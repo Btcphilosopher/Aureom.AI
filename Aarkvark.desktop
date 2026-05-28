@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Aarkvark
+Comment=Hyper‑modern spreadsheet with AI assistance
+Exec=/home/tom/Documents/abacus-main/venv/bin/python /home/tom/Documents/abacus-main/abacus-main/aarkvark/main.py
+Icon=/home/tom/.local/share/icons/aarkvark.png
+Terminal=false
+Categories=Office;Spreadsheet;
