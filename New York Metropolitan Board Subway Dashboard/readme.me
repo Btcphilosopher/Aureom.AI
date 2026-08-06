@@ -1,0 +1,194 @@
+new-york-metropolitan-board/
+│
+├── README.md
+├── LICENSE
+├── architecture/
+│   ├── system-design.md
+│   ├── data-flow.md
+│   ├── security-model.md
+│   └── api-specification.md
+│
+├── frontend/
+│
+│   └── kotlin-control-centre/
+│       │
+│       ├── build.gradle.kts
+│       ├── settings.gradle.kts
+│       │
+│       └── src/
+│           ├── main/
+│           │
+│           ├── dashboard/
+│           │   ├── MainDashboard.kt
+│           │   ├── NetworkOverview.kt
+│           │   ├── TrainStatusPanel.kt
+│           │   ├── IncidentPanel.kt
+│           │   └── EnergyDashboard.kt
+│           │
+│           ├── visualization/
+│           │   ├── SubwayMapRenderer.kt
+│           │   ├── TrainAnimation.kt
+│           │   ├── StationRenderer.kt
+│           │   ├── SignalRenderer.kt
+│           │   └── DigitalTwinView.kt
+│           │
+│           ├── websocket/
+│           │   ├── LiveTelemetryClient.kt
+│           │   └── EventStream.kt
+│           │
+│           └── components/
+│               ├── Charts.kt
+│               ├── Tables.kt
+│               └── Alerts.kt
+│
+│
+├── backend/
+│
+│   ├── python-platform/
+│   │
+│   │   ├── api/
+│   │   │   ├── main.py
+│   │   │   ├── routes/
+│   │   │   ├── authentication/
+│   │   │   └── websocket/
+│   │   │
+│   │   ├── digital_twin/
+│   │   │   ├── network_model.py
+│   │   │   ├── train_state.py
+│   │   │   ├── station_model.py
+│   │   │   └── simulation_manager.py
+│   │   │
+│   │   ├── ai_engine/
+│   │   │   │
+│   │   │   ├── demand_prediction/
+│   │   │   │   ├── ridership_model.py
+│   │   │   │   └── neural_forecaster.py
+│   │   │   │
+│   │   │   ├── anomaly_detection/
+│   │   │   │   ├── delay_detector.py
+│   │   │   │   └── failure_prediction.py
+│   │   │   │
+│   │   │   ├── optimisation/
+│   │   │   │   ├── route_optimizer.py
+│   │   │   │   ├── timetable_optimizer.py
+│   │   │   │   └── energy_optimizer.py
+│   │   │   │
+│   │   │   └── reinforcement_learning/
+│   │   │       └── dispatch_agent.py
+│   │   │
+│   │   ├── data_pipeline/
+│   │   │   ├── ingestion.py
+│   │   │   ├── cleaning.py
+│   │   │   ├── feature_engineering.py
+│   │   │   └── streaming.py
+│   │   │
+│   │   └── requirements.txt
+│
+│
+├── core-engine/
+│
+│   └── rust-transport-engine/
+│       │
+│       ├── Cargo.toml
+│       │
+│       └── src/
+│           │
+│           ├── main.rs
+│           │
+│           ├── simulation/
+│           │   ├── train.rs
+│           │   ├── station.rs
+│           │   ├── passenger.rs
+│           │   └── network.rs
+│           │
+│           ├── signalling/
+│           │   ├── signal.rs
+│           │   ├── block_control.rs
+│           │   └── safety.rs
+│           │
+│           ├── routing/
+│           │   ├── graph.rs
+│           │   ├── shortest_path.rs
+│           │   └── congestion.rs
+│           │
+│           └── physics/
+│               ├── acceleration.rs
+│               ├── braking.rs
+│               └── energy.rs
+│
+│
+├── analytics/
+│
+│   └── r-statistical-engine/
+│       │
+│       ├── reliability/
+│       │   ├── mtbf_analysis.R
+│       │   └── failure_models.R
+│       │
+│       ├── economics/
+│       │   ├── operating_costs.R
+│       │   └── investment_models.R
+│       │
+│       ├── passenger/
+│       │   ├── demand_forecast.R
+│       │   └── congestion_models.R
+│       │
+│       ├── reporting/
+│       │   ├── dashboards.R
+│       │   └── reports.R
+│       │
+│       └── statistics/
+│           ├── regression.R
+│           ├── bayesian_models.R
+│           └── time_series.R
+│
+│
+├── database/
+│
+│   ├── postgres/
+│   ├── timescaledb/
+│   ├── migrations/
+│   └── schemas/
+│
+│
+├── messaging/
+│
+│   ├── kafka/
+│   │
+│   ├── topics/
+│   │   ├── train-position
+│   │   ├── station-load
+│   │   ├── incidents
+│   │   └── power-demand
+│   │
+│   └── event-models/
+│
+│
+├── ai-agents/
+│
+│   ├── claude-agent/
+│   │   ├── architecture-agent.md
+│   │   ├── coding-agent.md
+│   │   ├── testing-agent.md
+│   │   └── documentation-agent.md
+│   │
+│   └── gemini-agent/
+│       ├── kotlin-generator.md
+│       ├── rust-generator.md
+│       ├── r-generator.md
+│       └── ui-generator.md
+│
+│
+├── deployment/
+│
+│   ├── docker/
+│   ├── kubernetes/
+│   ├── monitoring/
+│   └── security/
+│
+└── tests/
+
+    ├── unit/
+    ├── integration/
+    ├── simulation/
+    └── stress-testing/
