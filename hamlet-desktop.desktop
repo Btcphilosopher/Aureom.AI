@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Hamlet Archiver
+Comment=Maximum Compression Archiver (LZMA & Zstandard)
+Exec=python3 /home/tom/Documents/Code/hamlet_qt_gui.py
+Icon=/home/tom/.local/share/icons/hamlet_icon.svg
+Terminal=false
+Categories=Utility;Archiving;
+Keywords=zip;unzip;compress;decompress;archive;ham;
+StartupNotify=true
