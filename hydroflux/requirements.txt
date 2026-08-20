@@ -1,0 +1,12 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+pyyaml>=6.0
+
+# optional (install as needed)
+# pyarrow>=14.0        # Parquet I/O
+# xarray>=2023.1        # NetCDF I/O
+# netCDF4>=1.6           # NetCDF I/O
+# torch>=2.0             # gradient-based optimisation backend
+# pytest>=7.4             # tests
+# hypothesis>=6.90         # property-based tests

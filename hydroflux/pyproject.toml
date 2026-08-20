@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hydroflux"
+version = "0.1.0"
+description = "A research-grade Python engine for optimising hydroelectric and tidal power generation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=14.0"]
+netcdf = ["xarray>=2023.1", "netCDF4>=1.6"]
+torch = ["torch>=2.0"]
+dev = ["pytest>=7.4", "hypothesis>=6.90"]
+
+[project.scripts]
+hydroflux = "hydroflux.main:main"
+
+[tool.setuptools.packages.find]
+include = ["hydroflux*"]
+
+[tool.pytest.ini_options]
+testpaths = ["hydroflux/tests"]
