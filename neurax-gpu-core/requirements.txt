@@ -1,0 +1,14 @@
+# Core (required)
+numpy>=1.24
+pandas>=2.0
+
+# Visualisation (optional -- ui/gpu_visualizer.py degrades gracefully without it)
+matplotlib>=3.7
+
+# Testing
+pytest>=7.4
+
+# --- Optional extras (not required by any code path; install by hand if wanted) ---
+# torch>=2.0        # ai/workload_predictor.py uses a torch MLP when available,
+#                    # and falls back to a numpy ridge-regression surrogate otherwise.
+# pyvista>=0.43      # for a future 3D die-layout view; no code currently depends on it.
