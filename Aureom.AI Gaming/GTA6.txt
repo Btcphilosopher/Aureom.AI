@@ -1,0 +1,2324 @@
+Open-World Railway Economy — C Simulation Core
+Core concept
+WORLD
+ │
+ ├── Cities
+ │    ├── population
+ │    ├── employment
+ │    ├── wealth
+ │    ├── consumption
+ │    └── demand
+ │
+ ├── Industries
+ │    ├── mines
+ │    ├── factories
+ │    ├── farms
+ │    └── warehouses
+ │
+ ├── Railway Network
+ │    ├── stations
+ │    ├── tracks
+ │    ├── trains
+ │    └── cargo
+ │
+ └── Economy
+      ↓
+   Prices
+      ↓
+   Demand
+      ↓
+   Production
+      ↓
+   Rail freight
+      ↓
+   Inventory
+      ↓
+   Prices
+
+The player can therefore interact with the economy through the railway, but the economy continues operating even when the player isn't involved.
+
+Suggested C project
+openrail/
+├── include/
+│   ├── world.h
+│   ├── economy.h
+│   ├── city.h
+│   ├── industry.h
+│   ├── railway.h
+│   ├── train.h
+│   ├── demand.h
+│   └── simulation.h
+│
+├── src/
+│   ├── main.c
+│   ├── world.c
+│   ├── economy.c
+│   ├── city.c
+│   ├── industry.c
+│   ├── railway.c
+│   ├── train.c
+│   ├── demand.c
+│   └── simulation.c
+│
+└── CMakeLists.txt
+
+Here is a useful starting implementation.
+
+world.h
+#ifndef WORLD_H
+#define WORLD_H
+
+#define MAX_CITIES 64
+#define MAX_INDUSTRIES 128
+#define MAX_STATIONS 128
+#define MAX_TRAINS 64
+#define MAX_GOODS 16
+
+typedef struct {
+    float x;
+    float y;
+} Vec2;
+
+typedef enum {
+    GOODS_FOOD,
+    GOODS_COAL,
+    GOODS_STEEL,
+    GOODS_FUEL,
+    GOODS_TIMBER,
+    GOODS_CARS,
+    GOODS_ELECTRONICS,
+    GOODS_CONSTRUCTION,
+    GOODS_COUNT
+} GoodType;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    Vec2 position;
+
+    float population;
+    float wealth;
+
+    float consumption[GOODS_COUNT];
+    float inventory[GOODS_COUNT];
+
+    float demand[GOODS_COUNT];
+    float price[GOODS_COUNT];
+
+} City;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    Vec2 position;
+
+    GoodType produces;
+    GoodType consumes;
+
+    float production_rate;
+    float consumption_rate;
+
+    float inventory;
+
+    float operating_cost;
+
+} Industry;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    Vec2 position;
+
+    float cargo[GOODS_COUNT];
+    float capacity;
+
+} Station;
+
+typedef struct {
+    int id;
+
+    int current_station;
+    int destination_station;
+
+    float progress;
+    float speed;
+
+    float cargo[GOODS_COUNT];
+
+    float fuel;
+    float operating_cost;
+
+    int active;
+
+} Train;
+
+typedef struct {
+
+    City cities[MAX_CITIES];
+    int city_count;
+
+    Industry industries[MAX_INDUSTRIES];
+    int industry_count;
+
+    Station stations[MAX_STATIONS];
+    int station_count;
+
+    Train trains[MAX_TRAINS];
+    int train_count;
+
+    double simulation_time;
+
+} World;
+
+#endif
+Demand-pull economy
+
+The key mechanic should not simply be:
+
+city needs food → spawn food
+
+Instead:
+
+population
+     ↓
+consumption
+     ↓
+inventory
+     ↓
+shortage
+     ↓
+price increase
+     ↓
+profit opportunity
+     ↓
+production response
+     ↓
+rail freight demand
+economy.c
+#include <math.h>
+#include "world.h"
+
+static float clamp(float value, float min, float max)
+{
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+void update_city_demand(City *city, float dt)
+{
+    for (int g = 0; g < GOODS_COUNT; g++) {
+
+        float base_demand =
+            city->consumption[g] *
+            city->population;
+
+        /*
+         * Demand rises when inventory falls.
+         *
+         * This creates the economic "pull".
+         */
+        float inventory_ratio =
+            city->inventory[g] /
+            fmaxf(base_demand * 7.0f, 1.0f);
+
+        float shortage =
+            clamp(1.0f - inventory_ratio, 0.0f, 1.0f);
+
+        city->demand[g] =
+            base_demand *
+            (1.0f + shortage * 2.0f);
+
+        /*
+         * Simple scarcity pricing.
+         */
+        float target_price =
+            10.0f *
+            (1.0f + shortage * 4.0f);
+
+        /*
+         * Prices move gradually rather than
+         * instantly jumping.
+         */
+        city->price[g] +=
+            (target_price - city->price[g])
+            * 0.05f *
+            dt;
+    }
+}
+
+Now the economy can produce genuine shortages.
+
+For example:
+
+Steel inventory falls
+        ↓
+Steel price rises
+        ↓
+Factory becomes profitable
+        ↓
+Factory requests coal
+        ↓
+Coal demand rises
+        ↓
+Coal price rises
+        ↓
+Coal mine expands production
+        ↓
+Railway gets a freight opportunity
+Railway system
+
+The railway should be a physical economic network, rather than merely a transportation animation.
+
+railway.c
+#include <math.h>
+#include "world.h"
+
+static float distance(Vec2 a, Vec2 b)
+{
+    float dx = b.x - a.x;
+    float dy = b.y - a.y;
+
+    return sqrtf(dx * dx + dy * dy);
+}
+
+void update_train(
+    World *world,
+    Train *train,
+    float dt
+)
+{
+    if (!train->active)
+        return;
+
+    Station *from =
+        &world->stations[train->current_station];
+
+    Station *to =
+        &world->stations[train->destination_station];
+
+    float route_distance =
+        distance(from->position, to->position);
+
+    if (route_distance <= 0.01f)
+        return;
+
+    /*
+     * Convert physical velocity into
+     * normalized route progress.
+     */
+    float movement =
+        (train->speed * dt) /
+        route_distance;
+
+    train->progress += movement;
+
+    if (train->progress >= 1.0f) {
+
+        train->progress = 0.0f;
+
+        /*
+         * Arrived.
+         */
+        train->current_station =
+            train->destination_station;
+
+        /*
+         * Example destination-selection logic.
+         * A real implementation would use
+         * the economic routing engine.
+         */
+        train->destination_station =
+            (train->destination_station + 1)
+            % world->station_count;
+    }
+
+    train->fuel -=
+        train->operating_cost * dt;
+
+    if (train->fuel <= 0.0f) {
+        train->active = 0;
+    }
+}
+Economic freight routing
+
+This is where it gets much more interesting.
+
+Instead of manually telling trains what to carry, calculate:
+
+profit =
+destination_price
+-
+origin_price
+-
+transport_cost
+-
+handling_cost
+-
+fuel_cost
+-
+risk
+demand.c
+#include "world.h"
+
+typedef struct {
+    int origin;
+    int destination;
+
+    GoodType good;
+
+    float quantity;
+    float expected_profit;
+
+} FreightOpportunity;
+
+FreightOpportunity find_best_freight(
+    World *world
+)
+{
+    FreightOpportunity best = {
+        -1, -1, GOODS_FOOD, 0.0f, -999999.0f
+    };
+
+    for (int a = 0; a < world->station_count; a++) {
+
+        for (int b = 0; b < world->station_count; b++) {
+
+            if (a == b)
+                continue;
+
+            for (int g = 0; g < GOODS_COUNT; g++) {
+
+                /*
+                 * For the prototype we map stations
+                 * to cities by index.
+                 */
+                if (a >= world->city_count ||
+                    b >= world->city_count)
+                    continue;
+
+                City *origin =
+                    &world->cities[a];
+
+                City *destination =
+                    &world->cities[b];
+
+                float price_origin =
+                    origin->price[g];
+
+                float price_destination =
+                    destination->price[g];
+
+                float price_difference =
+                    price_destination -
+                    price_origin;
+
+                float transport_cost =
+                    2.0f;
+
+                float profit =
+                    price_difference -
+                    transport_cost;
+
+                if (profit >
+                    best.expected_profit) {
+
+                    best.origin = a;
+                    best.destination = b;
+                    best.good = g;
+
+                    best.quantity = 100.0f;
+
+                    best.expected_profit =
+                        profit;
+                }
+            }
+        }
+    }
+
+    return best;
+}
+
+This gives you a basic AI freight market.
+
+The live simulation loop
+simulation.c
+#include "world.h"
+
+void update_city_demand(City *, float);
+void update_train(World *, Train *, float);
+
+void simulation_tick(
+    World *world,
+    float dt
+)
+{
+    /*
+     * 1. Economic demand
+     */
+    for (int i = 0;
+         i < world->city_count;
+         i++) {
+
+        update_city_demand(
+            &world->cities[i],
+            dt
+        );
+    }
+
+    /*
+     * 2. Industrial production
+     */
+    for (int i = 0;
+         i < world->industry_count;
+         i++) {
+
+        Industry *industry =
+            &world->industries[i];
+
+        industry->inventory +=
+            industry->production_rate * dt;
+    }
+
+    /*
+     * 3. Railway movement
+     */
+    for (int i = 0;
+         i < world->train_count;
+         i++) {
+
+        update_train(
+            world,
+            &world->trains[i],
+            dt
+        );
+    }
+
+    /*
+     * 4. Advance world clock.
+     */
+    world->simulation_time += dt;
+}
+
+And the game can run it independently of rendering:
+
+#include <stdio.h>
+#include "world.h"
+
+void simulation_tick(World *, float);
+
+int main(void)
+{
+    World world = {0};
+
+    /*
+     * Populate world here.
+     */
+
+    const float dt = 1.0f / 20.0f;
+
+    for (;;) {
+
+        simulation_tick(
+            &world,
+            dt
+        );
+
+        /*
+         * Game engine consumes
+         * the resulting world state.
+         */
+
+        printf(
+            "Simulation time: %.2f\n",
+            world.simulation_time
+        );
+    }
+
+    return 0;
+}
+The bigger architecture I'd use
+
+For the full game, I'd separate simulation from the game engine:
+
+                 OPEN-WORLD GAME
+                       │
+       ┌───────────────┼────────────────┐
+       │               │                │
+   PLAYER AI       VEHICLES          NPCs
+       │               │                │
+       └───────────────┼────────────────┘
+                       │
+                 GAME STATE API
+                       │
+                       ▼
+              ┌─────────────────┐
+              │    WORLD SIM    │
+              │      C CORE     │
+              └─────────────────┘
+                       │
+       ┌───────────────┼─────────────────┐
+       ▼               ▼                 ▼
+    ECONOMY        RAILWAY           INDUSTRY
+       │               │                 │
+       ▼               ▼                 ▼
+    DEMAND          FREIGHT          PRODUCTION
+       │               │                 │
+       └───────────────┼─────────────────┘
+                       ▼
+                    PRICES
+                       │
+                       └──────→ DEMAND
+
+The particularly powerful feature would be economic emergence.
+
+A player could, for example, cause a huge increase in construction activity in one city. That creates:
+
+construction boom → steel shortage → steel prices ↑ → coal demand ↑ → coal freight ↑ → railway utilisation ↑ → locomotive demand ↑ → industrial employment ↑ → population ↑ → food demand ↑ → food freight ↑.
+
+Meanwhile, another city could experience a recession and see the reverse.
+
+The railway therefore becomes part of the simulation's economic nervous system, rather than simply scenery or a transport minigame.
+
+For a GTA-style open-world game, I'd keep the C simulation game-agnostic and expose it through a compact API so Unreal/Unity/custom C/C++ rendering code can query things like:
+
+get_city_price(city_id, GOODS_STEEL);
+get_city_demand(city_id, GOODS_FOOD);
+get_station_cargo(station_id, GOODS_COAL);
+get_train_position(train_id);
+get_freight_opportunity();
+get_city_economic_state(city_id);
+
+That gives you a genuinely interesting living open-world economy + railway simulation underneath the visual game world.
+
+
+
+
+/*
+ * luxury_rail.c
+ *
+ * 2020s American Luxury Rail Simulation
+ *
+ * Simulation layer for:
+ *   - Premium passenger coaches
+ *   - Private suites
+ *   - Dining cars
+ *   - Observation lounges
+ *   - Premium dining
+ *   - Beverage inventory
+ *   - Service staff
+ *   - Reservations
+ *   - Passenger satisfaction
+ *   - Revenue
+ *   - Operating costs
+ *
+ * Game-engine agnostic.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_CARS            32
+#define MAX_PASSENGERS      256
+#define MAX_MENU_ITEMS      64
+#define MAX_RESERVATIONS    512
+#define MAX_STAFF           128
+#define MAX_STATIONS        64
+
+#define MAX_NAME            64
+#define MAX_DESCRIPTION     128
+
+
+/* ============================================================
+   ENUMERATIONS
+   ============================================================ */
+
+typedef enum {
+
+    CAR_FIRST_CLASS,
+    CAR_PRIVATE_SUITE,
+    CAR_DINING,
+    CAR_OBSERVATION,
+    CAR_LOUNGE,
+    CAR_SLEEPER
+
+} CarType;
+
+
+typedef enum {
+
+    SERVICE_BREAKFAST,
+    SERVICE_LUNCH,
+    SERVICE_DINNER,
+    SERVICE_LATE_NIGHT
+
+} DiningPeriod;
+
+
+typedef enum {
+
+    ITEM_APPETIZER,
+    ITEM_MAIN,
+    ITEM_DESSERT,
+    ITEM_WINE,
+    ITEM_SPIRIT,
+    ITEM_COCKTAIL,
+    ITEM_COFFEE,
+    ITEM_NON_ALCOHOLIC
+
+} MenuCategory;
+
+
+typedef enum {
+
+    PASSENGER_STANDARD,
+    PASSENGER_FIRST_CLASS,
+    PASSENGER_SUITE
+
+} PassengerClass;
+
+
+/* ============================================================
+   MENU
+   ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    char description[MAX_DESCRIPTION];
+
+    MenuCategory category;
+
+    double price;
+
+    double ingredient_cost;
+
+    int inventory;
+
+    int premium;
+
+} MenuItem;
+
+
+/* ============================================================
+   PASSENGER
+   ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    PassengerClass class;
+
+    int origin_station;
+
+    int destination_station;
+
+    double willingness_to_pay;
+
+    double satisfaction;
+
+    double spending;
+
+    int dining_reservation;
+
+    int boarded;
+
+} Passenger;
+
+
+/* ============================================================
+   RESERVATION
+   ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    int passenger_id;
+
+    int dining_car;
+
+    DiningPeriod period;
+
+    int table_number;
+
+    int guests;
+
+    int completed;
+
+} DiningReservation;
+
+
+/* ============================================================
+   STAFF
+   ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    char role[MAX_NAME];
+
+    double hourly_cost;
+
+    double service_skill;
+
+    double fatigue;
+
+    int active;
+
+} Staff;
+
+
+/* ============================================================
+   RAIL CAR
+   ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    CarType type;
+
+    int capacity;
+
+    int occupied;
+
+    double service_level;
+
+    double cleanliness;
+
+    double temperature;
+
+    double power_load;
+
+    double operating_cost;
+
+} RailCar;
+
+
+/* ============================================================
+   TRAIN
+   ============================================================ */
+
+typedef struct {
+
+    char name[MAX_NAME];
+
+    char route[MAX_NAME];
+
+    RailCar cars[MAX_CARS];
+
+    int car_count;
+
+    Passenger passengers[MAX_PASSENGERS];
+
+    int passenger_count;
+
+    MenuItem menu[MAX_MENU_ITEMS];
+
+    int menu_count;
+
+    DiningReservation reservations[MAX_RESERVATIONS];
+
+    int reservation_count;
+
+    Staff staff[MAX_STAFF];
+
+    int staff_count;
+
+    double ticket_revenue;
+
+    double dining_revenue;
+
+    double beverage_revenue;
+
+    double operating_cost;
+
+    double satisfaction;
+
+    double journey_time;
+
+} LuxuryTrain;
+
+
+/* ============================================================
+   UTILITY
+   ============================================================ */
+
+static double clamp(
+    double value,
+    double min,
+    double max
+)
+{
+    if (value < min)
+        return min;
+
+    if (value > max)
+        return max;
+
+    return value;
+}
+
+
+/* ============================================================
+   TRAIN INITIALISATION
+   ============================================================ */
+
+void initialise_train(
+    LuxuryTrain *train,
+    const char *name,
+    const char *route
+)
+{
+    memset(train, 0, sizeof(LuxuryTrain));
+
+    strncpy(
+        train->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    strncpy(
+        train->route,
+        route,
+        MAX_NAME - 1
+    );
+
+    train->satisfaction = 90.0;
+}
+
+
+/* ============================================================
+   ADD RAIL CAR
+   ============================================================ */
+
+int add_car(
+    LuxuryTrain *train,
+    CarType type,
+    const char *name,
+    int capacity,
+    double operating_cost
+)
+{
+    if (train->car_count >= MAX_CARS)
+        return -1;
+
+    RailCar *car =
+        &train->cars[train->car_count];
+
+    memset(car, 0, sizeof(RailCar));
+
+    car->id =
+        train->car_count;
+
+    car->type =
+        type;
+
+    strncpy(
+        car->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    car->capacity =
+        capacity;
+
+    car->service_level =
+        95.0;
+
+    car->cleanliness =
+        100.0;
+
+    car->temperature =
+        21.0;
+
+    car->operating_cost =
+        operating_cost;
+
+    train->car_count++;
+
+    return car->id;
+}
+
+
+/* ============================================================
+   ADD MENU ITEM
+   ============================================================ */
+
+int add_menu_item(
+    LuxuryTrain *train,
+    const char *name,
+    const char *description,
+    MenuCategory category,
+    double price,
+    double ingredient_cost,
+    int inventory
+)
+{
+    if (train->menu_count >= MAX_MENU_ITEMS)
+        return -1;
+
+    MenuItem *item =
+        &train->menu[train->menu_count];
+
+    memset(item, 0, sizeof(MenuItem));
+
+    item->id =
+        train->menu_count;
+
+    strncpy(
+        item->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    strncpy(
+        item->description,
+        description,
+        MAX_DESCRIPTION - 1
+    );
+
+    item->category =
+        category;
+
+    item->price =
+        price;
+
+    item->ingredient_cost =
+        ingredient_cost;
+
+    item->inventory =
+        inventory;
+
+    item->premium =
+        1;
+
+    train->menu_count++;
+
+    return item->id;
+}
+
+
+/* ============================================================
+   ADD STAFF
+   ============================================================ */
+
+int add_staff(
+    LuxuryTrain *train,
+    const char *name,
+    const char *role,
+    double hourly_cost,
+    double skill
+)
+{
+    if (train->staff_count >= MAX_STAFF)
+        return -1;
+
+    Staff *staff =
+        &train->staff[train->staff_count];
+
+    memset(staff, 0, sizeof(Staff));
+
+    staff->id =
+        train->staff_count;
+
+    strncpy(
+        staff->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    strncpy(
+        staff->role,
+        role,
+        MAX_NAME - 1
+    );
+
+    staff->hourly_cost =
+        hourly_cost;
+
+    staff->service_skill =
+        clamp(skill, 0.0, 100.0);
+
+    staff->fatigue =
+        0.0;
+
+    staff->active =
+        1;
+
+    train->staff_count++;
+
+    return staff->id;
+}
+
+
+/* ============================================================
+   PASSENGER
+   ============================================================ */
+
+int add_passenger(
+    LuxuryTrain *train,
+    const char *name,
+    PassengerClass class,
+    int origin,
+    int destination,
+    double willingness_to_pay
+)
+{
+    if (train->passenger_count >= MAX_PASSENGERS)
+        return -1;
+
+    Passenger *p =
+        &train->passengers[train->passenger_count];
+
+    memset(p, 0, sizeof(Passenger));
+
+    p->id =
+        train->passenger_count;
+
+    strncpy(
+        p->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    p->class =
+        class;
+
+    p->origin_station =
+        origin;
+
+    p->destination_station =
+        destination;
+
+    p->willingness_to_pay =
+        willingness_to_pay;
+
+    p->satisfaction =
+        90.0;
+
+    p->boarded =
+        1;
+
+    train->passenger_count++;
+
+    return p->id;
+}
+
+
+/* ============================================================
+   DINING RESERVATION
+   ============================================================ */
+
+int reserve_dining(
+    LuxuryTrain *train,
+    int passenger_id,
+    int dining_car,
+    DiningPeriod period,
+    int table,
+    int guests
+)
+{
+    if (train->reservation_count >= MAX_RESERVATIONS)
+        return -1;
+
+    DiningReservation *r =
+        &train->reservations[
+            train->reservation_count
+        ];
+
+    memset(r, 0, sizeof(DiningReservation));
+
+    r->id =
+        train->reservation_count;
+
+    r->passenger_id =
+        passenger_id;
+
+    r->dining_car =
+        dining_car;
+
+    r->period =
+        period;
+
+    r->table_number =
+        table;
+
+    r->guests =
+        guests;
+
+    train->reservation_count++;
+
+    if (passenger_id >= 0 &&
+        passenger_id < train->passenger_count)
+    {
+        train->passengers[
+            passenger_id
+        ].dining_reservation = r->id;
+    }
+
+    return r->id;
+}
+
+
+/* ============================================================
+   PURCHASE DINING ITEM
+   ============================================================ */
+
+double purchase_menu_item(
+    LuxuryTrain *train,
+    int passenger_id,
+    int menu_id
+)
+{
+    if (passenger_id < 0 ||
+        passenger_id >= train->passenger_count)
+        return 0.0;
+
+    if (menu_id < 0 ||
+        menu_id >= train->menu_count)
+        return 0.0;
+
+    MenuItem *item =
+        &train->menu[menu_id];
+
+    if (item->inventory <= 0)
+        return 0.0;
+
+    Passenger *passenger =
+        &train->passengers[passenger_id];
+
+    /*
+     * Premium passengers have higher
+     * propensity to purchase premium items.
+     */
+    if (item->price >
+        passenger->willingness_to_pay)
+        return 0.0;
+
+    item->inventory--;
+
+    passenger->spending +=
+        item->price;
+
+    passenger->satisfaction +=
+        1.0;
+
+    passenger->satisfaction =
+        clamp(
+            passenger->satisfaction,
+            0.0,
+            100.0
+        );
+
+    if (
+        item->category == ITEM_WINE ||
+        item->category == ITEM_SPIRIT ||
+        item->category == ITEM_COCKTAIL
+    )
+    {
+        train->beverage_revenue +=
+            item->price;
+    }
+    else
+    {
+        train->dining_revenue +=
+            item->price;
+    }
+
+    return item->price;
+}
+
+
+/* ============================================================
+   SERVICE QUALITY
+   ============================================================ */
+
+void update_service_quality(
+    LuxuryTrain *train,
+    double dt
+)
+{
+    double total_skill = 0.0;
+
+    int active_staff = 0;
+
+    for (int i = 0;
+         i < train->staff_count;
+         i++)
+    {
+        Staff *s =
+            &train->staff[i];
+
+        if (!s->active)
+            continue;
+
+        total_skill +=
+            s->service_skill;
+
+        active_staff++;
+
+        /*
+         * Staff fatigue accumulates
+         * during a long journey.
+         */
+        s->fatigue +=
+            0.01 * dt;
+
+        s->fatigue =
+            clamp(
+                s->fatigue,
+                0.0,
+                50.0
+            );
+    }
+
+    if (active_staff == 0)
+        return;
+
+    double average_skill =
+        total_skill /
+        active_staff;
+
+    /*
+     * Service quality combines:
+     *
+     * staff skill
+     * cleanliness
+     * car service level
+     * staffing
+     */
+
+    double car_quality = 0.0;
+
+    int cars = 0;
+
+    for (int i = 0;
+         i < train->car_count;
+         i++)
+    {
+        car_quality +=
+            train->cars[i].service_level;
+
+        car_quality +=
+            train->cars[i].cleanliness;
+
+        cars++;
+    }
+
+    if (cars > 0)
+        car_quality /=
+            (cars * 2.0);
+
+    double quality =
+        average_skill * 0.40 +
+        car_quality * 0.60;
+
+    train->satisfaction +=
+        (quality - train->satisfaction)
+        * 0.01
+        * dt;
+
+    train->satisfaction =
+        clamp(
+            train->satisfaction,
+            0.0,
+            100.0
+        );
+}
+
+
+/* ============================================================
+   OPERATING COST
+   ============================================================ */
+
+void update_operating_cost(
+    LuxuryTrain *train,
+    double dt
+)
+{
+    for (int i = 0;
+         i < train->car_count;
+         i++)
+    {
+        train->operating_cost +=
+            train->cars[i].operating_cost
+            * dt;
+    }
+
+    for (int i = 0;
+         i < train->staff_count;
+         i++)
+    {
+        Staff *s =
+            &train->staff[i];
+
+        if (s->active)
+        {
+            train->operating_cost +=
+                s->hourly_cost * dt;
+        }
+    }
+}
+
+
+/* ============================================================
+   PREMIUM TICKET REVENUE
+   ============================================================ */
+
+double ticket_price(
+    PassengerClass class,
+    double distance_miles
+)
+{
+    double base;
+
+    switch (class)
+    {
+        case PASSENGER_FIRST_CLASS:
+            base = 1.75;
+            break;
+
+        case PASSENGER_SUITE:
+            base = 4.50;
+            break;
+
+        default:
+            base = 1.00;
+            break;
+    }
+
+    return base *
+           distance_miles;
+}
+
+
+void calculate_ticket_revenue(
+    LuxuryTrain *train,
+    double distance_miles
+)
+{
+    train->ticket_revenue = 0.0;
+
+    for (int i = 0;
+         i < train->passenger_count;
+         i++)
+    {
+        Passenger *p =
+            &train->passengers[i];
+
+        train->ticket_revenue +=
+            ticket_price(
+                p->class,
+                distance_miles
+            );
+    }
+}
+
+
+/* ============================================================
+   TRAIN PROFIT
+   ============================================================ */
+
+double train_profit(
+    const LuxuryTrain *train
+)
+{
+    double revenue =
+        train->ticket_revenue +
+        train->dining_revenue +
+        train->beverage_revenue;
+
+    return revenue -
+           train->operating_cost;
+}
+
+
+/* ============================================================
+   REPORT
+   ============================================================ */
+
+void print_train_report(
+    const LuxuryTrain *train
+)
+{
+    printf("\n");
+    printf("============================================\n");
+    printf("       LUXURY AMERICAN RAIL REPORT\n");
+    printf("============================================\n");
+
+    printf(
+        "Train: %s\n",
+        train->name
+    );
+
+    printf(
+        "Route: %s\n",
+        train->route
+    );
+
+    printf(
+        "Rail Cars: %d\n",
+        train->car_count
+    );
+
+    printf(
+        "Passengers: %d\n",
+        train->passenger_count
+    );
+
+    printf(
+        "Ticket Revenue: $%.2f\n",
+        train->ticket_revenue
+    );
+
+    printf(
+        "Dining Revenue: $%.2f\n",
+        train->dining_revenue
+    );
+
+    printf(
+        "Beverage Revenue: $%.2f\n",
+        train->beverage_revenue
+    );
+
+    printf(
+        "Operating Cost: $%.2f\n",
+        train->operating_cost
+    );
+
+    printf(
+        "Operating Profit: $%.2f\n",
+        train_profit(train)
+    );
+
+    printf(
+        "Service Satisfaction: %.1f%%\n",
+        train->satisfaction
+    );
+
+    printf(
+        "============================================\n"
+    );
+}
+
+
+/* ============================================================
+   DEMONSTRATION TRAIN
+   ============================================================ */
+
+int main(void)
+{
+    LuxuryTrain train;
+
+    initialise_train(
+        &train,
+        "The American",
+        "New York — Washington — Miami"
+    );
+
+
+    /*
+     * PREMIUM TRAINSET
+     */
+
+    add_car(
+        &train,
+        CAR_FIRST_CLASS,
+        "First Class Salon",
+        32,
+        850.0
+    );
+
+    add_car(
+        &train,
+        CAR_PRIVATE_SUITE,
+        "Presidential Suites",
+        12,
+        1200.0
+    );
+
+    add_car(
+        &train,
+        CAR_DINING,
+        "Grand Dining Room",
+        48,
+        1600.0
+    );
+
+    add_car(
+        &train,
+        CAR_OBSERVATION,
+        "Observation Lounge",
+        36,
+        1100.0
+    );
+
+    add_car(
+        &train,
+        CAR_LOUNGE,
+        "Club Lounge",
+        40,
+        900.0
+    );
+
+
+    /*
+     * MENU
+     */
+
+    add_menu_item(
+        &train,
+        "Chesapeake Crab Cake",
+        "Lump crab with citrus aioli",
+        ITEM_APPETIZER,
+        28.0,
+        9.0,
+        80
+    );
+
+    add_menu_item(
+        &train,
+        "Prime Beef Tenderloin",
+        "US prime beef with seasonal vegetables",
+        ITEM_MAIN,
+        64.0,
+        21.0,
+        80
+    );
+
+    add_menu_item(
+        &train,
+        "Atlantic Salmon",
+        "Roasted salmon with herbs",
+        ITEM_MAIN,
+        52.0,
+        17.0,
+        80
+    );
+
+    add_menu_item(
+        &train,
+        "New York Cheesecake",
+        "Classic cheesecake",
+        ITEM_DESSERT,
+        18.0,
+        5.0,
+        100
+    );
+
+    add_menu_item(
+        &train,
+        "American Cabernet",
+        "Premium California Cabernet",
+        ITEM_WINE,
+        24.0,
+        8.0,
+        120
+    );
+
+    add_menu_item(
+        &train,
+        "Vintage Champagne",
+        "Premium sparkling wine",
+        ITEM_WINE,
+        38.0,
+        15.0,
+        60
+    );
+
+
+    /*
+     * CREW
+     */
+
+    add_staff(
+        &train,
+        "Dining Manager",
+        "Dining Manager",
+        45.0,
+        98.0
+    );
+
+    add_staff(
+        &train,
+        "Executive Chef",
+        "Chef",
+        65.0,
+        99.0
+    );
+
+    add_staff(
+        &train,
+        "Sommelier",
+        "Sommelier",
+        55.0,
+        97.0
+    );
+
+    add_staff(
+        &train,
+        "Lead Steward",
+        "Steward",
+        38.0,
+        95.0
+    );
+
+
+    /*
+     * PASSENGERS
+     */
+
+    add_passenger(
+        &train,
+        "Passenger 001",
+        PASSENGER_SUITE,
+        0,
+        3,
+        500.0
+    );
+
+    add_passenger(
+        &train,
+        "Passenger 002",
+        PASSENGER_FIRST_CLASS,
+        0,
+        3,
+        150.0
+    );
+
+    add_passenger(
+        &train,
+        "Passenger 003",
+        PASSENGER_FIRST_CLASS,
+        0,
+        3,
+        200.0
+    );
+
+
+    /*
+     * DINING
+     */
+
+    reserve_dining(
+        &train,
+        0,
+        2,
+        SERVICE_DINNER,
+        1,
+        2
+    );
+
+
+    /*
+     * SIMULATE JOURNEY
+     */
+
+    calculate_ticket_revenue(
+        &train,
+        1.0
+    );
+
+    for (int hour = 0;
+         hour < 10;
+         hour++)
+    {
+        update_service_quality(
+            &train,
+            1.0
+        );
+
+        update_operating_cost(
+            &train,
+            1.0
+        );
+
+        /*
+         * Example passenger purchases.
+         */
+        if (hour == 2)
+        {
+            purchase_menu_item(
+                &train,
+                0,
+                1
+            );
+
+            purchase_menu_item(
+                &train,
+                0,
+                5
+            );
+        }
+    }
+
+
+    print_train_report(&train);
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * CYBERCRYPT
+ * Cyberpunk Digital Possession Vault
+ *
+ * In-game C subsystem for an open-world game.
+ *
+ * The crypt stores:
+ *   - player currency
+ *   - weapons / equipment
+ *   - vehicles
+ *   - collectibles
+ *   - digital documents
+ *   - mission items
+ *   - contraband
+ *   - rare items
+ *
+ * Everything exists strictly inside the game simulation.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX_ITEMS       256
+#define MAX_CRYPTO      32
+#define MAX_NAME        64
+#define MAX_LOG_ENTRIES 128
+
+typedef enum {
+    ITEM_CURRENCY,
+    ITEM_WEAPON,
+    ITEM_EQUIPMENT,
+    ITEM_VEHICLE,
+    ITEM_COLLECTIBLE,
+    ITEM_DOCUMENT,
+    ITEM_MISSION,
+    ITEM_CONTRABAND
+} ItemType;
+
+typedef struct {
+    uint64_t id;
+    ItemType type;
+
+    char name[MAX_NAME];
+
+    uint32_t quantity;
+    uint64_t value;
+
+    bool insured;
+    bool mission_locked;
+} CryptItem;
+
+typedef struct {
+    char address[MAX_CRYPTO];
+    uint64_t balance;
+} CryptoWallet;
+
+typedef struct {
+    uint64_t timestamp;
+    char event[MAX_NAME];
+} CryptLog;
+
+typedef struct {
+
+    /* Player-owned assets */
+    CryptItem items[MAX_ITEMS];
+    size_t item_count;
+
+    /* In-game digital currency */
+    CryptoWallet wallets[4];
+    size_t wallet_count;
+
+    /* Activity history */
+    CryptLog logs[MAX_LOG_ENTRIES];
+    size_t log_count;
+
+    /* Vault properties */
+    uint32_t security_level;
+    uint64_t storage_capacity;
+
+} DigitalCrypt;
+
+
+/* ============================================================
+ * INITIALISATION
+ * ============================================================ */
+
+void crypt_init(DigitalCrypt *crypt)
+{
+    if (!crypt)
+        return;
+
+    memset(crypt, 0, sizeof(DigitalCrypt));
+
+    crypt->security_level = 1;
+    crypt->storage_capacity = 100;
+
+    printf("[CYBERCRYPT] Digital vault initialised.\n");
+}
+
+
+/* ============================================================
+ * LOGGING
+ * ============================================================ */
+
+static void crypt_log(DigitalCrypt *crypt, const char *event)
+{
+    if (!crypt || !event)
+        return;
+
+    if (crypt->log_count >= MAX_LOG_ENTRIES)
+        return;
+
+    CryptLog *log = &crypt->logs[crypt->log_count++];
+
+    log->timestamp = (uint64_t)time(NULL);
+
+    snprintf(
+        log->event,
+        sizeof(log->event),
+        "%s",
+        event
+    );
+}
+
+
+/* ============================================================
+ * ITEM STORAGE
+ * ============================================================ */
+
+bool crypt_store_item(
+    DigitalCrypt *crypt,
+    uint64_t id,
+    ItemType type,
+    const char *name,
+    uint32_t quantity,
+    uint64_t value
+)
+{
+    if (!crypt || !name)
+        return false;
+
+    if (crypt->item_count >= MAX_ITEMS)
+        return false;
+
+    CryptItem *item = &crypt->items[crypt->item_count];
+
+    item->id = id;
+    item->type = type;
+
+    snprintf(
+        item->name,
+        sizeof(item->name),
+        "%s",
+        name
+    );
+
+    item->quantity = quantity;
+    item->value = value;
+
+    item->insured = false;
+    item->mission_locked = false;
+
+    crypt->item_count++;
+
+    char log_message[MAX_NAME];
+
+    snprintf(
+        log_message,
+        sizeof(log_message),
+        "Stored asset: %s",
+        name
+    );
+
+    crypt_log(crypt, log_message);
+
+    return true;
+}
+
+
+/* ============================================================
+ * ITEM RETRIEVAL
+ * ============================================================ */
+
+bool crypt_withdraw_item(
+    DigitalCrypt *crypt,
+    uint64_t id
+)
+{
+    if (!crypt)
+        return false;
+
+    for (size_t i = 0; i < crypt->item_count; ++i) {
+
+        if (crypt->items[i].id == id) {
+
+            if (crypt->items[i].mission_locked)
+                return false;
+
+            char log_message[MAX_NAME];
+
+            snprintf(
+                log_message,
+                sizeof(log_message),
+                "Retrieved asset: %s",
+                crypt->items[i].name
+            );
+
+            crypt_log(crypt, log_message);
+
+            /*
+             * Compact array after removal.
+             */
+
+            for (size_t j = i;
+                 j < crypt->item_count - 1;
+                 ++j)
+            {
+                crypt->items[j] = crypt->items[j + 1];
+            }
+
+            crypt->item_count--;
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+/* ============================================================
+ * IN-GAME DIGITAL CURRENCY
+ * ============================================================ */
+
+bool crypt_deposit_currency(
+    DigitalCrypt *crypt,
+    uint64_t amount
+)
+{
+    if (!crypt || crypt->wallet_count == 0)
+        return false;
+
+    crypt->wallets[0].balance += amount;
+
+    crypt_log(
+        crypt,
+        "Currency deposited into digital vault"
+    );
+
+    return true;
+}
+
+
+bool crypt_withdraw_currency(
+    DigitalCrypt *crypt,
+    uint64_t amount
+)
+{
+    if (!crypt || crypt->wallet_count == 0)
+        return false;
+
+    if (crypt->wallets[0].balance < amount)
+        return false;
+
+    crypt->wallets[0].balance -= amount;
+
+    crypt_log(
+        crypt,
+        "Currency withdrawn from digital vault"
+    );
+
+    return true;
+}
+
+
+/* ============================================================
+ * WALLET CREATION
+ * ============================================================ */
+
+bool crypt_create_wallet(
+    DigitalCrypt *crypt,
+    const char *address
+)
+{
+    if (!crypt || !address)
+        return false;
+
+    if (crypt->wallet_count >= 4)
+        return false;
+
+    CryptoWallet *wallet =
+        &crypt->wallets[crypt->wallet_count];
+
+    snprintf(
+        wallet->address,
+        sizeof(wallet->address),
+        "%s",
+        address
+    );
+
+    wallet->balance = 0;
+
+    crypt->wallet_count++;
+
+    crypt_log(
+        crypt,
+        "New in-game digital wallet created"
+    );
+
+    return true;
+}
+
+
+/* ============================================================
+ * VAULT SECURITY
+ * ============================================================ */
+
+void crypt_upgrade_security(
+    DigitalCrypt *crypt
+)
+{
+    if (!crypt)
+        return;
+
+    if (crypt->security_level < 10)
+        crypt->security_level++;
+
+    crypt->storage_capacity += 25;
+
+    crypt_log(
+        crypt,
+        "Crypt security upgraded"
+    );
+}
+
+
+/* ============================================================
+ * INVENTORY DISPLAY
+ * ============================================================ */
+
+void crypt_print_inventory(
+    const DigitalCrypt *crypt
+)
+{
+    if (!crypt)
+        return;
+
+    printf("\n");
+    printf("=====================================\n");
+    printf("          CYBERCRYPT VAULT\n");
+    printf("=====================================\n");
+
+    printf(
+        "Security Level : %u\n",
+        crypt->security_level
+    );
+
+    printf(
+        "Stored Assets  : %zu\n",
+        crypt->item_count
+    );
+
+    printf("\nASSETS\n");
+
+    for (size_t i = 0; i < crypt->item_count; ++i) {
+
+        const CryptItem *item =
+            &crypt->items[i];
+
+        printf(
+            "[%llu] %-24s x%u | Value: %llu\n",
+            (unsigned long long)item->id,
+            item->name,
+            item->quantity,
+            (unsigned long long)item->value
+        );
+    }
+
+    printf("\nWALLETS\n");
+
+    for (size_t i = 0; i < crypt->wallet_count; ++i) {
+
+        printf(
+            "%s : %llu credits\n",
+            crypt->wallets[i].address,
+            (unsigned long long)
+            crypt->wallets[i].balance
+        );
+    }
+
+    printf("=====================================\n");
+}
+
+
+/* ============================================================
+ * CRYPT VALUATION
+ * ============================================================ */
+
+uint64_t crypt_total_value(
+    const DigitalCrypt *crypt
+)
+{
+    if (!crypt)
+        return 0;
+
+    uint64_t total = 0;
+
+    for (size_t i = 0; i < crypt->item_count; ++i) {
+
+        total +=
+            crypt->items[i].value *
+            crypt->items[i].quantity;
+    }
+
+    for (size_t i = 0; i < crypt->wallet_count; ++i)
+        total += crypt->wallets[i].balance;
+
+    return total;
+}
+
+
+/* ============================================================
+ * DEMO
+ * ============================================================ */
+
+int main(void)
+{
+    DigitalCrypt crypt;
+
+    crypt_init(&crypt);
+
+    crypt_create_wallet(
+        &crypt,
+        "NEXUS-7A91"
+    );
+
+    crypt_deposit_currency(
+        &crypt,
+        250000
+    );
+
+    crypt_store_item(
+        &crypt,
+        1001,
+        ITEM_WEAPON,
+        "Kirov Plasma Rifle",
+        1,
+        85000
+    );
+
+    crypt_store_item(
+        &crypt,
+        1002,
+        ITEM_COLLECTIBLE,
+        "Neon District Artifact",
+        3,
+        12000
+    );
+
+    crypt_store_item(
+        &crypt,
+        1003,
+        ITEM_VEHICLE,
+        "NightRunner ZX",
+        1,
+        175000
+    );
+
+    crypt_print_inventory(&crypt);
+
+    printf(
+        "\nTOTAL CRYPT VALUE: %llu credits\n",
+        (unsigned long long)
+        crypt_total_value(&crypt)
+    );
+
+    crypt_upgrade_security(&crypt);
+
+    return 0;
+
+
+
+
+
+
+
+
+
+
+
