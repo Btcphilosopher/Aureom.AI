@@ -2319,6 +2319,3292 @@ int main(void)
 
 
 
+Core C simulation
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define MAX_REGIONS 32
+#define MAX_PLANTS 128
+#define MAX_STATIONS 256
+
+typedef struct {
+    char name[64];
+
+    double hydrogen_inventory;      // tonnes
+    double production_capacity;     // tonnes / day
+    double production_efficiency;   // 0.0 - 1.0
+
+    double industrial_demand;
+    double transport_demand;
+    double aerospace_demand;
+
+    double price_per_tonne;
+
+    double minimum_reserve;
+} HydrogenRegion;
+
+typedef struct {
+    char name[64];
+
+    int region;
+
+    double capacity;
+    double production_rate;
+
+    double operating_cost;
+    double efficiency;
+
+    bool operational;
+} HydrogenPlant;
+
+typedef struct {
+    char name[64];
+
+    int region;
+
+    double capacity;
+    double inventory;
+
+    double buy_price;
+    double sell_price;
+
+    bool operational;
+} HydrogenDepot;
+
+typedef enum {
+    VEHICLE_CAR,
+    VEHICLE_TRUCK,
+    VEHICLE_AIRCRAFT,
+    VEHICLE_ROCKET,
+    VEHICLE_GAME_MISSILE
+} VehicleType;
+
+typedef struct {
+    VehicleType type;
+
+    double hydrogen_capacity;
+    double hydrogen;
+
+    double consumption_rate;
+
+    bool active;
+} HydrogenVehicle;
+
+Then create a dynamic price engine.
+
+double calculate_hydrogen_price(
+    const HydrogenRegion *r
+) {
+    double total_demand =
+        r->industrial_demand +
+        r->transport_demand +
+        r->aerospace_demand;
+
+    double effective_supply =
+        r->hydrogen_inventory +
+        r->production_capacity;
+
+    if (effective_supply <= 0.0)
+        return 100000.0;
+
+    double scarcity =
+        total_demand / effective_supply;
+
+    /*
+        Base commodity price.
+        This is deliberately a game-economy abstraction,
+        rather than a real-world hydrogen pricing model.
+    */
+
+    double base_price = 2500.0;
+
+    double multiplier =
+        1.0 + pow(scarcity, 1.7);
+
+    /*
+        Emergency scarcity premium.
+    */
+
+    if (r->hydrogen_inventory < r->minimum_reserve) {
+        multiplier *= 1.5;
+    }
+
+    double price = base_price * multiplier;
+
+    /*
+        Prevent absurd values in the game economy.
+    */
+
+    if (price < 250.0)
+        price = 250.0;
+
+    if (price > 100000.0)
+        price = 100000.0;
+
+    return price;
+}
+Supply simulation
+
+Every game tick, plants produce hydrogen:
+
+void update_hydrogen_production(
+    HydrogenRegion regions[],
+    HydrogenPlant plants[],
+    int plant_count,
+    double days
+) {
+    for (int i = 0; i < plant_count; i++) {
+
+        HydrogenPlant *p = &plants[i];
+
+        if (!p->operational)
+            continue;
+
+        double production =
+            p->production_rate *
+            p->efficiency *
+            days;
+
+        regions[p->region].hydrogen_inventory += production;
+
+        /*
+            Storage cannot exceed regional capacity
+            in a more complete implementation.
+        */
+    }
+}
+Demand
+
+Demand should come from multiple sectors.
+
+void update_hydrogen_demand(
+    HydrogenRegion *r,
+    double economic_activity
+) {
+    r->industrial_demand =
+        40.0 * economic_activity;
+
+    r->transport_demand =
+        15.0 * economic_activity;
+
+    r->aerospace_demand =
+        5.0 * economic_activity;
+}
+
+But the interesting part is that player behaviour changes demand.
+
+For example:
+
+void consume_hydrogen(
+    HydrogenRegion *r,
+    double amount
+) {
+    if (amount <= 0.0)
+        return;
+
+    if (r->hydrogen_inventory < amount) {
+
+        /*
+            Shortage:
+            only part of the requested hydrogen
+            can actually be supplied.
+        */
+
+        amount = r->hydrogen_inventory;
+    }
+
+    r->hydrogen_inventory -= amount;
+}
+Rockets
+
+For the game, make rockets a consumer of the commodity rather than hard-coding unlimited fuel.
+
+double rocket_hydrogen_requirement(
+    double mission_size,
+    double payload_class
+) {
+    /*
+        Abstract gameplay equation.
+
+        This intentionally represents a fictional
+        game resource requirement rather than real
+        rocket-engine performance.
+    */
+
+    return 20.0 +
+           mission_size * 50.0 +
+           payload_class * 10.0;
+}
+
+Launching a rocket therefore affects the entire local economy:
+
+bool launch_rocket(
+    HydrogenRegion *r,
+    double mission_size,
+    double payload_class
+) {
+    double required =
+        rocket_hydrogen_requirement(
+            mission_size,
+            payload_class
+        );
+
+    if (r->hydrogen_inventory < required) {
+        printf("LAUNCH ABORTED: insufficient hydrogen\n");
+        return false;
+    }
+
+    consume_hydrogen(r, required);
+
+    printf(
+        "Rocket launched. Hydrogen consumed: %.2f tonnes\n",
+        required
+    );
+
+    return true;
+}
+
+For the fictional missile entities, I'd use the same abstract resource model rather than modelling real propulsion or weapon performance:
+
+bool game_missile_launch(
+    HydrogenRegion *r,
+    double fuel_cost
+) {
+    if (fuel_cost <= 0.0)
+        return false;
+
+    if (r->hydrogen_inventory < fuel_cost) {
+        printf("MISSILE LAUNCH FAILED: hydrogen shortage\n");
+        return false;
+    }
+
+    consume_hydrogen(r, fuel_cost);
+
+    return true;
+}
+The really interesting GTA-style mechanic
+
+I'd add regional hydrogen markets.
+
+For example:
+
+                 NORTHLAND
+              Production: HIGH
+              Demand: LOW
+              £1,900/t
+                    │
+                    │ pipeline
+                    ▼
+WESTERN CITY ───────────── CENTRAL CITY
+Demand: HIGH              Demand: VERY HIGH
+£3,800/t                  £7,200/t
+                    │
+                    ▼
+                SPACEPORT
+             Demand: EXTREME
+             £12,500/t
+
+The player could therefore:
+
+Buy hydrogen cheaply in a production region.
+Transport it using tankers.
+Sell it in a shortage region.
+Build a hydrogen depot.
+Invest in an electrolysis plant.
+Sign long-term supply contracts.
+Buy hydrogen futures/contracts.
+Cause or exploit shortages through legitimate gameplay.
+Watch aerospace demand push prices upward.
+See the economy react to major launches.
+
+You can even implement rarity as a continuous variable:
+
+double hydrogen_rarity(
+    const HydrogenRegion *r
+) {
+    double demand =
+        r->industrial_demand +
+        r->transport_demand +
+        r->aerospace_demand;
+
+    double supply =
+        r->hydrogen_inventory +
+        r->production_capacity;
+
+    if (supply <= 0.0)
+        return 1.0;
+
+    double ratio = demand / supply;
+
+    /*
+        0 = abundant
+        1 = extremely scarce
+    */
+
+    double rarity =
+        1.0 - exp(-ratio);
+
+    return rarity;
+}
+
+Then the game UI could display:
+
+HYDROGEN MARKET
+──────────────────────────────
+
+London Region
+
+Inventory       1,842 t
+Daily Supply      420 t
+Daily Demand      610 t
+
+Scarcity         ████████░░ 78%
+
+Price            £6,840 / tonne
+24h Change       +14.7%
+
+INDUSTRY          38%
+TRANSPORT         21%
+AEROSPACE         41%
+
+STATUS            ⚠ SHORTAGE
+
+And crucially, the economy should feed back into the world. If hydrogen becomes expensive:
+
+HIGH H₂ PRICE
+      ↓
+Hydrogen vehicles become expensive
+      ↓
+NPCs reduce hydrogen consumption
+      ↓
+Industrial demand falls
+      ↓
+Price stabilises
+
+while:
+
+LOW H₂ PRICE
+      ↓
+More hydrogen vehicles purchased
+      ↓
+Industrial consumption rises
+      ↓
+Demand increases
+      ↓
+Price rises
+
+That gives you an actual emergent commodity economy, rather than a simple fuel counter.
+
+For a GTA-scale engine, I'd ultimately split this into modules:
+
+src/
+├── engine/
+│   ├── game.c
+│   ├── world.c
+│   ├── time.c
+│   └── physics.c
+│
+├── hydrogen/
+│   ├── hydrogen.c
+│   ├── production.c
+│   ├── storage.c
+│   ├── distribution.c
+│   └── market.c
+│
+├── economy/
+│   ├── supply_demand.c
+│   ├── prices.c
+│   ├── contracts.c
+│   └── commodities.c
+│
+├── vehicles/
+│   ├── vehicle.c
+│   ├── hydrogen_vehicle.c
+│   ├── aircraft.c
+│   └── aerospace.c
+│
+└── world/
+    ├── regions.c
+    ├── cities.c
+    ├── infrastructure.c
+    └── companies.c
+
+The market.c + supply_demand.c combination is what I'd make particularly sophisticated: multiple regional markets, finite inventories, production lag, transportation bottlenecks, NPC consumption, player speculation, seasonal demand, infrastructure failures, and price propagation between regions. That would make hydrogen feel like a genuine strategic resource in the game world.
+
+
+
+
+
+
+
+
+
+Yes. For the game, I'd make the rocket-propelled grenade launcher/ammunition an ultra-rare gameplay item, with its scarcity determined by the same commodity/economic system. I would keep the weapon physics abstract rather than modelling real-world explosive or propulsion performance.
+
+1. Rarest-weapon economic model
+
+The RPG system could have:
+
+Extremely low spawn probability
+Finite ammunition
+Regional stockpiles
+NPC military/black-market demand
+Dynamic price
+Production constraints
+Supply shocks
+Player hoarding
+Theft/loot events
+Destruction of supply depots
+Reputation/access requirements
+A global rarity index
+
+For example:
+
+RPG-CLASS WEAPON
+──────────────────────────────
+
+Global Stock:             47
+Available for Sale:        3
+Player-Owned:              8
+NPC Strategic Reserve:    36
+
+Rarity:               99.97%
+Market Price:        £185,000
+Replacement Time:       42 days
+
+SUPPLY        ██░░░░░░░░
+DEMAND        ██████████
+SCARCITY      ██████████
+
+STATUS:
+EXTREMELY RARE
+2. C implementation
+#include <stdio.h>
+#include <math.h>
+#include <stdbool.h>
+
+typedef struct {
+    double global_stock;
+    double regional_stock;
+
+    double production_rate;
+    double demand_rate;
+
+    double base_price;
+    double current_price;
+
+    double rarity;
+    double scarcity;
+
+    bool available;
+} RareWeaponMarket;
+
+
+/*
+ * Economic scarcity:
+ *
+ * scarcity = demand / available supply
+ *
+ * The result is transformed into a bounded
+ * 0-1 rarity value for the game economy.
+ */
+double calculate_scarcity(
+    double supply,
+    double demand
+) {
+    if (supply <= 0.0)
+        return 1.0;
+
+    double ratio = demand / supply;
+
+    return 1.0 - exp(-ratio);
+}
+
+
+/*
+ * Price responds non-linearly to scarcity.
+ */
+double calculate_weapon_price(
+    double base_price,
+    double scarcity
+) {
+    double multiplier =
+        1.0 + pow(scarcity * 10.0, 2.0);
+
+    if (multiplier > 100.0)
+        multiplier = 100.0;
+
+    return base_price * multiplier;
+}
+
+
+/*
+ * Update the market.
+ */
+void update_rare_weapon_market(
+    RareWeaponMarket *market,
+    double days
+) {
+    /*
+     * Production adds to the global stock.
+     */
+    double production =
+        market->production_rate * days;
+
+    market->global_stock += production;
+
+    /*
+     * Demand removes stock.
+     */
+    double consumption =
+        market->demand_rate * days;
+
+    if (consumption > market->global_stock)
+        consumption = market->global_stock;
+
+    market->global_stock -= consumption;
+
+    /*
+     * Scarcity calculation.
+     */
+    market->scarcity =
+        calculate_scarcity(
+            market->global_stock,
+            market->demand_rate
+        );
+
+    /*
+     * Rarity is deliberately amplified so that
+     * this remains the game's exceptional weapon.
+     */
+    market->rarity =
+        pow(market->scarcity, 0.35);
+
+    /*
+     * Dynamic market price.
+     */
+    market->current_price =
+        calculate_weapon_price(
+            market->base_price,
+            market->scarcity
+        );
+
+    market->available =
+        market->global_stock > 0.0;
+}
+3. Player acquisition
+
+The important mechanic is that finding one isn't guaranteed just because the player has enough money.
+
+typedef struct {
+    int player_money;
+    int rare_weapons;
+} Player;
+
+
+bool purchase_rare_weapon(
+    Player *player,
+    RareWeaponMarket *market
+) {
+    if (!market->available) {
+        printf("MARKET: SOLD OUT\n");
+        return false;
+    }
+
+    int price =
+        (int)market->current_price;
+
+    if (player->player_money < price) {
+        printf("INSUFFICIENT FUNDS\n");
+        return false;
+    }
+
+    player->player_money -= price;
+
+    market->global_stock -= 1.0;
+
+    player->rare_weapons++;
+
+    printf(
+        "RARE WEAPON ACQUIRED: £%d\n",
+        price
+    );
+
+    return true;
+}
+4. Make it genuinely rare
+
+I'd add a rarity generator rather than having every shop carry one.
+
+double calculate_spawn_probability(
+    double regional_scarcity,
+    double mission_difficulty,
+    double world_rarity
+) {
+    double probability =
+        0.0001 *
+        (1.0 - regional_scarcity) *
+        mission_difficulty *
+        world_rarity;
+
+    if (probability < 0.000001)
+        probability = 0.000001;
+
+    return probability;
+}
+
+So a normal city might have:
+
+RPG-CLASS WEAPON
+
+Street loot:             0.001%
+General shop:             0.000%
+Special contract:          0.02%
+Rare military cache:       0.10%
+Major story event:         1.00%
+
+The weapon therefore becomes something the player remembers obtaining rather than another item sitting in every ammunition shop.
+
+5. Connect it to the hydrogen economy
+
+This is where your original idea gets particularly interesting.
+
+Instead of making the weapon itself consume hydrogen directly, make hydrogen-market conditions influence the fictional game's aerospace/industrial supply chain.
+
+For example:
+
+HYDROGEN SHORTAGE
+       ↓
+Aerospace industry costs rise
+       ↓
+Advanced equipment production falls
+       ↓
+Rare military equipment becomes harder to obtain
+       ↓
+RPG-CLASS WEAPON STOCKPILE ↓
+       ↓
+Rarity ↑
+       ↓
+Market price ↑
+
+Conversely:
+
+HYDROGEN SURPLUS
+       ↓
+Industrial production ↑
+       ↓
+Equipment manufacturing ↑
+       ↓
+Rare-item supply ↑
+       ↓
+Rarity ↓
+       ↓
+Price ↓
+
+You can implement that coupling:
+
+double calculate_equipment_supply(
+    double hydrogen_scarcity,
+    double industrial_capacity
+) {
+    double supply =
+        industrial_capacity *
+        (1.0 - 0.75 * hydrogen_scarcity);
+
+    if (supply < 0.01)
+        supply = 0.01;
+
+    return supply;
+}
+
+That gives you a much more interesting game economy:
+
+hydrogen → industrial capacity → equipment production → weapon scarcity → market price → NPC behaviour → player behaviour → new demand for hydrogen.
+
+That feedback loop can become one of the central economic systems of the entire GTA-style world.
+
+
+
+
+
+Yes — for the game, I'd make the Merchant an agorist-style NPC whose gameplay revolves around operating outside the formal economy: sourcing scarce contraband, maintaining contacts, moving inventory between regions, and responding to changing prices and enforcement.
+
+I’d keep the actual weapons represented as abstract game items rather than providing real-world procurement or weapon-trading mechanics.
+
+Merchant architecture
+MERCHANT
+│
+├── Character
+│   ├── Cash
+│   ├── Reputation
+│   ├── Risk tolerance
+│   ├── Contacts
+│   └── Heat
+│
+├── Inventory
+│   ├── Common contraband
+│   ├── Rare equipment
+│   └── Ultra-rare items
+│
+├── Market
+│   ├── Supply
+│   ├── Demand
+│   ├── Scarcity
+│   ├── Price
+│   └── Regional arbitrage
+│
+├── Network
+│   ├── Suppliers
+│   ├── Customers
+│   ├── Couriers
+│   └── Safe locations
+│
+└── Risk
+    ├── Police attention
+    ├── Competitors
+    ├── Inventory seizure
+    └── Reputation loss
+C framework
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define MAX_INVENTORY 32
+#define MAX_CONTACTS 32
+
+typedef enum {
+    ITEM_COMMON,
+    ITEM_UNCOMMON,
+    ITEM_RARE,
+    ITEM_ULTRA_RARE
+} ItemRarity;
+
+typedef struct {
+    char name[64];
+
+    ItemRarity rarity;
+
+    double quantity;
+    double base_value;
+
+    double supply;
+    double demand;
+    double scarcity;
+
+    bool available;
+} ContrabandItem;
+
+typedef struct {
+    char name[64];
+
+    double cash;
+
+    double reputation;
+    double heat;
+    double risk_tolerance;
+
+    double inventory_value;
+
+    ContrabandItem inventory[MAX_INVENTORY];
+    int inventory_count;
+} Merchant;
+
+
+/* -----------------------------------------
+   ECONOMICS
+   ----------------------------------------- */
+
+double calculate_scarcity(
+    double supply,
+    double demand
+) {
+    if (supply <= 0.0)
+        return 1.0;
+
+    return 1.0 - exp(-(demand / supply));
+}
+
+
+double calculate_price(
+    double base_value,
+    double scarcity,
+    double reputation
+) {
+    /*
+     * Scarcity increases the price.
+     *
+     * Reputation gives the Merchant access
+     * to better prices in the game economy.
+     */
+
+    double scarcity_multiplier =
+        1.0 + scarcity * 8.0;
+
+    double reputation_discount =
+        1.0 - reputation * 0.25;
+
+    if (reputation_discount < 0.70)
+        reputation_discount = 0.70;
+
+    return base_value *
+           scarcity_multiplier *
+           reputation_discount;
+}
+
+
+/* -----------------------------------------
+   INVENTORY
+   ----------------------------------------- */
+
+bool add_inventory(
+    Merchant *merchant,
+    ContrabandItem item
+) {
+    if (merchant->inventory_count >= MAX_INVENTORY)
+        return false;
+
+    merchant->inventory[
+        merchant->inventory_count
+    ] = item;
+
+    merchant->inventory_count++;
+
+    return true;
+}
+
+
+void update_inventory_values(
+    Merchant *merchant
+) {
+    merchant->inventory_value = 0.0;
+
+    for (int i = 0;
+         i < merchant->inventory_count;
+         i++) {
+
+        ContrabandItem *item =
+            &merchant->inventory[i];
+
+        item->scarcity =
+            calculate_scarcity(
+                item->supply,
+                item->demand
+            );
+
+        merchant->inventory_value +=
+            item->quantity *
+            calculate_price(
+                item->base_value,
+                item->scarcity,
+                merchant->reputation
+            );
+    }
+}
+
+
+/* -----------------------------------------
+   MERCHANT TRANSACTION
+   ----------------------------------------- */
+
+bool sell_item(
+    Merchant *merchant,
+    int inventory_index,
+    double quantity
+) {
+    if (inventory_index < 0 ||
+        inventory_index >= merchant->inventory_count)
+        return false;
+
+    ContrabandItem *item =
+        &merchant->inventory[inventory_index];
+
+    if (quantity <= 0.0 ||
+        quantity > item->quantity)
+        return false;
+
+    double price =
+        calculate_price(
+            item->base_value,
+            item->scarcity,
+            merchant->reputation
+        );
+
+    double revenue =
+        price * quantity;
+
+    merchant->cash += revenue;
+    item->quantity -= quantity;
+
+    printf(
+        "%s sold %.1f units for £%.2f\n",
+        item->name,
+        quantity,
+        revenue
+    );
+
+    return true;
+}
+The important part: heat
+
+The Merchant shouldn't simply be "a shop with guns." The game loop should be:
+
+BUY LOW
+   ↓
+MOVE INVENTORY
+   ↓
+FIND CUSTOMER
+   ↓
+SELL
+   ↓
+PROFIT
+   ↓
+HEAT INCREASES
+   ↓
+LAY LOW
+   ↓
+REBUILD NETWORK
+
+For example:
+
+void update_heat(
+    Merchant *merchant,
+    double transaction_value,
+    double days
+) {
+    /*
+     * Larger transactions attract more attention.
+     */
+
+    merchant->heat +=
+        transaction_value * 0.00001;
+
+    /*
+     * Heat gradually decays when inactive.
+     */
+
+    merchant->heat -=
+        2.0 * days;
+
+    if (merchant->heat < 0.0)
+        merchant->heat = 0.0;
+
+    if (merchant->heat > 100.0)
+        merchant->heat = 100.0;
+}
+
+Then NPC behaviour can depend on it:
+
+bool merchant_can_trade(
+    const Merchant *merchant
+) {
+    return merchant->heat < 80.0;
+}
+Reputation
+
+Reputation should be separate from heat.
+
+REPUTATION
+    ↑
+trusted customers
+    ↓
+better prices
+    ↓
+better suppliers
+    ↓
+rarer inventory
+
+
+HEAT
+    ↑
+transactions
+    ↓
+police attention
+    ↓
+surveillance
+    ↓
+seizure risk
+
+So a Merchant could become extremely reputable within the underground economy while simultaneously becoming extremely wanted by authorities.
+
+Regional arbitrage
+
+This is where it ties directly into your hydrogen/economic system.
+
+Each city can have its own market:
+
+                    REGION A
+                 Supply: HIGH
+                  Price: £800
+                      │
+                      │
+                      ▼
+REGION B ───────────────────── REGION C
+Supply: LOW                    Supply: VERY LOW
+Price: £8,000                  Price: £25,000
+Demand: HIGH                   Demand: EXTREME
+
+The Merchant sees:
+
+BUY → REGION A
+TRANSPORT → REGION B
+SELL → REGION C
+
+while the game continuously changes supply and demand.
+
+That means the Merchant becomes a mobile economic agent, not simply an NPC vendor.
+
+And you can make the whole system emergent:
+
+Hydrogen shortage
+       ↓
+Industrial costs ↑
+       ↓
+Rare equipment production ↓
+       ↓
+Contraband supply ↓
+       ↓
+Merchant inventory ↓
+       ↓
+Scarcity ↑
+       ↓
+Prices ↑
+       ↓
+Merchant profit ↑
+       ↓
+Competition ↑
+       ↓
+Risk / heat ↑
+
+That would give your GTA-style game a proper underground commodity economy, with the Merchant acting as one of the principal agents connecting regional supply, demand, scarcity, reputation and risk.
+
+
+
+
+
+
+
+
+
+Absolutely. For a GTA-style game, I'd make airships a full player-owned vehicle class with hydrogen as an economic resource. The player can buy, lease, customise, operate, or build an airship and then freely fly it around a fictionalised Miami-style map.
+
+The C framework should focus on game simulation, not real-world airship construction.
+
+Core architecture
+AIRSHIP
+│
+├── Vehicle
+│   ├── Position
+│   ├── Velocity
+│   ├── Altitude
+│   ├── Heading
+│   └── Autopilot
+│
+├── Hydrogen
+│   ├── Tank capacity
+│   ├── Current H₂
+│   ├── Consumption
+│   └── Refuelling
+│
+├── Economy
+│   ├── Purchase price
+│   ├── Operating cost
+│   ├── Hydrogen price
+│   └── Cargo revenue
+│
+└── World
+    ├── Miami region
+    ├── Airports
+    ├── Airship docks
+    ├── Refuelling stations
+    └── Restricted zones
+C airship simulation
+#include <stdio.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define PI 3.141592653589793
+
+typedef struct {
+    double x;
+    double y;
+    double z;
+
+    double heading;
+    double speed;
+
+    double vertical_speed;
+} Vector3;
+
+
+typedef struct {
+    char name[64];
+
+    double purchase_price;
+
+    double hydrogen_capacity;
+    double hydrogen;
+
+    double hydrogen_consumption;
+
+    double max_speed;
+    double climb_rate;
+    double descent_rate;
+
+    double cargo_capacity;
+    double cargo;
+
+    double fuel_cost;
+
+    bool owned;
+    bool airborne;
+} Airship;
+
+
+/* ---------------------------------------
+   AIRSHIP CREATION
+   --------------------------------------- */
+
+Airship create_airship(
+    const char *name,
+    double price,
+    double hydrogen_capacity,
+    double max_speed,
+    double cargo_capacity
+) {
+    Airship ship = {0};
+
+    snprintf(
+        ship.name,
+        sizeof(ship.name),
+        "%s",
+        name
+    );
+
+    ship.purchase_price = price;
+
+    ship.hydrogen_capacity =
+        hydrogen_capacity;
+
+    ship.hydrogen =
+        hydrogen_capacity;
+
+    ship.max_speed =
+        max_speed;
+
+    ship.cargo_capacity =
+        cargo_capacity;
+
+    ship.hydrogen_consumption =
+        0.15;
+
+    ship.climb_rate =
+        3.0;
+
+    ship.descent_rate =
+        2.0;
+
+    return ship;
+}
+Movement
+void airship_update(
+    Airship *ship,
+    Vector3 *position,
+    double throttle,
+    double climb_input,
+    double dt
+) {
+    if (!ship->airborne)
+        return;
+
+    if (ship->hydrogen <= 0.0) {
+        ship->speed *= 0.95;
+        return;
+    }
+
+    /*
+     * Abstract game movement model.
+     */
+
+    if (throttle < 0.0)
+        throttle = 0.0;
+
+    if (throttle > 1.0)
+        throttle = 1.0;
+
+    ship->speed =
+        ship->max_speed * throttle;
+
+    double heading_rad =
+        ship->heading * PI / 180.0;
+
+    position->x +=
+        cos(heading_rad) *
+        ship->speed * dt;
+
+    position->y +=
+        sin(heading_rad) *
+        ship->speed * dt;
+
+    /*
+     * Altitude control.
+     */
+
+    position->z +=
+        climb_input *
+        ship->climb_rate *
+        dt;
+
+    if (position->z < 0.0)
+        position->z = 0.0;
+
+    /*
+     * Hydrogen consumption.
+     */
+
+    double consumption =
+        ship->hydrogen_consumption *
+        throttle *
+        dt;
+
+    ship->hydrogen -= consumption;
+
+    if (ship->hydrogen < 0.0)
+        ship->hydrogen = 0.0;
+}
+Refuelling
+
+This should connect directly to your hydrogen market.
+
+double refuel_airship(
+    Airship *ship,
+    double hydrogen_price
+) {
+    double required =
+        ship->hydrogen_capacity -
+        ship->hydrogen;
+
+    if (required <= 0.0)
+        return 0.0;
+
+    double cost =
+        required * hydrogen_price;
+
+    ship->hydrogen =
+        ship->hydrogen_capacity;
+
+    return cost;
+}
+
+So the player might see:
+
+MIAMI HYDROGEN DOCK
+────────────────────────
+
+H₂ PRICE
+
+$2,840 / tonne
+
+AIRSHIP:
+ATLANTIC SOVEREIGN
+
+Tank
+████████░░ 81%
+
+Required
+14.2 tonnes
+
+Refuel
+$40,328
+
+And because hydrogen prices are dynamic, flying an airship becomes an economic decision.
+
+Buying one
+bool buy_airship(
+    Airship *ship,
+    double *player_money
+) {
+    if (*player_money <
+        ship->purchase_price)
+        return false;
+
+    *player_money -=
+        ship->purchase_price;
+
+    ship->owned = true;
+
+    return true;
+}
+
+You can offer several classes:
+
+AIRSHIP MARKET
+────────────────────────────
+
+MIAMI CLASS
+$2.5M
+Speed:       65 mph
+Cargo:       5 t
+Range:       Medium
+
+FLORIDA CLASS
+$8M
+Speed:       90 mph
+Cargo:       30 t
+Range:       Long
+
+ATLANTIC CLASS
+$25M
+Speed:       115 mph
+Cargo:       100 t
+Range:       Very Long
+
+SOVEREIGN CLASS
+$75M
+Speed:       140 mph
+Cargo:       300 t
+Range:       Extreme
+Building one
+
+Rather than making construction instantaneous, give the player an industrial progression:
+
+LAND
+ ↓
+AIRSHIP HANGAR
+ ↓
+FABRICATION FACILITY
+ ↓
+HYDROGEN STORAGE
+ ↓
+ENVELOPE / FRAME PRODUCTION
+ ↓
+PROPULSION SYSTEM
+ ↓
+AVIONICS
+ ↓
+ASSEMBLY
+ ↓
+TEST FLIGHT
+ ↓
+PLAYER AIRSHIP
+
+The game could have:
+
+typedef struct {
+    double materials;
+    double manufacturing;
+    double hydrogen;
+    double electronics;
+    double labour;
+
+    double completion;
+
+    bool construction_active;
+} AirshipFactory;
+
+and construction progresses over game time.
+
+Miami world integration
+
+I'd give the Miami map an airspace layer above the normal GTA-style road map:
+
+                    ALTITUDE
+                       ↑
+
+       ┌─────────────────────────────┐
+       │       HIGH ALTITUDE          │
+       │       AIRSHIP ROUTES         │
+       └─────────────────────────────┘
+
+              🌴 MIAMI SKYLINE
+
+       ┌─────────────────────────────┐
+       │     LOW AIRSPACE             │
+       │     sightseeing              │
+       │     cargo                     │
+       │     docking                    │
+       └─────────────────────────────┘
+
+~~~~~~~~~~~~~~~~~~ OCEAN ~~~~~~~~~~~~~~~~~
+
+       MIAMI BEACH
+       DOWNTOWN
+       PORT
+       INDUSTRIAL DISTRICT
+       AIRSHIP TERMINALS
+
+The player could then:
+
+Own an airship.
+Buy one from an airship dealer.
+Build one at their own facility.
+Paint/customise it.
+Install different engines.
+Add passenger or cargo capacity.
+Dock at airship terminals.
+Refuel with dynamically priced hydrogen.
+Fly over the city.
+Use it as a mobile base.
+Run sightseeing or cargo businesses.
+Trade hydrogen between regions.
+Upgrade its range and autonomy.
+
+The best part is connecting all your systems together:
+
+HYDROGEN ECONOMY
+       ↓
+     PRICE
+       ↓
+AIRSHIP OPERATING COST
+       ↓
+PLAYER ROUTE CHOICE
+       ↓
+CARGO / PASSENGER REVENUE
+       ↓
+PLAYER PROFIT
+       ↓
+NEW AIRSHIP / HANGAR
+       ↓
+GREATER HYDROGEN DEMAND
+       ↓
+REGIONAL HYDROGEN PRICE
+
+That turns flying over Miami from a simple vehicle mechanic into an actual economic gameplay system.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Yes — for an open-world GTA-style railway network, I'd make the timetable system simulation-driven rather than just a list of scheduled trains. The same engine can handle commuter rail, metro, freight, intercity and special services.
+
+The important abstraction is:
+
+NETWORK
+   ↓
+ROUTES
+   ↓
+STATIONS
+   ↓
+TIMETABLES
+   ↓
+TRAINS
+   ↓
+DISPATCHER
+   ↓
+SIGNALS / TRACK OCCUPANCY
+   ↓
+WORLD CLOCK
+Core C structures
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_STATIONS 256
+#define MAX_ROUTES 128
+#define MAX_STOPS 32
+#define MAX_TRAINS 512
+#define MAX_TIMETABLES 1024
+
+typedef struct {
+    int hour;
+    int minute;
+    int second;
+} GameTime;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    double x;
+    double y;
+
+    bool passenger_station;
+    bool freight_terminal;
+} Station;
+
+typedef struct {
+    int station_id;
+
+    int arrival_minute;
+    int departure_minute;
+
+    int dwell_seconds;
+} TimetableStop;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    int stop_count;
+    TimetableStop stops[MAX_STOPS];
+
+    int frequency_minutes;
+
+    bool active;
+} Route;
+
+typedef enum {
+    TRAIN_STOPPED,
+    TRAIN_RUNNING,
+    TRAIN_DWELLING,
+    TRAIN_DELAYED,
+    TRAIN_TERMINATED
+} TrainState;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    int route_id;
+    int current_stop;
+
+    double position;
+    double speed;
+
+    int delay_seconds;
+
+    TrainState state;
+
+    bool passenger_service;
+    bool freight_service;
+} Train;
+World clock
+
+The entire railway system should run from the game's master clock.
+
+int time_to_seconds(GameTime t)
+{
+    return
+        t.hour * 3600 +
+        t.minute * 60 +
+        t.second;
+}
+
+
+GameTime seconds_to_time(int seconds)
+{
+    GameTime t;
+
+    seconds %= 86400;
+
+    t.hour = seconds / 3600;
+    t.minute = (seconds % 3600) / 60;
+    t.second = seconds % 60;
+
+    return t;
+}
+
+So if the game is running at:
+
+08:14:32
+
+every train can independently determine where it should be.
+
+Timetable lookup
+TimetableStop *get_current_stop(
+    Route *route,
+    Train *train
+)
+{
+    if (train->current_stop < 0 ||
+        train->current_stop >= route->stop_count)
+        return NULL;
+
+    return &route->stops[
+        train->current_stop
+    ];
+}
+
+Then the dispatcher can determine whether a train should have arrived.
+
+void update_train_schedule(
+    Train *train,
+    Route *route,
+    int current_minute
+)
+{
+    if (train->state ==
+        TRAIN_TERMINATED)
+        return;
+
+    TimetableStop *stop =
+        get_current_stop(route, train);
+
+    if (!stop)
+        return;
+
+    if (current_minute <
+        stop->arrival_minute)
+    {
+        train->state =
+            TRAIN_RUNNING;
+
+        return;
+    }
+
+    if (current_minute >=
+        stop->arrival_minute &&
+        current_minute <
+        stop->departure_minute)
+    {
+        train->state =
+            TRAIN_DWELLING;
+
+        train->speed = 0.0;
+
+        return;
+    }
+
+    if (current_minute >=
+        stop->departure_minute)
+    {
+        train->current_stop++;
+
+        if (train->current_stop >=
+            route->stop_count)
+        {
+            train->state =
+                TRAIN_TERMINATED;
+        }
+        else
+        {
+            train->state =
+                TRAIN_RUNNING;
+        }
+    }
+}
+Automatic repeating services
+
+For an open-world game, manually creating every train is inefficient.
+
+Instead:
+
+typedef struct {
+    int route_id;
+
+    int first_service;
+    int last_service;
+
+    int frequency;
+
+    bool weekdays;
+    bool weekends;
+} ServicePattern;
+
+For example:
+
+MIAMI CENTRAL → NORTH CITY
+
+05:00
+05:15
+05:30
+05:45
+06:00
+06:15
+...
+23:45
+
+The engine generates the individual train services.
+
+int generate_departures(
+    ServicePattern *pattern,
+    int output[],
+    int max_services
+)
+{
+    int count = 0;
+
+    for (
+        int t = pattern->first_service;
+        t <= pattern->last_service;
+        t += pattern->frequency
+    ) {
+        if (count >= max_services)
+            break;
+
+        output[count++] = t;
+    }
+
+    return count;
+}
+Delays
+
+This is where it starts feeling like a real railway rather than a cosmetic game system.
+
+void apply_delay(
+    Train *train,
+    int delay_seconds
+)
+{
+    train->delay_seconds +=
+        delay_seconds;
+
+    if (train->delay_seconds > 0)
+        train->state =
+            TRAIN_DELAYED;
+}
+
+A delay can propagate through the network:
+
+Train A delayed
+     ↓
+misses platform slot
+     ↓
+Train B waits
+     ↓
+Train B delayed
+     ↓
+Train C catches B
+     ↓
+network congestion
+
+You can model that with a simple dispatcher.
+
+Track occupancy
+typedef struct {
+    int id;
+
+    int from_station;
+    int to_station;
+
+    bool occupied;
+
+    int occupying_train;
+} TrackSection;
+
+Then:
+
+bool request_track(
+    TrackSection *track,
+    int train_id
+)
+{
+    if (track->occupied &&
+        track->occupying_train != train_id)
+        return false;
+
+    track->occupied = true;
+    track->occupying_train = train_id;
+
+    return true;
+}
+
+
+void release_track(
+    TrackSection *track,
+    int train_id
+)
+{
+    if (track->occupying_train ==
+        train_id)
+    {
+        track->occupied = false;
+        track->occupying_train = -1;
+    }
+}
+
+This allows the game to generate real conflicts.
+
+Open-world timetable
+
+I'd have the player's map show something like:
+
+MIAMI RAIL NETWORK
+────────────────────────────────
+
+14:32
+
+CENTRAL
+──────────────────────────────
+14:35  → Airport       3 min
+14:38  → Northside     6 min
+14:42  → Beach         10 min
+14:47  → Port          15 min
+
+AIRPORT
+──────────────────────────────
+14:34  ← Central       ON TIME
+14:39  → Central       ON TIME
+14:44  → Northside     +2 min
+
+NORTHSIDE
+──────────────────────────────
+14:36  ← Central       ON TIME
+14:41  → Industrial    DELAYED
+Freight trains
+
+The same framework can handle freight:
+
+typedef struct {
+    int origin;
+    int destination;
+
+    double cargo_tonnes;
+
+    int priority;
+
+    int departure_time;
+
+    bool loaded;
+    bool delivered;
+} FreightJob;
+
+This can connect beautifully with the economic systems you've already described:
+
+HYDROGEN MARKET
+      ↓
+INDUSTRIAL DEMAND
+      ↓
+FREIGHT ORDERS
+      ↓
+RAILWAY FREIGHT
+      ↓
+TRACK CAPACITY
+      ↓
+CONGESTION
+      ↓
+DELAYS
+      ↓
+DELIVERY COST
+      ↓
+HYDROGEN PRICE
+
+So a shortage in one part of the world could generate more freight movements, which congest the railway, increasing transport costs and feeding back into the economy.
+
+Passenger demand
+
+You can also dynamically generate passengers:
+
+typedef struct {
+    int origin;
+    int destination;
+
+    int passengers;
+
+    int preferred_departure;
+    int tolerance_minutes;
+} PassengerDemand;
+
+The game can therefore calculate:
+
+                    PASSENGER DEMAND
+                           ↓
+                    TRAIN FREQUENCY
+                           ↓
+                    TRAIN CAPACITY
+                           ↓
+                 CROWDING / REVENUE
+                           ↓
+                  OPERATOR PROFIT
+                           ↓
+                  NEW SERVICES
+The full open-world architecture
+
+I'd ultimately make the railway engine look like:
+
+railway/
+│
+├── railway.c
+├── station.c
+├── track.c
+├── signalling.c
+├── timetable.c
+├── dispatcher.c
+├── train.c
+├── passenger.c
+├── freight.c
+├── delays.c
+├── maintenance.c
+├── railway_economy.c
+└── railway_ai.c
+
+The particularly powerful feature would be AI-generated timetable adaptation: instead of trains always following exactly the same schedule, the dispatcher can respond to passenger demand, freight demand, delays, breakdowns, weather, special events and track closures.
+
+That would make the railway a genuinely living infrastructure system inside the open world rather than a collection of scripted train animations.
+
+
+
+
+
+1. Railway crime system
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_BANDITS 64
+#define MAX_POLICE 128
+#define MAX_TRAINS 512
+#define MAX_INCIDENTS 256
+
+typedef enum {
+    BANDIT_IDLE,
+    BANDIT_SCOUTING,
+    BANDIT_TARGETING,
+    BANDIT_COMMITTING,
+    BANDIT_ESCAPING,
+    BANDIT_CAUGHT
+} BanditState;
+
+typedef enum {
+    POLICE_PATROL,
+    POLICE_INVESTIGATING,
+    POLICE_RESPONDING,
+    POLICE_PURSUING,
+    POLICE_ARRESTING
+} PoliceState;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double notoriety;
+    double aggression;
+
+    double stolen_value;
+
+    BanditState state;
+
+    bool active;
+} RailwayBandit;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double detection_radius;
+    double response_speed;
+
+    PoliceState state;
+
+    int target_bandit;
+
+    bool active;
+} TransportPolice;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double cargo_value;
+
+    bool passenger_train;
+    bool freight_train;
+
+    bool moving;
+    bool alarm_active;
+} RailwayTrain;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    int train_id;
+
+    bool active;
+    bool resolved;
+} RailwayIncident;
+2. Railway crime probability
+
+Give every train a dynamically calculated crime attractiveness.
+
+double calculate_train_attractiveness(
+    RailwayTrain *train,
+    double local_demand,
+    double police_presence
+) {
+    double attractiveness = 0.0;
+
+    if (train->freight_train)
+        attractiveness += train->cargo_value * 0.00001;
+
+    attractiveness += local_demand * 0.25;
+
+    /*
+     * Police presence suppresses crime opportunities.
+     */
+
+    attractiveness *=
+        1.0 / (1.0 + police_presence);
+
+    if (attractiveness < 0.0)
+        attractiveness = 0.0;
+
+    if (attractiveness > 100.0)
+        attractiveness = 100.0;
+
+    return attractiveness;
+}
+
+This means the world itself determines where criminal activity is likely to emerge.
+
+High-value freight
+       +
+High demand
+       +
+Low police presence
+       ↓
+HIGH CRIME PRESSURE
+3. Bandit AI
+void update_bandit(
+    RailwayBandit *bandit,
+    RailwayTrain trains[],
+    int train_count
+) {
+    if (!bandit->active)
+        return;
+
+    switch (bandit->state) {
+
+        case BANDIT_IDLE:
+            bandit->state =
+                BANDIT_SCOUTING;
+            break;
+
+        case BANDIT_SCOUTING:
+
+            /*
+             * Find an attractive train.
+             */
+
+            for (int i = 0;
+                 i < train_count;
+                 i++) {
+
+                if (!trains[i].moving &&
+                    trains[i].freight_train) {
+
+                    bandit->state =
+                        BANDIT_TARGETING;
+
+                    break;
+                }
+            }
+
+            break;
+
+        case BANDIT_TARGETING:
+
+            /*
+             * Game abstraction:
+             * attempt to create a crime incident.
+             */
+
+            bandit->state =
+                BANDIT_COMMITTING;
+
+            break;
+
+        case BANDIT_COMMITTING:
+
+            bandit->stolen_value += 1000.0;
+
+            bandit->notoriety += 5.0;
+
+            bandit->state =
+                BANDIT_ESCAPING;
+
+            break;
+
+        case BANDIT_ESCAPING:
+
+            /*
+             * Police AI takes over if detected.
+             */
+
+            break;
+
+        case BANDIT_CAUGHT:
+            bandit->active = false;
+            break;
+    }
+}
+4. Crime incidents
+
+The important bridge between the two AI systems is the incident manager.
+
+int create_incident(
+    RailwayIncident incidents[],
+    int train_id,
+    double x,
+    double y
+) {
+    for (int i = 0; i < MAX_INCIDENTS; i++) {
+
+        if (!incidents[i].active) {
+
+            incidents[i].id = i;
+            incidents[i].train_id = train_id;
+
+            incidents[i].x = x;
+            incidents[i].y = y;
+
+            incidents[i].active = true;
+            incidents[i].resolved = false;
+
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+A robbery can therefore trigger:
+
+TRAIN ALARM
+     ↓
+RAILWAY INCIDENT
+     ↓
+CONTROL CENTRE
+     ↓
+TRANSPORT POLICE
+     ↓
+NEAREST UNIT DISPATCHED
+5. Transport Police dispatch
+double distance(
+    double x1,
+    double y1,
+    double x2,
+    double y2
+) {
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+
+    return sqrt(dx * dx + dy * dy);
+}
+
+
+int find_nearest_police(
+    TransportPolice police[],
+    double x,
+    double y
+) {
+    int best = -1;
+    double best_distance = 1e30;
+
+    for (int i = 0;
+         i < MAX_POLICE;
+         i++) {
+
+        if (!police[i].active)
+            continue;
+
+        double d =
+            distance(
+                police[i].x,
+                police[i].y,
+                x,
+                y
+            );
+
+        if (d < best_distance) {
+            best_distance = d;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+Then dispatch:
+
+void dispatch_police(
+    TransportPolice police[],
+    RailwayIncident *incident
+) {
+    int unit =
+        find_nearest_police(
+            police,
+            incident->x,
+            incident->y
+        );
+
+    if (unit < 0)
+        return;
+
+    police[unit].state =
+        POLICE_RESPONDING;
+
+    police[unit].target_bandit =
+        incident->id;
+}
+6. Police detection
+bool detect_bandit(
+    TransportPolice *police,
+    RailwayBandit *bandit
+) {
+    double d =
+        distance(
+            police->x,
+            police->y,
+            bandit->x,
+            bandit->y
+        );
+
+    return d <=
+           police->detection_radius;
+}
+
+Then the police state machine:
+
+void update_police(
+    TransportPolice *police,
+    RailwayBandit bandits[]
+) {
+    if (!police->active)
+        return;
+
+    if (police->target_bandit < 0)
+        return;
+
+    RailwayBandit *target =
+        &bandits[police->target_bandit];
+
+    switch (police->state) {
+
+        case POLICE_PATROL:
+            break;
+
+        case POLICE_RESPONDING:
+
+            police->state =
+                POLICE_PURSUING;
+
+            break;
+
+        case POLICE_PURSUING:
+
+            if (detect_bandit(
+                    police,
+                    target)) {
+
+                police->state =
+                    POLICE_ARRESTING;
+            }
+
+            break;
+
+        case POLICE_ARRESTING:
+
+            target->state =
+                BANDIT_CAUGHT;
+
+            police->state =
+                POLICE_PATROL;
+
+            police->target_bandit =
+                -1;
+
+            break;
+
+        case POLICE_INVESTIGATING:
+            break;
+    }
+}
+7. Make the railway network itself matter
+
+I'd go further and make Transport Police network-aware.
+
+                 CENTRAL
+                    │
+          ┌─────────┼─────────┐
+          │         │         │
+       NORTH      AIRPORT     PORT
+          │         │         │
+          │         │         │
+       WEST ─────── SOUTH ─── BEACH
+
+Every station has:
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double passenger_volume;
+    double freight_volume;
+
+    double crime_pressure;
+    double police_coverage;
+
+    bool police_station;
+} RailwayStation;
+
+Then crime pressure can emerge naturally:
+
+double calculate_crime_pressure(
+    RailwayStation *station
+) {
+    double pressure =
+        station->freight_volume * 0.001 +
+        station->passenger_volume * 0.0001;
+
+    pressure *=
+        1.0 /
+        (1.0 + station->police_coverage);
+
+    return pressure;
+}
+
+So the player might see:
+
+RAILWAY NETWORK
+────────────────────────────────
+
+CENTRAL             🟢 SAFE
+Crime: 8%
+Police: HIGH
+
+NORTH FREIGHT       🟠 ELEVATED
+Crime: 43%
+Police: MEDIUM
+
+PORT TERMINAL       🔴 HIGH
+Crime: 81%
+Police: LOW
+
+AIRPORT             🟢 SAFE
+Crime: 5%
+Police: VERY HIGH
+8. Dynamic police deployment
+
+This creates an interesting feedback loop:
+
+Crime ↑
+   ↓
+Police deployment ↑
+   ↓
+Detection probability ↑
+   ↓
+Successful crimes ↓
+   ↓
+Crime pressure ↓
+   ↓
+Police redeployed elsewhere
+   ↓
+New weak point emerges
+
+That means the railway network becomes a living security system.
+
+You can also connect this to your existing economic simulation:
+
+HYDROGEN PRICE ↑
+       ↓
+Industrial transport ↑
+       ↓
+Freight value ↑
+       ↓
+Railway cargo ↑
+       ↓
+Crime attractiveness ↑
+       ↓
+Bandit activity ↑
+       ↓
+Transport Police deployment ↑
+       ↓
+Rail operating costs ↑
+       ↓
+Freight prices ↑
+
+So your open-world railway becomes a genuine simulated ecosystem containing passengers, freight, timetables, delays, economics, crime, policing and AI agents, all reacting to the same world state.
+
+
+
+
+
+
+
+
+
+
+
+
+C: Open-World Freight & Commodity Simulation
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdbool.h>
+#include <time.h>
+
+#define MAX_COMMODITIES 32
+#define MAX_REGIONS 32
+#define MAX_CONSIGNMENTS 512
+#define MAX_TRAIN_CARS 32
+
+/* =========================================================
+   COMMODITIES
+   ========================================================= */
+
+typedef enum {
+    COMMODITY_LITHIUM,
+    COMMODITY_HYDROGEN,
+    COMMODITY_RARE_EARTHS,
+    COMMODITY_WEAPONS,
+    COMMODITY_STEEL,
+    COMMODITY_CEMENT,
+    COMMODITY_FOOD,
+    COMMODITY_ELECTRONICS,
+    COMMODITY_FUEL,
+    COMMODITY_MACHINE_PARTS
+} CommodityType;
+
+
+typedef struct {
+    CommodityType type;
+
+    char name[64];
+
+    /*
+     * Base economic value.
+     * Game abstraction rather than real-world pricing.
+     */
+    double base_price;
+
+    /*
+     * Total quantity currently available
+     * within the region.
+     */
+    double stock;
+
+    /*
+     * Desired inventory level.
+     */
+    double target_stock;
+
+    /*
+     * Daily consumption.
+     */
+    double daily_demand;
+
+    /*
+     * Local production.
+     */
+    double daily_production;
+
+    /*
+     * External imports arriving by rail/ship.
+     */
+    double daily_imports;
+
+    /*
+     * Economic scarcity: 0 = abundant,
+     * 1 = extreme scarcity.
+     */
+    double scarcity;
+
+    double price;
+} Commodity;
+
+
+/* =========================================================
+   REGION
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Commodity commodities[MAX_COMMODITIES];
+
+    double economic_activity;
+
+    double import_dependency;
+
+} FreightRegion;
+
+
+/* =========================================================
+   CONSIGNMENT
+   ========================================================= */
+
+typedef enum {
+    FREIGHT_PLANNED,
+    FREIGHT_LOADING,
+    FREIGHT_IN_TRANSIT,
+    FREIGHT_DELIVERED,
+    FREIGHT_LOST,
+    FREIGHT_CANCELLED
+} FreightStatus;
+
+
+typedef struct {
+
+    int id;
+
+    CommodityType commodity;
+
+    double quantity;
+
+    double cargo_value;
+
+    int origin_region;
+    int destination_region;
+
+    int origin_terminal;
+    int destination_terminal;
+
+    double distance_km;
+
+    double transport_cost;
+
+    double expected_revenue;
+
+    double profit;
+
+    FreightStatus status;
+
+} FreightConsignment;
+
+
+/* =========================================================
+   RAIL FREIGHT TRAIN
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double capacity_tonnes;
+
+    double loaded_tonnes;
+
+    double operating_cost_per_km;
+
+    double position;
+
+    double route_length;
+
+    bool active;
+
+    FreightConsignment *cargo[MAX_TRAIN_CARS];
+
+    int cargo_count;
+
+} FreightTrain;
+
+
+/* =========================================================
+   COMMODITY INITIALISATION
+   ========================================================= */
+
+void initialise_commodity(
+    Commodity *c,
+    CommodityType type,
+    const char *name,
+    double base_price,
+    double stock,
+    double target_stock,
+    double demand,
+    double production
+) {
+    c->type = type;
+
+    snprintf(
+        c->name,
+        sizeof(c->name),
+        "%s",
+        name
+    );
+
+    c->base_price = base_price;
+    c->stock = stock;
+    c->target_stock = target_stock;
+    c->daily_demand = demand;
+    c->daily_production = production;
+
+    c->daily_imports = 0.0;
+
+    c->scarcity = 0.0;
+    c->price = base_price;
+}
+
+
+/* =========================================================
+   SCARCITY ENGINE
+   ========================================================= */
+
+double calculate_scarcity(
+    double stock,
+    double target_stock
+) {
+    if (target_stock <= 0.0)
+        return 0.0;
+
+    /*
+     * Stock above target = abundance.
+     */
+
+    if (stock >= target_stock)
+        return 0.0;
+
+    double deficit =
+        1.0 -
+        (stock / target_stock);
+
+    if (deficit < 0.0)
+        deficit = 0.0;
+
+    if (deficit > 1.0)
+        deficit = 1.0;
+
+    return deficit;
+}
+
+
+/* =========================================================
+   PRICE ENGINE
+   ========================================================= */
+
+double calculate_price(
+    double base_price,
+    double scarcity,
+    double economic_activity
+) {
+    /*
+     * Non-linear price response.
+     */
+
+    double scarcity_multiplier =
+        1.0 +
+        pow(scarcity, 1.8) * 8.0;
+
+    double demand_multiplier =
+        0.75 +
+        economic_activity * 0.5;
+
+    double price =
+        base_price *
+        scarcity_multiplier *
+        demand_multiplier;
+
+    return price;
+}
+
+
+/* =========================================================
+   UPDATE COMMODITY MARKET
+   ========================================================= */
+
+void update_commodity_market(
+    FreightRegion *region,
+    Commodity *commodity,
+    double days
+) {
+    /*
+     * Local production.
+     */
+
+    commodity->stock +=
+        commodity->daily_production * days;
+
+    /*
+     * Imports.
+     */
+
+    commodity->stock +=
+        commodity->daily_imports * days;
+
+    /*
+     * Consumption.
+     */
+
+    commodity->stock -=
+        commodity->daily_demand *
+        region->economic_activity *
+        days;
+
+    if (commodity->stock < 0.0)
+        commodity->stock = 0.0;
+
+    /*
+     * Recalculate scarcity.
+     */
+
+    commodity->scarcity =
+        calculate_scarcity(
+            commodity->stock,
+            commodity->target_stock
+        );
+
+    /*
+     * Recalculate price.
+     */
+
+    commodity->price =
+        calculate_price(
+            commodity->base_price,
+            commodity->scarcity,
+            region->economic_activity
+        );
+}
+
+
+/* =========================================================
+   IMPORT DEMAND
+   ========================================================= */
+
+double calculate_import_requirement(
+    const Commodity *commodity
+) {
+    if (commodity->stock >=
+        commodity->target_stock)
+        return 0.0;
+
+    return
+        commodity->target_stock -
+        commodity->stock;
+}
+
+
+/* =========================================================
+   TRANSPORT COST
+   ========================================================= */
+
+double calculate_transport_cost(
+    double distance_km,
+    double tonnes,
+    double cost_per_tonne_km
+) {
+    return
+        distance_km *
+        tonnes *
+        cost_per_tonne_km;
+}
+
+
+/* =========================================================
+   CREATE CONSIGNMENT
+   ========================================================= */
+
+FreightConsignment create_consignment(
+    int id,
+    CommodityType commodity,
+    double quantity,
+    double price,
+    int origin,
+    int destination,
+    double distance
+) {
+    FreightConsignment c = {0};
+
+    c.id = id;
+
+    c.commodity = commodity;
+
+    c.quantity = quantity;
+
+    c.cargo_value =
+        quantity * price;
+
+    c.origin_region = origin;
+    c.destination_region = destination;
+
+    c.distance_km = distance;
+
+    /*
+     * Abstract railway logistics cost.
+     */
+
+    c.transport_cost =
+        calculate_transport_cost(
+            distance,
+            quantity,
+            0.08
+        );
+
+    c.expected_revenue =
+        c.cargo_value;
+
+    c.profit =
+        c.expected_revenue -
+        c.transport_cost;
+
+    c.status =
+        FREIGHT_PLANNED;
+
+    return c;
+}
+
+
+/* =========================================================
+   LOAD TRAIN
+   ========================================================= */
+
+bool load_consignment(
+    FreightTrain *train,
+    FreightConsignment *cargo
+) {
+    if (cargo->status !=
+        FREIGHT_PLANNED)
+        return false;
+
+    if (train->loaded_tonnes +
+        cargo->quantity >
+        train->capacity_tonnes)
+        return false;
+
+    if (train->cargo_count >=
+        MAX_TRAIN_CARS)
+        return false;
+
+    train->cargo[
+        train->cargo_count++
+    ] = cargo;
+
+    train->loaded_tonnes +=
+        cargo->quantity;
+
+    cargo->status =
+        FREIGHT_LOADING;
+
+    return true;
+}
+
+
+/* =========================================================
+   DEPART TRAIN
+   ========================================================= */
+
+void depart_freight_train(
+    FreightTrain *train
+) {
+    if (!train->active)
+        return;
+
+    for (int i = 0;
+         i < train->cargo_count;
+         i++) {
+
+        FreightConsignment *cargo =
+            train->cargo[i];
+
+        if (cargo == NULL)
+            continue;
+
+        cargo->status =
+            FREIGHT_IN_TRANSIT;
+    }
+
+    printf(
+        "TRAIN %s departed with %.1f tonnes\n",
+        train->name,
+        train->loaded_tonnes
+    );
+}
+
+
+/* =========================================================
+   MOVE TRAIN
+   ========================================================= */
+
+void update_freight_train(
+    FreightTrain *train,
+    double speed,
+    double hours
+) {
+    if (!train->active)
+        return;
+
+    train->position +=
+        speed * hours;
+
+    if (train->position >=
+        train->route_length) {
+
+        train->position =
+            train->route_length;
+
+        for (int i = 0;
+             i < train->cargo_count;
+             i++) {
+
+            FreightConsignment *cargo =
+                train->cargo[i];
+
+            if (cargo != NULL)
+                cargo->status =
+                    FREIGHT_DELIVERED;
+        }
+
+        train->active = false;
+
+        printf(
+            "TRAIN %s ARRIVED\n",
+            train->name
+        );
+    }
+}
+
+
+/* =========================================================
+   IMPORT INTO REGION
+   ========================================================= */
+
+void deliver_import(
+    FreightRegion *region,
+    FreightConsignment *cargo
+) {
+    if (cargo->status !=
+        FREIGHT_DELIVERED)
+        return;
+
+    Commodity *commodity =
+        &region->commodities[
+            cargo->commodity
+        ];
+
+    commodity->stock +=
+        cargo->quantity;
+
+    commodity->daily_imports +=
+        cargo->quantity;
+
+    printf(
+        "%s: %.1f tonnes of %s delivered\n",
+        region->name,
+        cargo->quantity,
+        commodity->name
+    );
+}
+
+
+/* =========================================================
+   MARKET REPORT
+   ========================================================= */
+
+void print_market(
+    FreightRegion *region,
+    CommodityType type
+) {
+    Commodity *c =
+        &region->commodities[type];
+
+    printf(
+        "\n=== %s MARKET ===\n",
+        c->name
+    );
+
+    printf(
+        "Stock:       %.1f tonnes\n",
+        c->stock
+    );
+
+    printf(
+        "Demand:      %.1f tonnes/day\n",
+        c->daily_demand
+    );
+
+    printf(
+        "Scarcity:    %.2f\n",
+        c->scarcity
+    );
+
+    printf(
+        "Price:       £%.2f / tonne\n",
+        c->price
+    );
+}
+Example open-world economy
+
+You can initialise a region such as your fictional Miami area:
+
+int main(void)
+{
+    FreightRegion miami = {0};
+
+    miami.id = 0;
+
+    snprintf(
+        miami.name,
+        sizeof(miami.name),
+        "Miami Metropolitan Area"
+    );
+
+    miami.economic_activity = 1.35;
+    miami.import_dependency = 0.72;
+
+
+    initialise_commodity(
+        &miami.commodities[COMMODITY_LITHIUM],
+        COMMODITY_LITHIUM,
+        "Lithium",
+        12000.0,
+        400.0,
+        2500.0,
+        180.0,
+        20.0
+    );
+
+
+    initialise_commodity(
+        &miami.commodities[COMMODITY_HYDROGEN],
+        COMMODITY_HYDROGEN,
+        "Hydrogen",
+        2500.0,
+        900.0,
+        4000.0,
+        500.0,
+        80.0
+    );
+
+
+    initialise_commodity(
+        &miami.commodities[COMMODITY_RARE_EARTHS],
+        COMMODITY_RARE_EARTHS,
+        "Rare Earth Materials",
+        18000.0,
+        100.0,
+        800.0,
+        60.0,
+        5.0
+    );
+
+
+    initialise_commodity(
+        &miami.commodities[COMMODITY_WEAPONS],
+        COMMODITY_WEAPONS,
+        "Restricted Equipment",
+        50000.0,
+        20.0,
+        100.0,
+        8.0,
+        0.0
+    );
+
+
+    /*
+     * Run one day of the economy.
+     */
+
+    for (int i = 0;
+         i < MAX_COMMODITIES;
+         i++) {
+
+        update_commodity_market(
+            &miami,
+            &miami.commodities[i],
+            1.0
+        );
+    }
+
+
+    print_market(
+        &miami,
+        COMMODITY_LITHIUM
+    );
+
+    print_market(
+        &miami,
+        COMMODITY_HYDROGEN
+    );
+
+    print_market(
+        &miami,
+        COMMODITY_RARE_EARTHS
+    );
+
+    print_market(
+        &miami,
+        COMMODITY_WEAPONS
+    );
+
+    return 0;
+}
+The really interesting part: imports automatically emerge
+
+Instead of scripting:
+
+"At 10:00 a lithium train arrives."
+
+the economic engine asks:
+
+LOCAL STOCK
+     ↓
+TARGET STOCK
+     ↓
+DEFICIT
+     ↓
+IMPORT REQUIREMENT
+     ↓
+PORT / SUPPLIER
+     ↓
+FREIGHT CONTRACT
+     ↓
+RAILWAY TRAIN
+     ↓
+TERMINAL
+     ↓
+WAREHOUSE
+     ↓
+LOCAL MARKET
+
+For example:
+
+MIAMI — LITHIUM
+────────────────────────────
+
+Inventory             400 t
+Target              2,500 t
+Daily demand          180 t
+Local production       20 t
+
+SHORTFALL           2,100 t
+
+                    ↓
+
+IMPORT CONTRACT
+2,100 tonnes
+Origin: Overseas Port
+Destination: Miami Freight Terminal
+
+                    ↓
+
+RAIL FREIGHT
+
+Train #4812
+24 wagons
+1,920 tonnes
+ETA: 06:42
+
+Then the arrival changes the market:
+
+BEFORE
+
+Lithium
+Stock:       400 t
+Scarcity:    0.84
+Price:       £X/t
+
+
+TRAIN ARRIVES
+      ↓
++1,920 tonnes
+
+
+AFTER
+
+Stock:       2,320 t
+Scarcity:    0.07
+Price:       £Y/t
+
+That gives you actual commodity cycles rather than static prices.
+
+Railway + economy + open world
+
+I'd connect this to the timetable system you asked for previously:
+
+                 WORLD ECONOMY
+                       │
+              ┌────────┴────────┐
+              ↓                 ↓
+          SUPPLY              DEMAND
+              │                 │
+              └────────┬────────┘
+                       ↓
+                    PRICE
+                       ↓
+               IMPORT REQUIREMENT
+                       ↓
+                FREIGHT CONTRACT
+                       ↓
+                 TRAIN PLANNER
+                       ↓
+                  TIMETABLE
+                       ↓
+                 DISPATCHER
+                       ↓
+                RAILWAY NETWORK
+                       ↓
+                 DESTINATION
+                       ↓
+                  INVENTORY
+                       ↓
+                     PRICE
+
+This also means railway congestion has economic consequences. If three lithium trains are delayed, the city doesn't simply display three delayed trains—the lithium inventory falls, scarcity rises, the commodity price increases, and NPC businesses respond.
+
+You could therefore have a full open-world commodity dashboard:
+
+┌─────────────────────────────────────────────┐
+│              MIAMI ECONOMIC GRID            │
+├─────────────────────────────────────────────┤
+│                                             │
+│ LITHIUM       █████████░░   £14,280/t  ↑    │
+│ HYDROGEN      ██████░░░░░   £3,420/t   ↑    │
+│ RARE EARTHS   ██████████░   £27,810/t  ↑↑   │
+│ STEEL         ███░░░░░░░░   £920/t     ↓    │
+│ FOOD          ██░░░░░░░░░   £410/t     —    │
+│                                             │
+├─────────────────────────────────────────────┤
+│ RAIL FREIGHT                                │
+│                                             │
+│ 18 trains in transit                        │
+│ 7 loading                                   │
+│ 3 delayed                                   │
+│ 2 awaiting track access                     │
+│                                             │
+├─────────────────────────────────────────────┤
+│ PORT                                         │
+│                                             │
+│ 12 ships unloading                           │
+│ 4 import contracts pending                  │
+│                                             │
+└─────────────────────────────────────────────┘
+
+That architecture gives you a foundation where the player can become a railway operator, freight company, industrialist, trader, miner, manufacturer or simply a passenger, while all of those activities interact with the same simulated supply-and-demand economy.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
