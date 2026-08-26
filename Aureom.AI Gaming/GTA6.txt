@@ -7461,6 +7461,2166 @@ The key design decision I'd make for your engine is simulation level of detail (
 
 
 
+GPU Internal Market
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_GPU_TYPES 16
+#define MAX_VAULTS 32
+#define MAX_TRANSACTIONS 1024
+
+/* =========================================================
+   GPU TYPES
+   ========================================================= */
+
+typedef enum {
+    GPU_H100,
+    GPU_H200,
+    GPU_B200,
+    GPU_B300,
+    GPU_CUSTOM,
+    GPU_LEGACY
+} GPUType;
+
+
+typedef struct {
+
+    GPUType type;
+
+    char name[32];
+
+    /* Capital cost */
+    double purchase_price;
+
+    /* Electrical characteristics */
+    double power_kw;
+
+    /* Compute output */
+    double compute_units;
+
+    /* Memory */
+    double memory_gb;
+
+    /* Useful lifetime */
+    double lifetime_hours;
+
+    /* Current availability */
+    double supply;
+
+    /* Market demand */
+    double demand;
+
+    /* Internal market price */
+    double market_price;
+
+} GPUAsset;
+
+
+/* =========================================================
+   GPU VAULT
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double capital;
+
+    double land_cost;
+    double building_cost;
+
+    double power_capacity_mw;
+    double cooling_capacity_mw;
+
+    double network_capacity_tbps;
+
+    int gpu_count;
+
+    GPUAsset *gpus[MAX_GPU_TYPES];
+
+    double total_compute;
+    double total_memory;
+
+    double current_power_mw;
+
+    double utilisation;
+
+    double revenue;
+    double operating_cost;
+
+    double asset_value;
+
+    bool operational;
+
+} GPUVault;
+
+
+/* =========================================================
+   GPU MARKET
+   ========================================================= */
+
+typedef struct {
+
+    GPUAsset gpu[MAX_GPU_TYPES];
+
+    double total_compute_demand;
+
+    double total_compute_supply;
+
+    double electricity_price;
+
+    double capital_interest_rate;
+
+    double scarcity;
+
+} GPUMarket;
+Dynamic GPU pricing
+
+The GPU price should move according to scarcity + compute demand + power availability + capital conditions.
+
+double calculate_gpu_price(
+    GPUAsset *gpu,
+    GPUMarket *market
+) {
+    double supply =
+        gpu->supply;
+
+    double demand =
+        gpu->demand;
+
+    if (supply < 1.0)
+        supply = 1.0;
+
+    double scarcity =
+        demand / supply;
+
+    /*
+     * Price rises non-linearly
+     * when demand exceeds supply.
+     */
+
+    double multiplier =
+        0.65 +
+        pow(scarcity, 1.35);
+
+    /*
+     * Clamp extreme values.
+     */
+
+    if (multiplier < 0.40)
+        multiplier = 0.40;
+
+    if (multiplier > 5.0)
+        multiplier = 5.0;
+
+    gpu->market_price =
+        gpu->purchase_price *
+        multiplier;
+
+    return gpu->market_price;
+}
+
+This gives you a proper internal market:
+
+GPU SHORTAGE
+     ↓
+GPU PRICE ↑
+     ↓
+VAULT CAPEX ↑
+     ↓
+COST OF COMPUTE ↑
+     ↓
+COMPUTE RENTAL PRICE ↑
+     ↓
+NEW GPU SUPPLY
+     ↓
+GPU PRICE ↓
+GPU purchasing
+bool buy_gpu(
+    GPUMarket *market,
+    GPUVault *vault,
+    GPUType type,
+    int quantity
+) {
+    GPUAsset *gpu =
+        &market->gpu[type];
+
+    double cost =
+        gpu->market_price *
+        quantity;
+
+    if (vault->capital < cost)
+        return false;
+
+    if (gpu->supply < quantity)
+        return false;
+
+    vault->capital -= cost;
+
+    gpu->supply -= quantity;
+
+    /*
+     * Add compute capacity.
+     */
+
+    vault->gpu_count += quantity;
+
+    vault->total_compute +=
+        gpu->compute_units *
+        quantity;
+
+    vault->total_memory +=
+        gpu->memory_gb *
+        quantity;
+
+    vault->current_power_mw +=
+        gpu->power_kw *
+        quantity /
+        1000.0;
+
+    return true;
+}
+Power becomes the fundamental bottleneck
+
+This is where your idea of the GPU crypt/vault gets interesting.
+
+double calculate_power_constraint(
+    GPUVault *vault
+) {
+    if (vault->power_capacity_mw <= 0.0)
+        return 0.0;
+
+    return
+        vault->current_power_mw /
+        vault->power_capacity_mw;
+}
+
+If the vault has:
+
+10,000 GPUs
+       ↓
+7 MW GPU load
+       ↓
++ cooling
++ networking
++ storage
++ building
+       ↓
+TOTAL FACILITY LOAD
+
+then the game determines whether buying another 1,000 GPUs is actually useful.
+
+Compute efficiency
+double compute_per_mw(
+    GPUVault *vault
+) {
+    if (vault->current_power_mw <= 0.0)
+        return 0.0;
+
+    return
+        vault->total_compute /
+        vault->current_power_mw;
+}
+
+This creates an important technology race.
+
+OLD GPU
+
+100 compute units
+700 W
+
+        versus
+
+NEW GPU
+
+300 compute units
+1000 W
+
+The newer GPU wins because:
+
+300 / 1.0 MW-equivalent
+        >
+100 / 0.7 MW-equivalent
+
+even if its acquisition price is much higher.
+
+Build the underground GPU vault
+GPUVault create_gpu_vault(
+    const char *name,
+    double capital
+) {
+    GPUVault vault = {0};
+
+    snprintf(
+        vault.name,
+        sizeof(vault.name),
+        "%s",
+        name
+    );
+
+    vault.capital =
+        capital;
+
+    vault.land_cost =
+        capital * 0.08;
+
+    vault.building_cost =
+        capital * 0.22;
+
+    vault.power_capacity_mw =
+        25.0;
+
+    vault.cooling_capacity_mw =
+        30.0;
+
+    vault.network_capacity_tbps =
+        20.0;
+
+    vault.operational = true;
+
+    return vault;
+}
+
+Then your player could start with:
+
+THE VAULT
+────────────────────────────
+
+Capital       $500,000,000
+
+Land          $40M
+Construction  $110M
+Power         25 MW
+Cooling       30 MW
+Network       20 Tbps
+
+GPU inventory
+H100          0
+H200          0
+B200          0
+B300          0
+Compute revenue
+
+The vault sells GPU-hours, rather than simply selling GPUs.
+
+double calculate_compute_revenue(
+    GPUVault *vault,
+    double gpu_hour_price,
+    double hours
+) {
+    double usable_compute =
+        vault->total_compute *
+        vault->utilisation;
+
+    return
+        usable_compute *
+        gpu_hour_price *
+        hours;
+}
+
+And operating cost:
+
+double calculate_operating_cost(
+    GPUVault *vault,
+    GPUMarket *market,
+    double hours
+) {
+    double electricity =
+        vault->current_power_mw *
+        1000.0 *
+        market->electricity_price *
+        hours;
+
+    double cooling =
+        electricity * 0.25;
+
+    double staffing =
+        50000.0 * hours / 8760.0;
+
+    double maintenance =
+        vault->asset_value *
+        0.04 *
+        hours / 8760.0;
+
+    return
+        electricity +
+        cooling +
+        staffing +
+        maintenance;
+}
+Asset valuation
+
+This is important because the player should be able to borrow against the GPU vault, sell it, or expand it.
+
+double calculate_vault_value(
+    GPUVault *vault,
+    GPUMarket *market
+) {
+    double gpu_value = 0.0;
+
+    for (int i = 0;
+         i < MAX_GPU_TYPES;
+         i++) {
+
+        if (vault->gpus[i] == NULL)
+            continue;
+
+        gpu_value +=
+            vault->gpus[i]->market_price;
+    }
+
+    double infrastructure =
+        vault->building_cost +
+        vault->land_cost;
+
+    double power_value =
+        vault->power_capacity_mw *
+        1000000.0;
+
+    double network_value =
+        vault->network_capacity_tbps *
+        1000000.0;
+
+    return
+        gpu_value +
+        infrastructure +
+        power_value +
+        network_value;
+}
+GPU vault expansion
+
+The really interesting mechanic is that capital alone doesn't create compute.
+
+bool expand_vault(
+    GPUVault *vault,
+    double new_power_mw,
+    double construction_cost
+) {
+    if (vault->capital <
+        construction_cost)
+        return false;
+
+    vault->capital -=
+        construction_cost;
+
+    vault->power_capacity_mw +=
+        new_power_mw;
+
+    vault->cooling_capacity_mw +=
+        new_power_mw * 1.15;
+
+    vault->building_cost +=
+        construction_cost;
+
+    return true;
+}
+
+So you get:
+
+                CAPITAL
+                   │
+                   ↓
+              BUILD VAULT
+                   │
+        ┌──────────┼──────────┐
+        ↓          ↓          ↓
+      POWER      COOLING    NETWORK
+        │          │          │
+        └──────────┼──────────┘
+                   ↓
+                  GPUs
+                   ↓
+                COMPUTE
+                   ↓
+             GPU-HOUR SALES
+                   ↓
+                REVENUE
+                   ↓
+              MORE CAPITAL
+                   ↓
+             EXPAND VAULT
+And I'd add a GPU futures market
+
+This would make the internal economy much more interesting:
+
+typedef struct {
+
+    GPUType gpu_type;
+
+    double contracted_units;
+
+    double delivery_time;
+
+    double agreed_price;
+
+    double collateral;
+
+    bool settled;
+
+} GPUContract;
+
+Now corporations can effectively say:
+
+"I need 10,000 B200-equivalent accelerators six months from now."
+
+The price today changes because everybody expects future scarcity.
+
+That produces speculation, hoarding, credit, leverage, depreciation and technological obsolescence.
+
+The game could then have a live market like:
+
+╔══════════════════════════════════════════╗
+║             GPU INTERNAL MARKET           ║
+╠══════════════════════════════════════════╣
+║ GPU      PRICE       SUPPLY     DEMAND    ║
+║ H100     $25.6K       72%        61%      ║
+║ H200     $40.9K       44%        89%      ║
+║ B200     $86.0K       31%        96%      ║
+║ B300     $XX.XK       18%        99%      ║
+╠══════════════════════════════════════════╣
+║ ELECTRICITY         $XX / MWh             ║
+║ COMPUTE             $X.XX / GPU-hour      ║
+║ VAULT CAPEX         $XXX M                ║
+║ POWER AVAILABLE     21.4 MW               ║
+║ COMPUTE UTILISATION 87%                   ║
+╠══════════════════════════════════════════╣
+║ CAPITAL             $412M                 ║
+║ GPU ASSETS          $287M                 ║
+║ INFRASTRUCTURE      $191M                 ║
+║ TOTAL ASSET VALUE   $478M                 ║
+║ DAILY REVENUE       $2.8M                 ║
+║ DAILY COST          $1.9M                 ║
+║ EBITDA               $0.9M                 ║
+╚══════════════════════════════════════════╝
+
+That would make your GPU crypt effectively a playable financial/industrial asset: the player is constantly deciding whether the next £100m should go into more GPUs, more electricity, cooling, networking, another underground vault, or simply cash reserves. Current market conditions make that especially plausible as a game mechanic: reported 2026 AI-server prices are being pushed higher by constrained HBM/memory supply, while data-centre construction itself is consuming billions in capital.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+C: Alligator AI
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_ALLIGATORS 512
+#define MAX_WATER_ZONES 128
+
+typedef enum {
+    GATOR_IDLE,
+    GATOR_BASKING,
+    GATOR_SWIMMING,
+    GATOR_FORAGING,
+    GATOR_ALERT,
+    GATOR_WARNING,
+    GATOR_DEFENDING,
+    GATOR_RETREATING,
+    GATOR_NESTING,
+    GATOR_FLEEING
+} GatorState;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double length;
+    double weight;
+
+    double health;
+    double energy;
+    double hunger;
+
+    double fear;
+
+    /* Territory */
+    double territory_x;
+    double territory_y;
+    double territory_radius;
+
+    /* Perception */
+    double vision_range;
+    double hearing_range;
+
+    /* Behaviour */
+    double aggression;
+    double territoriality;
+
+    bool female;
+    bool has_nest;
+    bool has_young;
+
+    GatorState state;
+
+    bool alive;
+} Alligator;
+
+
+/* =========================================================
+   DISTANCE
+   ========================================================= */
+
+double distance(
+    double x1,
+    double y1,
+    double x2,
+    double y2
+) {
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+
+    return sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+
+
+/* =========================================================
+   TERRITORY
+   ========================================================= */
+
+bool inside_territory(
+    Alligator *gator,
+    double x,
+    double y
+) {
+    double d =
+        distance(
+            gator->territory_x,
+            gator->territory_y,
+            x,
+            y
+        );
+
+    return d <=
+           gator->territory_radius;
+}
+
+
+/* =========================================================
+   PLAYER / NPC PERCEPTION
+   ========================================================= */
+
+double threat_level(
+    Alligator *gator,
+    double player_x,
+    double player_y,
+    bool player_running,
+    bool player_near_nest
+) {
+    double d =
+        distance(
+            gator->x,
+            gator->y,
+            player_x,
+            player_y
+        );
+
+    if (d > gator->vision_range)
+        return 0.0;
+
+    /*
+     * Being close increases perceived threat.
+     */
+
+    double threat =
+        1.0 -
+        d / gator->vision_range;
+
+    /*
+     * Running / sudden movement.
+     */
+
+    if (player_running)
+        threat += 0.20;
+
+    /*
+     * Nest protection is a major modifier.
+     */
+
+    if (player_near_nest &&
+        gator->female &&
+        gator->has_nest) {
+
+        threat += 0.50;
+    }
+
+    return threat;
+}
+
+
+/* =========================================================
+   WARNING BEHAVIOUR
+   ========================================================= */
+
+void issue_warning(
+    Alligator *gator
+) {
+    printf(
+        "GATOR %d: HISS / WARNING\n",
+        gator->id
+    );
+
+    gator->state =
+        GATOR_WARNING;
+}
+
+
+/* =========================================================
+   DEFENSIVE RESPONSE
+   ========================================================= */
+
+void defensive_response(
+    Alligator *gator,
+    double threat
+) {
+    /*
+     * Most encounters should resolve
+     * through warning or retreat rather
+     * than immediate aggression.
+     */
+
+    if (threat < 0.35) {
+
+        gator->state =
+            GATOR_ALERT;
+
+        return;
+    }
+
+    if (threat < 0.65) {
+
+        issue_warning(gator);
+
+        return;
+    }
+
+    /*
+     * High threat.
+     */
+
+    if (gator->fear > 60.0) {
+
+        gator->state =
+            GATOR_RETREATING;
+
+        return;
+    }
+
+    /*
+     * Nesting females are strongly
+     * defensive.
+     */
+
+    if (gator->female &&
+        gator->has_nest) {
+
+        gator->state =
+            GATOR_DEFENDING;
+
+        return;
+    }
+
+    /*
+     * Otherwise retreat first.
+     */
+
+    gator->state =
+        GATOR_RETREATING;
+}
+
+
+/* =========================================================
+   ALLIGATOR AI
+   ========================================================= */
+
+void update_alligator(
+    Alligator *gator,
+    double player_x,
+    double player_y,
+    bool player_running,
+    bool player_near_nest,
+    double delta_time
+) {
+    if (!gator->alive)
+        return;
+
+    double threat =
+        threat_level(
+            gator,
+            player_x,
+            player_y,
+            player_running,
+            player_near_nest
+        );
+
+    switch (gator->state) {
+
+        case GATOR_IDLE:
+
+            if (gator->hunger > 70.0)
+                gator->state =
+                    GATOR_FORAGING;
+
+            else if (threat > 0.15)
+                gator->state =
+                    GATOR_ALERT;
+
+            break;
+
+
+        case GATOR_BASKING:
+
+            /*
+             * Slowly recover energy.
+             */
+
+            gator->energy +=
+                2.0 * delta_time;
+
+            if (gator->energy > 100.0)
+                gator->energy = 100.0;
+
+            if (threat > 0.15)
+                gator->state =
+                    GATOR_ALERT;
+
+            break;
+
+
+        case GATOR_SWIMMING:
+
+            gator->energy -=
+                1.0 * delta_time;
+
+            if (threat > 0.25)
+                gator->state =
+                    GATOR_ALERT;
+
+            break;
+
+
+        case GATOR_FORAGING:
+
+            gator->hunger -=
+                5.0 * delta_time;
+
+            if (gator->hunger < 20.0)
+                gator->hunger = 20.0;
+
+            if (threat > 0.30)
+                gator->state =
+                    GATOR_ALERT;
+
+            break;
+
+
+        case GATOR_ALERT:
+
+            defensive_response(
+                gator,
+                threat
+            );
+
+            break;
+
+
+        case GATOR_WARNING:
+
+            /*
+             * If threat decreases,
+             * return to normal behaviour.
+             */
+
+            if (threat < 0.25) {
+
+                gator->state =
+                    GATOR_IDLE;
+            }
+
+            /*
+             * Escalate only if the player
+             * continues approaching.
+             */
+
+            else if (threat > 0.75) {
+
+                gator->state =
+                    GATOR_DEFENDING;
+            }
+
+            break;
+
+
+        case GATOR_DEFENDING:
+
+            /*
+             * Defensive state.
+             * Return to normal once
+             * perceived threat leaves
+             * the territory.
+             */
+
+            if (threat < 0.40) {
+
+                gator->state =
+                    GATOR_RETREATING;
+            }
+
+            break;
+
+
+        case GATOR_RETREATING:
+
+            /*
+             * Move back toward water /
+             * safe territory.
+             */
+
+            gator->fear -=
+                5.0 * delta_time;
+
+            if (gator->fear < 20.0)
+                gator->fear = 20.0;
+
+            if (threat < 0.15) {
+
+                gator->state =
+                    GATOR_SWIMMING;
+            }
+
+            break;
+
+
+        case GATOR_NESTING:
+
+            if (gator->female &&
+                gator->has_nest &&
+                threat > 0.25) {
+
+                gator->state =
+                    GATOR_DEFENDING;
+            }
+
+            break;
+
+
+        case GATOR_FLEEING:
+
+            if (threat < 0.10)
+                gator->state =
+                    GATOR_SWIMMING;
+
+            break;
+    }
+}
+Make the Florida world affect them
+
+The really good version is to make the gators respond to the world simulation, rather than placing random aggressive animals around the map.
+
+typedef struct {
+
+    double water_level;
+    double temperature;
+
+    double pollution;
+    double human_activity;
+
+    double fish_population;
+
+    bool flooding;
+    bool storm;
+
+} WetlandEnvironment;
+
+Then:
+
+void update_environment(
+    Alligator *gator,
+    WetlandEnvironment *environment,
+    double delta_time
+) {
+    /*
+     * Temperature affects activity.
+     */
+
+    if (environment->temperature > 30.0)
+        gator->energy +=
+            1.0 * delta_time;
+
+    /*
+     * Food availability affects hunger.
+     */
+
+    if (environment->fish_population > 70.0)
+        gator->hunger -=
+            2.0 * delta_time;
+
+    /*
+     * Heavy human activity increases
+     * disturbance.
+     */
+
+    if (environment->human_activity > 80.0)
+        gator->fear +=
+            1.0 * delta_time;
+
+    /*
+     * Flooding can cause movement between
+     * water zones.
+     */
+
+    if (environment->flooding)
+        gator->state =
+            GATOR_SWIMMING;
+}
+Nesting behaviour
+
+This gives you much more interesting wildlife:
+
+                    MIAMI
+                      │
+        ┌─────────────┼─────────────┐
+        ↓             ↓             ↓
+     CANAL          SWAMP          LAKE
+        │             │             │
+     GATOR          GATOR          GATOR
+        │             │
+        └──────┬──────┘
+               ↓
+         TERRITORY MAP
+               │
+      ┌────────┴────────┐
+      ↓                 ↓
+   NORMAL             NEST
+   ANIMAL            DEFENCE
+      │                 │
+      ↓                 ↓
+  AVOIDS NPC        WARNING
+                       ↓
+                  ESCALATION
+
+Females protecting nests are particularly suitable for the defensive AI you're describing; Florida wildlife sources specifically describe females remaining near nests and warning/defending against intruders.
+
+Add a wildlife population system
+
+Then the game can simulate hundreds of gators:
+
+typedef struct {
+
+    Alligator animals[MAX_ALLIGATORS];
+
+    int population;
+
+    double birth_rate;
+    double mortality_rate;
+
+} AlligatorPopulation;
+
+
+void update_population(
+    AlligatorPopulation *population,
+    double days
+) {
+    int births =
+        (int)(
+            population->population *
+            population->birth_rate *
+            days
+        );
+
+    int deaths =
+        (int)(
+            population->population *
+            population->mortality_rate *
+            days
+        );
+
+    population->population +=
+        births - deaths;
+
+    if (population->population < 0)
+        population->population = 0;
+}
+
+Now your open world gets actual ecological dynamics:
+
+rain → wetlands expand → fish populations change → gator movement changes → nesting locations change → NPC encounters change → wildlife population changes.
+
+You can even have hurricanes/flooding temporarily push gators into unusual places, while urban development reduces habitat and increases encounters. Florida's wildlife authorities note that alligators occur throughout the state's freshwater lakes, ponds, swamps and slow-moving rivers, so tying their AI to those water systems would make the Miami map feel much more convincing.
+
+
+
+
+
+For the game, tigers can use the same wildlife-agent architecture, but with territoriality, stalking, cover, prey selection, fatigue, avoidance and defensive behaviour. Since tigers aren't native to Miami, you could make them an exotic/private-zoo or escaped-animal scenario in the open world.
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_TIGERS 128
+#define MAX_PREY   512
+
+typedef enum {
+    TIGER_RESTING,
+    TIGER_PATROLLING,
+    TIGER_HUNTING,
+    TIGER_STALKING,
+    TIGER_ALERT,
+    TIGER_WARNING,
+    TIGER_DEFENDING,
+    TIGER_FLEEING,
+    TIGER_EATING,
+    TIGER_INJURED
+} TigerState;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double health;
+    double energy;
+    double hunger;
+    double thirst;
+
+    double age;
+    double size;
+
+    double vision_range;
+    double hearing_range;
+
+    double territory_x;
+    double territory_y;
+    double territory_radius;
+
+    double aggression;
+    double fear;
+    double territoriality;
+
+    bool female;
+    bool has_cubs;
+
+    TigerState state;
+
+    int target_prey;
+
+    bool alive;
+} Tiger;
+
+typedef struct {
+    int id;
+
+    double x;
+    double y;
+
+    double size;
+    double health;
+
+    double speed;
+
+    bool alive;
+} Prey;
+
+
+/* =========================================================
+   DISTANCE
+   ========================================================= */
+
+double distance(
+    double x1,
+    double y1,
+    double x2,
+    double y2
+) {
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+
+    return sqrt(dx * dx + dy * dy);
+}
+
+
+/* =========================================================
+   TERRITORY
+   ========================================================= */
+
+bool inside_tiger_territory(
+    Tiger *tiger,
+    double x,
+    double y
+) {
+    return distance(
+        tiger->territory_x,
+        tiger->territory_y,
+        x,
+        y
+    ) <= tiger->territory_radius;
+}
+
+
+/* =========================================================
+   PERCEPTION
+   ========================================================= */
+
+double calculate_threat(
+    Tiger *tiger,
+    double x,
+    double y,
+    bool moving_fast,
+    bool near_cubs
+) {
+    double d =
+        distance(
+            tiger->x,
+            tiger->y,
+            x,
+            y
+        );
+
+    if (d > tiger->vision_range)
+        return 0.0;
+
+    double threat =
+        1.0 -
+        d / tiger->vision_range;
+
+    if (moving_fast)
+        threat += 0.20;
+
+    if (near_cubs &&
+        tiger->female &&
+        tiger->has_cubs)
+        threat += 0.50;
+
+    return threat;
+}
+
+
+/* =========================================================
+   FIND PREY
+   ========================================================= */
+
+int find_nearest_prey(
+    Tiger *tiger,
+    Prey prey[],
+    int count
+) {
+    int best = -1;
+    double best_distance = 1e30;
+
+    for (int i = 0; i < count; i++) {
+
+        if (!prey[i].alive)
+            continue;
+
+        double d =
+            distance(
+                tiger->x,
+                tiger->y,
+                prey[i].x,
+                prey[i].y
+            );
+
+        if (d <= tiger->vision_range &&
+            d < best_distance) {
+
+            best_distance = d;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+
+/* =========================================================
+   TIGER AI
+   ========================================================= */
+
+void update_tiger(
+    Tiger *tiger,
+    Prey prey[],
+    int prey_count,
+    double player_x,
+    double player_y,
+    bool player_running,
+    bool player_near_cubs,
+    double delta_time
+) {
+    if (!tiger->alive)
+        return;
+
+    double player_threat =
+        calculate_threat(
+            tiger,
+            player_x,
+            player_y,
+            player_running,
+            player_near_cubs
+        );
+
+    /*
+     * Energy naturally declines.
+     */
+
+    tiger->energy -=
+        0.5 * delta_time;
+
+    if (tiger->energy < 0.0)
+        tiger->energy = 0.0;
+
+    /*
+     * Hunger increases over time.
+     */
+
+    tiger->hunger +=
+        1.0 * delta_time;
+
+    if (tiger->hunger > 100.0)
+        tiger->hunger = 100.0;
+
+
+    switch (tiger->state) {
+
+        case TIGER_RESTING:
+
+            if (player_threat > 0.25) {
+
+                tiger->state =
+                    TIGER_ALERT;
+
+            } else if (tiger->hunger > 65.0) {
+
+                tiger->state =
+                    TIGER_PATROLLING;
+            }
+
+            break;
+
+
+        case TIGER_PATROLLING:
+
+            /*
+             * Look for prey.
+             */
+
+            tiger->target_prey =
+                find_nearest_prey(
+                    tiger,
+                    prey,
+                    prey_count
+                );
+
+            if (tiger->target_prey >= 0) {
+
+                tiger->state =
+                    TIGER_STALKING;
+
+            } else if (player_threat > 0.30) {
+
+                tiger->state =
+                    TIGER_ALERT;
+            }
+
+            break;
+
+
+        case TIGER_STALKING:
+
+            /*
+             * Abstract hunting state.
+             */
+
+            if (tiger->target_prey < 0) {
+
+                tiger->state =
+                    TIGER_PATROLLING;
+
+                break;
+            }
+
+            if (!prey[
+                    tiger->target_prey
+                ].alive) {
+
+                tiger->target_prey = -1;
+
+                tiger->state =
+                    TIGER_PATROLLING;
+
+                break;
+            }
+
+            /*
+             * Avoid hunting while severely
+             * exhausted.
+             */
+
+            if (tiger->energy < 20.0) {
+
+                tiger->state =
+                    TIGER_RESTING;
+
+                break;
+            }
+
+            tiger->state =
+                TIGER_HUNTING;
+
+            break;
+
+
+        case TIGER_HUNTING:
+
+            if (tiger->target_prey < 0) {
+
+                tiger->state =
+                    TIGER_PATROLLING;
+
+                break;
+            }
+
+            /*
+             * Fictional game resolution.
+             */
+
+            if (tiger->energy > 30.0) {
+
+                prey[
+                    tiger->target_prey
+                ].health -=
+                    20.0 * delta_time;
+
+                tiger->energy -=
+                    5.0 * delta_time;
+            }
+
+            if (prey[
+                    tiger->target_prey
+                ].health <= 0.0) {
+
+                prey[
+                    tiger->target_prey
+                ].alive = false;
+
+                tiger->hunger -= 70.0;
+
+                if (tiger->hunger < 0.0)
+                    tiger->hunger = 0.0;
+
+                tiger->state =
+                    TIGER_EATING;
+            }
+
+            break;
+
+
+        case TIGER_ALERT:
+
+            /*
+             * Prefer avoidance where possible.
+             */
+
+            if (player_threat < 0.20) {
+
+                tiger->state =
+                    TIGER_PATROLLING;
+
+            } else if (player_threat > 0.70) {
+
+                if (tiger->female &&
+                    tiger->has_cubs) {
+
+                    tiger->state =
+                        TIGER_DEFENDING;
+
+                } else {
+
+                    tiger->state =
+                        TIGER_FLEEING;
+                }
+            }
+
+            break;
+
+
+        case TIGER_DEFENDING:
+
+            /*
+             * Defensive state around cubs.
+             */
+
+            if (player_threat < 0.35) {
+
+                tiger->state =
+                    TIGER_FLEEING;
+            }
+
+            break;
+
+
+        case TIGER_FLEEING:
+
+            tiger->fear -=
+                4.0 * delta_time;
+
+            if (player_threat < 0.10) {
+
+                tiger->state =
+                    TIGER_RESTING;
+            }
+
+            break;
+
+
+        case TIGER_EATING:
+
+            tiger->energy +=
+                4.0 * delta_time;
+
+            tiger->hunger -=
+                8.0 * delta_time;
+
+            if (tiger->hunger < 20.0)
+                tiger->hunger = 20.0;
+
+            if (tiger->energy > 70.0)
+                tiger->state =
+                    TIGER_RESTING;
+
+            break;
+
+
+        case TIGER_WARNING:
+
+            if (player_threat < 0.20)
+                tiger->state =
+                    TIGER_FLEEING;
+
+            break;
+
+
+        case TIGER_INJURED:
+
+            tiger->energy -=
+                0.2 * delta_time;
+
+            if (tiger->energy <= 0.0)
+                tiger->alive = false;
+
+            break;
+    }
+}
+Make the tiger feel like a real open-world animal
+
+I'd give every tiger a persistent territory:
+
+                 TIGER TERRITORY
+
+       ┌───────────────────────────┐
+       │                           │
+       │       RESTING ZONE        │
+       │             ●             │
+       │                           │
+       │   ● WATER                 │
+       │                           │
+       │              ● PREY       │
+       │                           │
+       │                    ●      │
+       │             CUBS           │
+       └───────────────────────────┘
+
+And then have the world continuously change:
+
+FOREST
+  ↓
+PREY POPULATION
+  ↓
+TIGER HUNGER
+  ↓
+PATROL RANGE
+  ↓
+TERRITORY OVERLAP
+  ↓
+ANIMAL ENCOUNTERS
+
+You can also have multiple AI personalities:
+
+typedef enum {
+    TIGER_PERSONALITY_SHY,
+    TIGER_PERSONALITY_TERRITORIAL,
+    TIGER_PERSONALITY_BOLD,
+    TIGER_PERSONALITY_OLD,
+    TIGER_PERSONALITY_YOUNG
+} TigerPersonality;
+
+
+
+
+
+
+
+Yes — make Khan a unique, hidden apex-tier tiger: not merely a stronger tiger, but a persistent legendary NPC with exceptional intelligence, territory control and an antagonist relationship with the protagonist.
+
+I'd keep the Shere Khan inspiration but make Khan an original game character.
+
+Khan — Apex Tiger
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+typedef enum {
+    TIGER_COMMON,
+    TIGER_APEX,
+    TIGER_KHAN
+} TigerClass;
+
+typedef enum {
+    KHAN_DORMANT,
+    KHAN_HUNTING,
+    KHAN_STALKING,
+    KHAN_OBSERVING,
+    KHAN_WARNING,
+    KHAN_PURSUING,
+    KHAN_DEFENDING_TERRITORY,
+    KHAN_RETREATING,
+    KHAN_FINAL_ENCOUNTER
+} KhanState;
+
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    TigerClass class_type;
+
+    double x;
+    double y;
+
+    double health;
+    double max_health;
+
+    double stamina;
+    double max_stamina;
+
+    double hunger;
+    double fear;
+
+    /*
+     * Apex attributes.
+     */
+
+    double strength;
+    double speed;
+    double intelligence;
+
+    double perception;
+    double stealth;
+
+    double territoriality;
+
+    /*
+     * Relationship with protagonist.
+     */
+
+    double protagonist_reputation;
+    double hostility;
+
+    /*
+     * Persistent world state.
+     */
+
+    double territory_radius;
+
+    int encounters;
+
+    bool discovered;
+    bool alive;
+
+    KhanState state;
+
+} Tiger;
+
+
+/* =========================================================
+   CREATE KHAN
+   ========================================================= */
+
+Tiger create_khan(void)
+{
+    Tiger khan = {0};
+
+    khan.id = 9999;
+
+    snprintf(
+        khan.name,
+        sizeof(khan.name),
+        "KHAN"
+    );
+
+    khan.class_type =
+        TIGER_KHAN;
+
+    /*
+     * Exceptional physical attributes.
+     */
+
+    khan.max_health = 500.0;
+    khan.health = 500.0;
+
+    khan.max_stamina = 300.0;
+    khan.stamina = 300.0;
+
+    khan.strength = 100.0;
+    khan.speed = 95.0;
+
+    /*
+     * The important difference:
+     * Khan is unusually intelligent.
+     */
+
+    khan.intelligence = 100.0;
+    khan.perception = 100.0;
+    khan.stealth = 98.0;
+
+    khan.territoriality = 100.0;
+
+    khan.hunger = 20.0;
+    khan.fear = 0.0;
+
+    khan.protagonist_reputation = 0.0;
+    khan.hostility = 0.0;
+
+    khan.territory_radius = 5000.0;
+
+    khan.encounters = 0;
+
+    khan.discovered = false;
+    khan.alive = true;
+
+    khan.state =
+        KHAN_DORMANT;
+
+    return khan;
+}
+Make Khan genuinely rare
+
+Don't simply spawn him randomly like ordinary wildlife.
+
+bool should_spawn_khan(
+    unsigned long world_seed,
+    int story_progress,
+    double wilderness_percentage
+) {
+    /*
+     * Khan is impossible to encounter
+     * during the early game.
+     */
+
+    if (story_progress < 60)
+        return false;
+
+    /*
+     * Requires sufficiently wild territory.
+     */
+
+    if (wilderness_percentage < 40.0)
+        return false;
+
+    /*
+     * Deterministic world seed.
+     * Khan therefore has a persistent
+     * location rather than appearing randomly.
+     */
+
+    unsigned long value =
+        world_seed * 1103515245UL
+        + 12345UL;
+
+    value =
+        (value >> 16) & 0x7FFF;
+
+    /*
+     * Approximately 1/5000 qualifying
+     * world-generation opportunities.
+     */
+
+    return (value % 5000) == 0;
+}
+
+I'd actually make the canonical Khan spawn deterministic in the final game, so players can eventually discover clues leading to him, rather than having the game's most important animal accidentally fail to exist.
+
+Khan's intelligence
+
+Ordinary tigers can have simple state machines. Khan gets a higher-level memory system.
+
+#define MAX_KHAN_MEMORIES 32
+
+typedef struct {
+
+    double x;
+    double y;
+
+    int encounter_number;
+
+    double threat_level;
+
+    bool protagonist_present;
+
+} KhanMemory;
+
+
+typedef struct {
+
+    KhanMemory memories[MAX_KHAN_MEMORIES];
+
+    int memory_count;
+
+    double player_threat;
+
+    double player_reputation;
+
+    bool knows_player;
+
+} KhanMind;
+
+Memory recording:
+
+void khan_remember(
+    KhanMind *mind,
+    double x,
+    double y,
+    double threat
+) {
+    if (mind->memory_count >=
+        MAX_KHAN_MEMORIES)
+        return;
+
+    KhanMemory *memory =
+        &mind->memories[
+            mind->memory_count
+        ];
+
+    memory->x = x;
+    memory->y = y;
+
+    memory->encounter_number =
+        mind->memory_count + 1;
+
+    memory->threat_level =
+        threat;
+
+    memory->protagonist_present =
+        true;
+
+    mind->memory_count++;
+
+    mind->knows_player = true;
+}
+
+Now Khan can remember where the protagonist has encountered him.
+
+Khan's antagonist relationship
+
+Instead of:
+
+PLAYER → RANDOM TIGER
+
+you get:
+
+PLAYER
+   │
+   │ first encounter
+   ↓
+KHAN
+   │
+   ↓
+REMEMBERS PLAYER
+   │
+   ↓
+PLAYER RETURNS
+   │
+   ↓
+KHAN RECOGNISES PLAYER
+   │
+   ↓
+ESCALATING CONFLICT
+void update_khan_relationship(
+    Tiger *khan,
+    KhanMind *mind,
+    bool player_seen,
+    double player_action
+) {
+    if (!player_seen)
+        return;
+
+    /*
+     * player_action:
+     *
+     * positive = non-threatening
+     * negative = hostile
+     */
+
+    khan->protagonist_reputation +=
+        player_action;
+
+    /*
+     * Repeated hostile encounters
+     * create persistent hostility.
+     */
+
+    if (player_action < 0.0) {
+
+        khan->hostility +=
+            fabs(player_action) * 0.5;
+    }
+
+    if (khan->hostility > 100.0)
+        khan->hostility = 100.0;
+}
+Apex behaviour
+
+Khan shouldn't constantly attack.
+
+The interesting part is that the player doesn't know what Khan will do.
+
+void update_khan(
+    Tiger *khan,
+    KhanMind *mind,
+    double player_x,
+    double player_y,
+    bool player_visible,
+    double delta_time
+) {
+    if (!khan->alive)
+        return;
+
+    double distance =
+        sqrt(
+            pow(player_x - khan->x, 2) +
+            pow(player_y - khan->y, 2)
+        );
+
+    switch (khan->state) {
+
+        case KHAN_DORMANT:
+
+            if (player_visible &&
+                distance < 1500.0) {
+
+                khan->state =
+                    KHAN_OBSERVING;
+            }
+
+            break;
+
+
+        case KHAN_OBSERVING:
+
+            /*
+             * Khan watches rather than
+             * immediately attacking.
+             */
+
+            if (distance < 800.0) {
+
+                khan->state =
+                    KHAN_STALKING;
+            }
+
+            break;
+
+
+        case KHAN_STALKING:
+
+            /*
+             * Exceptional stealth allows
+             * Khan to remain undetected.
+             */
+
+            if (distance < 300.0) {
+
+                khan->state =
+                    KHAN_WARNING;
+            }
+
+            break;
+
+
+        case KHAN_WARNING:
+
+            /*
+             * The protagonist is being
+             * deliberately given an
+             * opportunity to leave.
+             */
+
+            if (distance > 600.0) {
+
+                khan->state =
+                    KHAN_RETREATING;
+
+            } else if (
+                khan->hostility > 70.0
+            ) {
+
+                khan->state =
+                    KHAN_PURSUING;
+            }
+
+            break;
+
+
+        case KHAN_PURSUING:
+
+            /*
+             * Abstract boss pursuit.
+             */
+
+            khan->stamina -=
+                2.0 * delta_time;
+
+            if (khan->stamina < 30.0) {
+
+                khan->state =
+                    KHAN_RETREATING;
+            }
+
+            break;
+
+
+        case KHAN_DEFENDING_TERRITORY:
+
+            if (distance > 1000.0) {
+
+                khan->state =
+                    KHAN_OBSERVING;
+            }
+
+            break;
+
+
+        case KHAN_RETREATING:
+
+            khan->stamina +=
+                3.0 * delta_time;
+
+            if (khan->stamina >
+                200.0) {
+
+                khan->state =
+                    KHAN_DORMANT;
+            }
+
+            break;
+
+
+        case KHAN_FINAL_ENCOUNTER:
+
+            /*
+             * Reserved for the story's
+             * climactic encounter.
+             */
+
+            break;
+
+        default:
+            break;
+    }
+}
+Give Khan a legendary world presence
+
+The best implementation would make Khan almost a mythological character within the game.
+
+NPCs might generate rumours:
+
+"Woods are empty tonight."
+
+"Something killed three deer
+without leaving a carcass."
+
+"There's a tiger out there."
+
+"Not a tiger.
+
+Khan."
+
+Then environmental clues progressively reveal his existence:
+
+UNKNOWN ANIMAL
+       ↓
+UNUSUALLY LARGE TRACKS
+       ↓
+DEAD PREY
+       ↓
+NPC REPORTS
+       ↓
+DISTANT ROAR
+       ↓
+FIRST SIGHTING
+       ↓
+KHAN
+Apex hierarchy
+                    KHAN
+                 ★ LEGENDARY ★
+                      │
+                      ↓
+                 APEX TIGERS
+                      │
+                      ↓
+                 ADULT TIGERS
+                      │
+                      ↓
+                 YOUNG TIGERS
+                      │
+                      ↓
+                 OTHER WILDLIFE
+
+And importantly, Khan's "superhuman" quality doesn't have to mean magical powers. In gameplay terms it can mean extraordinary perception, persistence, intelligence, memory, stealth and physical attributes—making him feel almost superhuman while remaining recognisably an animal.
+
+That also makes him much more interesting as a GTA-style antagonist: the player can't simply clear an area of ordinary enemies and move on. Khan is a persistent character who owns part of the world, remembers encounters and can reappear much later in the story.
+
+
+
+
 
 
 
