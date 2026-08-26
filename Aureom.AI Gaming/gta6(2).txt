@@ -1,0 +1,10535 @@
+/*
+ * ============================================================
+ * OPEN-WORLD WILDLIFE & HUNTING SYSTEM
+ * ============================================================
+ *
+ * TERRAIN:
+ *   - Everglades
+ *   - Desert
+ *   - Wildlife Park
+ *   - Jungle
+ *   - Woodland
+ *   - Mountain
+ *   - Wetland
+ *
+ * The system provides:
+ *   - procedural animal spawning
+ *   - rarity
+ *   - animal AI
+ *   - terrain preferences
+ *   - time-of-day behaviour
+ *   - weather response
+ *   - tracks/signs
+ *   - encounters
+ *   - fictional game hunting actions
+ *   - wildlife population persistence
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_ANIMALS 256
+#define MAX_SPECIES 32
+#define MAX_TERRAIN_SPECIES 10
+
+/* ============================================================
+ * TERRAIN
+ * ============================================================ */
+
+typedef enum {
+    TERRAIN_EVERGLADES,
+    TERRAIN_DESERT,
+    TERRAIN_WILDLIFE_PARK,
+    TERRAIN_JUNGLE,
+    TERRAIN_WOODLAND,
+    TERRAIN_MOUNTAIN,
+    TERRAIN_WETLAND
+} TerrainType;
+
+
+/* ============================================================
+ * ANIMAL SPECIES
+ * ============================================================ */
+
+typedef enum {
+
+    ALLIGATOR,
+    FLAMINGO,
+    HERON,
+    DEER,
+    STAG,
+    BOAR,
+    BEAR,
+    COYOTE,
+    BISON,
+    ANTELOPE,
+    CAMEL,
+    TIGER,
+    JAGUAR,
+    PANTHER,
+    MONKEY,
+    PARROT,
+    ELEPHANT,
+    RHINO,
+    HIPPO,
+    WOLF,
+    EAGLE,
+    BUFFALO
+
+} Species;
+
+
+/* ============================================================
+ * ANIMAL BEHAVIOUR
+ * ============================================================ */
+
+typedef enum {
+
+    CALM,
+    GRAZING,
+    ROAMING,
+    ALERT,
+    FLEEING,
+    AGGRESSIVE,
+    SLEEPING,
+    MIGRATING
+
+} AnimalState;
+
+
+/* ============================================================
+ * VECTOR
+ * ============================================================ */
+
+typedef struct {
+
+    double x;
+    double y;
+    double z;
+
+} Vec3;
+
+
+/* ============================================================
+ * ANIMAL
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    Species species;
+
+    Vec3 position;
+    Vec3 velocity;
+
+    AnimalState state;
+
+    double health;
+    double speed;
+    double awareness;
+
+    double rarity;
+
+    bool alive;
+    bool nocturnal;
+    bool territorial;
+
+    int herd_id;
+
+} Animal;
+
+
+/* ============================================================
+ * TERRAIN ZONE
+ * ============================================================ */
+
+typedef struct {
+
+    TerrainType type;
+
+    char name[64];
+
+    double width;
+    double length;
+
+    double temperature;
+    double humidity;
+
+    double vegetation;
+    double water;
+
+    int animal_count;
+
+    Animal animals[MAX_ANIMALS];
+
+} WildlifeZone;
+
+
+/* ============================================================
+ * RANDOM HELPERS
+ * ============================================================ */
+
+static double random_double(void)
+{
+    return (double)rand() /
+           (double)RAND_MAX;
+}
+
+
+static int random_int(
+    int min,
+    int max
+)
+{
+    return min +
+        rand() %
+        (max - min + 1);
+}
+
+
+/* ============================================================
+ * SPECIES NAMES
+ * ============================================================ */
+
+static const char *species_name(
+    Species species
+)
+{
+    switch (species)
+    {
+        case ALLIGATOR: return "Alligator";
+        case FLAMINGO: return "Flamingo";
+        case HERON: return "Heron";
+        case DEER: return "Deer";
+        case STAG: return "Stag";
+        case BOAR: return "Boar";
+        case BEAR: return "Bear";
+        case COYOTE: return "Coyote";
+        case BISON: return "Bison";
+        case ANTELOPE: return "Antelope";
+        case CAMEL: return "Camel";
+        case TIGER: return "Tiger";
+        case JAGUAR: return "Jaguar";
+        case PANTHER: return "Panther";
+        case MONKEY: return "Monkey";
+        case PARROT: return "Parrot";
+        case ELEPHANT: return "Elephant";
+        case RHINO: return "Rhino";
+        case HIPPO: return "Hippo";
+        case WOLF: return "Wolf";
+        case EAGLE: return "Eagle";
+        case BUFFALO: return "Buffalo";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * TERRAIN NAMES
+ * ============================================================ */
+
+static const char *terrain_name(
+    TerrainType terrain
+)
+{
+    switch (terrain)
+    {
+        case TERRAIN_EVERGLADES:
+            return "Everglades";
+
+        case TERRAIN_DESERT:
+            return "Desert";
+
+        case TERRAIN_WILDLIFE_PARK:
+            return "Wildlife Park";
+
+        case TERRAIN_JUNGLE:
+            return "Jungle";
+
+        case TERRAIN_WOODLAND:
+            return "Woodland";
+
+        case TERRAIN_MOUNTAIN:
+            return "Mountain";
+
+        case TERRAIN_WETLAND:
+            return "Wetland";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * TERRAIN SPECIES TABLE
+ * ============================================================ */
+
+static Species terrain_species(
+    TerrainType terrain,
+    int index
+)
+{
+    switch (terrain)
+    {
+        case TERRAIN_EVERGLADES:
+
+            switch (index)
+            {
+                case 0: return ALLIGATOR;
+                case 1: return HERON;
+                case 2: return FLAMINGO;
+                case 3: return DEER;
+                case 4: return PANTHER;
+                case 5: return BOAR;
+                default: return ALLIGATOR;
+            }
+
+
+        case TERRAIN_DESERT:
+
+            switch (index)
+            {
+                case 0: return COYOTE;
+                case 1: return ANTELOPE;
+                case 2: return CAMEL;
+                case 3: return EAGLE;
+                case 4: return BISON;
+                default: return COYOTE;
+            }
+
+
+        case TERRAIN_WILDLIFE_PARK:
+
+            switch (index)
+            {
+                case 0: return DEER;
+                case 1: return STAG;
+                case 2: return BOAR;
+                case 3: return BISON;
+                case 4: return WOLF;
+                case 5: return BEAR;
+                default: return DEER;
+            }
+
+
+        case TERRAIN_JUNGLE:
+
+            switch (index)
+            {
+                case 0: return TIGER;
+                case 1: return JAGUAR;
+                case 2: return MONKEY;
+                case 3: return PARROT;
+                case 4: return ELEPHANT;
+                case 5: return RHINO;
+                case 6: return HIPPO;
+                default: return MONKEY;
+            }
+
+
+        case TERRAIN_WOODLAND:
+
+            switch (index)
+            {
+                case 0: return DEER;
+                case 1: return STAG;
+                case 2: return BOAR;
+                case 3: return BEAR;
+                case 4: return WOLF;
+                default: return DEER;
+            }
+
+
+        case TERRAIN_MOUNTAIN:
+
+            switch (index)
+            {
+                case 0: return BISON;
+                case 1: return ANTELOPE;
+                case 2: return EAGLE;
+                case 3: return WOLF;
+                default: return BISON;
+            }
+
+
+        case TERRAIN_WETLAND:
+
+            switch (index)
+            {
+                case 0: return ALLIGATOR;
+                case 1: return HERON;
+                case 2: return FLAMINGO;
+                case 3: return DEER;
+                default: return HERON;
+            }
+    }
+
+    return DEER;
+}
+
+
+/* ============================================================
+ * ANIMAL INITIALISATION
+ * ============================================================ */
+
+static void initialise_animal(
+    Animal *animal,
+    int id,
+    Species species,
+    WildlifeZone *zone
+)
+{
+    animal->id = id;
+
+    animal->species = species;
+
+    animal->position.x =
+        random_double() * zone->width;
+
+    animal->position.y = 0;
+
+    animal->position.z =
+        random_double() * zone->length;
+
+    animal->velocity.x = 0;
+    animal->velocity.y = 0;
+    animal->velocity.z = 0;
+
+    animal->health = 100;
+
+    animal->alive = true;
+
+    animal->state = ROAMING;
+
+    animal->speed = 5.0;
+
+    animal->awareness =
+        0.3 + random_double() * 0.6;
+
+    animal->rarity =
+        random_double();
+
+    animal->nocturnal = false;
+
+    animal->territorial = false;
+
+    animal->herd_id =
+        random_int(0, 10);
+
+
+    /*
+     * Species-specific characteristics.
+     */
+
+    switch (species)
+    {
+        case ALLIGATOR:
+            animal->speed = 4;
+            animal->territorial = true;
+            break;
+
+        case DEER:
+            animal->speed = 12;
+            break;
+
+        case STAG:
+            animal->speed = 13;
+            animal->territorial = true;
+            break;
+
+        case BOAR:
+            animal->speed = 8;
+            animal->territorial = true;
+            break;
+
+        case BEAR:
+            animal->speed = 9;
+            animal->territorial = true;
+            break;
+
+        case COYOTE:
+            animal->speed = 14;
+            animal->nocturnal = true;
+            break;
+
+        case TIGER:
+            animal->speed = 16;
+            animal->territorial = true;
+            break;
+
+        case JAGUAR:
+            animal->speed = 15;
+            animal->nocturnal = true;
+            break;
+
+        case PANTHER:
+            animal->speed = 16;
+            animal->nocturnal = true;
+            break;
+
+        case WOLF:
+            animal->speed = 14;
+            break;
+
+        default:
+            break;
+    }
+}
+
+
+/* ============================================================
+ * SPAWN WILDLIFE
+ * ============================================================ */
+
+static void spawn_wildlife(
+    WildlifeZone *zone,
+    int population
+)
+{
+    for (int i = 0;
+         i < population &&
+         zone->animal_count < MAX_ANIMALS;
+         i++)
+    {
+        int species_index =
+            random_int(
+                0,
+                MAX_TERRAIN_SPECIES - 1
+            );
+
+        Species species =
+            terrain_species(
+                zone->type,
+                species_index
+            );
+
+        initialise_animal(
+            &zone->animals[
+                zone->animal_count
+            ],
+            zone->animal_count,
+            species,
+            zone
+        );
+
+        zone->animal_count++;
+    }
+}
+
+
+/* ============================================================
+ * CREATE TERRAIN
+ * ============================================================ */
+
+static void create_zone(
+    WildlifeZone *zone,
+    TerrainType terrain,
+    const char *name
+)
+{
+    zone->type = terrain;
+
+    snprintf(
+        zone->name,
+        sizeof(zone->name),
+        "%s",
+        name
+    );
+
+    zone->width = 2000;
+    zone->length = 2000;
+
+    zone->animal_count = 0;
+
+    switch (terrain)
+    {
+        case TERRAIN_EVERGLADES:
+
+            zone->temperature = 29;
+            zone->humidity = 0.90;
+            zone->vegetation = 0.85;
+            zone->water = 0.90;
+
+            spawn_wildlife(zone, 40);
+            break;
+
+
+        case TERRAIN_DESERT:
+
+            zone->temperature = 38;
+            zone->humidity = 0.15;
+            zone->vegetation = 0.10;
+            zone->water = 0.05;
+
+            spawn_wildlife(zone, 25);
+            break;
+
+
+        case TERRAIN_WILDLIFE_PARK:
+
+            zone->temperature = 24;
+            zone->humidity = 0.55;
+            zone->vegetation = 0.70;
+            zone->water = 0.40;
+
+            spawn_wildlife(zone, 50);
+            break;
+
+
+        case TERRAIN_JUNGLE:
+
+            zone->temperature = 30;
+            zone->humidity = 0.95;
+            zone->vegetation = 0.98;
+            zone->water = 0.75;
+
+            spawn_wildlife(zone, 60);
+            break;
+
+
+        case TERRAIN_WOODLAND:
+
+            zone->temperature = 18;
+            zone->humidity = 0.65;
+            zone->vegetation = 0.85;
+            zone->water = 0.35;
+
+            spawn_wildlife(zone, 45);
+            break;
+
+
+        case TERRAIN_MOUNTAIN:
+
+            zone->temperature = 8;
+            zone->humidity = 0.45;
+            zone->vegetation = 0.40;
+            zone->water = 0.30;
+
+            spawn_wildlife(zone, 30);
+            break;
+
+
+        case TERRAIN_WETLAND:
+
+            zone->temperature = 25;
+            zone->humidity = 0.85;
+            zone->vegetation = 0.75;
+            zone->water = 0.95;
+
+            spawn_wildlife(zone, 40);
+            break;
+    }
+}
+
+
+/* ============================================================
+ * ANIMAL AI
+ * ============================================================ */
+
+static void update_animal(
+    Animal *animal,
+    Vec3 player,
+    double time_of_day,
+    double dt
+)
+{
+    if (!animal->alive)
+        return;
+
+
+    double dx =
+        animal->position.x -
+        player.x;
+
+    double dz =
+        animal->position.z -
+        player.z;
+
+    double distance =
+        sqrt(
+            dx * dx +
+            dz * dz
+        );
+
+
+    /*
+     * Nocturnal animals become more active at night.
+     */
+
+    if (animal->nocturnal)
+    {
+        if (time_of_day > 20.0 ||
+            time_of_day < 6.0)
+        {
+            animal->state =
+                ROAMING;
+        }
+        else
+        {
+            animal->state =
+                SLEEPING;
+        }
+    }
+
+
+    /*
+     * Player proximity.
+     */
+
+    if (distance <
+        80.0 * animal->awareness)
+    {
+        animal->state =
+            FLEEING;
+    }
+
+
+    /*
+     * Flee behaviour.
+     */
+
+    if (animal->state ==
+        FLEEING)
+    {
+        double magnitude =
+            sqrt(
+                dx * dx +
+                dz * dz
+            );
+
+        if (magnitude > 0.01)
+        {
+            dx /= magnitude;
+            dz /= magnitude;
+        }
+
+        animal->velocity.x =
+            dx * animal->speed;
+
+        animal->velocity.z =
+            dz * animal->speed;
+    }
+
+
+    /*
+     * Movement.
+     */
+
+    animal->position.x +=
+        animal->velocity.x * dt;
+
+    animal->position.z +=
+        animal->velocity.z * dt;
+}
+
+
+/* ============================================================
+ * TRACK GENERATION
+ * ============================================================ */
+
+static void generate_tracks(
+    Animal *animal
+)
+{
+    if (!animal->alive)
+        return;
+
+    printf(
+        "[TRACK] %s tracks detected "
+        "near %.1f, %.1f\n",
+        species_name(animal->species),
+        animal->position.x,
+        animal->position.z
+    );
+}
+
+
+/* ============================================================
+ * FICTIONAL GAME HUNTING ACTION
+ * ============================================================ */
+
+static bool hunt_action(
+    Animal *animal
+)
+{
+    if (!animal->alive)
+        return false;
+
+    /*
+     * Abstract game action.
+     * No real-world weapon modelling.
+     */
+
+    animal->alive = false;
+
+    printf(
+        "[GAME] Encounter completed: %s #%d\n",
+        species_name(animal->species),
+        animal->id
+    );
+
+    return true;
+}
+
+
+/* ============================================================
+ * RARE ENCOUNTER
+ * ============================================================ */
+
+static bool is_rare(
+    Animal *animal
+)
+{
+    return animal->rarity < 0.03;
+}
+
+
+/* ============================================================
+ * ZONE REPORT
+ * ============================================================ */
+
+static void zone_report(
+    WildlifeZone *zone
+)
+{
+    int living = 0;
+    int rare = 0;
+
+    for (int i = 0;
+         i < zone->animal_count;
+         i++)
+    {
+        Animal *animal =
+            &zone->animals[i];
+
+        if (animal->alive)
+        {
+            living++;
+
+            if (is_rare(animal))
+                rare++;
+        }
+    }
+
+    printf(
+        "\n"
+        "============================================\n"
+        "%s\n"
+        "============================================\n"
+        "Terrain:       %s\n"
+        "Temperature:   %.1f C\n"
+        "Vegetation:    %.2f\n"
+        "Water:         %.2f\n"
+        "Wildlife:      %d\n"
+        "Rare animals:  %d\n"
+        "============================================\n",
+        zone->name,
+        terrain_name(zone->type),
+        zone->temperature,
+        zone->vegetation,
+        zone->water,
+        living,
+        rare
+    );
+}
+
+
+/* ============================================================
+ * MAIN DEMONSTRATION
+ * ============================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    WildlifeZone everglades;
+    WildlifeZone desert;
+    WildlifeZone jungle;
+    WildlifeZone park;
+
+    create_zone(
+        &everglades,
+        TERRAIN_EVERGLADES,
+        "Southern Everglades"
+    );
+
+    create_zone(
+        &desert,
+        TERRAIN_DESERT,
+        "Western Desert"
+    );
+
+    create_zone(
+        &jungle,
+        TERRAIN_JUNGLE,
+        "Deep Jungle"
+    );
+
+    create_zone(
+        &park,
+        TERRAIN_WILDLIFE_PARK,
+        "Malt Whiskey Wildlife Park"
+    );
+
+
+    zone_report(&everglades);
+    zone_report(&desert);
+    zone_report(&jungle);
+    zone_report(&park);
+
+
+    /*
+     * Player simulation.
+     */
+
+    Vec3 player = {
+        1000,
+        0,
+        1000
+    };
+
+
+    /*
+     * Update wildlife.
+     */
+
+    for (int frame = 0;
+         frame < 300;
+         frame++)
+    {
+        double time =
+            frame * 0.016;
+
+        for (int i = 0;
+             i < everglades.animal_count;
+             i++)
+        {
+            update_animal(
+                &everglades.animals[i],
+                player,
+                22.0,
+                0.016
+            );
+        }
+
+        for (int i = 0;
+             i < desert.animal_count;
+             i++)
+        {
+            update_animal(
+                &desert.animals[i],
+                player,
+                22.0,
+                0.016
+            );
+        }
+
+        for (int i = 0;
+             i < jungle.animal_count;
+             i++)
+        {
+            update_animal(
+                &jungle.animals[i],
+                player,
+                22.0,
+                0.016
+            );
+        }
+    }
+
+
+    /*
+     * Find rare encounters.
+     */
+
+    printf(
+        "\nRARE WILDLIFE ENCOUNTERS\n"
+    );
+
+    for (int i = 0;
+         i < jungle.animal_count;
+         i++)
+    {
+        if (is_rare(
+                &jungle.animals[i]))
+        {
+            printf(
+                "Rare %s detected in jungle.\n",
+                species_name(
+                    jungle.animals[i].species
+                )
+            );
+        }
+    }
+
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * OPEN-WORLD GAME
+ * WEAPON SYSTEM
+ * ============================================================
+ *
+ * Fictional game-engine firearm framework.
+ *
+ * Handles:
+ *   - weapon catalogue
+ *   - weapon classes
+ *   - ammunition
+ *   - damage
+ *   - range
+ *   - accuracy
+ *   - recoil
+ *   - fire rate
+ *   - magazine capacity
+ *   - reload time
+ *   - rarity
+ *   - durability
+ *   - NPC ownership
+ *   - inventory
+ *   - economy
+ *
+ * NOTE:
+ * This is gameplay simulation only.
+ * No real-world firearm construction or modification data.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_WEAPONS 64
+#define MAX_INVENTORY 16
+#define MAX_AMMO_TYPES 12
+
+/* ============================================================
+ * WEAPON CATEGORIES
+ * ============================================================ */
+
+typedef enum {
+
+    WEAPON_MELEE,
+    WEAPON_PISTOL,
+    WEAPON_REVOLVER,
+    WEAPON_SMG,
+    WEAPON_SHOTGUN,
+    WEAPON_RIFLE,
+    WEAPON_CARBINE,
+    WEAPON_MARKSMAN,
+    WEAPON_SNIPER,
+    WEAPON_SPECIAL
+
+} WeaponCategory;
+
+
+/* ============================================================
+ * RARITY
+ * ============================================================ */
+
+typedef enum {
+
+    COMMON,
+    UNCOMMON,
+    RARE,
+    EPIC,
+    LEGENDARY
+
+} WeaponRarity;
+
+
+/* ============================================================
+ * AMMUNITION
+ * ============================================================ */
+
+typedef enum {
+
+    AMMO_NONE,
+    AMMO_LIGHT,
+    AMMO_MEDIUM,
+    AMMO_HEAVY,
+    AMMO_SHOTGUN,
+    AMMO_PRECISION,
+    AMMO_SPECIAL
+
+} AmmoType;
+
+
+/* ============================================================
+ * WEAPON
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    WeaponCategory category;
+
+    WeaponRarity rarity;
+
+    AmmoType ammo_type;
+
+    int damage;
+
+    double effective_range;
+
+    double accuracy;
+
+    double recoil;
+
+    double fire_rate;
+
+    int magazine_capacity;
+
+    double reload_time;
+
+    double durability;
+
+    double purchase_price;
+
+    bool automatic;
+
+    bool owned;
+
+} Weapon;
+
+
+/* ============================================================
+ * PLAYER INVENTORY
+ * ============================================================ */
+
+typedef struct {
+
+    Weapon *weapons[MAX_INVENTORY];
+
+    int weapon_count;
+
+    int ammo[MAX_AMMO_TYPES];
+
+    double cash;
+
+} PlayerInventory;
+
+
+/* ============================================================
+ * WEAPON NAMES
+ * ============================================================ */
+
+static const char *category_name(
+    WeaponCategory category
+)
+{
+    switch (category)
+    {
+        case WEAPON_MELEE:
+            return "Melee";
+
+        case WEAPON_PISTOL:
+            return "Pistol";
+
+        case WEAPON_REVOLVER:
+            return "Revolver";
+
+        case WEAPON_SMG:
+            return "SMG";
+
+        case WEAPON_SHOTGUN:
+            return "Shotgun";
+
+        case WEAPON_RIFLE:
+            return "Rifle";
+
+        case WEAPON_CARBINE:
+            return "Carbine";
+
+        case WEAPON_MARKSMAN:
+            return "Marksman";
+
+        case WEAPON_SNIPER:
+            return "Sniper";
+
+        case WEAPON_SPECIAL:
+            return "Special";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * RARITY NAME
+ * ============================================================ */
+
+static const char *rarity_name(
+    WeaponRarity rarity
+)
+{
+    switch (rarity)
+    {
+        case COMMON: return "Common";
+        case UNCOMMON: return "Uncommon";
+        case RARE: return "Rare";
+        case EPIC: return "Epic";
+        case LEGENDARY: return "Legendary";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * WEAPON CREATION
+ * ============================================================ */
+
+static Weapon create_weapon(
+    int id,
+    const char *name,
+    WeaponCategory category,
+    WeaponRarity rarity,
+    AmmoType ammo,
+    int damage,
+    double range,
+    double accuracy,
+    double recoil,
+    double fire_rate,
+    int magazine,
+    double reload,
+    double price,
+    bool automatic
+)
+{
+    Weapon weapon;
+
+    weapon.id = id;
+
+    snprintf(
+        weapon.name,
+        sizeof(weapon.name),
+        "%s",
+        name
+    );
+
+    weapon.category = category;
+    weapon.rarity = rarity;
+    weapon.ammo_type = ammo;
+
+    weapon.damage = damage;
+
+    weapon.effective_range =
+        range;
+
+    weapon.accuracy =
+        accuracy;
+
+    weapon.recoil =
+        recoil;
+
+    weapon.fire_rate =
+        fire_rate;
+
+    weapon.magazine_capacity =
+        magazine;
+
+    weapon.reload_time =
+        reload;
+
+    weapon.durability =
+        100.0;
+
+    weapon.purchase_price =
+        price;
+
+    weapon.automatic =
+        automatic;
+
+    weapon.owned = false;
+
+    return weapon;
+}
+
+
+/* ============================================================
+ * COMPLETE FICTIONAL WEAPON CATALOGUE
+ * ============================================================ */
+
+static int build_weapon_catalogue(
+    Weapon weapons[]
+)
+{
+    int count = 0;
+
+
+    /* --------------------------------------------------------
+     * PISTOLS
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            1,
+            "Civic P9",
+            WEAPON_PISTOL,
+            COMMON,
+            AMMO_LIGHT,
+            32,
+            55,
+            0.72,
+            0.30,
+            3.0,
+            15,
+            1.6,
+            450,
+            false
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            2,
+            "Harbor 9",
+            WEAPON_PISTOL,
+            UNCOMMON,
+            AMMO_LIGHT,
+            36,
+            60,
+            0.76,
+            0.28,
+            3.5,
+            17,
+            1.5,
+            800,
+            false
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            3,
+            "Aurelius",
+            WEAPON_PISTOL,
+            RARE,
+            AMMO_LIGHT,
+            41,
+            65,
+            0.84,
+            0.22,
+            3.2,
+            18,
+            1.4,
+            2400,
+            false
+        );
+
+
+    /* --------------------------------------------------------
+     * REVOLVERS
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            4,
+            "Frontier Six",
+            WEAPON_REVOLVER,
+            COMMON,
+            AMMO_HEAVY,
+            65,
+            65,
+            0.68,
+            0.55,
+            1.2,
+            6,
+            2.3,
+            700,
+            false
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            5,
+            "Blackjack",
+            WEAPON_REVOLVER,
+            RARE,
+            AMMO_HEAVY,
+            82,
+            75,
+            0.80,
+            0.50,
+            1.4,
+            6,
+            2.1,
+            3500,
+            false
+        );
+
+
+    /* --------------------------------------------------------
+     * SMGs
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            6,
+            "Metro-9",
+            WEAPON_SMG,
+            COMMON,
+            AMMO_LIGHT,
+            24,
+            45,
+            0.60,
+            0.40,
+            11.0,
+            30,
+            1.8,
+            1200,
+            true
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            7,
+            "Viper",
+            WEAPON_SMG,
+            UNCOMMON,
+            AMMO_LIGHT,
+            27,
+            50,
+            0.67,
+            0.36,
+            12.0,
+            32,
+            1.7,
+            2200,
+            true
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            8,
+            "Nightline",
+            WEAPON_SMG,
+            EPIC,
+            AMMO_LIGHT,
+            31,
+            58,
+            0.76,
+            0.30,
+            13.0,
+            36,
+            1.5,
+            7000,
+            true
+        );
+
+
+    /* --------------------------------------------------------
+     * SHOTGUNS
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            9,
+            "Homestead",
+            WEAPON_SHOTGUN,
+            COMMON,
+            AMMO_SHOTGUN,
+            90,
+            25,
+            0.55,
+            0.70,
+            1.0,
+            6,
+            2.4,
+            1000,
+            false
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            10,
+            "Breakwater",
+            WEAPON_SHOTGUN,
+            RARE,
+            AMMO_SHOTGUN,
+            105,
+            30,
+            0.62,
+            0.64,
+            1.2,
+            8,
+            2.2,
+            4200,
+            false
+        );
+
+
+    /* --------------------------------------------------------
+     * RIFLES
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            11,
+            "Frontier AR",
+            WEAPON_RIFLE,
+            COMMON,
+            AMMO_MEDIUM,
+            39,
+            100,
+            0.65,
+            0.46,
+            8.0,
+            30,
+            2.1,
+            1800,
+            true
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            12,
+            "Continental",
+            WEAPON_RIFLE,
+            RARE,
+            AMMO_MEDIUM,
+            47,
+            120,
+            0.78,
+            0.39,
+            7.0,
+            30,
+            1.9,
+            5500,
+            true
+        );
+
+
+    /* --------------------------------------------------------
+     * CARBINES
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            13,
+            "Crown Carbine",
+            WEAPON_CARBINE,
+            UNCOMMON,
+            AMMO_MEDIUM,
+            42,
+            110,
+            0.74,
+            0.38,
+            7.5,
+            24,
+            1.9,
+            3200,
+            true
+        );
+
+
+    weapons[count++] =
+        create_weapon(
+            14,
+            "Apex Carbine",
+            WEAPON_CARBINE,
+            EPIC,
+            AMMO_MEDIUM,
+            50,
+            135,
+            0.86,
+            0.31,
+            8.0,
+            30,
+            1.7,
+            9000,
+            true
+        );
+
+
+    /* --------------------------------------------------------
+     * MARKSMAN
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            15,
+            "Surveyor",
+            WEAPON_MARKSMAN,
+            RARE,
+            AMMO_PRECISION,
+            72,
+            180,
+            0.88,
+            0.32,
+            2.0,
+            10,
+            2.4,
+            6500,
+            false
+        );
+
+
+    /* --------------------------------------------------------
+     * SNIPER
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            16,
+            "Longview",
+            WEAPON_SNIPER,
+            EPIC,
+            AMMO_PRECISION,
+            100,
+            300,
+            0.94,
+            0.40,
+            0.7,
+            5,
+            2.8,
+            12000,
+            false
+        );
+
+
+    /* --------------------------------------------------------
+     * SPECIAL
+     * -------------------------------------------------------- */
+
+    weapons[count++] =
+        create_weapon(
+            17,
+            "Aether",
+            WEAPON_SPECIAL,
+            LEGENDARY,
+            AMMO_SPECIAL,
+            125,
+            220,
+            0.90,
+            0.20,
+            2.5,
+            12,
+            2.0,
+            25000,
+            false
+        );
+
+
+    return count;
+}
+
+
+/* ============================================================
+ * INVENTORY
+ * ============================================================ */
+
+static bool add_weapon(
+    PlayerInventory *inventory,
+    Weapon *weapon
+)
+{
+    if (inventory->weapon_count >=
+        MAX_INVENTORY)
+    {
+        printf(
+            "Inventory full.\n"
+        );
+
+        return false;
+    }
+
+    inventory->weapons[
+        inventory->weapon_count
+    ] = weapon;
+
+    inventory->weapon_count++;
+
+    weapon->owned = true;
+
+    printf(
+        "[INVENTORY] Acquired %s\n",
+        weapon->name
+    );
+
+    return true;
+}
+
+
+/* ============================================================
+ * PURCHASE
+ * ============================================================ */
+
+static bool purchase_weapon(
+    PlayerInventory *inventory,
+    Weapon *weapon
+)
+{
+    if (inventory->cash <
+        weapon->purchase_price)
+    {
+        printf(
+            "[SHOP] Cannot afford %s\n",
+            weapon->name
+        );
+
+        return false;
+    }
+
+    inventory->cash -=
+        weapon->purchase_price;
+
+    return add_weapon(
+        inventory,
+        weapon
+    );
+}
+
+
+/* ============================================================
+ * DURABILITY
+ * ============================================================ */
+
+static void use_weapon(
+    Weapon *weapon
+)
+{
+    if (!weapon->owned)
+        return;
+
+    weapon->durability -= 0.05;
+
+    if (weapon->durability < 0)
+        weapon->durability = 0;
+
+    if (weapon->durability < 20)
+    {
+        printf(
+            "[WEAPON] %s requires "
+            "maintenance.\n",
+            weapon->name
+        );
+    }
+}
+
+
+/* ============================================================
+ * WEAPON REPORT
+ * ============================================================ */
+
+static void print_weapon(
+    Weapon *weapon
+)
+{
+    printf(
+        "%-18s | %-10s | %-10s | "
+        "DMG %3d | RNG %3.0f | "
+        "ACC %.2f | $%.0f\n",
+
+        weapon->name,
+
+        category_name(
+            weapon->category
+        ),
+
+        rarity_name(
+            weapon->rarity
+        ),
+
+        weapon->damage,
+
+        weapon->effective_range,
+
+        weapon->accuracy,
+
+        weapon->purchase_price
+    );
+}
+
+
+/* ============================================================
+ * CATALOGUE REPORT
+ * ============================================================ */
+
+static void print_catalogue(
+    Weapon weapons[],
+    int count
+)
+{
+    printf(
+        "\n"
+        "============================================================\n"
+        "                 WEAPON CATALOGUE\n"
+        "============================================================\n"
+    );
+
+    for (int i = 0;
+         i < count;
+         i++)
+    {
+        print_weapon(
+            &weapons[i]
+        );
+    }
+
+    printf(
+        "============================================================\n"
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    Weapon weapons[MAX_WEAPONS];
+
+    int weapon_count =
+        build_weapon_catalogue(
+            weapons
+        );
+
+
+    print_catalogue(
+        weapons,
+        weapon_count
+    );
+
+
+    /*
+     * Player inventory.
+     */
+
+    PlayerInventory player;
+
+    memset(
+        &player,
+        0,
+        sizeof(player)
+    );
+
+    player.cash = 30000;
+
+
+    /*
+     * Example acquisitions.
+     */
+
+    purchase_weapon(
+        &player,
+        &weapons[2]
+    );
+
+    purchase_weapon(
+        &player,
+        &weapons[7]
+    );
+
+    purchase_weapon(
+        &player,
+        &weapons[13]
+    );
+
+    purchase_weapon(
+        &player,
+        &weapons[15]
+    );
+
+
+    /*
+     * Simulate usage.
+     */
+
+    use_weapon(
+        &weapons[2]
+    );
+
+
+    printf(
+        "\nPlayer weapons: %d\n",
+        player.weapon_count
+    );
+
+    printf(
+        "Remaining cash: $%.0f\n",
+        player.cash
+    );
+
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+SUNCOAST MOTOR COMPANY
+Miami, Florida — Est. 1987
+
+A Florida-native manufacturer with a slightly retro-futurist identity: Miami Art Deco, aerospace engineering, Everglades utility vehicles and high-end coastal luxury.
+
+Below is a C framework for the complete vehicle catalogue and economy.
+
+/*
+ * ============================================================
+ * SUNCOAST MOTOR COMPANY
+ * ============================================================
+ *
+ * Fictional Floridian automotive manufacturer
+ *
+ * Powertrains:
+ *   - Battery Electric
+ *   - Hydrogen Fuel Cell
+ *   - Hydrogen Performance
+ *
+ * Vehicle classes:
+ *   - City
+ *   - Sedan
+ *   - SUV
+ *   - Pickup
+ *   - Sports
+ *   - Supercar
+ *   - Luxury
+ *   - Utility
+ *   - Commercial
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_CARS 64
+#define MAX_GARAGE 20
+
+
+/* ============================================================
+ * POWERTRAIN
+ * ============================================================ */
+
+typedef enum {
+
+    POWER_ELECTRIC,
+    POWER_HYDROGEN,
+    POWER_HYDROGEN_PERFORMANCE
+
+} Powertrain;
+
+
+/* ============================================================
+ * VEHICLE CLASS
+ * ============================================================ */
+
+typedef enum {
+
+    CLASS_CITY,
+    CLASS_SEDAN,
+    CLASS_SUV,
+    CLASS_PICKUP,
+    CLASS_SPORTS,
+    CLASS_SUPERCAR,
+    CLASS_LUXURY,
+    CLASS_UTILITY,
+    CLASS_COMMERCIAL
+
+} VehicleClass;
+
+
+/* ============================================================
+ * VEHICLE
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char model[64];
+
+    VehicleClass class;
+    Powertrain powertrain;
+
+    double price;
+
+    double top_speed;
+
+    double acceleration;
+
+    double handling;
+
+    double durability;
+
+    double range;
+
+    double cargo;
+
+    double passenger_capacity;
+
+    double energy_efficiency;
+
+    bool autonomous_ready;
+
+} Vehicle;
+
+
+/* ============================================================
+ * POWERTRAIN NAME
+ * ============================================================ */
+
+const char *powertrain_name(
+    Powertrain p
+)
+{
+    switch (p)
+    {
+        case POWER_ELECTRIC:
+            return "Battery Electric";
+
+        case POWER_HYDROGEN:
+            return "Hydrogen Fuel Cell";
+
+        case POWER_HYDROGEN_PERFORMANCE:
+            return "Hydrogen Performance";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * VEHICLE CLASS NAME
+ * ============================================================ */
+
+const char *class_name(
+    VehicleClass c
+)
+{
+    switch (c)
+    {
+        case CLASS_CITY:
+            return "City";
+
+        case CLASS_SEDAN:
+            return "Sedan";
+
+        case CLASS_SUV:
+            return "SUV";
+
+        case CLASS_PICKUP:
+            return "Pickup";
+
+        case CLASS_SPORTS:
+            return "Sports";
+
+        case CLASS_SUPERCAR:
+            return "Supercar";
+
+        case CLASS_LUXURY:
+            return "Luxury";
+
+        case CLASS_UTILITY:
+            return "Utility";
+
+        case CLASS_COMMERCIAL:
+            return "Commercial";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * VEHICLE FACTORY
+ * ============================================================ */
+
+Vehicle make_vehicle(
+    int id,
+    const char *model,
+    VehicleClass class,
+    Powertrain powertrain,
+    double price,
+    double top_speed,
+    double acceleration,
+    double handling,
+    double durability,
+    double range,
+    double cargo,
+    double passengers,
+    double efficiency,
+    bool autonomous
+)
+{
+    Vehicle v;
+
+    v.id = id;
+
+    snprintf(
+        v.model,
+        sizeof(v.model),
+        "%s",
+        model
+    );
+
+    v.class = class;
+    v.powertrain = powertrain;
+
+    v.price = price;
+
+    v.top_speed = top_speed;
+    v.acceleration = acceleration;
+    v.handling = handling;
+
+    v.durability = durability;
+
+    v.range = range;
+
+    v.cargo = cargo;
+
+    v.passenger_capacity =
+        passengers;
+
+    v.energy_efficiency =
+        efficiency;
+
+    v.autonomous_ready =
+        autonomous;
+
+    return v;
+}
+
+
+/* ============================================================
+ * SUNCOAST PRODUCT RANGE
+ * ============================================================ */
+
+int build_suncoast_range(
+    Vehicle cars[]
+)
+{
+    int n = 0;
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST PALM
+     * --------------------------------------------------------
+     *
+     * Small urban EV.
+     */
+
+    cars[n++] = make_vehicle(
+        1,
+        "Palm",
+        CLASS_CITY,
+        POWER_ELECTRIC,
+
+        28000,
+
+        105,
+        7.8,
+        8.0,
+        65,
+        240,
+
+        220,
+        4,
+        0.92,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST BISCAYNE
+     * --------------------------------------------------------
+     *
+     * Mainstream family sedan.
+     */
+
+    cars[n++] = make_vehicle(
+        2,
+        "Biscayne",
+        CLASS_SEDAN,
+        POWER_ELECTRIC,
+
+        42000,
+
+        135,
+        5.9,
+        8.3,
+        72,
+        420,
+
+        420,
+        5,
+        0.90,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST ATLANTIC
+     * --------------------------------------------------------
+     *
+     * Hydrogen executive sedan.
+     */
+
+    cars[n++] = make_vehicle(
+        3,
+        "Atlantic",
+        CLASS_SEDAN,
+        POWER_HYDROGEN,
+
+        68000,
+
+        155,
+        5.1,
+        8.7,
+        78,
+        620,
+
+        450,
+        5,
+        0.94,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST EVERGLADE
+     * --------------------------------------------------------
+     *
+     * Adventure SUV.
+     */
+
+    cars[n++] = make_vehicle(
+        4,
+        "Everglade",
+        CLASS_SUV,
+        POWER_ELECTRIC,
+
+        59000,
+
+        130,
+        6.2,
+        7.5,
+        92,
+        480,
+
+        800,
+        7,
+        0.86,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST HURRICANE
+     * --------------------------------------------------------
+     *
+     * Hydrogen SUV.
+     */
+
+    cars[n++] = make_vehicle(
+        5,
+        "Hurricane",
+        CLASS_SUV,
+        POWER_HYDROGEN,
+
+        82000,
+
+        155,
+        4.8,
+        8.2,
+        88,
+        700,
+
+        900,
+        7,
+        0.93,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST GATOR
+     * --------------------------------------------------------
+     *
+     * Heavy-duty pickup.
+     */
+
+    cars[n++] = make_vehicle(
+        6,
+        "Gator",
+        CLASS_PICKUP,
+        POWER_ELECTRIC,
+
+        61000,
+
+        125,
+        6.7,
+        6.9,
+        98,
+        450,
+
+        1500,
+        5,
+        0.81,
+
+        false
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST TIDELINE
+     * --------------------------------------------------------
+     *
+     * Hydrogen utility pickup.
+     */
+
+    cars[n++] = make_vehicle(
+        7,
+        "Tideline",
+        CLASS_PICKUP,
+        POWER_HYDROGEN,
+
+        76000,
+
+        140,
+        5.8,
+        7.1,
+        97,
+        720,
+
+        1800,
+        5,
+        0.90,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST MIAMI GT
+     * --------------------------------------------------------
+     *
+     * High-performance electric sports car.
+     */
+
+    cars[n++] = make_vehicle(
+        8,
+        "Miami GT",
+        CLASS_SPORTS,
+        POWER_ELECTRIC,
+
+        115000,
+
+        190,
+        2.9,
+        9.7,
+        70,
+        390,
+
+        180,
+        2,
+        0.82,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST PALM BEACH
+     * --------------------------------------------------------
+     *
+     * Luxury hydrogen grand tourer.
+     */
+
+    cars[n++] = make_vehicle(
+        9,
+        "Palm Beach",
+        CLASS_LUXURY,
+        POWER_HYDROGEN,
+
+        165000,
+
+        180,
+        3.7,
+        9.2,
+        76,
+        760,
+
+        380,
+        5,
+        0.95,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST NEPTUNE
+     * --------------------------------------------------------
+     *
+     * Flagship hydrogen supercar.
+     */
+
+    cars[n++] = make_vehicle(
+        10,
+        "Neptune",
+        CLASS_SUPERCAR,
+        POWER_HYDROGEN_PERFORMANCE,
+
+        390000,
+
+        240,
+        2.1,
+        10.0,
+        58,
+        510,
+
+        120,
+        2,
+        0.78,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST SOLARIS
+     * --------------------------------------------------------
+     *
+     * Ultra-luxury electric.
+     */
+
+    cars[n++] = make_vehicle(
+        11,
+        "Solaris",
+        CLASS_LUXURY,
+        POWER_ELECTRIC,
+
+        240000,
+
+        175,
+        3.3,
+        9.5,
+        70,
+        610,
+
+        500,
+        5,
+        0.93,
+
+        true
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * SUNCOAST WORKMASTER
+     * --------------------------------------------------------
+     *
+     * Commercial vehicle.
+     */
+
+    cars[n++] = make_vehicle(
+        12,
+        "Workmaster",
+        CLASS_COMMERCIAL,
+        POWER_HYDROGEN,
+
+        94000,
+
+        115,
+        8.2,
+        5.9,
+        99,
+        680,
+
+        4500,
+        3,
+        0.91,
+
+        true
+    );
+
+
+    return n;
+}
+
+
+/* ============================================================
+ * GARAGE
+ * ============================================================ */
+
+typedef struct {
+
+    Vehicle *vehicles[MAX_GARAGE];
+
+    int count;
+
+} Garage;
+
+
+bool garage_add(
+    Garage *garage,
+    Vehicle *vehicle
+)
+{
+    if (garage->count >= MAX_GARAGE)
+        return false;
+
+    garage->vehicles[
+        garage->count
+    ] = vehicle;
+
+    garage->count++;
+
+    return true;
+}
+
+
+/* ============================================================
+ * VEHICLE DISPLAY
+ * ============================================================ */
+
+void display_vehicle(
+    Vehicle *v
+)
+{
+    printf(
+        "\n"
+        "----------------------------------------\n"
+        "%s\n"
+        "----------------------------------------\n"
+        "Class:       %s\n"
+        "Power:       %s\n"
+        "Price:       $%.0f\n"
+        "Top speed:   %.0f mph\n"
+        "0-60:        %.1f sec\n"
+        "Handling:    %.1f/10\n"
+        "Durability:  %.1f/100\n"
+        "Range:       %.0f mi\n"
+        "Cargo:       %.0f kg\n"
+        "Passengers:  %.0f\n"
+        "Efficiency:  %.2f\n"
+        "Autonomy:    %s\n",
+
+        v->model,
+
+        class_name(
+            v->class
+        ),
+
+        powertrain_name(
+            v->powertrain
+        ),
+
+        v->price,
+
+        v->top_speed,
+
+        v->acceleration,
+
+        v->handling,
+
+        v->durability,
+
+        v->range,
+
+        v->cargo,
+
+        v->passenger_capacity,
+
+        v->energy_efficiency,
+
+        v->autonomous_ready
+            ? "READY"
+            : "NO"
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    Vehicle cars[MAX_CARS];
+
+    int count =
+        build_suncoast_range(
+            cars
+        );
+
+
+    printf(
+        "\n"
+        "============================================\n"
+        "       SUNCOAST MOTOR COMPANY\n"
+        "             MIAMI, FLORIDA\n"
+        "============================================\n"
+    );
+
+
+    for (int i = 0;
+         i < count;
+         i++)
+    {
+        display_vehicle(
+            &cars[i]
+        );
+    }
+
+
+    /*
+     * Player garage.
+     */
+
+    Garage garage = {0};
+
+    garage_add(
+        &garage,
+        &cars[7]
+    );
+
+    garage_add(
+        &garage,
+        &cars[9]
+    );
+
+
+    printf(
+        "\nPlayer garage: %d vehicles\n",
+        garage.count
+    );
+
+
+    return 0;
+}
+Make the cars part of the economy
+
+I'd take this further than simply having a dealership menu. Give the entire automotive sector its own simulation:
+
+                    SUNCOAST MOTORS
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+       ELECTRIC MARKET             HYDROGEN MARKET
+             │                           │
+        Battery supply              H₂ supply
+             │                           │
+        Charging network           H₂ stations
+             │                           │
+             └─────────────┬─────────────┘
+                           │
+                    VEHICLE MARKET
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+       Dealers          Auctions         Private
+          │                │              sales
+          │                │                │
+          └────────────────┼────────────────┘
+                           │
+                       PLAYER
+
+Then give every vehicle a dynamic market value.
+
+For example:
+
+typedef struct
+{
+    double base_price;
+
+    double current_price;
+
+    double demand;
+
+    double supply;
+
+    double fuel_cost;
+
+    double electricity_cost;
+
+    double hydrogen_cost;
+
+    double depreciation;
+
+} VehicleMarket;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * SUNCOAST MOTOR CORPORATION
+ * MIAMI OPEN-WORLD CORPORATE NPC SYSTEM
+ * ============================================================
+ *
+ * Fictional automotive corporation.
+ *
+ * Features:
+ *
+ *   CORPORATE STRUCTURE
+ *   EXECUTIVE NPCs
+ *   PERSONALITIES
+ *   MOODS
+ *   RELATIONSHIPS
+ *   DAILY ROUTINES
+ *   LOCATIONS
+ *   AMBITIONS
+ *   CORPORATE POLITICS
+ *   VEHICLE DIVISIONS
+ *   HYDROGEN DIVISION
+ *   ELECTRIC DIVISION
+ *   MOTORSPORT
+ *   NPC MEMORY
+ *   PLAYER RELATIONSHIPS
+ *
+ * Pure C.
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+
+/* ============================================================
+ * CONSTANTS
+ * ============================================================ */
+
+#define MAX_EXECUTIVES 16
+#define MAX_RELATIONSHIPS 16
+#define MAX_EVENTS 64
+#define MAX_VEHICLES 64
+#define MAX_DIALOGUE 16
+
+
+/* ============================================================
+ * LOCATIONS
+ * ============================================================ */
+
+typedef enum
+{
+    LOCATION_SUNCOAST_TOWER,
+    LOCATION_CEO_OFFICE,
+    LOCATION_BOARDROOM,
+    LOCATION_DESIGN_STUDIO,
+    LOCATION_FACTORY,
+    LOCATION_HYDROGEN_LAB,
+    LOCATION_BATTERY_LAB,
+    LOCATION_RACE_TRACK,
+    LOCATION_DEALERSHIP,
+    LOCATION_MARINA,
+    LOCATION_RESTAURANT,
+    LOCATION_NIGHTCLUB,
+    LOCATION_PENTHOUSE,
+    LOCATION_BEACH,
+    LOCATION_AIRPORT,
+    LOCATION_UNKNOWN
+
+} Location;
+
+
+/* ============================================================
+ * PERSONALITY ARCHETYPES
+ * ============================================================ */
+
+typedef enum
+{
+    PERSONALITY_VISIONARY,
+    PERSONALITY_OPERATOR,
+    PERSONALITY_FINANCIER,
+    PERSONALITY_ENGINEER,
+    PERSONALITY_ARTIST,
+    PERSONALITY_RACER,
+    PERSONALITY_SOCIALITE,
+    PERSONALITY_SECURITY,
+    PERSONALITY_REBEL
+
+} PersonalityType;
+
+
+/* ============================================================
+ * MOOD
+ * ============================================================ */
+
+typedef enum
+{
+    MOOD_CALM,
+    MOOD_HAPPY,
+    MOOD_STRESSED,
+    MOOD_ANGRY,
+    MOOD_EXCITED,
+    MOOD_SUSPICIOUS,
+    MOOD_DRUNK,
+    MOOD_EXHAUSTED,
+    MOOD_FOCUSED
+
+} Mood;
+
+
+/* ============================================================
+ * CORPORATE FACTIONS
+ * ============================================================ */
+
+typedef enum
+{
+    FACTION_ELECTRIC,
+    FACTION_HYDROGEN,
+    FACTION_PERFORMANCE,
+    FACTION_FINANCE,
+    FACTION_SECURITY
+
+} CorporateFaction;
+
+
+/* ============================================================
+ * VEHICLE DIVISION
+ * ============================================================ */
+
+typedef enum
+{
+    DIVISION_CITY,
+    DIVISION_EV,
+    DIVISION_HYDROGEN,
+    DIVISION_LUXURY,
+    DIVISION_PERFORMANCE,
+    DIVISION_COMMERCIAL
+
+} VehicleDivision;
+
+
+/* ============================================================
+ * RELATIONSHIP
+ * ============================================================ */
+
+typedef struct
+{
+    int target_id;
+
+    double friendship;
+    double respect;
+    double trust;
+    double rivalry;
+
+} Relationship;
+
+
+/* ============================================================
+ * NPC
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char first_name[32];
+    char last_name[32];
+
+    char job_title[64];
+
+    int age;
+
+    PersonalityType personality;
+
+    CorporateFaction faction;
+
+    Mood mood;
+
+    Location current_location;
+
+    double wealth;
+    double influence;
+
+    double ambition;
+    double ego;
+
+    double intelligence;
+    double charisma;
+
+    double risk_tolerance;
+    double loyalty;
+
+    double stress;
+
+    bool alive;
+    bool at_work;
+
+    Relationship relationships[MAX_RELATIONSHIPS];
+
+    int relationship_count;
+
+    char catchphrase[128];
+
+    char description[512];
+
+} NPC;
+
+
+/* ============================================================
+ * CORPORATION
+ * ============================================================ */
+
+typedef struct
+{
+    char name[128];
+
+    double revenue;
+    double valuation;
+
+    double reputation;
+
+    int employees;
+
+    double electric_share;
+    double hydrogen_share;
+
+    double performance_share;
+
+    double stock_price;
+
+    NPC executives[MAX_EXECUTIVES];
+
+    int executive_count;
+
+} Corporation;
+
+
+/* ============================================================
+ * LOCATION NAMES
+ * ============================================================ */
+
+const char *location_name(
+    Location location
+)
+{
+    switch (location)
+    {
+        case LOCATION_SUNCOAST_TOWER:
+            return "Suncoast Tower";
+
+        case LOCATION_CEO_OFFICE:
+            return "CEO Office";
+
+        case LOCATION_BOARDROOM:
+            return "Boardroom";
+
+        case LOCATION_DESIGN_STUDIO:
+            return "Miami Design Studio";
+
+        case LOCATION_FACTORY:
+            return "Suncoast Factory";
+
+        case LOCATION_HYDROGEN_LAB:
+            return "Hydrogen Research Centre";
+
+        case LOCATION_BATTERY_LAB:
+            return "Battery Research Centre";
+
+        case LOCATION_RACE_TRACK:
+            return "Suncoast Performance Circuit";
+
+        case LOCATION_DEALERSHIP:
+            return "Suncoast Dealership";
+
+        case LOCATION_MARINA:
+            return "Miami Marina";
+
+        case LOCATION_RESTAURANT:
+            return "Ocean Drive Restaurant";
+
+        case LOCATION_NIGHTCLUB:
+            return "Miami Nightclub";
+
+        case LOCATION_PENTHOUSE:
+            return "Miami Penthouse";
+
+        case LOCATION_BEACH:
+            return "Miami Beach";
+
+        case LOCATION_AIRPORT:
+            return "Miami International Airport";
+
+        default:
+            return "Unknown";
+    }
+}
+
+
+/* ============================================================
+ * PERSONALITY NAMES
+ * ============================================================ */
+
+const char *personality_name(
+    PersonalityType personality
+)
+{
+    switch (personality)
+    {
+        case PERSONALITY_VISIONARY:
+            return "Visionary";
+
+        case PERSONALITY_OPERATOR:
+            return "Operator";
+
+        case PERSONALITY_FINANCIER:
+            return "Financier";
+
+        case PERSONALITY_ENGINEER:
+            return "Engineer";
+
+        case PERSONALITY_ARTIST:
+            return "Artist";
+
+        case PERSONALITY_RACER:
+            return "Racer";
+
+        case PERSONALITY_SOCIALITE:
+            return "Socialite";
+
+        case PERSONALITY_SECURITY:
+            return "Security";
+
+        case PERSONALITY_REBEL:
+            return "Rebel";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * MOOD NAMES
+ * ============================================================ */
+
+const char *mood_name(
+    Mood mood
+)
+{
+    switch (mood)
+    {
+        case MOOD_CALM:
+            return "Calm";
+
+        case MOOD_HAPPY:
+            return "Happy";
+
+        case MOOD_STRESSED:
+            return "Stressed";
+
+        case MOOD_ANGRY:
+            return "Angry";
+
+        case MOOD_EXCITED:
+            return "Excited";
+
+        case MOOD_SUSPICIOUS:
+            return "Suspicious";
+
+        case MOOD_DRUNK:
+            return "Drunk";
+
+        case MOOD_EXHAUSTED:
+            return "Exhausted";
+
+        case MOOD_FOCUSED:
+            return "Focused";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * NPC CREATION
+ * ============================================================ */
+
+NPC create_npc(
+    int id,
+    const char *first,
+    const char *last,
+    const char *job,
+    int age,
+    PersonalityType personality,
+    CorporateFaction faction
+)
+{
+    NPC npc;
+
+    memset(
+        &npc,
+        0,
+        sizeof(NPC)
+    );
+
+    npc.id = id;
+
+    snprintf(
+        npc.first_name,
+        sizeof(npc.first_name),
+        "%s",
+        first
+    );
+
+    snprintf(
+        npc.last_name,
+        sizeof(npc.last_name),
+        "%s",
+        last
+    );
+
+    snprintf(
+        npc.job_title,
+        sizeof(npc.job_title),
+        "%s",
+        job
+    );
+
+    npc.age = age;
+
+    npc.personality = personality;
+
+    npc.faction = faction;
+
+    npc.mood = MOOD_CALM;
+
+    npc.current_location =
+        LOCATION_SUNCOAST_TOWER;
+
+    npc.wealth = 1000000.0;
+
+    npc.influence = 0.5;
+
+    npc.ambition = 0.5;
+
+    npc.ego = 0.5;
+
+    npc.intelligence = 0.7;
+
+    npc.charisma = 0.7;
+
+    npc.risk_tolerance = 0.5;
+
+    npc.loyalty = 0.7;
+
+    npc.stress = 0.1;
+
+    npc.alive = true;
+
+    npc.at_work = true;
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 1
+ * ADRIAN VALE
+ * ============================================================ */
+
+NPC create_adrian_vale(void)
+{
+    NPC npc =
+        create_npc(
+            1,
+            "Adrian",
+            "Vale",
+            "Chairman & CEO",
+            58,
+            PERSONALITY_VISIONARY,
+            FACTION_HYDROGEN
+        );
+
+    npc.wealth = 1800000000.0;
+
+    npc.influence = 0.98;
+
+    npc.ambition = 0.99;
+
+    npc.ego = 0.91;
+
+    npc.intelligence = 0.92;
+
+    npc.charisma = 0.96;
+
+    npc.risk_tolerance = 0.86;
+
+    npc.loyalty = 0.94;
+
+    npc.stress = 0.32;
+
+    npc.current_location =
+        LOCATION_CEO_OFFICE;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "Florida doesn't follow the future. "
+        "Florida builds it."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "A charismatic Miami industrialist. "
+        "Adrian is obsessed with hydrogen, "
+        "architecture and building things "
+        "larger than anyone thinks necessary. "
+        "He enjoys yachts, racing and late-night "
+        "strategy meetings."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 2
+ * ISABELLA CRUZ
+ * ============================================================ */
+
+NPC create_isabella_cruz(void)
+{
+    NPC npc =
+        create_npc(
+            2,
+            "Isabella",
+            "Cruz",
+            "President & COO",
+            49,
+            PERSONALITY_OPERATOR,
+            FACTION_ELECTRIC
+        );
+
+    npc.wealth = 420000000.0;
+
+    npc.influence = 0.94;
+
+    npc.ambition = 0.87;
+
+    npc.ego = 0.55;
+
+    npc.intelligence = 0.97;
+
+    npc.charisma = 0.76;
+
+    npc.risk_tolerance = 0.41;
+
+    npc.loyalty = 0.91;
+
+    npc.stress = 0.64;
+
+    npc.current_location =
+        LOCATION_FACTORY;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "Production doesn't care about excuses."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "Hyper-organised and intimidatingly "
+        "competent. Isabella personally monitors "
+        "factory output, logistics and delivery "
+        "schedules. She rarely raises her voice."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 3
+ * MARCUS STERLING
+ * ============================================================ */
+
+NPC create_marcus_sterling(void)
+{
+    NPC npc =
+        create_npc(
+            3,
+            "Marcus",
+            "Sterling",
+            "Chief Financial Officer",
+            55,
+            PERSONALITY_FINANCIER,
+            FACTION_FINANCE
+        );
+
+    npc.wealth = 670000000.0;
+
+    npc.influence = 0.88;
+
+    npc.ambition = 0.93;
+
+    npc.ego = 0.73;
+
+    npc.intelligence = 0.96;
+
+    npc.charisma = 0.68;
+
+    npc.risk_tolerance = 0.58;
+
+    npc.loyalty = 0.61;
+
+    npc.stress = 0.48;
+
+    npc.current_location =
+        LOCATION_BOARDROOM;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "Everything has a price."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "A sophisticated financier who treats "
+        "Suncoast like a giant mathematical system. "
+        "He loves expensive restaurants and hates "
+        "uncontrolled spending."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 4
+ * DR ELENA MARQUEZ
+ * ============================================================ */
+
+NPC create_elena_marquez(void)
+{
+    NPC npc =
+        create_npc(
+            4,
+            "Elena",
+            "Marquez",
+            "Chief Technology Officer",
+            44,
+            PERSONALITY_ENGINEER,
+            FACTION_ELECTRIC
+        );
+
+    npc.wealth = 190000000.0;
+
+    npc.influence = 0.84;
+
+    npc.ambition = 0.91;
+
+    npc.ego = 0.47;
+
+    npc.intelligence = 0.995;
+
+    npc.charisma = 0.63;
+
+    npc.risk_tolerance = 0.73;
+
+    npc.loyalty = 0.88;
+
+    npc.stress = 0.71;
+
+    npc.current_location =
+        LOCATION_HYDROGEN_LAB;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "If we can simulate it, we can build it."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "A brilliant engineer who forgets meetings "
+        "because she is working on prototypes. "
+        "She carries a tablet everywhere and "
+        "occasionally sleeps in the laboratory."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 5
+ * JULIAN CROSS
+ * ============================================================ */
+
+NPC create_julian_cross(void)
+{
+    NPC npc =
+        create_npc(
+            5,
+            "Julian",
+            "Cross",
+            "Chief Design Officer",
+            51,
+            PERSONALITY_ARTIST,
+            FACTION_PERFORMANCE
+        );
+
+    npc.wealth = 110000000.0;
+
+    npc.influence = 0.76;
+
+    npc.ambition = 0.82;
+
+    npc.ego = 0.89;
+
+    npc.intelligence = 0.82;
+
+    npc.charisma = 0.94;
+
+    npc.risk_tolerance = 0.88;
+
+    npc.loyalty = 0.73;
+
+    npc.stress = 0.28;
+
+    npc.current_location =
+        LOCATION_DESIGN_STUDIO;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "If it doesn't make people turn around, "
+        "redesign it."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "Flamboyant designer obsessed with Miami "
+        "Art Deco, yachts, aircraft and dramatic "
+        "silhouettes. Julian arrives at work in "
+        "different Suncoast prototypes."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 6
+ * RAFAEL TORRES
+ * ============================================================ */
+
+NPC create_rafael_torres(void)
+{
+    NPC npc =
+        create_npc(
+            6,
+            "Rafael",
+            "Torres",
+            "President of Suncoast Performance",
+            42,
+            PERSONALITY_RACER,
+            FACTION_PERFORMANCE
+        );
+
+    npc.wealth = 84000000.0;
+
+    npc.influence = 0.71;
+
+    npc.ambition = 0.96;
+
+    npc.ego = 0.94;
+
+    npc.intelligence = 0.81;
+
+    npc.charisma = 0.91;
+
+    npc.risk_tolerance = 0.99;
+
+    npc.loyalty = 0.82;
+
+    npc.stress = 0.37;
+
+    npc.current_location =
+        LOCATION_RACE_TRACK;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "If you're not first, make the car faster."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "Former racing driver. Competitive, loud "
+        "and completely obsessed with performance. "
+        "He challenges almost everyone he meets "
+        "to race."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 7
+ * VICTORIA LANG
+ * ============================================================ */
+
+NPC create_victoria_lang(void)
+{
+    NPC npc =
+        create_npc(
+            7,
+            "Victoria",
+            "Lang",
+            "Chief Marketing Officer",
+            39,
+            PERSONALITY_SOCIALITE,
+            FACTION_PERFORMANCE
+        );
+
+    npc.wealth = 76000000.0;
+
+    npc.influence = 0.78;
+
+    npc.ambition = 0.94;
+
+    npc.ego = 0.82;
+
+    npc.intelligence = 0.89;
+
+    npc.charisma = 0.98;
+
+    npc.risk_tolerance = 0.84;
+
+    npc.loyalty = 0.69;
+
+    npc.stress = 0.42;
+
+    npc.current_location =
+        LOCATION_BEACH;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "If Miami doesn't love it, we launch again."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "Celebrity-oriented marketing executive "
+        "who seems to know everybody in Miami. "
+        "She organises launches, parties, races "
+        "and enormous waterfront events."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CHARACTER 8
+ * DARIUS COLE
+ * ============================================================ */
+
+NPC create_darius_cole(void)
+{
+    NPC npc =
+        create_npc(
+            8,
+            "Darius",
+            "Cole",
+            "Chief Security Officer",
+            61,
+            PERSONALITY_SECURITY,
+            FACTION_SECURITY
+        );
+
+    npc.wealth = 34000000.0;
+
+    npc.influence = 0.73;
+
+    npc.ambition = 0.51;
+
+    npc.ego = 0.41;
+
+    npc.intelligence = 0.91;
+
+    npc.charisma = 0.54;
+
+    npc.risk_tolerance = 0.66;
+
+    npc.loyalty = 0.98;
+
+    npc.stress = 0.44;
+
+    npc.current_location =
+        LOCATION_SUNCOAST_TOWER;
+
+    snprintf(
+        npc.catchphrase,
+        sizeof(npc.catchphrase),
+        "I already know."
+    );
+
+    snprintf(
+        npc.description,
+        sizeof(npc.description),
+        "Quiet, watchful and extremely difficult "
+        "to surprise. Darius knows every security "
+        "camera and service entrance in Suncoast "
+        "Tower."
+    );
+
+    return npc;
+}
+
+
+/* ============================================================
+ * CORPORATION INITIALISATION
+ * ============================================================ */
+
+void initialise_corporation(
+    Corporation *company
+)
+{
+    memset(
+        company,
+        0,
+        sizeof(Corporation)
+    );
+
+    snprintf(
+        company->name,
+        sizeof(company->name),
+        "Suncoast Motor Corporation"
+    );
+
+    company->revenue =
+        42000000000.0;
+
+    company->valuation =
+        98000000000.0;
+
+    company->reputation =
+        0.91;
+
+    company->employees =
+        48000;
+
+    company->electric_share =
+        0.38;
+
+    company->hydrogen_share =
+        0.17;
+
+    company->performance_share =
+        0.12;
+
+    company->stock_price =
+        142.80;
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_adrian_vale();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_isabella_cruz();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_marcus_sterling();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_elena_marquez();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_julian_cross();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_rafael_torres();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_victoria_lang();
+
+
+    company->executives[
+        company->executive_count++
+    ] = create_darius_cole();
+}
+
+
+/* ============================================================
+ * NPC DAILY ROUTINE
+ * ============================================================ */
+
+void update_npc_schedule(
+    NPC *npc,
+    int hour
+)
+{
+    if (!npc->alive)
+        return;
+
+
+    /*
+     * CEO
+     */
+
+    if (npc->id == 1)
+    {
+        if (hour >= 8 && hour < 12)
+            npc->current_location =
+                LOCATION_CEO_OFFICE;
+
+        else if (hour >= 12 && hour < 14)
+            npc->current_location =
+                LOCATION_RESTAURANT;
+
+        else if (hour >= 14 && hour < 19)
+            npc->current_location =
+                LOCATION_BOARDROOM;
+
+        else
+            npc->current_location =
+                LOCATION_MARINA;
+    }
+
+
+    /*
+     * COO
+     */
+
+    else if (npc->id == 2)
+    {
+        if (hour >= 7 && hour < 18)
+            npc->current_location =
+                LOCATION_FACTORY;
+
+        else
+            npc->current_location =
+                LOCATION_PENTHOUSE;
+    }
+
+
+    /*
+     * CFO
+     */
+
+    else if (npc->id == 3)
+    {
+        if (hour >= 8 && hour < 17)
+            npc->current_location =
+                LOCATION_BOARDROOM;
+
+        else
+            npc->current_location =
+                LOCATION_RESTAURANT;
+    }
+
+
+    /*
+     * CTO
+     */
+
+    else if (npc->id == 4)
+    {
+        if (hour >= 9 && hour < 22)
+            npc->current_location =
+                LOCATION_HYDROGEN_LAB;
+
+        else
+            npc->current_location =
+                LOCATION_BATTERY_LAB;
+    }
+
+
+    /*
+     * DESIGNER
+     */
+
+    else if (npc->id == 5)
+    {
+        if (hour >= 10 && hour < 20)
+            npc->current_location =
+                LOCATION_DESIGN_STUDIO;
+
+        else
+            npc->current_location =
+                LOCATION_NIGHTCLUB;
+    }
+
+
+    /*
+     * RACING EXECUTIVE
+     */
+
+    else if (npc->id == 6)
+    {
+        if (hour >= 8 && hour < 18)
+            npc->current_location =
+                LOCATION_RACE_TRACK;
+
+        else
+            npc->current_location =
+                LOCATION_MARINA;
+    }
+
+
+    /*
+     * MARKETING EXECUTIVE
+     */
+
+    else if (npc->id == 7)
+    {
+        if (hour >= 9 && hour < 17)
+            npc->current_location =
+                LOCATION_SUNCOAST_TOWER;
+
+        else if (hour >= 18)
+            npc->current_location =
+                LOCATION_NIGHTCLUB;
+
+        else
+            npc->current_location =
+                LOCATION_BEACH;
+    }
+
+
+    /*
+     * SECURITY
+     */
+
+    else if (npc->id == 8)
+    {
+        if (hour >= 7 && hour < 23)
+            npc->current_location =
+                LOCATION_SUNCOAST_TOWER;
+
+        else
+            npc->current_location =
+                LOCATION_AIRPORT;
+    }
+}
+
+
+/* ============================================================
+ * NPC MOOD ENGINE
+ * ============================================================ */
+
+void update_npc_mood(
+    NPC *npc
+)
+{
+    if (npc->stress > 0.85)
+    {
+        npc->mood =
+            MOOD_STRESSED;
+
+        return;
+    }
+
+    if (npc->stress > 0.65)
+    {
+        npc->mood =
+            MOOD_FOCUSED;
+
+        return;
+    }
+
+    if (npc->personality ==
+        PERSONALITY_RACER)
+    {
+        npc->mood =
+            MOOD_EXCITED;
+
+        return;
+    }
+
+    if (npc->personality ==
+        PERSONALITY_ENGINEER)
+    {
+        npc->mood =
+            MOOD_FOCUSED;
+
+        return;
+    }
+
+    if (npc->personality ==
+        PERSONALITY_SOCIALITE)
+    {
+        npc->mood =
+            MOOD_HAPPY;
+
+        return;
+    }
+
+    npc->mood =
+        MOOD_CALM;
+}
+
+
+/* ============================================================
+ * PLAYER RELATIONSHIP
+ * ============================================================ */
+
+void modify_player_relationship(
+    NPC *npc,
+    double respect_change,
+    double trust_change
+)
+{
+    /*
+     * Player is represented as target ID 0.
+     */
+
+    int slot = -1;
+
+    for (int i = 0;
+         i < npc->relationship_count;
+         i++)
+    {
+        if (npc->relationships[i].target_id == 0)
+        {
+            slot = i;
+            break;
+        }
+    }
+
+
+    if (slot == -1)
+    {
+        if (npc->relationship_count >=
+            MAX_RELATIONSHIPS)
+            return;
+
+        slot =
+            npc->relationship_count++;
+
+        npc->relationships[slot].target_id =
+            0;
+    }
+
+
+    npc->relationships[slot].respect +=
+        respect_change;
+
+    npc->relationships[slot].trust +=
+        trust_change;
+
+
+    if (npc->relationships[slot].respect >
+        1.0)
+        npc->relationships[slot].respect = 1.0;
+
+    if (npc->relationships[slot].respect <
+        -1.0)
+        npc->relationships[slot].respect = -1.0;
+
+
+    if (npc->relationships[slot].trust >
+        1.0)
+        npc->relationships[slot].trust = 1.0;
+
+    if (npc->relationships[slot].trust <
+        -1.0)
+        npc->relationships[slot].trust = -1.0;
+}
+
+
+/* ============================================================
+ * NPC REACTION TO PLAYER
+ * ============================================================ */
+
+void npc_react_to_player(
+    NPC *npc,
+    double player_reputation,
+    bool player_has_suncoast_vehicle
+)
+{
+    if (!npc->alive)
+        return;
+
+
+    if (npc->personality ==
+        PERSONALITY_SOCIALITE)
+    {
+        if (player_reputation > 0.7)
+        {
+            modify_player_relationship(
+                npc,
+                0.05,
+                0.03
+            );
+        }
+    }
+
+
+    if (npc->personality ==
+        PERSONALITY_FINANCIER)
+    {
+        if (player_reputation < 0.2)
+        {
+            npc->mood =
+                MOOD_SUSPICIOUS;
+        }
+    }
+
+
+    if (npc->personality ==
+        PERSONALITY_RACER)
+    {
+        if (player_has_suncoast_vehicle)
+        {
+            npc->mood =
+                MOOD_EXCITED;
+
+            modify_player_relationship(
+                npc,
+                0.04,
+                0.01
+            );
+        }
+    }
+
+
+    if (npc->personality ==
+        PERSONALITY_SECURITY)
+    {
+        if (player_reputation < 0.3)
+        {
+            npc->mood =
+                MOOD_SUSPICIOUS;
+
+            modify_player_relationship(
+                npc,
+                -0.05,
+                -0.08
+            );
+        }
+    }
+}
+
+
+/* ============================================================
+ * NPC DISPLAY
+ * ============================================================ */
+
+void print_npc(
+    NPC *npc
+)
+{
+    printf(
+        "\n"
+        "==================================================\n"
+        "%s %s\n"
+        "==================================================\n"
+        "Age:          %d\n"
+        "Position:     %s\n"
+        "Personality:  %s\n"
+        "Mood:         %s\n"
+        "Location:     %s\n"
+        "Influence:    %.2f\n"
+        "Ambition:     %.2f\n"
+        "Charisma:     %.2f\n"
+        "Intelligence: %.2f\n"
+        "Risk:         %.2f\n"
+        "Stress:       %.2f\n"
+        "\n"
+        "\"%s\"\n"
+        "\n"
+        "%s\n",
+        npc->first_name,
+        npc->last_name,
+        npc->age,
+        npc->job_title,
+        personality_name(
+            npc->personality
+        ),
+        mood_name(
+            npc->mood
+        ),
+        location_name(
+            npc->current_location
+        ),
+        npc->influence,
+        npc->ambition,
+        npc->charisma,
+        npc->intelligence,
+        npc->risk_tolerance,
+        npc->stress,
+        npc->catchphrase,
+        npc->description
+    );
+}
+
+
+/* ============================================================
+ * CORPORATE REPORT
+ * ============================================================ */
+
+void print_corporation(
+    Corporation *company
+)
+{
+    printf(
+        "\n"
+        "##################################################\n"
+        "#          SUNCOAST MOTOR CORPORATION            #\n"
+        "##################################################\n"
+        "\n"
+        "Revenue:       $%.0f\n"
+        "Valuation:     $%.0f\n"
+        "Employees:     %d\n"
+        "Reputation:    %.2f\n"
+        "Stock:         $%.2f\n"
+        "EV share:      %.2f\n"
+        "Hydrogen:      %.2f\n"
+        "Performance:   %.2f\n"
+        "\n",
+        company->revenue,
+        company->valuation,
+        company->employees,
+        company->reputation,
+        company->stock_price,
+        company->electric_share,
+        company->hydrogen_share,
+        company->performance_share
+    );
+
+
+    printf(
+        "EXECUTIVE BOARD\n"
+        "---------------\n"
+    );
+
+    for (int i = 0;
+         i < company->executive_count;
+         i++)
+    {
+        NPC *npc =
+            &company->executives[i];
+
+        printf(
+            "%d. %s %s — %s\n",
+            i + 1,
+            npc->first_name,
+            npc->last_name,
+            npc->job_title
+        );
+    }
+}
+
+
+/* ============================================================
+ * MAIN SIMULATION
+ * ============================================================ */
+
+int main(void)
+{
+    Corporation suncoast;
+
+
+    initialise_corporation(
+        &suncoast
+    );
+
+
+    print_corporation(
+        &suncoast
+    );
+
+
+    /*
+     * Simulate a Miami day.
+     */
+
+    for (int hour = 6;
+         hour <= 23;
+         hour++)
+    {
+        printf(
+            "\n--- %02d:00 MIAMI ---\n",
+            hour
+        );
+
+
+        for (int i = 0;
+             i < suncoast.executive_count;
+             i++)
+        {
+            NPC *npc =
+                &suncoast.executives[i];
+
+            update_npc_schedule(
+                npc,
+                hour
+            );
+
+            update_npc_mood(
+                npc
+            );
+        }
+    }
+
+
+    /*
+     * Player interaction example.
+     */
+
+    printf(
+        "\nPLAYER INTERACTION\n"
+    );
+
+
+    for (int i = 0;
+         i < suncoast.executive_count;
+         i++)
+    {
+        npc_react_to_player(
+            &suncoast.executives[i],
+            0.65,
+            true
+        );
+    }
+
+
+    /*
+     * Final NPC state.
+     */
+
+    for (int i = 0;
+         i < suncoast.executive_count;
+         i++)
+    {
+        print_npc(
+            &suncoast.executives[i]
+        );
+    }
+
+
+    return 0;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * NPC: J. THORNTON "TEX" CALDWELL
+ * ============================================================
+ *
+ * Fictional open-world NPC.
+ *
+ * Ruthless Texas oil executive living in Florida.
+ *
+ * BUSINESS RULE:
+ *
+ *     OIL -> HARD GOLD ONLY
+ *
+ * He refuses:
+ *
+ *     CASH
+ *     CREDIT
+ *     BANK TRANSFERS
+ *     CRYPTO
+ *     COMPANY STOCK
+ *
+ * Accepted settlement:
+ *
+ *     PHYSICAL GOLD
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <math.h>
+
+
+#define MAX_RELATIONSHIPS 16
+#define MAX_TRANSACTIONS 64
+
+
+/* ============================================================
+ * ENUMERATIONS
+ * ============================================================ */
+
+typedef enum
+{
+    TEX_MOOD_CALM,
+    TEX_MOOD_ANGRY,
+    TEX_MOOD_SUSPICIOUS,
+    TEX_MOOD_CONFIDENT,
+    TEX_MOOD_DRUNK,
+    TEX_MOOD_EXCITED
+} TexMood;
+
+
+typedef enum
+{
+    PAYMENT_CASH,
+    PAYMENT_CARD,
+    PAYMENT_BANK,
+    PAYMENT_CRYPTO,
+    PAYMENT_GOLD
+} PaymentType;
+
+
+/* ============================================================
+ * GOLD
+ * ============================================================ */
+
+typedef struct
+{
+    double ounces;
+
+    double purity;
+
+    double market_value;
+
+} Gold;
+
+
+/* ============================================================
+ * OIL
+ * ============================================================ */
+
+typedef struct
+{
+    double barrels;
+
+    double price_per_barrel;
+
+} Oil;
+
+
+/* ============================================================
+ * RELATIONSHIP
+ * ============================================================ */
+
+typedef struct
+{
+    int character_id;
+
+    double respect;
+
+    double trust;
+
+    double hostility;
+
+} Relationship;
+
+
+/* ============================================================
+ * TRANSACTION
+ * ============================================================ */
+
+typedef struct
+{
+    double barrels;
+
+    double gold_paid;
+
+    bool completed;
+
+} OilTransaction;
+
+
+/* ============================================================
+ * TEX CALDWELL
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char first_name[32];
+    char last_name[32];
+
+    char nickname[32];
+
+    char title[64];
+
+    int age;
+
+    TexMood mood;
+
+    double wealth;
+
+    double influence;
+
+    double ruthlessness;
+
+    double charisma;
+
+    double intelligence;
+
+    double patience;
+
+    double greed;
+
+    double loyalty;
+
+    double reputation;
+
+    double suspicion;
+
+    double oil_reserves;
+
+    double daily_production;
+
+    double gold_reserves;
+
+    Relationship relationships[MAX_RELATIONSHIPS];
+
+    int relationship_count;
+
+    OilTransaction transactions[MAX_TRANSACTIONS];
+
+    int transaction_count;
+
+    char home[128];
+
+    char office[128];
+
+    char vehicle[128];
+
+    char catchphrase[256];
+
+} TexCaldwell;
+
+
+/* ============================================================
+ * INITIALISE NPC
+ * ============================================================ */
+
+void initialise_tex(
+    TexCaldwell *tex
+)
+{
+    memset(
+        tex,
+        0,
+        sizeof(TexCaldwell)
+    );
+
+
+    tex->id = 9001;
+
+
+    strcpy(
+        tex->first_name,
+        "J. Thornton"
+    );
+
+
+    strcpy(
+        tex->last_name,
+        "Caldwell"
+    );
+
+
+    strcpy(
+        tex->nickname,
+        "Tex"
+    );
+
+
+    strcpy(
+        tex->title,
+        "President & CEO, Caldwell Energy"
+    );
+
+
+    tex->age = 67;
+
+
+    tex->mood =
+        TEX_MOOD_CONFIDENT;
+
+
+    /*
+     * Personality.
+     */
+
+    tex->wealth =
+        2400000000.0;
+
+    tex->influence =
+        0.94;
+
+    tex->ruthlessness =
+        0.97;
+
+    tex->charisma =
+        0.91;
+
+    tex->intelligence =
+        0.89;
+
+    tex->patience =
+        0.58;
+
+    tex->greed =
+        0.96;
+
+    tex->loyalty =
+        0.71;
+
+    tex->reputation =
+        0.88;
+
+    tex->suspicion =
+        0.79;
+
+
+    /*
+     * Oil empire.
+     */
+
+    tex->oil_reserves =
+        185000000.0;
+
+    tex->daily_production =
+        175000.0;
+
+
+    /*
+     * Private physical gold vault.
+     */
+
+    tex->gold_reserves =
+        42000.0;
+
+
+    /*
+     * Florida residence.
+     */
+
+    strcpy(
+        tex->home,
+        "Caldwell Ocean Estate, Miami"
+    );
+
+
+    strcpy(
+        tex->office,
+        "Caldwell Energy Tower, Miami"
+    );
+
+
+    strcpy(
+        tex->vehicle,
+        "Caldwell Armoured Continental"
+    );
+
+
+    strcpy(
+        tex->catchphrase,
+        "Oil is temporary. Gold is real."
+    );
+}
+
+
+/* ============================================================
+ * PAYMENT CHECK
+ * ============================================================ */
+
+bool accepts_payment(
+    PaymentType type
+)
+{
+    /*
+     * Tex accepts exactly one settlement medium.
+     */
+
+    if (type == PAYMENT_GOLD)
+        return true;
+
+    return false;
+}
+
+
+/* ============================================================
+ * GOLD VALUE
+ * ============================================================ */
+
+double calculate_gold_value(
+    Gold *gold,
+    double gold_price
+)
+{
+    return
+        gold->ounces *
+        gold->purity *
+        gold_price;
+}
+
+
+/* ============================================================
+ * OIL PRICE
+ * ============================================================ */
+
+double calculate_oil_price(
+    TexCaldwell *tex,
+    double market_price
+)
+{
+    /*
+     * Tex charges a premium when:
+     *
+     *   supply is tight
+     *   suspicion is high
+     *   demand is high
+     */
+
+    double premium =
+        1.0;
+
+    if (tex->oil_reserves < 50000000.0)
+        premium += 0.15;
+
+    if (tex->suspicion > 0.80)
+        premium += 0.10;
+
+    if (tex->reputation > 0.80)
+        premium += 0.05;
+
+    return market_price * premium;
+}
+
+
+/* ============================================================
+ * OIL -> GOLD TRANSACTION
+ * ============================================================ */
+
+bool sell_oil_for_gold(
+    TexCaldwell *tex,
+    double barrels,
+    Gold *gold,
+    double oil_market_price,
+    double gold_market_price
+)
+{
+    /*
+     * Cannot sell more oil than available.
+     */
+
+    if (barrels <= 0.0)
+        return false;
+
+
+    if (barrels > tex->oil_reserves)
+        return false;
+
+
+    /*
+     * Calculate transaction value.
+     */
+
+    double oil_price =
+        calculate_oil_price(
+            tex,
+            oil_market_price
+        );
+
+
+    double total_price =
+        barrels *
+        oil_price;
+
+
+    double gold_value =
+        calculate_gold_value(
+            gold,
+            gold_market_price
+        );
+
+
+    /*
+     * GOLD ONLY.
+     */
+
+    if (gold_value < total_price)
+    {
+        printf(
+            "\nTEX CALDWELL:\n"
+            "\"Come back when you've got "
+            "the yellow metal.\"\n"
+        );
+
+        return false;
+    }
+
+
+    /*
+     * Execute transaction.
+     */
+
+    tex->oil_reserves -=
+        barrels;
+
+
+    tex->gold_reserves +=
+        gold->ounces;
+
+
+    /*
+     * Record transaction.
+     */
+
+    if (tex->transaction_count <
+        MAX_TRANSACTIONS)
+    {
+        OilTransaction *transaction =
+            &tex->transactions[
+                tex->transaction_count++
+            ];
+
+        transaction->barrels =
+            barrels;
+
+        transaction->gold_paid =
+            gold->ounces;
+
+        transaction->completed =
+            true;
+    }
+
+
+    printf(
+        "\n"
+        "================================================\n"
+        "CALDWELL ENERGY TRANSACTION\n"
+        "================================================\n"
+        "Oil purchased: %.0f barrels\n"
+        "Gold delivered: %.2f oz\n"
+        "Oil price: $%.2f/barrel\n"
+        "Settlement: PHYSICAL GOLD\n"
+        "================================================\n",
+        barrels,
+        gold->ounces,
+        oil_price
+    );
+
+
+    return true;
+}
+
+
+/* ============================================================
+ * NPC REACTION
+ * ============================================================ */
+
+void tex_react_to_payment(
+    TexCaldwell *tex,
+    PaymentType payment
+)
+{
+    if (payment == PAYMENT_GOLD)
+    {
+        tex->mood =
+            TEX_MOOD_CONFIDENT;
+
+        tex->suspicion -=
+            0.05;
+
+        if (tex->suspicion < 0.0)
+            tex->suspicion = 0.0;
+
+        printf(
+            "TEX: \"Now that's a currency "
+            "I understand.\"\n"
+        );
+
+        return;
+    }
+
+
+    tex->mood =
+        TEX_MOOD_SUSPICIOUS;
+
+
+    tex->suspicion +=
+        0.10;
+
+
+    if (tex->suspicion > 1.0)
+        tex->suspicion = 1.0;
+
+
+    printf(
+        "TEX: \"I don't take paper promises.\"\n"
+    );
+}
+
+
+/* ============================================================
+ * PLAYER RELATIONSHIP
+ * ============================================================ */
+
+void modify_relationship(
+    TexCaldwell *tex,
+    int player_id,
+    double respect,
+    double trust
+)
+{
+    int index = -1;
+
+
+    for (int i = 0;
+         i < tex->relationship_count;
+         i++)
+    {
+        if (tex->relationships[i]
+                .character_id == player_id)
+        {
+            index = i;
+            break;
+        }
+    }
+
+
+    if (index == -1)
+    {
+        if (tex->relationship_count >=
+            MAX_RELATIONSHIPS)
+            return;
+
+
+        index =
+            tex->relationship_count++;
+
+
+        tex->relationships[index]
+            .character_id =
+                player_id;
+    }
+
+
+    tex->relationships[index]
+        .respect += respect;
+
+
+    tex->relationships[index]
+        .trust += trust;
+}
+
+
+/* ============================================================
+ * NPC STATUS
+ * ============================================================ */
+
+void print_tex_status(
+    TexCaldwell *tex
+)
+{
+    printf(
+        "\n"
+        "################################################\n"
+        "#             J. THORNTON CALDWELL             #\n"
+        "################################################\n"
+        "\n"
+        "Nickname:       %s\n"
+        "Position:       %s\n"
+        "Age:            %d\n"
+        "Wealth:         $%.0f\n"
+        "Influence:      %.2f\n"
+        "Ruthlessness:   %.2f\n"
+        "Charisma:       %.2f\n"
+        "Intelligence:   %.2f\n"
+        "Greed:          %.2f\n"
+        "Suspicion:      %.2f\n"
+        "\n"
+        "Oil Reserves:   %.0f barrels\n"
+        "Daily Output:   %.0f barrels\n"
+        "Gold Reserves:  %.0f oz\n"
+        "\n"
+        "Residence:      %s\n"
+        "Office:         %s\n"
+        "Vehicle:        %s\n"
+        "\n"
+        "\"%s\"\n",
+        tex->nickname,
+        tex->title,
+        tex->age,
+        tex->wealth,
+        tex->influence,
+        tex->ruthlessness,
+        tex->charisma,
+        tex->intelligence,
+        tex->greed,
+        tex->suspicion,
+        tex->oil_reserves,
+        tex->daily_production,
+        tex->gold_reserves,
+        tex->home,
+        tex->office,
+        tex->vehicle,
+        tex->catchphrase
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    TexCaldwell tex;
+
+
+    initialise_tex(
+        &tex
+    );
+
+
+    print_tex_status(
+        &tex
+    );
+
+
+    /*
+     * Example market.
+     */
+
+    double oil_market_price =
+        82.50;
+
+
+    double gold_market_price =
+        2500.00;
+
+
+    /*
+     * Player arrives with physical gold.
+     */
+
+    Gold player_gold;
+
+    player_gold.ounces =
+        500.0;
+
+    player_gold.purity =
+        0.999;
+
+    player_gold.market_value =
+        gold_market_price;
+
+
+    printf(
+        "\nPLAYER APPROACHES CALDWELL...\n"
+    );
+
+
+    tex_react_to_payment(
+        &tex,
+        PAYMENT_GOLD
+    );
+
+
+    /*
+     * Attempt oil purchase.
+     */
+
+    sell_oil_for_gold(
+        &tex,
+        10000.0,
+        &player_gold,
+        oil_market_price,
+        gold_market_price
+    );
+
+
+    /*
+     * Final status.
+     */
+
+    print_tex_status(
+        &tex
+    );
+
+
+    return 0;
+}
+
+
+
+
+
+
+/*
+ * ============================================================
+ * MIAMI OPEN WORLD
+ * OIL MARKET ECONOMIC ENGINE
+ * ============================================================
+ *
+ * Background simulation for a fictional open-world economy.
+ *
+ * Simulates:
+ *
+ *   - crude oil production
+ *   - inventories
+ *   - refinery demand
+ *   - imports / exports
+ *   - transport costs
+ *   - regional demand
+ *   - market sentiment
+ *   - shortages
+ *   - oversupply
+ *   - price shocks
+ *   - corporate behaviour
+ *   - strategic reserves
+ *   - NPC trading
+ *
+ * This is an ECONOMIC GAME SIMULATION.
+ *
+ * It is deliberately fictional and does not represent
+ * a real-world trading system.
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+
+/* ============================================================
+ * CONFIGURATION
+ * ============================================================ */
+
+#define MAX_PRODUCERS       32
+#define MAX_REFINERIES      24
+#define MAX_REGIONS         16
+#define MAX_TRANSACTIONS    256
+#define MAX_DAYS            3650
+
+#define STARTING_OIL_PRICE  80.0
+#define MIN_OIL_PRICE       15.0
+#define MAX_OIL_PRICE       300.0
+
+
+/* ============================================================
+ * MARKET PARTICIPANTS
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double daily_production;
+
+    double production_cost;
+
+    double reserves;
+
+    double storage;
+
+    double market_share;
+
+    double reliability;
+
+    bool active;
+
+} OilProducer;
+
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double daily_capacity;
+
+    double utilization;
+
+    double crude_inventory;
+
+    double fuel_output;
+
+    double demand;
+
+    bool active;
+
+} Refinery;
+
+
+/* ============================================================
+ * REGIONAL MARKET
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double population;
+
+    double industrial_demand;
+
+    double transport_demand;
+
+    double electricity_demand;
+
+    double total_demand;
+
+    double inventory;
+
+    double import_dependency;
+
+} OilRegion;
+
+
+/* ============================================================
+ * MARKET SENTIMENT
+ * ============================================================ */
+
+typedef struct
+{
+    double demand_pressure;
+
+    double supply_pressure;
+
+    double inventory_pressure;
+
+    double geopolitical_risk;
+
+    double weather_risk;
+
+    double speculation;
+
+    double confidence;
+
+} MarketSentiment;
+
+
+/* ============================================================
+ * PRICE
+ * ============================================================ */
+
+typedef struct
+{
+    double spot_price;
+
+    double previous_price;
+
+    double opening_price;
+
+    double daily_high;
+
+    double daily_low;
+
+    double volatility;
+
+    double trend;
+
+} OilPrice;
+
+
+/* ============================================================
+ * TRANSACTION
+ * ============================================================ */
+
+typedef struct
+{
+    int buyer;
+
+    int seller;
+
+    double barrels;
+
+    double price;
+
+    double total_value;
+
+} OilTransaction;
+
+
+/* ============================================================
+ * GLOBAL MARKET
+ * ============================================================ */
+
+typedef struct
+{
+    int day;
+
+    double global_production;
+
+    double global_consumption;
+
+    double global_inventory;
+
+    double strategic_reserve;
+
+    double imports;
+
+    double exports;
+
+    double refinery_demand;
+
+    double transport_demand;
+
+    double industrial_demand;
+
+    OilPrice price;
+
+    MarketSentiment sentiment;
+
+    OilProducer producers[MAX_PRODUCERS];
+
+    Refinery refineries[MAX_REFINERIES];
+
+    OilRegion regions[MAX_REGIONS];
+
+    OilTransaction transactions[MAX_TRANSACTIONS];
+
+    int producer_count;
+
+    int refinery_count;
+
+    int region_count;
+
+    int transaction_count;
+
+} OilMarket;
+
+
+/* ============================================================
+ * RANDOM UTILITY
+ * ============================================================ */
+
+double random_range(
+    double min,
+    double max
+)
+{
+    double r =
+        (double)rand() /
+        (double)RAND_MAX;
+
+    return min +
+           r * (max - min);
+}
+
+
+/* ============================================================
+ * CLAMP
+ * ============================================================ */
+
+double clamp(
+    double value,
+    double min,
+    double max
+)
+{
+    if (value < min)
+        return min;
+
+    if (value > max)
+        return max;
+
+    return value;
+}
+
+
+/* ============================================================
+ * MARKET INITIALISATION
+ * ============================================================ */
+
+void initialise_market(
+    OilMarket *market
+)
+{
+    memset(
+        market,
+        0,
+        sizeof(OilMarket)
+    );
+
+    market->day = 0;
+
+    market->price.spot_price =
+        STARTING_OIL_PRICE;
+
+    market->price.previous_price =
+        STARTING_OIL_PRICE;
+
+    market->price.opening_price =
+        STARTING_OIL_PRICE;
+
+    market->price.daily_high =
+        STARTING_OIL_PRICE;
+
+    market->price.daily_low =
+        STARTING_OIL_PRICE;
+
+    market->strategic_reserve =
+        50000000.0;
+}
+
+
+/* ============================================================
+ * ADD PRODUCER
+ * ============================================================ */
+
+void add_producer(
+    OilMarket *market,
+    const char *name,
+    double production,
+    double cost,
+    double reserves
+)
+{
+    if (market->producer_count >=
+        MAX_PRODUCERS)
+        return;
+
+    OilProducer *p =
+        &market->producers[
+            market->producer_count
+        ];
+
+    p->id =
+        market->producer_count;
+
+    snprintf(
+        p->name,
+        sizeof(p->name),
+        "%s",
+        name
+    );
+
+    p->daily_production =
+        production;
+
+    p->production_cost =
+        cost;
+
+    p->reserves =
+        reserves;
+
+    p->storage =
+        production * 7.0;
+
+    p->reliability =
+        0.90;
+
+    p->active =
+        true;
+
+    market->producer_count++;
+}
+
+
+/* ============================================================
+ * ADD REFINERY
+ * ============================================================ */
+
+void add_refinery(
+    OilMarket *market,
+    const char *name,
+    double capacity
+)
+{
+    if (market->refinery_count >=
+        MAX_REFINERIES)
+        return;
+
+    Refinery *r =
+        &market->refineries[
+            market->refinery_count
+        ];
+
+    r->id =
+        market->refinery_count;
+
+    snprintf(
+        r->name,
+        sizeof(r->name),
+        "%s",
+        name
+    );
+
+    r->daily_capacity =
+        capacity;
+
+    r->utilization =
+        0.85;
+
+    r->crude_inventory =
+        capacity * 3.0;
+
+    r->active =
+        true;
+
+    market->refinery_count++;
+}
+
+
+/* ============================================================
+ * ADD REGION
+ * ============================================================ */
+
+void add_region(
+    OilMarket *market,
+    const char *name,
+    double population,
+    double industrial,
+    double transport
+)
+{
+    if (market->region_count >=
+        MAX_REGIONS)
+        return;
+
+    OilRegion *r =
+        &market->regions[
+            market->region_count
+        ];
+
+    r->id =
+        market->region_count;
+
+    snprintf(
+        r->name,
+        sizeof(r->name),
+        "%s",
+        name
+    );
+
+    r->population =
+        population;
+
+    r->industrial_demand =
+        industrial;
+
+    r->transport_demand =
+        transport;
+
+    r->electricity_demand =
+        population * 0.02;
+
+    r->inventory =
+        (industrial + transport) * 5.0;
+
+    r->import_dependency =
+        random_range(
+            0.20,
+            0.90
+        );
+
+    market->region_count++;
+}
+
+
+/* ============================================================
+ * CALCULATE DEMAND
+ * ============================================================ */
+
+void calculate_demand(
+    OilMarket *market
+)
+{
+    double total = 0.0;
+
+    double industrial = 0.0;
+
+    double transport = 0.0;
+
+
+    for (int i = 0;
+         i < market->region_count;
+         i++)
+    {
+        OilRegion *r =
+            &market->regions[i];
+
+
+        /*
+         * Random short-term demand movement.
+         */
+
+        double transport_factor =
+            1.0 +
+            random_range(
+                -0.025,
+                0.025
+            );
+
+
+        double industrial_factor =
+            1.0 +
+            random_range(
+                -0.020,
+                0.020
+            );
+
+
+        r->transport_demand *=
+            transport_factor;
+
+        r->industrial_demand *=
+            industrial_factor;
+
+
+        r->total_demand =
+            r->industrial_demand +
+            r->transport_demand +
+            r->electricity_demand;
+
+
+        total +=
+            r->total_demand;
+
+        industrial +=
+            r->industrial_demand;
+
+        transport +=
+            r->transport_demand;
+    }
+
+
+    market->global_consumption =
+        total;
+
+    market->industrial_demand =
+        industrial;
+
+    market->transport_demand =
+        transport;
+}
+
+
+/* ============================================================
+ * PRODUCTION
+ * ============================================================ */
+
+void calculate_production(
+    OilMarket *market
+)
+{
+    double total = 0.0;
+
+
+    for (int i = 0;
+         i < market->producer_count;
+         i++)
+    {
+        OilProducer *p =
+            &market->producers[i];
+
+
+        if (!p->active)
+            continue;
+
+
+        /*
+         * Production varies slightly.
+         */
+
+        double output =
+            p->daily_production *
+            random_range(
+                0.97,
+                1.03
+            );
+
+
+        /*
+         * Producers with very low reserves
+         * gradually decline.
+         */
+
+        if (p->reserves < 1000000.0)
+        {
+            output *= 0.80;
+        }
+
+
+        p->reserves -=
+            output;
+
+
+        p->storage +=
+            output;
+
+
+        total +=
+            output;
+    }
+
+
+    market->global_production =
+        total;
+}
+
+
+/* ============================================================
+ * REFINERY DEMAND
+ * ============================================================ */
+
+void calculate_refinery_demand(
+    OilMarket *market
+)
+{
+    double total = 0.0;
+
+
+    for (int i = 0;
+         i < market->refinery_count;
+         i++)
+    {
+        Refinery *r =
+            &market->refineries[i];
+
+
+        if (!r->active)
+            continue;
+
+
+        double demand =
+            r->daily_capacity *
+            r->utilization;
+
+
+        r->demand =
+            demand;
+
+
+        total +=
+            demand;
+    }
+
+
+    market->refinery_demand =
+        total;
+}
+
+
+/* ============================================================
+ * INVENTORY
+ * ============================================================ */
+
+void update_inventory(
+    OilMarket *market
+)
+{
+    double net_flow =
+        market->global_production
+        -
+        market->global_consumption;
+
+
+    market->global_inventory +=
+        net_flow;
+
+
+    if (market->global_inventory <
+        0.0)
+    {
+        market->global_inventory =
+            0.0;
+    }
+}
+
+
+/* ============================================================
+ * MARKET SENTIMENT
+ * ============================================================ */
+
+void calculate_sentiment(
+    OilMarket *market
+)
+{
+    double supply =
+        market->global_production;
+
+    double demand =
+        market->global_consumption;
+
+
+    market->sentiment.supply_pressure =
+        supply / fmax(
+            demand,
+            1.0
+        );
+
+
+    market->sentiment.demand_pressure =
+        demand / fmax(
+            supply,
+            1.0
+        );
+
+
+    /*
+     * Inventory pressure.
+     */
+
+    double inventory_ratio =
+        market->global_inventory /
+        fmax(
+            demand * 30.0,
+            1.0
+        );
+
+
+    market->sentiment.inventory_pressure =
+        clamp(
+            inventory_ratio,
+            0.0,
+            3.0
+        );
+
+
+    /*
+     * Random market uncertainty.
+     */
+
+    market->sentiment.geopolitical_risk =
+        random_range(
+            0.0,
+            0.20
+        );
+
+
+    market->sentiment.weather_risk =
+        random_range(
+            0.0,
+            0.10
+        );
+
+
+    market->sentiment.speculation =
+        random_range(
+            -0.10,
+            0.10
+        );
+
+
+    market->sentiment.confidence =
+        clamp(
+            0.75 -
+            market->sentiment.geopolitical_risk
+            -
+            market->sentiment.weather_risk,
+            0.0,
+            1.0
+        );
+}
+
+
+/* ============================================================
+ * PRICE ENGINE
+ * ============================================================ */
+
+void update_oil_price(
+    OilMarket *market
+)
+{
+    double price =
+        market->price.spot_price;
+
+
+    /*
+     * Supply / demand balance.
+     */
+
+    double balance =
+        market->global_consumption -
+        market->global_production;
+
+
+    double demand_effect =
+        balance /
+        fmax(
+            market->global_consumption,
+            1.0
+        );
+
+
+    /*
+     * Inventory effect.
+     *
+     * Low inventory = higher prices.
+     */
+
+    double inventory_target =
+        market->global_consumption *
+        30.0;
+
+
+    double inventory_ratio =
+        market->global_inventory /
+        fmax(
+            inventory_target,
+            1.0
+        );
+
+
+    double inventory_effect =
+        0.50 -
+        inventory_ratio;
+
+
+    /*
+     * Risk premium.
+     */
+
+    double risk =
+        market->sentiment
+            .geopolitical_risk
+        +
+        market->sentiment
+            .weather_risk;
+
+
+    /*
+     * Speculative component.
+     */
+
+    double speculation =
+        market->sentiment
+            .speculation;
+
+
+    /*
+     * Combined price movement.
+     */
+
+    double change =
+        demand_effect * 0.20
+        +
+        inventory_effect * 0.10
+        +
+        risk * 0.10
+        +
+        speculation * 0.05;
+
+
+    /*
+     * Add small market noise.
+     */
+
+    change +=
+        random_range(
+            -0.015,
+            0.015
+        );
+
+
+    price *=
+        1.0 + change;
+
+
+    price =
+        clamp(
+            price,
+            MIN_OIL_PRICE,
+            MAX_OIL_PRICE
+        );
+
+
+    market->price.previous_price =
+        market->price.spot_price;
+
+    market->price.spot_price =
+        price;
+
+
+    if (price >
+        market->price.daily_high)
+    {
+        market->price.daily_high =
+            price;
+    }
+
+
+    if (price <
+        market->price.daily_low)
+    {
+        market->price.daily_low =
+            price;
+    }
+}
+
+
+/* ============================================================
+ * STRATEGIC RESERVE
+ * ============================================================ */
+
+void manage_strategic_reserve(
+    OilMarket *market
+)
+{
+    double demand =
+        market->global_consumption;
+
+
+    double reserve_days =
+        market->strategic_reserve /
+        fmax(
+            demand,
+            1.0
+        );
+
+
+    /*
+     * Build reserve when prices are low.
+     */
+
+    if (reserve_days < 60.0 &&
+        market->price.spot_price < 70.0)
+    {
+        double purchase =
+            demand * 0.10;
+
+        market->strategic_reserve +=
+            purchase;
+
+        market->global_inventory -=
+            purchase;
+    }
+
+
+    /*
+     * Release reserve during shortage.
+     */
+
+    if (reserve_days > 30.0 &&
+        market->price.spot_price > 150.0)
+    {
+        double release =
+            demand * 0.05;
+
+        market->strategic_reserve -=
+            release;
+
+        market->global_inventory +=
+            release;
+    }
+}
+
+
+/* ============================================================
+ * MARKET SHOCK
+ * ============================================================ */
+
+void apply_market_shock(
+    OilMarket *market,
+    double production_multiplier,
+    double demand_multiplier
+)
+{
+    for (int i = 0;
+         i < market->producer_count;
+         i++)
+    {
+        market->producers[i]
+            .daily_production *=
+                production_multiplier;
+    }
+
+
+    for (int i = 0;
+         i < market->region_count;
+         i++)
+    {
+        market->regions[i]
+            .transport_demand *=
+                demand_multiplier;
+
+        market->regions[i]
+            .industrial_demand *=
+                demand_multiplier;
+    }
+}
+
+
+/* ============================================================
+ * DAILY SIMULATION
+ * ============================================================ */
+
+void simulate_day(
+    OilMarket *market
+)
+{
+    market->day++;
+
+
+    market->price.opening_price =
+        market->price.spot_price;
+
+    market->price.daily_high =
+        market->price.spot_price;
+
+    market->price.daily_low =
+        market->price.spot_price;
+
+
+    calculate_demand(
+        market
+    );
+
+
+    calculate_production(
+        market
+    );
+
+
+    calculate_refinery_demand(
+        market
+    );
+
+
+    update_inventory(
+        market
+    );
+
+
+    calculate_sentiment(
+        market
+    );
+
+
+    manage_strategic_reserve(
+        market
+    );
+
+
+    update_oil_price(
+        market
+    );
+}
+
+
+/* ============================================================
+ * MARKET REPORT
+ * ============================================================ */
+
+void print_market_report(
+    OilMarket *market
+)
+{
+    double daily_change =
+        market->price.spot_price -
+        market->price.previous_price;
+
+
+    double percentage =
+        (daily_change /
+         market->price.previous_price)
+        * 100.0;
+
+
+    printf(
+        "\n"
+        "====================================================\n"
+        "             GLOBAL OIL MARKET\n"
+        "====================================================\n"
+        "Day:                  %d\n"
+        "Spot Price:           $%.2f / barrel\n"
+        "Daily Change:         %+.2f%%\n"
+        "Daily High:           $%.2f\n"
+        "Daily Low:            $%.2f\n"
+        "\n"
+        "Production:           %.0f barrels/day\n"
+        "Consumption:          %.0f barrels/day\n"
+        "Inventory:            %.0f barrels\n"
+        "Strategic Reserve:    %.0f barrels\n"
+        "\n"
+        "Refinery Demand:      %.0f barrels/day\n"
+        "Transport Demand:     %.0f barrels/day\n"
+        "Industrial Demand:    %.0f barrels/day\n"
+        "\n"
+        "Geopolitical Risk:    %.2f\n"
+        "Weather Risk:         %.2f\n"
+        "Speculation:          %+.2f\n"
+        "Market Confidence:    %.2f\n"
+        "====================================================\n",
+        market->day,
+        market->price.spot_price,
+        percentage,
+        market->price.daily_high,
+        market->price.daily_low,
+        market->global_production,
+        market->global_consumption,
+        market->global_inventory,
+        market->strategic_reserve,
+        market->refinery_demand,
+        market->transport_demand,
+        market->industrial_demand,
+        market->sentiment.geopolitical_risk,
+        market->sentiment.weather_risk,
+        market->sentiment.speculation,
+        market->sentiment.confidence
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+
+    OilMarket market;
+
+
+    initialise_market(
+        &market
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * FICTIONAL OIL PRODUCERS
+     * --------------------------------------------------------
+     */
+
+    add_producer(
+        &market,
+        "Caldwell Energy",
+        175000.0,
+        34.0,
+        185000000.0
+    );
+
+
+    add_producer(
+        &market,
+        "Atlantic Petroleum",
+        240000.0,
+        41.0,
+        95000000.0
+    );
+
+
+    add_producer(
+        &market,
+        "SunCoast Resources",
+        90000.0,
+        47.0,
+        32000000.0
+    );
+
+
+    add_producer(
+        &market,
+        "Gulf Meridian Oil",
+        310000.0,
+        38.0,
+        140000000.0
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * REFINERIES
+     * --------------------------------------------------------
+     */
+
+    add_refinery(
+        &market,
+        "Miami Central Refining",
+        180000.0
+    );
+
+
+    add_refinery(
+        &market,
+        "Atlantic Fuel Works",
+        240000.0
+    );
+
+
+    add_refinery(
+        &market,
+        "Florida Gulf Refining",
+        150000.0
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * REGIONS
+     * --------------------------------------------------------
+     */
+
+    add_region(
+        &market,
+        "Miami",
+        6000000.0,
+        65000.0,
+        95000.0
+    );
+
+
+    add_region(
+        &market,
+        "Florida Interior",
+        4200000.0,
+        55000.0,
+        70000.0
+    );
+
+
+    add_region(
+        &market,
+        "Atlantic Coast",
+        7200000.0,
+        90000.0,
+        110000.0
+    );
+
+
+    add_region(
+        &market,
+        "Northern Industrial Zone",
+        5100000.0,
+        105000.0,
+        65000.0
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * INITIAL INVENTORY
+     * --------------------------------------------------------
+     */
+
+    market.global_inventory =
+        45000000.0;
+
+
+    /*
+     * --------------------------------------------------------
+     * RUN SIMULATION
+     * --------------------------------------------------------
+     */
+
+    for (int day = 0;
+         day < 365;
+         day++)
+    {
+        /*
+         * Occasional fictional market shock.
+         */
+
+        if (day == 90)
+        {
+            printf(
+                "\n"
+                "*** MARKET EVENT: SUPPLY DISRUPTION ***\n"
+            );
+
+            apply_market_shock(
+                &market,
+                0.80,
+                1.00
+            );
+        }
+
+
+        if (day == 180)
+        {
+            printf(
+                "\n"
+                "*** MARKET EVENT: DEMAND SURGE ***\n"
+            );
+
+            apply_market_shock(
+                &market,
+                1.00,
+                1.20
+            );
+        }
+
+
+        if (day == 270)
+        {
+            printf(
+                "\n"
+                "*** MARKET EVENT: PRODUCTION RECOVERY ***\n"
+            );
+
+            apply_market_shock(
+                &market,
+                1.25,
+                0.95
+            );
+        }
+
+
+        simulate_day(
+            &market
+        );
+
+
+        /*
+         * Print monthly reports.
+         */
+
+        if (day % 30 == 0)
+        {
+            print_market_report(
+                &market
+            );
+        }
+    }
+
+
+    return 0;
+}
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * AURUM MIAMI EXCHANGE
+ * ============================================================
+ *
+ * Fictional high-security gold exchange for an open-world game.
+ *
+ * Features:
+ *
+ *   - Exchange members
+ *   - Gold vaults
+ *   - Deposits / withdrawals
+ *   - Assay verification
+ *   - Gold bars
+ *   - Spot market
+ *   - Buy / sell orders
+ *   - Order matching
+ *   - Settlement
+ *   - Multi-layer security
+ *   - Access control
+ *   - Audit trail
+ *   - Suspicious activity detection
+ *   - Exchange halts
+ *   - NPC security personnel
+ *
+ * All values are fictional game-economy values.
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <time.h>
+#include <math.h>
+
+
+#define MAX_MEMBERS       128
+#define MAX_BARS          2048
+#define MAX_ORDERS        1024
+#define MAX_TRADES        2048
+#define MAX_AUDIT         4096
+#define MAX_SECURITY      64
+
+
+/* ============================================================
+ * CONSTANTS
+ * ============================================================ */
+
+#define GOLD_MIN_PURITY   0.995
+#define GOLD_SPOT_PRICE   2500.0
+
+#define MAX_ORDER_SIZE    100000.0
+
+#define SECURITY_NORMAL   0
+#define SECURITY_ELEVATED 1
+#define SECURITY_LOCKDOWN 2
+
+
+/* ============================================================
+ * GOLD BAR
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    double weight_oz;
+
+    double purity;
+
+    double market_value;
+
+    bool assayed;
+
+    bool vaulted;
+
+    bool locked;
+
+} GoldBar;
+
+
+/* ============================================================
+ * MEMBER
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    char organisation[96];
+
+    double cash_balance;
+
+    double gold_balance;
+
+    double reputation;
+
+    int security_clearance;
+
+    bool active;
+
+} ExchangeMember;
+
+
+/* ============================================================
+ * ORDER
+ * ============================================================ */
+
+typedef enum
+{
+    ORDER_BUY,
+    ORDER_SELL
+} OrderType;
+
+
+typedef struct
+{
+    int id;
+
+    int member_id;
+
+    OrderType type;
+
+    double ounces;
+
+    double price;
+
+    double remaining;
+
+    bool active;
+
+} GoldOrder;
+
+
+/* ============================================================
+ * TRADE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    int buyer_id;
+
+    int seller_id;
+
+    double ounces;
+
+    double price;
+
+    double value;
+
+    time_t timestamp;
+
+} GoldTrade;
+
+
+/* ============================================================
+ * AUDIT
+ * ============================================================ */
+
+typedef struct
+{
+    time_t timestamp;
+
+    int member_id;
+
+    char action[128];
+
+    char result[64];
+
+} AuditEntry;
+
+
+/* ============================================================
+ * SECURITY
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    char role[64];
+
+    int clearance;
+
+    bool armed;
+
+    bool active;
+
+} SecurityOfficer;
+
+
+/* ============================================================
+ * EXCHANGE
+ * ============================================================ */
+
+typedef struct
+{
+    char name[128];
+
+    double gold_spot_price;
+
+    double total_gold_vaulted;
+
+    double total_cash_reserves;
+
+    int security_state;
+
+    bool market_open;
+
+    bool withdrawals_enabled;
+
+    bool deposits_enabled;
+
+    ExchangeMember members[MAX_MEMBERS];
+
+    GoldBar bars[MAX_BARS];
+
+    GoldOrder orders[MAX_ORDERS];
+
+    GoldTrade trades[MAX_TRADES];
+
+    AuditEntry audit[MAX_AUDIT];
+
+    SecurityOfficer security[MAX_SECURITY];
+
+    int member_count;
+
+    int bar_count;
+
+    int order_count;
+
+    int trade_count;
+
+    int audit_count;
+
+    int security_count;
+
+} GoldExchange;
+
+
+/* ============================================================
+ * AUDIT LOG
+ * ============================================================ */
+
+void audit_log(
+    GoldExchange *exchange,
+    int member_id,
+    const char *action,
+    const char *result
+)
+{
+    if (exchange->audit_count >= MAX_AUDIT)
+        return;
+
+    AuditEntry *entry =
+        &exchange->audit[
+            exchange->audit_count++
+        ];
+
+    entry->timestamp =
+        time(NULL);
+
+    entry->member_id =
+        member_id;
+
+    snprintf(
+        entry->action,
+        sizeof(entry->action),
+        "%s",
+        action
+    );
+
+    snprintf(
+        entry->result,
+        sizeof(entry->result),
+        "%s",
+        result
+    );
+}
+
+
+/* ============================================================
+ * FIND MEMBER
+ * ============================================================ */
+
+ExchangeMember *find_member(
+    GoldExchange *exchange,
+    int id
+)
+{
+    for (int i = 0;
+         i < exchange->member_count;
+         i++)
+    {
+        if (exchange->members[i].id == id)
+            return &exchange->members[i];
+    }
+
+    return NULL;
+}
+
+
+/* ============================================================
+ * SECURITY STATE
+ * ============================================================ */
+
+void set_security_state(
+    GoldExchange *exchange,
+    int state
+)
+{
+    exchange->security_state =
+        state;
+
+    if (state == SECURITY_NORMAL)
+    {
+        printf(
+            "\n[SECURITY] STATUS: NORMAL\n"
+        );
+    }
+
+    else if (state == SECURITY_ELEVATED)
+    {
+        printf(
+            "\n[SECURITY] STATUS: ELEVATED\n"
+        );
+    }
+
+    else
+    {
+        printf(
+            "\n[SECURITY] STATUS: LOCKDOWN\n"
+        );
+
+        exchange->withdrawals_enabled =
+            false;
+    }
+}
+
+
+/* ============================================================
+ * EXCHANGE INITIALISATION
+ * ============================================================ */
+
+void initialise_exchange(
+    GoldExchange *exchange
+)
+{
+    memset(
+        exchange,
+        0,
+        sizeof(GoldExchange)
+    );
+
+
+    strcpy(
+        exchange->name,
+        "Aurum Miami Exchange"
+    );
+
+
+    exchange->gold_spot_price =
+        GOLD_SPOT_PRICE;
+
+
+    exchange->market_open =
+        true;
+
+
+    exchange->withdrawals_enabled =
+        true;
+
+
+    exchange->deposits_enabled =
+        true;
+
+
+    exchange->security_state =
+        SECURITY_NORMAL;
+}
+
+
+/* ============================================================
+ * ADD MEMBER
+ * ============================================================ */
+
+int add_member(
+    GoldExchange *exchange,
+    const char *name,
+    const char *organisation,
+    double cash
+)
+{
+    if (exchange->member_count >=
+        MAX_MEMBERS)
+        return -1;
+
+
+    int id =
+        1000 +
+        exchange->member_count;
+
+
+    ExchangeMember *member =
+        &exchange->members[
+            exchange->member_count++
+        ];
+
+
+    member->id =
+        id;
+
+
+    snprintf(
+        member->name,
+        sizeof(member->name),
+        "%s",
+        name
+    );
+
+
+    snprintf(
+        member->organisation,
+        sizeof(member->organisation),
+        "%s",
+        organisation
+    );
+
+
+    member->cash_balance =
+        cash;
+
+
+    member->gold_balance =
+        0.0;
+
+
+    member->reputation =
+        0.75;
+
+
+    member->security_clearance =
+        1;
+
+
+    member->active =
+        true;
+
+
+    audit_log(
+        exchange,
+        id,
+        "ACCOUNT_CREATED",
+        "APPROVED"
+    );
+
+
+    return id;
+}
+
+
+/* ============================================================
+ * GOLD ASSAY
+ * ============================================================ */
+
+bool assay_gold(
+    GoldBar *bar
+)
+{
+    if (bar->weight_oz <= 0.0)
+        return false;
+
+
+    if (bar->purity <
+        GOLD_MIN_PURITY)
+        return false;
+
+
+    bar->assayed =
+        true;
+
+
+    return true;
+}
+
+
+/* ============================================================
+ * DEPOSIT GOLD
+ * ============================================================ */
+
+bool deposit_gold(
+    GoldExchange *exchange,
+    int member_id,
+    double ounces,
+    double purity
+)
+{
+    if (!exchange->deposits_enabled)
+        return false;
+
+
+    if (exchange->security_state ==
+        SECURITY_LOCKDOWN)
+        return false;
+
+
+    if (ounces <= 0.0)
+        return false;
+
+
+    if (purity < GOLD_MIN_PURITY)
+        return false;
+
+
+    if (exchange->bar_count >=
+        MAX_BARS)
+        return false;
+
+
+    ExchangeMember *member =
+        find_member(
+            exchange,
+            member_id
+        );
+
+
+    if (!member ||
+        !member->active)
+        return false;
+
+
+    GoldBar *bar =
+        &exchange->bars[
+            exchange->bar_count++
+        ];
+
+
+    bar->id =
+        exchange->bar_count;
+
+
+    bar->weight_oz =
+        ounces;
+
+
+    bar->purity =
+        purity;
+
+
+    bar->market_value =
+        ounces *
+        purity *
+        exchange->gold_spot_price;
+
+
+    bar->assayed =
+        assay_gold(bar);
+
+
+    bar->vaulted =
+        true;
+
+
+    bar->locked =
+        false;
+
+
+    member->gold_balance +=
+        ounces;
+
+
+    exchange->total_gold_vaulted +=
+        ounces;
+
+
+    audit_log(
+        exchange,
+        member_id,
+        "GOLD_DEPOSIT",
+        "SETTLED"
+    );
+
+
+    return true;
+}
+
+
+/* ============================================================
+ * WITHDRAW GOLD
+ * ============================================================ */
+
+bool withdraw_gold(
+    GoldExchange *exchange,
+    int member_id,
+    double ounces
+)
+{
+    if (!exchange->withdrawals_enabled)
+        return false;
+
+
+    if (exchange->security_state ==
+        SECURITY_LOCKDOWN)
+        return false;
+
+
+    ExchangeMember *member =
+        find_member(
+            exchange,
+            member_id
+        );
+
+
+    if (!member ||
+        !member->active)
+        return false;
+
+
+    if (member->gold_balance <
+        ounces)
+        return false;
+
+
+    member->gold_balance -=
+        ounces;
+
+
+    exchange->total_gold_vaulted -=
+        ounces;
+
+
+    audit_log(
+        exchange,
+        member_id,
+        "GOLD_WITHDRAWAL",
+        "APPROVED"
+    );
+
+
+    return true;
+}
+
+
+/* ============================================================
+ * BUY ORDER
+ * ============================================================ */
+
+int place_buy_order(
+    GoldExchange *exchange,
+    int member_id,
+    double ounces,
+    double price
+)
+{
+    if (!exchange->market_open)
+        return -1;
+
+
+    if (exchange->security_state ==
+        SECURITY_LOCKDOWN)
+        return -1;
+
+
+    if (ounces <= 0.0 ||
+        ounces > MAX_ORDER_SIZE)
+        return -1;
+
+
+    if (price <= 0.0)
+        return -1;
+
+
+    ExchangeMember *member =
+        find_member(
+            exchange,
+            member_id
+        );
+
+
+    if (!member ||
+        !member->active)
+        return -1;
+
+
+    double required_cash =
+        ounces * price;
+
+
+    if (member->cash_balance <
+        required_cash)
+        return -1;
+
+
+    if (exchange->order_count >=
+        MAX_ORDERS)
+        return -1;
+
+
+    GoldOrder *order =
+        &exchange->orders[
+            exchange->order_count
+        ];
+
+
+    order->id =
+        exchange->order_count;
+
+
+    order->member_id =
+        member_id;
+
+
+    order->type =
+        ORDER_BUY;
+
+
+    order->ounces =
+        ounces;
+
+
+    order->price =
+        price;
+
+
+    order->remaining =
+        ounces;
+
+
+    order->active =
+        true;
+
+
+    exchange->order_count++;
+
+
+    audit_log(
+        exchange,
+        member_id,
+        "BUY_ORDER",
+        "ACCEPTED"
+    );
+
+
+    return order->id;
+}
+
+
+/* ============================================================
+ * SELL ORDER
+ * ============================================================ */
+
+int place_sell_order(
+    GoldExchange *exchange,
+    int member_id,
+    double ounces,
+    double price
+)
+{
+    if (!exchange->market_open)
+        return -1;
+
+
+    if (exchange->security_state ==
+        SECURITY_LOCKDOWN)
+        return -1;
+
+
+    ExchangeMember *member =
+        find_member(
+            exchange,
+            member_id
+        );
+
+
+    if (!member ||
+        member->gold_balance < ounces)
+        return -1;
+
+
+    if (exchange->order_count >=
+        MAX_ORDERS)
+        return -1;
+
+
+    GoldOrder *order =
+        &exchange->orders[
+            exchange->order_count
+        ];
+
+
+    order->id =
+        exchange->order_count;
+
+
+    order->member_id =
+        member_id;
+
+
+    order->type =
+        ORDER_SELL;
+
+
+    order->ounces =
+        ounces;
+
+
+    order->price =
+        price;
+
+
+    order->remaining =
+        ounces;
+
+
+    order->active =
+        true;
+
+
+    exchange->order_count++;
+
+
+    audit_log(
+        exchange,
+        member_id,
+        "SELL_ORDER",
+        "ACCEPTED"
+    );
+
+
+    return order->id;
+}
+
+
+/* ============================================================
+ * SETTLE TRADE
+ * ============================================================ */
+
+void settle_trade(
+    GoldExchange *exchange,
+    GoldOrder *buy,
+    GoldOrder *sell,
+    double ounces,
+    double price
+)
+{
+    ExchangeMember *buyer =
+        find_member(
+            exchange,
+            buy->member_id
+        );
+
+
+    ExchangeMember *seller =
+        find_member(
+            exchange,
+            sell->member_id
+        );
+
+
+    if (!buyer || !seller)
+        return;
+
+
+    double value =
+        ounces * price;
+
+
+    /*
+     * Cash settlement.
+     */
+
+    buyer->cash_balance -=
+        value;
+
+
+    seller->cash_balance +=
+        value;
+
+
+    /*
+     * Gold settlement.
+     */
+
+    buyer->gold_balance +=
+        ounces;
+
+
+    seller->gold_balance -=
+        ounces;
+
+
+    /*
+     * Record trade.
+     */
+
+    if (exchange->trade_count <
+        MAX_TRADES)
+    {
+        GoldTrade *trade =
+            &exchange->trades[
+                exchange->trade_count++
+            ];
+
+
+        trade->id =
+            exchange->trade_count;
+
+
+        trade->buyer_id =
+            buyer->id;
+
+
+        trade->seller_id =
+            seller->id;
+
+
+        trade->ounces =
+            ounces;
+
+
+        trade->price =
+            price;
+
+
+        trade->value =
+            value;
+
+
+        trade->timestamp =
+            time(NULL);
+    }
+
+
+    buy->remaining -=
+        ounces;
+
+
+    sell->remaining -=
+        ounces;
+
+
+    if (buy->remaining <= 0.0001)
+        buy->active = false;
+
+
+    if (sell->remaining <= 0.0001)
+        sell->active = false;
+
+
+    exchange->gold_spot_price =
+        price;
+
+
+    printf(
+        "\n"
+        "[TRADE EXECUTED]\n"
+        "Gold: %.2f oz\n"
+        "Price: $%.2f\n"
+        "Value: $%.2f\n",
+        ounces,
+        price,
+        value
+    );
+}
+
+
+/* ============================================================
+ * ORDER MATCHING
+ * ============================================================ */
+
+void match_orders(
+    GoldExchange *exchange
+)
+{
+    for (int i = 0;
+         i < exchange->order_count;
+         i++)
+    {
+        GoldOrder *buy =
+            &exchange->orders[i];
+
+
+        if (!buy->active ||
+            buy->type != ORDER_BUY)
+            continue;
+
+
+        for (int j = 0;
+             j < exchange->order_count;
+             j++)
+        {
+            GoldOrder *sell =
+                &exchange->orders[j];
+
+
+            if (!sell->active ||
+                sell->type != ORDER_SELL)
+                continue;
+
+
+            if (buy->price <
+                sell->price)
+                continue;
+
+
+            double volume =
+                fmin(
+                    buy->remaining,
+                    sell->remaining
+                );
+
+
+            settle_trade(
+                exchange,
+                buy,
+                sell,
+                volume,
+                sell->price
+            );
+
+
+            if (!buy->active)
+                break;
+        }
+    }
+}
+
+
+/* ============================================================
+ * SECURITY MONITOR
+ * ============================================================ */
+
+void security_scan(
+    GoldExchange *exchange
+)
+{
+    int suspicious_orders = 0;
+
+
+    for (int i = 0;
+         i < exchange->order_count;
+         i++)
+    {
+        GoldOrder *order =
+            &exchange->orders[i];
+
+
+        if (!order->active)
+            continue;
+
+
+        if (order->ounces >
+            MAX_ORDER_SIZE * 0.80)
+        {
+            suspicious_orders++;
+        }
+    }
+
+
+    if (suspicious_orders >= 3)
+    {
+        set_security_state(
+            exchange,
+            SECURITY_ELEVATED
+        );
+    }
+}
+
+
+/* ============================================================
+ * ADD SECURITY OFFICER
+ * ============================================================ */
+
+void add_security_officer(
+    GoldExchange *exchange,
+    const char *name,
+    const char *role,
+    int clearance
+)
+{
+    if (exchange->security_count >=
+        MAX_SECURITY)
+        return;
+
+
+    SecurityOfficer *officer =
+        &exchange->security[
+            exchange->security_count++
+        ];
+
+
+    officer->id =
+        exchange->security_count;
+
+
+    snprintf(
+        officer->name,
+        sizeof(officer->name),
+        "%s",
+        name
+    );
+
+
+    snprintf(
+        officer->role,
+        sizeof(officer->role),
+        "%s",
+        role
+    );
+
+
+    officer->clearance =
+        clearance;
+
+
+    officer->armed =
+        true;
+
+
+    officer->active =
+        true;
+}
+
+
+/* ============================================================
+ * EXCHANGE STATUS
+ * ============================================================ */
+
+void print_exchange_status(
+    GoldExchange *exchange
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "              AURUM MIAMI EXCHANGE\n"
+        "====================================================\n"
+        "Gold Spot:             $%.2f / oz\n"
+        "Gold Vaulted:          %.2f oz\n"
+        "Cash Reserves:         $%.2f\n"
+        "Members:               %d\n"
+        "Open Orders:           %d\n"
+        "Completed Trades:      %d\n"
+        "Security State:        %d\n"
+        "Market:                %s\n"
+        "Withdrawals:           %s\n"
+        "Deposits:              %s\n"
+        "====================================================\n",
+        exchange->gold_spot_price,
+        exchange->total_gold_vaulted,
+        exchange->total_cash_reserves,
+        exchange->member_count,
+        exchange->order_count,
+        exchange->trade_count,
+        exchange->security_state,
+        exchange->market_open
+            ? "OPEN"
+            : "CLOSED",
+        exchange->withdrawals_enabled
+            ? "ENABLED"
+            : "LOCKED",
+        exchange->deposits_enabled
+            ? "ENABLED"
+            : "LOCKED"
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    GoldExchange exchange;
+
+
+    initialise_exchange(
+        &exchange
+    );
+
+
+    /*
+     * Security team.
+     */
+
+    add_security_officer(
+        &exchange,
+        "Marcus Vale",
+        "Chief Security Officer",
+        5
+    );
+
+
+    add_security_officer(
+        &exchange,
+        "Elena Cross",
+        "Vault Director",
+        5
+    );
+
+
+    add_security_officer(
+        &exchange,
+        "Daniel Price",
+        "Exchange Security",
+        4
+    );
+
+
+    /*
+     * Members.
+     */
+
+    int tex =
+        add_member(
+            &exchange,
+            "J. Thornton Caldwell",
+            "Caldwell Energy",
+            500000000.0
+        );
+
+
+    int miami_bank =
+        add_member(
+            &exchange,
+            "Miami Institutional Bank",
+            "Miami Financial Group",
+            1000000000.0
+        );
+
+
+    int trader =
+        add_member(
+            &exchange,
+            "Victor Sterling",
+            "Sterling Commodities",
+            250000000.0
+        );
+
+
+    /*
+     * Gold deposits.
+     */
+
+    deposit_gold(
+        &exchange,
+        tex,
+        5000.0,
+        0.999
+    );
+
+
+    deposit_gold(
+        &exchange,
+        trader,
+        2500.0,
+        0.999
+    );
+
+
+    /*
+     * Orders.
+     */
+
+    place_buy_order(
+        &exchange,
+        miami_bank,
+        1000.0,
+        2495.0
+    );
+
+
+    place_sell_order(
+        &exchange,
+        tex,
+        1000.0,
+        2490.0
+    );
+
+
+    /*
+     * Security monitoring.
+     */
+
+    security_scan(
+        &exchange
+    );
+
+
+    /*
+     * Match market.
+     */
+
+    match_orders(
+        &exchange
+    );
+
+
+    /*
+     * Final state.
+     */
+
+    print_exchange_status(
+        &exchange
+    );
+
+
+    return 0;
+}
+
+
+
+
+Concept: Gulf Atlantic Bank
+
+A major Miami financial institution occupying a monumental downtown block.
+
+6
+                 GULF ATLANTIC BANK
+                       MIAMI
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+   NEO-GEORGIAN FACADE              SECURE SERVICE
+        │                                 │
+   GRAND STEPS                       PRIVATE ENTRY
+   IONIC COLUMNS                       │
+   LIMESTONE                           │
+   PEDIMENT                     ┌───────┴────────┐
+   BRONZE DOORS                 │                │
+        │                    BANKING         SECURITY
+        │                    FLOOR           CONTROL
+        │                       │                │
+        └──────────────┬────────┴────────────────┘
+                       │
+                CENTRAL ATRIUM
+                       │
+          ┌────────────┼────────────┐
+          ↓            ↓            ↓
+       PRIVATE      TRADING       RETAIL
+       BANKING       DESKS        BANKING
+          │            │            │
+          └────────────┼────────────┘
+                       ↓
+                RESTRICTED FLOORS
+                       │
+          ┌────────────┼────────────┐
+          ↓            ↓            ↓
+       EXECUTIVE    OPERATIONS     DATA
+       OFFICES      CENTRE        CENTRE
+          │                         │
+          └────────────┬────────────┘
+                       ↓
+                 SECURE VAULT
+Hard C game implementation
+
+I'd structure it as a complete building rather than just a collision box:
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_FLOORS 30
+#define MAX_NPCS 128
+#define MAX_ACCOUNTS 10000
+#define MAX_SECURITY 64
+
+typedef enum {
+    BANK_PUBLIC,
+    BANK_RESTRICTED,
+    BANK_SECURE,
+    BANK_VAULT
+} AccessLevel;
+
+typedef enum {
+    SECURITY_NORMAL,
+    SECURITY_ELEVATED,
+    SECURITY_LOCKDOWN
+} SecurityState;
+
+typedef struct {
+    float x;
+    float y;
+    float z;
+} Vector3;
+
+typedef struct {
+    int id;
+    char name[64];
+
+    AccessLevel clearance;
+
+    bool armed;
+    bool active;
+
+    float alertness;
+} SecurityOfficer;
+
+typedef struct {
+    int id;
+
+    char name[64];
+
+    double balance;
+
+    double credit_limit;
+
+    bool private_client;
+    bool frozen;
+} BankAccount;
+
+typedef struct {
+    int floor;
+
+    char name[64];
+
+    AccessLevel access;
+
+    bool public_area;
+    bool monitored;
+} BankFloor;
+
+typedef struct {
+    char name[128];
+
+    Vector3 position;
+
+    int floors;
+
+    double assets;
+
+    double cash_reserves;
+
+    double gold_reserves;
+
+    SecurityState security;
+
+    bool open;
+
+    BankFloor floors_data[MAX_FLOORS];
+
+    SecurityOfficer security_team[MAX_SECURITY];
+
+    BankAccount accounts[MAX_ACCOUNTS];
+
+    int security_count;
+    int account_count;
+
+} GulfAtlanticBank;
+The building
+void initialise_bank(GulfAtlanticBank *bank)
+{
+    snprintf(
+        bank->name,
+        sizeof(bank->name),
+        "Gulf Atlantic Bank"
+    );
+
+    bank->position.x = 0.0f;
+    bank->position.y = 0.0f;
+    bank->position.z = 0.0f;
+
+    bank->floors = 30;
+
+    bank->assets = 185000000000.0;
+    bank->cash_reserves = 12500000000.0;
+    bank->gold_reserves = 850000.0;
+
+    bank->security = SECURITY_NORMAL;
+
+    bank->open = true;
+
+    bank->security_count = 0;
+    bank->account_count = 0;
+
+    for (int i = 0; i < bank->floors; i++)
+    {
+        bank->floors_data[i].floor = i;
+
+        bank->floors_data[i].public_area = false;
+        bank->floors_data[i].monitored = true;
+
+        bank->floors_data[i].access =
+            BANK_RESTRICTED;
+    }
+
+    /*
+     * Ground floor.
+     */
+
+    bank->floors_data[0].access =
+        BANK_PUBLIC;
+
+    bank->floors_data[0].public_area =
+        true;
+
+    snprintf(
+        bank->floors_data[0].name,
+        sizeof(bank->floors_data[0].name),
+        "Grand Banking Hall"
+    );
+
+    /*
+     * Private banking.
+     */
+
+    bank->floors_data[1].access =
+        BANK_RESTRICTED;
+
+    snprintf(
+        bank->floors_data[1].name,
+        sizeof(bank->floors_data[1].name),
+        "Private Banking"
+    );
+
+    /*
+     * Executive floors.
+     */
+
+    for (int i = 20; i < 28; i++)
+    {
+        bank->floors_data[i].access =
+            BANK_SECURE;
+    }
+
+    /*
+     * Vault.
+     */
+
+    bank->floors_data[29].access =
+        BANK_VAULT;
+
+    snprintf(
+        bank->floors_data[29].name,
+        sizeof(bank->floors_data[29].name),
+        "Central Vault"
+    );
+}
+Security as a gameplay system
+
+Rather than simply putting guards everywhere, make security reactive.
+
+NORMAL
+  ↓
+UNUSUAL ACTIVITY
+  ↓
+ELEVATED
+  ↓
+SECURITY RESPONSE
+  ↓
+LOCKDOWN
+
+The bank can monitor:
+
+typedef struct
+{
+    float suspicious_activity;
+
+    float restricted_access_attempts;
+
+    float security_alert;
+
+    float crowd_density;
+
+    float emergency_level;
+
+    bool vault_threat;
+
+} BankSecurityTelemetry;
+
+And the bank responds dynamically:
+
+void update_security(
+    GulfAtlanticBank *bank,
+    BankSecurityTelemetry *telemetry
+)
+{
+    if (telemetry->vault_threat)
+    {
+        bank->security =
+            SECURITY_LOCKDOWN;
+
+        bank->open = false;
+
+        return;
+    }
+
+    if (telemetry->suspicious_activity > 0.7f ||
+        telemetry->restricted_access_attempts > 3)
+    {
+        bank->security =
+            SECURITY_ELEVATED;
+
+        return;
+    }
+
+    bank->security =
+        SECURITY_NORMAL;
+}
+
+
+
+Hard C implementation
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_CUSTOMERS 256
+#define MAX_ACCOUNTS  1024
+
+typedef enum
+{
+    ACCOUNT_CHECKING,
+    ACCOUNT_PREMIER,
+    ACCOUNT_PRIVATE,
+    ACCOUNT_WEALTH,
+    ACCOUNT_UHNW
+
+} AccountTier;
+
+
+typedef struct
+{
+    double balance;
+    double invested_assets;
+    double property_value;
+
+    double annual_income;
+    double annual_debt;
+
+    double credit_score;
+
+    int transaction_count;
+
+} FinancialProfile;
+
+
+typedef struct
+{
+    int account_id;
+    int customer_id;
+
+    AccountTier tier;
+
+    char account_number[32];
+
+    double checking_balance;
+    double savings_balance;
+
+    double credit_limit;
+
+    bool debit_card;
+    bool wire_access;
+    bool investment_access;
+    bool private_banker;
+
+    bool active;
+
+} BankAccount;
+
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    FinancialProfile finances;
+
+    BankAccount account;
+
+    bool customer_active;
+
+} BankCustomer;
+
+
+typedef struct
+{
+    char name[128];
+
+    BankCustomer customers[MAX_CUSTOMERS];
+
+    int customer_count;
+
+} GulfAtlanticBank;
+Account classification
+AccountTier determine_account_tier(
+    FinancialProfile *f
+)
+{
+    double investable_assets =
+        f->balance +
+        f->invested_assets;
+
+    if (investable_assets >= 100000000.0)
+        return ACCOUNT_UHNW;
+
+    if (investable_assets >= 10000000.0)
+        return ACCOUNT_WEALTH;
+
+    if (investable_assets >= 250000.0)
+        return ACCOUNT_PRIVATE;
+
+    if (investable_assets >= 25000.0)
+        return ACCOUNT_PREMIER;
+
+    return ACCOUNT_CHECKING;
+}
+
+I'd make the bank periodically recalculate the customer's status rather than changing it instantly after every transaction.
+
+void review_customer(
+    BankCustomer *customer
+)
+{
+    AccountTier new_tier;
+
+    new_tier =
+        determine_account_tier(
+            &customer->finances
+        );
+
+    if (new_tier != customer->account.tier)
+    {
+        customer->account.tier =
+            new_tier;
+
+        printf(
+            "\nBANK STATUS CHANGE\n"
+            "Customer: %s\n"
+            "New tier: %d\n",
+            customer->name,
+            new_tier
+        );
+    }
+}
+Different banking experiences
+
+The tier should change the actual gameplay.
+
+void configure_services(
+    BankAccount *account
+)
+{
+    switch (account->tier)
+    {
+        case ACCOUNT_CHECKING:
+
+            account->debit_card = true;
+            account->wire_access = false;
+            account->investment_access = false;
+            account->private_banker = false;
+
+            account->credit_limit = 5000.0;
+
+            break;
+
+
+        case ACCOUNT_PREMIER:
+
+            account->debit_card = true;
+            account->wire_access = true;
+            account->investment_access = true;
+            account->private_banker = false;
+
+            account->credit_limit = 25000.0;
+
+            break;
+
+
+        case ACCOUNT_PRIVATE:
+
+            account->debit_card = true;
+            account->wire_access = true;
+            account->investment_access = true;
+            account->private_banker = true;
+
+            account->credit_limit = 250000.0;
+
+            break;
+
+
+        case ACCOUNT_WEALTH:
+
+            account->debit_card = true;
+            account->wire_access = true;
+            account->investment_access = true;
+            account->private_banker = true;
+
+            account->credit_limit = 1000000.0;
+
+            break;
+
+
+        case ACCOUNT_UHNW:
+
+            account->debit_card = true;
+            account->wire_access = true;
+            account->investment_access = true;
+            account->private_banker = true;
+
+            account->credit_limit = 10000000.0;
+
+            break;
+    }
+}
+Protagonist progression
+
+I'd make the protagonist's financial journey visible:
+
+START OF GAME
+
+Checking
+$2,400
+
+↓ missions / employment / business
+
+Premier
+$75,000
+
+↓ investments / businesses
+
+Private Banking
+$1.8m
+
+↓ major wealth creation
+
+Wealth Management
+$22m
+
+↓ empire
+
+UHNW
+$175m
+
+And importantly, losing money can actually hurt:
+
+UHNW
+$125m
+
+        ↓ major losses
+
+$80m
+        ↓
+
+WEALTH
+
+        ↓
+
+$7m
+        ↓
+
+PRIVATE
+
+        ↓
+
+$180k
+        ↓
+
+PREMIER
+
+        ↓
+
+$18k
+        ↓
+
+CHECKING
+
+That creates an interesting financial-status system alongside the physical open world.
+
+UHNW NPCs
+
+NPCs should have the same underlying system.
+
+For example:
+
+BankCustomer tycoon =
+{
+    .id = 42,
+
+    .name = "Richard Beaumont",
+
+    .finances =
+    {
+        .balance = 85000000.0,
+        .invested_assets = 175000000.0,
+        .property_value = 95000000.0,
+        .annual_income = 28000000.0,
+        .annual_debt = 12000000.0,
+        .credit_score = 890
+    }
+};
+
+
+
+
+
+
+
+
+
+
+Gulf Atlantic Bank — Robbery Simulation
+/*
+ * ============================================================
+ * GULF ATLANTIC BANK
+ * OPEN-WORLD ROBBERY / CHAOS SIMULATION
+ * ============================================================
+ *
+ * Fictional gameplay system.
+ *
+ * Focus:
+ *   - NPC decision making
+ *   - escalating alarms
+ *   - civilian panic
+ *   - police response
+ *   - traffic disruption
+ *   - bank lockdown
+ *   - financial consequences
+ *   - reputation
+ *   - getaway simulation
+ *
+ * Security is abstracted into gameplay variables rather than
+ * real-world bypass instructions.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+
+typedef enum
+{
+    ROBBERY_NONE,
+    ROBBERY_SUSPICIOUS,
+    ROBBERY_ALARM,
+    ROBBERY_ACTIVE,
+    ROBBERY_LOCKDOWN,
+    ROBBERY_ESCAPE,
+    ROBBERY_FAILED,
+    ROBBERY_COMPLETE
+
+} RobberyState;
+
+
+typedef enum
+{
+    POLICE_NONE,
+    POLICE_PATROL,
+    POLICE_RESPONSE,
+    POLICE_MAJOR_RESPONSE,
+    POLICE_CITYWIDE_RESPONSE
+
+} PoliceResponse;
+
+
+typedef struct
+{
+    float panic;
+
+    float crowd_density;
+
+    float traffic_disruption;
+
+    float emergency_calls;
+
+    float witness_count;
+
+    bool civilians_fleeing;
+    bool civilians_hiding;
+
+} CrowdSimulation;
+
+
+typedef struct
+{
+    float alarm;
+
+    float suspicion;
+
+    float security_response;
+
+    float lockdown;
+
+    bool vault_locked;
+    bool doors_locked;
+    bool banking_hall_closed;
+
+} BankSecurity;
+
+
+typedef struct
+{
+    float heat;
+
+    float police_units;
+
+    float roadblocks;
+
+    float helicopter_presence;
+
+    float surveillance;
+
+    PoliceResponse response;
+
+} PoliceSystem;
+
+
+typedef struct
+{
+    float cash_taken;
+
+    float gold_taken;
+
+    float damage;
+
+    float civilian_harm;
+
+    float property_damage;
+
+    float insurance_cost;
+
+} RobberyOutcome;
+
+
+typedef struct
+{
+    RobberyState state;
+
+    float elapsed_time;
+
+    float preparation;
+
+    float execution_quality;
+
+    float escape_probability;
+
+    float failure_probability;
+
+    float chaos;
+
+    BankSecurity bank;
+    CrowdSimulation crowd;
+    PoliceSystem police;
+    RobberyOutcome outcome;
+
+} BankRobbery;
+Start the event
+void initialise_robbery(
+    BankRobbery *r
+)
+{
+    r->state = ROBBERY_NONE;
+
+    r->elapsed_time = 0.0f;
+
+    r->preparation = 0.0f;
+
+    r->execution_quality = 0.0f;
+
+    r->escape_probability = 0.0f;
+
+    r->failure_probability = 0.0f;
+
+    r->chaos = 0.0f;
+
+    r->bank.alarm = 0.0f;
+    r->bank.suspicion = 0.0f;
+    r->bank.security_response = 0.0f;
+    r->bank.lockdown = 0.0f;
+
+    r->bank.vault_locked = false;
+    r->bank.doors_locked = false;
+    r->bank.banking_hall_closed = false;
+
+    r->crowd.panic = 0.0f;
+    r->crowd.crowd_density = 1.0f;
+    r->crowd.traffic_disruption = 0.0f;
+    r->crowd.emergency_calls = 0.0f;
+    r->crowd.witness_count = 0.0f;
+
+    r->police.heat = 0.0f;
+    r->police.police_units = 0.0f;
+    r->police.roadblocks = 0.0f;
+    r->police.helicopter_presence = 0.0f;
+
+    r->outcome.cash_taken = 0.0f;
+    r->outcome.gold_taken = 0.0f;
+    r->outcome.damage = 0.0f;
+}
+The crucial realism variable: uncertainty
+
+Don't make:
+
+ROBBERY = SUCCESS
+
+Instead:
+
+                         ┌── SUCCESS
+                         │
+ATTEMPT ── UNCERTAINTY ──┼── PARTIAL SUCCESS
+                         │
+                         ├── ABORTED
+                         │
+                         └── FAILURE
+
+The outcome depends upon the circumstances generated by the game.
+
+void calculate_outcome(
+    BankRobbery *r
+)
+{
+    float preparation_factor =
+        r->preparation;
+
+    float chaos_penalty =
+        r->chaos * 0.35f;
+
+    float police_penalty =
+        r->police.heat * 0.40f;
+
+    r->execution_quality =
+        preparation_factor
+        - chaos_penalty
+        - police_penalty;
+
+    if (r->execution_quality < 0.0f)
+        r->execution_quality = 0.0f;
+
+    r->failure_probability =
+        1.0f -
+        r->execution_quality;
+
+    r->escape_probability =
+        r->execution_quality *
+        0.8f;
+}
+Alarm escalation
+void update_bank_security(
+    BankRobbery *r,
+    float dt
+)
+{
+    if (r->state == ROBBERY_ACTIVE)
+    {
+        r->bank.suspicion +=
+            0.15f * dt;
+
+        if (r->bank.suspicion > 0.5f)
+        {
+            r->state =
+                ROBBERY_SUSPICIOUS;
+        }
+
+        if (r->bank.suspicion > 1.0f)
+        {
+            r->bank.alarm = 1.0f;
+
+            r->state =
+                ROBBERY_ALARM;
+        }
+    }
+
+    if (r->bank.alarm > 0.0f)
+    {
+        r->bank.lockdown +=
+            0.25f * dt;
+
+        r->bank.doors_locked = true;
+
+        r->bank.banking_hall_closed = true;
+    }
+
+    if (r->bank.lockdown >= 1.0f)
+    {
+        r->bank.vault_locked = true;
+
+        r->state =
+            ROBBERY_LOCKDOWN;
+    }
+}
+Civilian chaos
+
+This is where the event becomes much more interesting.
+
+void update_crowd(
+    BankRobbery *r,
+    float dt
+)
+{
+    if (r->state >= ROBBERY_ALARM)
+    {
+        r->crowd.panic +=
+            0.45f * dt;
+
+        r->crowd.emergency_calls +=
+            0.30f * dt;
+
+        r->crowd.traffic_disruption +=
+            0.20f * dt;
+
+        r->crowd.civilians_fleeing =
+            true;
+    }
+
+    if (r->crowd.panic > 0.8f)
+    {
+        r->crowd.civilians_hiding =
+            true;
+    }
+
+    if (r->crowd.panic > 1.0f)
+        r->crowd.panic = 1.0f;
+}
+Police response
+void update_police(
+    BankRobbery *r,
+    float dt
+)
+{
+    if (r->state >= ROBBERY_ALARM)
+    {
+        r->police.heat +=
+            0.30f * dt;
+    }
+
+    if (r->police.heat > 0.2f)
+    {
+        r->police.response =
+            POLICE_PATROL;
+
+        r->police.police_units = 2;
+    }
+
+    if (r->police.heat > 0.5f)
+    {
+        r->police.response =
+            POLICE_RESPONSE;
+
+        r->police.police_units = 6;
+    }
+
+    if (r->police.heat > 0.75f)
+    {
+        r->police.response =
+            POLICE_MAJOR_RESPONSE;
+
+        r->police.police_units = 12;
+        r->police.helicopter_presence = 1;
+    }
+
+    if (r->police.heat >= 1.0f)
+    {
+        r->police.response =
+            POLICE_CITYWIDE_RESPONSE;
+
+        r->police.roadblocks = 1.0f;
+    }
+}
+The robbery affects the entire city
+
+I'd make the event propagate outwards:
+
+BANK
+ │
+ ├── customers panic
+ │
+ ├── employees evacuate
+ │
+ ├── emergency services respond
+ │
+ ├── surrounding streets congest
+ │
+ ├── public transport diverts
+ │
+ ├── news spreads
+ │
+ ├── financial markets react
+ │
+ ├── bank temporarily closes
+ │
+ └── police search wider area
+          │
+          ↓
+       MIAMI
+          │
+     CITY RESPONSE
+
+For example:
+
+void update_city_chaos(
+    BankRobbery *r
+)
+{
+    r->chaos =
+        r->crowd.panic * 0.25f +
+        r->crowd.traffic_disruption * 0.20f +
+        r->police.heat * 0.35f +
+        r->bank.lockdown * 0.20f;
+}
+Financial consequences
+
+The bank shouldn't magically reset after the player leaves.
+
+A successful robbery could cause:
+
+Gulf Atlantic Bank
+       ↓
+temporary closure
+       ↓
+customers move money
+       ↓
+liquidity pressure
+       ↓
+security spending rises
+       ↓
+insurance costs rise
+       ↓
+rival banks gain customers
+       ↓
+Miami financial district reacts
+
+And if the protagonist is extremely wealthy, the robbery could become even more consequential because their existing banking relationship is damaged.
+
+Protagonist
+    │
+    ├── account frozen
+    ├── credit rating affected
+    ├── private banking relationship terminated
+    ├── assets investigated
+    └── other financial institutions react
+
+That gives you a much more GTA-like system: the interesting consequence isn't simply getting the money. It's what happens to the entire simulated city after the event.
+
+One particularly good mechanic would be that attempting the robbery is itself a gamble. A heavily prepared character might have a better chance of completing the fictional game event, while an impulsive NPC could trigger an immediate panic/lockdown and turn the whole downtown area into a chaotic emergent pursuit.
+
+
+
+
+
+
+
+
+
+
+Hidden C system
+/*
+ * ============================================================
+ * HIDDEN WEALTH DIFFICULTY SYSTEM
+ * ============================================================
+ *
+ * Invisible gameplay modifier.
+ *
+ * The player never sees:
+ *
+ *     wealth_difficulty
+ *     wealth_pressure
+ *     preservation_pressure
+ *
+ * The system quietly adjusts the difficulty of maintaining
+ * large amounts of money.
+ * ============================================================
+ */
+
+#include <math.h>
+#include <stdbool.h>
+
+typedef struct
+{
+    double cash;
+    double assets;
+
+    float wealth_difficulty;
+    float financial_pressure;
+
+} HiddenWealthState;
+
+
+/*
+ * Convert wealth into a hidden difficulty value.
+ *
+ * Logarithmic scaling prevents billionaires from simply
+ * reaching an absurd numerical difficulty value.
+ */
+
+static float calculate_wealth_difficulty(
+    double total_wealth
+)
+{
+    if (total_wealth <= 10000.0)
+        return 0.0f;
+
+    double x =
+        log10(total_wealth / 10000.0);
+
+    float difficulty =
+        (float)(x / 8.0);
+
+    if (difficulty < 0.0f)
+        difficulty = 0.0f;
+
+    if (difficulty > 1.0f)
+        difficulty = 1.0f;
+
+    return difficulty;
+}
+Hidden update
+void update_hidden_wealth_system(
+    HiddenWealthState *state
+)
+{
+    double total =
+        state->cash +
+        state->assets;
+
+    state->wealth_difficulty =
+        calculate_wealth_difficulty(total);
+
+    /*
+     * Smooth pressure prevents sudden difficulty jumps.
+     */
+
+    state->financial_pressure =
+        state->wealth_difficulty *
+        0.85f;
+}
+
+Then other game systems quietly query it:
+
+float get_hidden_difficulty(
+    const HiddenWealthState *state
+)
+{
+    return state->wealth_difficulty;
+}
+Apply it throughout the game
+typedef struct
+{
+    float mission_difficulty;
+    float operating_cost;
+    float market_volatility;
+    float NPC_competence;
+    float opportunity_risk;
+
+} GameplayModifiers;
+
+
+void apply_wealth_pressure(
+    const HiddenWealthState *wealth,
+    GameplayModifiers *game
+)
+{
+    float w =
+        wealth->financial_pressure;
+
+    game->mission_difficulty +=
+        w * 0.20f;
+
+    game->operating_cost +=
+        w * 0.35f;
+
+    game->market_volatility +=
+        w * 0.15f;
+
+    game->NPC_competence +=
+        w * 0.10f;
+
+    game->opportunity_risk +=
+        w * 0.20f;
+}
+
+So internally:
+
+PLAYER HAS $20,000
+       ↓
+hidden difficulty ≈ low
+       ↓
+normal game
+
+
+PLAYER HAS $2,000,000
+       ↓
+hidden difficulty ≈ moderate
+       ↓
+more demanding late-game economy
+
+
+PLAYER HAS $100,000,000
+       ↓
+hidden difficulty ≈ high
+       ↓
+wealth becomes considerably harder to maintain
+
+
+PLAYER HAS $1,000,000,000
+       ↓
+hidden difficulty ≈ very high
+       ↓
+late-game economic management
+
+The player never gets a popup saying "your wealth difficulty increased."
+
+Instead they experience it indirectly:
+
+MORE MONEY
+    ↓
+MORE COMPLEX GAMEPLAY
+    ↓
+MORE FINANCIAL EXPOSURE
+    ↓
+MORE DIFFICULT DECISIONS
+    ↓
+GREATER CONSEQUENCES
+
+I'd also add hysteresis so that a player can't repeatedly move just above/below a threshold to exploit the system:
+
+typedef struct
+{
+    float current;
+    float target;
+
+} DifficultyController;
+
+
+void smooth_difficulty(
+    DifficultyController *d,
+    float target,
+    float dt
+)
+{
+    const float rate = 0.15f;
+
+    d->target = target;
+
+    d->current +=
+        (d->target - d->current)
+        * rate
+        * dt;
+
+    if (d->current < 0.0f)
+        d->current = 0.0f;
+
+    if (d->current > 1.0f)
+        d->current = 1.0f;
+}
+
+
+
+
+
+
+
+C — Miami Cocaine Economy
+/*
+ * ============================================================
+ * MIAMI CONTRABAND ECONOMY
+ * ============================================================
+ *
+ * Fictional open-world gameplay system.
+ *
+ * Models:
+ *   - supply and demand
+ *   - fictional cocaine product grades
+ *   - price fluctuations
+ *   - NPC dealers
+ *   - faction territories
+ *   - police heat
+ *   - market shocks
+ *   - missions
+ *
+ * Real-world trafficking logistics are deliberately abstracted.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_FACTIONS 16
+#define MAX_MARKETS  32
+#define MAX_NPCS     256
+
+
+typedef enum
+{
+    PRODUCT_LOW_GRADE,
+    PRODUCT_STANDARD,
+    PRODUCT_HIGH_GRADE
+
+} ProductGrade;
+
+
+typedef enum
+{
+    MARKET_LOW,
+    MARKET_STABLE,
+    MARKET_HOT,
+    MARKET_CRISIS
+
+} MarketState;
+
+
+typedef struct
+{
+    ProductGrade grade;
+
+    double supply;
+    double demand;
+
+    double base_price;
+    double current_price;
+
+    float volatility;
+
+} ContrabandMarket;
+
+
+typedef struct
+{
+    char name[64];
+
+    float territory;
+    float influence;
+    float aggression;
+
+    double cash;
+
+    bool active;
+
+} Faction;
+
+
+typedef struct
+{
+    char name[64];
+
+    double cash;
+
+    float reputation;
+    float loyalty;
+
+    int faction_id;
+
+    bool active;
+
+} DealerNPC;
+
+
+typedef struct
+{
+    float police_heat;
+
+    float surveillance;
+
+    float patrol_density;
+
+    float investigation;
+
+    float market_pressure;
+
+} Enforcement;
+
+
+typedef struct
+{
+    double money;
+
+    double inventory;
+
+    float reputation;
+
+    float heat;
+
+    bool wanted;
+
+} PlayerContrabandState;
+
+
+typedef struct
+{
+    ContrabandMarket markets[MAX_MARKETS];
+
+    Faction factions[MAX_FACTIONS];
+
+    DealerNPC dealers[MAX_NPCS];
+
+    Enforcement enforcement;
+
+    PlayerContrabandState player;
+
+    int market_count;
+    int faction_count;
+    int dealer_count;
+
+} MiamiContrabandEconomy;
+Dynamic price engine
+double calculate_price(
+    const ContrabandMarket *market
+)
+{
+    if (market->supply <= 0.01)
+        return market->base_price * 4.0;
+
+    double ratio =
+        market->demand /
+        market->supply;
+
+    double price =
+        market->base_price *
+        (0.5 + ratio);
+
+    return price;
+}
+
+A shortage therefore creates a hot market:
+
+SUPPLY ↓
+   +
+DEMAND ↑
+   ↓
+PRICE ↑
+   ↓
+NPC ACTIVITY ↑
+   ↓
+POLICE PRESSURE ↑
+Market state
+MarketState determine_market_state(
+    const ContrabandMarket *m
+)
+{
+    double ratio =
+        m->demand /
+        fmax(m->supply, 0.01);
+
+    if (ratio > 3.0)
+        return MARKET_CRISIS;
+
+    if (ratio > 1.8)
+        return MARKET_HOT;
+
+    if (ratio > 0.8)
+        return MARKET_STABLE;
+
+    return MARKET_LOW;
+}
+Miami districts
+
+Give the fictional city several market zones:
+
+typedef enum
+{
+    DISTRICT_DOWNTOWN,
+    DISTRICT_BEACH,
+    DISTRICT_PORT,
+    DISTRICT_INLAND,
+    DISTRICT_INDUSTRIAL,
+    DISTRICT_SUBURBAN,
+    DISTRICT_ISLAND
+
+} MiamiDistrict;
+
+Each can have its own demand profile.
+
+void initialise_markets(
+    MiamiContrabandEconomy *economy
+)
+{
+    for (int i = 0;
+         i < MAX_MARKETS;
+         i++)
+    {
+        economy->markets[i].supply = 100.0;
+        economy->markets[i].demand = 100.0;
+        economy->markets[i].volatility = 0.25f;
+    }
+
+    economy->markets[0].base_price = 500.0;
+    economy->markets[1].base_price = 800.0;
+    economy->markets[2].base_price = 1200.0;
+}
+Factions
+
+The player can interact with competing fictional organisations:
+
+void create_faction(
+    Faction *f,
+    const char *name,
+    float territory,
+    float aggression
+)
+{
+    snprintf(
+        f->name,
+        sizeof(f->name),
+        "%s",
+        name
+    );
+
+    f->territory = territory;
+    f->influence = 0.5f;
+    f->aggression = aggression;
+    f->cash = 100000.0;
+    f->active = true;
+}
+
+Example fictional factions:
+
+THE PALM CREW
+    ↓
+beach / nightlife economy
+
+THE DOCKSIDE UNION
+    ↓
+industrial / port economy
+
+THE EVERGLADE BOYS
+    ↓
+rural / swamp economy
+
+THE GOLD COAST NETWORK
+    ↓
+luxury / high-end market
+
+These are game factions, not representations of real organisations.
+
+Police pressure
+void update_enforcement(
+    MiamiContrabandEconomy *economy,
+    float market_activity
+)
+{
+    economy->enforcement.police_heat +=
+        market_activity * 0.01f;
+
+    economy->enforcement.investigation +=
+        market_activity * 0.005f;
+
+    if (economy->enforcement.police_heat > 1.0f)
+        economy->enforcement.police_heat = 1.0f;
+
+    if (economy->enforcement.investigation > 1.0f)
+        economy->enforcement.investigation = 1.0f;
+}
+
+Heat then affects the world:
+
+LOW HEAT
+→ ordinary patrols
+
+MEDIUM HEAT
+→ increased police presence
+
+HIGH HEAT
+→ investigations
+→ surveillance
+→ faction disruption
+
+CRITICAL HEAT
+→ major enforcement event
+→ market temporarily destabilised
+Market shocks
+
+This makes the economy feel alive.
+
+typedef enum
+{
+    MARKET_EVENT_NONE,
+    MARKET_BUST,
+    MARKET_SHORTAGE,
+    MARKET_DEMAND_SURGE,
+    FACTION_WAR,
+    POLICE_CRACKDOWN,
+    MARKET_PANIC
+
+} MarketEvent;
+void apply_market_event(
+    ContrabandMarket *market,
+    MarketEvent event
+)
+{
+    switch (event)
+    {
+        case MARKET_BUST:
+            market->supply *= 0.55;
+            market->volatility += 0.15f;
+            break;
+
+        case MARKET_SHORTAGE:
+            market->supply *= 0.35;
+            break;
+
+        case MARKET_DEMAND_SURGE:
+            market->demand *= 1.75;
+            break;
+
+        case POLICE_CRACKDOWN:
+            market->demand *= 0.70;
+            market->volatility += 0.20f;
+            break;
+
+        case MARKET_PANIC:
+            market->supply *= 0.50;
+            market->demand *= 1.40;
+            break;
+
+        default:
+            break;
+    }
+
+    market->current_price =
+        calculate_price(market);
+}
+The important GTA-style element
+
+Don't make the player simply buy → sell → profit indefinitely.
+
+Have the entire Miami economy react:
+
+             CONTRABAND MARKET
+                     │
+        ┌────────────┼────────────┐
+        ↓            ↓            ↓
+      PRICE        FACTIONS      POLICE
+        │            │            │
+        ↓            ↓            ↓
+     DEMAND       TERRITORY    ENFORCEMENT
+        │            │            │
+        └────────────┼────────────┘
+                     ↓
+                 NPC BEHAVIOUR
+                     ↓
+              WORLD EVENTS
+
+So a player who becomes extremely successful might find that the market itself changes: competitors become more aggressive, prices become volatile, police pressure rises, and previously reliable NPC relationships become less dependable.
+
+
+
+
+
+
+
+
+
+MALT WHISKEY — PRIVATE MONEY CRISIS
+/*
+ * ============================================================
+ * MALT WHISKEY THEME PARK
+ * FICTIONAL PRIVATE MONEY CRISIS
+ * ============================================================
+ *
+ * Gameplay simulation:
+ *
+ *   Theme Park
+ *       ↓
+ *   Illegal note production
+ *       ↓
+ *   Currency supply expands
+ *       ↓
+ *   NPC spending increases
+ *       ↓
+ *   Local prices rise
+ *       ↓
+ *   Gulf Atlantic confidence falls
+ *       ↓
+ *   ECONOMIC CRISIS
+ *
+ * The printing process itself is abstracted.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+typedef enum
+{
+    MONEY_NORMAL,
+    MONEY_EXPANDING,
+    MONEY_INFLATION,
+    MONEY_CRISIS,
+    MONEY_COLLAPSE
+
+} MoneyState;
+
+
+typedef enum
+{
+    PLAYER_NEUTRAL,
+    PLAYER_STOPPING_MALT_WHISKEY,
+    PLAYER_SUPPORTING_MALT_WHISKEY
+
+} PlayerPosition;
+
+
+typedef enum
+{
+    QUEST_NONE,
+    QUEST_DISCOVER_PRINTER,
+    QUEST_INVESTIGATE_PARK,
+    QUEST_STOP_PRODUCTION,
+    QUEST_PROTECT_BANK,
+    QUEST_STABILISE_MARKET,
+    QUEST_EXPAND_MONEY,
+    QUEST_PROTECT_MALT_WHISKEY,
+    QUEST_ESCAPE_CRACKDOWN
+
+} QuestType;
+
+
+typedef struct
+{
+    double legitimate_currency;
+
+    double fraudulent_currency;
+
+    double total_currency;
+
+    double price_index;
+
+    double inflation_rate;
+
+    double currency_confidence;
+
+    MoneyState state;
+
+} MoneyEconomy;
+
+
+typedef struct
+{
+    double production_rate;
+
+    double money_stock;
+
+    float secrecy;
+
+    float park_influence;
+
+    bool printer_active;
+
+} MaltWhiskeyMoneyPlant;
+
+
+typedef struct
+{
+    PlayerPosition position;
+
+    float reputation;
+
+    float police_heat;
+
+    float bank_relationship;
+
+    int completed_quests;
+
+} PlayerEconomicAlignment;
+The hidden money printer
+
+The player doesn't initially know it exists.
+
+typedef struct
+{
+    bool discovered;
+    bool production_detected;
+    bool location_known;
+
+    float investigation_progress;
+
+} HiddenPrinter;
+
+The game's event manager can gradually reveal it:
+
+void investigate_printer(
+    HiddenPrinter *printer,
+    float investigation
+)
+{
+    printer->investigation_progress +=
+        investigation;
+
+    if (printer->investigation_progress >= 0.35f)
+        printer->production_detected = true;
+
+    if (printer->investigation_progress >= 0.70f)
+        printer->location_known = true;
+
+    if (printer->investigation_progress >= 1.0f)
+        printer->discovered = true;
+}
+Inflation engine
+void update_money_economy(
+    MoneyEconomy *economy
+)
+{
+    economy->total_currency =
+        economy->legitimate_currency +
+        economy->fraudulent_currency;
+
+    if (economy->legitimate_currency <= 0.0)
+        return;
+
+    double expansion =
+        economy->fraudulent_currency /
+        economy->legitimate_currency;
+
+    economy->inflation_rate =
+        expansion * 0.12;
+
+    economy->price_index =
+        1.0 +
+        economy->inflation_rate;
+
+    if (expansion < 0.05)
+        economy->state = MONEY_NORMAL;
+
+    else if (expansion < 0.15)
+        economy->state = MONEY_EXPANDING;
+
+    else if (expansion < 0.30)
+        economy->state = MONEY_INFLATION;
+
+    else if (expansion < 0.60)
+        economy->state = MONEY_CRISIS;
+
+    else
+        economy->state = MONEY_COLLAPSE;
+}
+Malt Whiskey production
+void update_malt_whiskey(
+    MaltWhiskeyMoneyPlant *plant,
+    MoneyEconomy *economy,
+    float dt
+)
+{
+    if (!plant->printer_active)
+        return;
+
+    double produced =
+        plant->production_rate * dt;
+
+    plant->money_stock += produced;
+
+    economy->fraudulent_currency +=
+        produced;
+
+    /*
+     * More production means more economic instability.
+     */
+
+    plant->secrecy -=
+        produced * 0.00001f;
+
+    if (plant->secrecy < 0.0f)
+        plant->secrecy = 0.0f;
+}
+The branching storyline
+
+This is where it becomes much more interesting than simply "destroy the printer."
+
+ACT I — Something Is Wrong
+QUEST 01
+"STRANGE MONEY"
+
+Malt Whiskey vendors suddenly have
+unusually large amounts of cash.
+
+↓
+
+QUEST 02
+"THE PAPER TRAIL"
+
+Track unusual transactions through
+the park's businesses.
+
+↓
+
+QUEST 03
+"THE FUNHOUSE"
+
+Discover that something unusual is
+happening beneath the park.
+
+The player then discovers the hidden monetary operation.
+
+ACT II — CHOOSE A SIDE
+                         DISCOVERY
+                             │
+                ┌────────────┴────────────┐
+                ↓                         ↓
+             STOP IT                   SUPPORT IT
+                │                         │
+          BANK CAMPAIGN              MALT WHISKEY
+                │                         │
+          DESTROY MONEY               EXPAND MONEY
+                │                         │
+          STABILISE MIAMI              CREATE BOOM
+                │                         │
+             ENDGAME                    ENDGAME
+Anti-inflation storyline
+
+The protagonist works with Gulf Atlantic Bank.
+
+void stop_money_production(
+    MaltWhiskeyMoneyPlant *plant
+)
+{
+    plant->printer_active = false;
+    plant->production_rate = 0.0;
+}
+
+Possible quests:
+
+"SHUTTER THE PARK"
+
+"PROTECT THE BANK"
+
+"RECOVER THE NOTES"
+
+"PANIC IN THE FINANCIAL DISTRICT"
+
+"STABILISE THE CURRENCY"
+
+"THE LAST NOTE"
+
+The economy gradually recovers rather than instantly resetting.
+
+Pro-Malt Whiskey storyline
+
+Alternatively, the protagonist can deliberately help the park expand the fictional money supply.
+
+void support_money_expansion(
+    MaltWhiskeyMoneyPlant *plant
+)
+{
+    plant->printer_active = true;
+
+    plant->production_rate *= 1.25;
+
+    plant->park_influence += 0.10f;
+}
+
+This creates a completely different game world:
+
+MORE MONEY
+    ↓
+MORE SPENDING
+    ↓
+THEME PARK BOOM
+    ↓
+BUSINESSES EXPAND
+    ↓
+PROPERTY PRICES RISE
+    ↓
+NPCs BECOME WEALTHIER
+    ↓
+SHORT-TERM ECONOMIC BOOM
+    ↓
+INFLATION
+    ↓
+CURRENCY CONFIDENCE FALLS
+    ↓
+FINANCIAL CRISIS
+NPC reactions
+typedef struct
+{
+    double cash;
+
+    double spending_power;
+
+    float inflation_awareness;
+
+    bool accepts_gulf_notes;
+    bool accepts_malt_notes;
+
+} EconomicNPC;
+
+Different NPCs react differently:
+
+POOR NPC
+→ spends immediately
+
+MIDDLE-CLASS NPC
+→ buys property
+
+RICH NPC
+→ moves into assets
+
+UHNW NPC
+→ reduces cash holdings
+
+BANKER
+→ becomes increasingly concerned
+
+SHOPKEEPER
+→ raises prices
+
+MALT WHISKEY OWNER
+→ wants even more money printed
+
+That creates emergent consequences.
+
+Inflation affects the whole map
+double apply_inflation(
+    double price,
+    const MoneyEconomy *economy
+)
+{
+    return price *
+           economy->price_index;
+}
+
+So:
+
+Theme Park Ticket
+$50 → $57
+
+Apartment
+$2.0M → $2.4M
+
+Luxury Car
+$180k → $225k
+
+Restaurant Meal
+$80 → $92
+
+while some assets can move differently.
+
+Final crisis event
+
+At sufficiently high monetary expansion:
+
+bool trigger_currency_crisis(
+    const MoneyEconomy *economy
+)
+{
+    return economy->state ==
+           MONEY_CRISIS ||
+           economy->state ==
+           MONEY_COLLAPSE;
+}
+
+The city can then enter:
+
+MALT WHISKEY MONEY CRISIS
+────────────────────────────
+
+BANKS
+⚠ liquidity stress
+
+SHOPS
+⚠ prices changing
+
+PROPERTY
+↑ speculative demand
+
+CURRENCY
+↓ confidence
+
+POLICE
+↑ investigation
+
+NPCs
+↑ panic
+
+THEME PARK
+↑ attendance
+
+FINANCIAL DISTRICT
+⚠ emergency
+
+And the player's ultimate choice determines the ending:
+
+END A — Stabiliser
+
+The protagonist shuts down the operation and helps restore confidence.
+
+END B — Inflationist
+
+The protagonist protects Malt Whiskey and allows the monetary expansion to continue.
+
+END C — Opportunist
+
+The protagonist profits from the chaos without committing fully to either side.
+
+END D — Collapse
+
+The player pushes the fictional monetary system too far, triggering a city-wide financial crisis.
+
+That would make Malt Whiskey itself an economic faction, with its own monetary policy, NPCs, quests, reputation and consequences—rather than just another theme park on the map.
+
+
+
+
+
+
+
+
+
+GULF ATLANTIC BANK — "THE GOLDEN NOTE"
+/*
+ * ============================================================
+ * GULF ATLANTIC BANK
+ * THE GOLDEN NOTE — QUEST ARC
+ * ============================================================
+ *
+ * Fictional GTA-style gameplay system.
+ *
+ * Gulf Atlantic Bank contracts the protagonist to stop
+ * Malt Whiskey's illegal fictional currency operation.
+ *
+ * The actual counterfeiting process is abstracted into
+ * game mechanics.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+
+typedef enum
+{
+    CONTRACT_OFFERED,
+    CONTRACT_ACCEPTED,
+    INVESTIGATION,
+    INFILTRATION,
+    SHUTDOWN,
+    RECOVERY,
+    BANK_RECONCILIATION,
+    COMPLETE,
+    FAILED
+
+} ContractState;
+
+
+typedef struct
+{
+    double upfront_payment;
+    double completion_bonus;
+    double recovery_bonus;
+
+    float bank_reputation;
+    float malt_whiskey_hostility;
+
+    ContractState state;
+
+} BankContract;
+EVENT 1 — THE CALL
+
+The protagonist receives a discreet message from Gulf Atlantic.
+
+GULF ATLANTIC BANK
+PRIVATE CLIENT SERVICES
+
+"We have a problem.
+
+Someone is circulating fraudulent
+Gulf Atlantic notes.
+
+We believe the source is
+Malt Whiskey.
+
+We would like to retain your services."
+
+The protagonist gets three choices:
+
+[ACCEPT]
+
+[NEGOTIATE]
+
+[DECLINE]
+
+Negotiating can increase the eventual payment.
+
+double negotiate_contract(
+    double base_payment,
+    float negotiation_skill
+)
+{
+    return base_payment *
+           (1.0 + negotiation_skill * 0.35);
+}
+EVENT 2 — PRIVATE CONTRACT
+
+Once accepted:
+
+void accept_contract(
+    BankContract *contract
+)
+{
+    contract->state =
+        CONTRACT_ACCEPTED;
+
+    contract->upfront_payment =
+        250000.0;
+
+    contract->completion_bonus =
+        1000000.0;
+
+    contract->recovery_bonus =
+        0.10;
+}
+
+The protagonist receives an upfront retainer.
+
+The bank deliberately doesn't reveal everything.
+
+"We need you to determine exactly how far this goes."
+
+EVENT 3 — INVESTIGATION
+
+The first mission is to establish whether Malt Whiskey is actually responsible.
+
+QUEST:
+
+THE PAPER TRAIL
+
+Investigate unusual transactions
+around the Malt Whiskey district.
+
+Objectives:
+
+□ Locate suspicious businesses
+□ Identify connected NPCs
+□ Establish the source
+□ Report to Gulf Atlantic
+
+The player can approach this however they want.
+
+The investigation generates:
+
+typedef struct
+{
+    float evidence;
+    float suspicion;
+    float bank_confidence;
+
+    bool source_identified;
+    bool operation_confirmed;
+
+} Investigation;
+EVENT 4 — BANK BRIEFING
+
+Once sufficient evidence has been collected:
+
+GULF ATLANTIC BANK
+PRIVATE BOARDROOM
+
+"You're right.
+
+Malt Whiskey isn't merely
+accepting the notes.
+
+They're manufacturing them.
+
+We want the operation stopped."
+
+The bank increases the contract.
+
+void upgrade_contract(
+    BankContract *contract
+)
+{
+    contract->completion_bonus =
+        2500000.0;
+
+    contract->bank_reputation +=
+        0.15f;
+}
+EVENT 5 — THE MALT WHISKEY CONNECTION
+
+The player discovers that several park employees and fictional NPCs are involved.
+
+Rather than modelling real-world counterfeiting techniques, the game treats the operation as a black-box illegal printing facility.
+
+MALT WHISKEY
+
+PARK
+ ↓
+SECRET FACILITY
+ ↓
+ILLEGAL CURRENCY
+ ↓
+DISTRIBUTION NETWORK
+ ↓
+LOCAL BUSINESSES
+ ↓
+MIAMI ECONOMY
+
+The protagonist now has a major decision:
+
+SHUT IT DOWN
+        OR
+LEAK INFORMATION
+        OR
+TAKE THE MONEY
+        OR
+SIDE WITH MALT WHISKEY
+EVENT 6 — "CLOSE THE PRINT SHOP"
+
+The main bank mission.
+
+The protagonist must reach the fictional facility and disable its production system.
+
+typedef struct
+{
+    bool facility_active;
+    bool security_active;
+    bool production_active;
+
+    float shutdown_progress;
+
+} MaltWhiskeyFacility;
+void shutdown_facility(
+    MaltWhiskeyFacility *facility
+)
+{
+    facility->production_active = false;
+    facility->shutdown_progress = 1.0f;
+}
+
+Once completed:
+
+ILLEGAL MONEY PRODUCTION
+
+████████████████████
+SHUT DOWN
+EVENT 7 — THE BANK WANTS THE NOTES BACK
+
+Stopping production isn't enough.
+
+Large quantities of fictional fraudulent currency are already circulating.
+
+The bank therefore gives the protagonist a second contract:
+
+QUEST:
+
+THE RETURN
+
+Recover outstanding Malt Whiskey
+currency before it destabilises
+the Gulf Atlantic monetary system.
+
+This becomes a map-wide recovery campaign.
+
+Possible locations:
+
+Nightclub
+Luxury apartment
+Casino
+Theme park
+Car dealership
+Port
+Private club
+Warehouse
+Rural property
+Financial district
+
+The locations can be procedurally selected.
+
+EVENT 8 — MALT WHISKEY FIGHTS BACK
+
+The theme park faction now knows the protagonist is working for the bank.
+
+Their relationship changes:
+
+void malt_whiskey_response(
+    BankContract *contract
+)
+{
+    contract->malt_whiskey_hostility +=
+        0.20f;
+}
+
+The world responds:
+
+MALT WHISKEY HOSTILITY
+
+LOW
+→ threats
+
+MEDIUM
+→ ambushes
+
+HIGH
+→ pursuit events
+
+CRITICAL
+→ major faction confrontation
+
+This also makes the theme park itself progressively more hostile.
+
+EVENT 9 — BANK RECONCILIATION
+
+After the operation:
+
+GULF ATLANTIC BANK
+TREASURY FLOOR
+
+Recovered notes:
+$████████
+
+Outstanding notes:
+$██████
+
+Estimated economic damage:
+$████████
+
+Currency confidence:
+█████████░ 91%
+
+The bank calculates the protagonist's final payment.
+
+double calculate_final_payment(
+    const BankContract *contract,
+    double recovered_value
+)
+{
+    return
+        contract->upfront_payment +
+        contract->completion_bonus +
+        recovered_value *
+        contract->recovery_bonus;
+}
+EVENT 10 — THE GOLDEN NOTE
+
+Final meeting with the bank chairman.
+
+GULF ATLANTIC BANK
+EXECUTIVE BOARDROOM
+
+CHAIRMAN:
+
+"You've done something very few
+people outside this institution
+could have done.
+
+You've protected the currency.
+
+Gulf Atlantic remembers its friends."
+
+The protagonist receives:
+
+CONTRACT COMPLETE
+
+UPFRONT PAYMENT       $250,000
+COMPLETION BONUS    $2,500,000
+RECOVERY BONUS        $██████
+
+BANK REPUTATION          +++
+PRIVATE CLIENT STATUS    UNLOCKED
+
+And this creates a useful long-term consequence:
+
+GULF ATLANTIC BANK
+        ↓
+TRUSTS PROTAGONIST
+        ↓
+PRIVATE CLIENT ACCESS
+        ↓
+HIGHER-VALUE CONTRACTS
+        ↓
+UHNW BANKING
+        ↓
+CORPORATE FINANCE
+        ↓
+MAJOR ECONOMIC MISSIONS
+
+The best twist would be that Malt Whiskey isn't completely destroyed. The park remains on the map, but its relationship with the protagonist permanently changes. If the player later returns, its NPCs remember that they were responsible for shutting down the operation—and a future quest can offer the protagonist a chance to either reconcile with the park, exploit its weakened position, or restart the monetary scheme from the opposite side.
+
+
+
+
+
+
+C — MIAMI GAME & FOOD MARKET
+/*
+ * ============================================================
+ * MIAMI GAME & FOOD MARKET
+ * ============================================================
+ *
+ * Dynamic food commodity marketplace.
+ *
+ * Players can sell:
+ *
+ *   GAME MEAT
+ *   FISH
+ *   FARM PRODUCE
+ *   LIVESTOCK PRODUCTS
+ *   RARE / PREMIUM FOODS
+ *
+ * Prices respond to:
+ *
+ *   SUPPLY
+ *   DEMAND
+ *   SEASON
+ *   WEATHER
+ *   NPC ACTIVITY
+ *   RESTAURANT DEMAND
+ *   MARKET EVENTS
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_PRODUCTS 64
+#define MAX_VENDORS 32
+#define MAX_CUSTOMERS 256
+
+
+typedef enum
+{
+    GAME_MEAT,
+    FISH,
+    FARM_PRODUCE,
+    DAIRY,
+    SPECIALTY_FOOD
+
+} FoodCategory;
+
+
+typedef enum
+{
+    COMMON,
+    UNCOMMON,
+    RARE,
+    PREMIUM
+
+} FoodQuality;
+
+
+typedef struct
+{
+    char name[64];
+
+    FoodCategory category;
+    FoodQuality quality;
+
+    double supply;
+    double demand;
+
+    double base_price;
+    double market_price;
+
+    float freshness;
+
+} FoodProduct;
+Example marketplace products
+void initialise_market(
+    FoodProduct *market
+)
+{
+    market[0] = (FoodProduct){
+        "Venison",
+        GAME_MEAT,
+        PREMIUM,
+        100.0,
+        90.0,
+        18.0,
+        18.0,
+        1.0
+    };
+
+    market[1] = (FoodProduct){
+        "Wild Boar",
+        GAME_MEAT,
+        UNCOMMON,
+        120.0,
+        80.0,
+        14.0,
+        14.0,
+        1.0
+    };
+
+    market[2] = (FoodProduct){
+        "Fresh Grouper",
+        FISH,
+        PREMIUM,
+        80.0,
+        120.0,
+        22.0,
+        22.0,
+        1.0
+    };
+
+    market[3] = (FoodProduct){
+        "Farm Vegetables",
+        FARM_PRODUCE,
+        COMMON,
+        500.0,
+        450.0,
+        5.0,
+        5.0,
+        1.0
+    };
+}
+Dynamic pricing
+double calculate_food_price(
+    FoodProduct *product
+)
+{
+    if (product->supply <= 0.01)
+        return product->base_price * 5.0;
+
+    double ratio =
+        product->demand /
+        product->supply;
+
+    double price =
+        product->base_price *
+        (0.5 + ratio);
+
+    /*
+     * Fresh products command
+     * higher prices.
+     */
+
+    price *=
+        (0.5 + product->freshness * 0.5);
+
+    return price;
+}
+
+So the player might discover:
+
+MIAMI FOOD MARKET
+────────────────────────
+
+VENISON
+Supply       LOW
+Demand       HIGH
+Price        $27/kg
+
+GROUPer
+Supply       VERY LOW
+Demand       HIGH
+Price        $39/kg
+
+VEGETABLES
+Supply       HIGH
+Demand       NORMAL
+Price        $4/kg
+Vendor system
+typedef struct
+{
+    char name[64];
+
+    double cash;
+
+    float reputation;
+    float bargaining;
+
+    FoodCategory speciality;
+
+} FoodVendor;
+
+Different vendors specialise:
+
+BUTCHER
+→ game meat
+
+FISHMONGER
+→ coastal fish
+
+FARMER
+→ vegetables
+
+LUXURY MERCHANT
+→ premium food
+
+RESTAURANT BUYER
+→ large-volume purchases
+Player selling
+typedef struct
+{
+    double quantity;
+    FoodProduct product;
+
+} PlayerFoodInventory;
+
+
+double sell_food(
+    FoodProduct *product,
+    double quantity
+)
+{
+    if (quantity <= 0.0)
+        return 0.0;
+
+    if (quantity > product->supply)
+        quantity = product->supply;
+
+    double revenue =
+        quantity *
+        product->market_price;
+
+    product->supply += quantity;
+
+    return revenue;
+}
+
+For gameplay, I'd actually make the marketplace's demand more important than the player's ability to dump unlimited stock:
+
+PLAYER
+  ↓
+SELLS 100kg
+  ↓
+MARKET SUPPLY ↑
+  ↓
+PRICE ↓
+  ↓
+OTHER VENDORS REACT
+  ↓
+RESTAURANTS BUY CHEAPER
+  ↓
+DEMAND RECOVERS
+
+That gives you an actual living commodity market.
+
+Market events
+typedef enum
+{
+    MARKET_NORMAL,
+    TOURIST_SURGE,
+    RESTAURANT_FESTIVAL,
+    FISHING_BOOM,
+    HUNTING_SEASON,
+    STORM,
+    SUPPLY_SHORTAGE,
+    FOOD_PANIC
+
+} FoodMarketEvent;
+
+For example:
+
+HURRICANE
+→ fishing disrupted
+→ fish supply falls
+→ fish prices rise
+
+FOOD FESTIVAL
+→ restaurant demand rises
+→ premium meat prices rise
+
+TOURIST SEASON
+→ total food demand rises
+
+ABUNDANT HARVEST
+→ vegetable prices fall
+
+RARE GAME EVENT
+→ premium game becomes temporarily valuable
+The marketplace itself
+
+Make the physical location substantial:
+
+                  MIAMI FOOD MARKET
+                         │
+       ┌─────────────────┼─────────────────┐
+       ↓                 ↓                 ↓
+    BUTCHERS          FISH HALL        FARMERS
+       │                 │                 │
+       ↓                 ↓                 ↓
+    GAME MEAT           FISH           PRODUCE
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         ↓
+                 WHOLESALE FLOOR
+                         ↓
+                  RESTAURANT BUYERS
+
+And give it a live ticker in the game's UI:
+
+╔══════════════════════════════════╗
+║       MIAMI FOOD EXCHANGE        ║
+╠══════════════════════════════════╣
+║ VENISON             $27.40 / kg  ║
+║ WILD BOAR           $19.80 / kg  ║
+║ GROUPER             $38.20 / kg  ║
+║ FARM PRODUCE         $4.10 / kg  ║
+║ PREMIUM BEEF        $31.50 / kg  ║
+╠══════════════════════════════════╣
+║ MARKET DEMAND          ███████░   ║
+║ SUPPLY                 █████░░░   ║
+║ TOURIST ACTIVITY       ████████   ║
+╚══════════════════════════════════╝
+
+That fits nicely with the wider economic systems you've been building: the hunting system produces commodities, the marketplace establishes prices, restaurants consume them, and the wider Miami economy reacts to shortages and surpluses.
+
+
+
+
+
+
+
+
+
+
+
+
