@@ -2415,3 +2415,2025 @@ The character can become a running joke / antagonist in the open world: extraord
 
 
 
+
+
+
+
+
+
+C — Flyable Helicopter
+/*
+ * ============================================================
+ * OPEN-WORLD HELICOPTER
+ * ============================================================
+ *
+ * Fictional game helicopter.
+ *
+ * Features:
+ *   - Fully flyable
+ *   - Vertical takeoff / landing
+ *   - Collective
+ *   - Cyclic
+ *   - Yaw control
+ *   - Forward flight
+ *   - Wind
+ *   - Fuel
+ *   - Damage
+ *   - Landing
+ *   - Passenger system
+ *   - AI pilot compatibility
+ *
+ * GAME PHYSICS ONLY.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define GRAVITY 9.80665
+#define MAX_PASSENGERS 8
+Helicopter structure
+typedef struct {
+
+    char name[64];
+
+    double mass;
+
+    double max_altitude;
+    double max_speed;
+
+    double rotor_power;
+    double rotor_efficiency;
+
+    double fuel;
+    double fuel_capacity;
+
+    double health;
+
+    int passengers;
+
+    bool engine_running;
+    bool landed;
+
+} Helicopter;
+
+Create one:
+
+Helicopter create_helicopter(void)
+{
+    Helicopter h = {
+
+        "Miami H-8",
+
+        3200.0,
+
+        5000.0,       /* altitude metres */
+        85.0,         /* speed m/s */
+
+        420000.0,
+        0.82,
+
+        100.0,
+        100.0,
+
+        1.0,
+
+        0,
+
+        false,
+        true
+    };
+
+    return h;
+}
+Flight state
+typedef struct {
+
+    double x;
+    double y;
+    double z;
+
+    double velocity_x;
+    double velocity_y;
+    double velocity_z;
+
+    double pitch;
+    double roll;
+    double yaw;
+
+    double pitch_rate;
+    double roll_rate;
+    double yaw_rate;
+
+    double collective;
+    double cyclic_x;
+    double cyclic_y;
+
+    double rudder;
+
+    double vertical_speed;
+    double horizontal_speed;
+
+} HelicopterFlight;
+
+This gives the helicopter actual spatial movement:
+
+             Z
+             ↑
+             │
+             │
+             ●────────→ X
+            /
+           /
+          Y
+Engine start
+void start_helicopter(
+    Helicopter *h
+) {
+    if (h->fuel <= 0)
+        return;
+
+    h->engine_running = true;
+    h->landed = false;
+
+    printf(
+        "%s engine started.\n",
+        h->name
+    );
+}
+Rotor lift
+double calculate_lift(
+    Helicopter *h,
+    HelicopterFlight *f
+) {
+    double rotor_force =
+        h->rotor_power *
+        h->rotor_efficiency *
+        f->collective;
+
+    /*
+     * Scale power into a gameplay-friendly
+     * acceleration value.
+     */
+
+    return rotor_force /
+           h->mass;
+}
+Gravity
+double calculate_vertical_acceleration(
+    Helicopter *h,
+    HelicopterFlight *f
+) {
+    double lift =
+        calculate_lift(h, f);
+
+    return lift - GRAVITY;
+}
+Vertical flight
+void update_vertical_motion(
+    Helicopter *h,
+    HelicopterFlight *f,
+    double dt
+) {
+    double acceleration =
+        calculate_vertical_acceleration(
+            h,
+            f
+        );
+
+    f->velocity_z +=
+        acceleration * dt;
+
+    f->z +=
+        f->velocity_z * dt;
+
+    /*
+     * Ground collision.
+     */
+
+    if (f->z <= 0.0) {
+
+        f->z = 0.0;
+
+        if (f->velocity_z < 0)
+            f->velocity_z = 0;
+
+        h->landed = true;
+    }
+}
+Cyclic controls
+
+The cyclic controls the helicopter's movement through pitch and roll.
+
+void update_cyclic(
+    HelicopterFlight *f,
+    double dt
+) {
+    f->pitch_rate +=
+        f->cyclic_y * 1.5 * dt;
+
+    f->roll_rate +=
+        f->cyclic_x * 1.5 * dt;
+
+    f->pitch +=
+        f->pitch_rate * dt;
+
+    f->roll +=
+        f->roll_rate * dt;
+
+    /*
+     * Stability damping.
+     */
+
+    f->pitch_rate *= 0.92;
+    f->roll_rate *= 0.92;
+}
+Forward movement
+void calculate_forward_motion(
+    Helicopter *h,
+    HelicopterFlight *f,
+    double dt
+) {
+    double acceleration =
+        sin(f->pitch) *
+        25.0;
+
+    f->horizontal_speed +=
+        acceleration * dt;
+
+    /*
+     * Drag.
+     */
+
+    f->horizontal_speed *=
+        0.995;
+
+    if (
+        f->horizontal_speed >
+        h->max_speed
+    )
+        f->horizontal_speed =
+            h->max_speed;
+
+    if (
+        f->horizontal_speed < 0
+    )
+        f->horizontal_speed = 0;
+
+    f->velocity_x =
+        cos(f->yaw) *
+        f->horizontal_speed;
+
+    f->velocity_y =
+        sin(f->yaw) *
+        f->horizontal_speed;
+
+    f->x +=
+        f->velocity_x * dt;
+
+    f->y +=
+        f->velocity_y * dt;
+}
+Yaw
+void update_yaw(
+    HelicopterFlight *f,
+    double dt
+) {
+    f->yaw_rate +=
+        f->rudder *
+        1.8 *
+        dt;
+
+    f->yaw +=
+        f->yaw_rate * dt;
+
+    f->yaw_rate *= 0.90;
+}
+Complete flight update
+void update_helicopter(
+    Helicopter *h,
+    HelicopterFlight *f,
+    double dt
+) {
+    if (!h->engine_running)
+        return;
+
+    update_vertical_motion(
+        h,
+        f,
+        dt
+    );
+
+    update_cyclic(
+        f,
+        dt
+    );
+
+    update_yaw(
+        f,
+        dt
+    );
+
+    calculate_forward_motion(
+        h,
+        f,
+        dt
+    );
+
+    h->fuel -=
+        0.015 *
+        f->collective *
+        dt;
+
+    if (h->fuel < 0)
+        h->fuel = 0;
+
+    if (h->fuel == 0) {
+
+        h->engine_running = false;
+
+        printf(
+            "HELICOPTER: fuel exhausted.\n"
+        );
+    }
+}
+Landing system
+bool can_land(
+    Helicopter *h,
+    HelicopterFlight *f
+) {
+    if (f->z > 5.0)
+        return false;
+
+    if (
+        fabs(f->velocity_z) >
+        3.0
+    )
+        return false;
+
+    if (
+        f->horizontal_speed >
+        5.0
+    )
+        return false;
+
+    return true;
+}
+void land_helicopter(
+    Helicopter *h,
+    HelicopterFlight *f
+) {
+    if (!can_land(h, f))
+        return;
+
+    f->z = 0;
+
+    f->velocity_z = 0;
+    f->horizontal_speed = 0;
+
+    h->landed = true;
+
+    printf(
+        "%s landed.\n",
+        h->name
+    );
+}
+Weather
+
+Miami should make weather important.
+
+typedef struct {
+
+    double wind_speed;
+    double wind_direction;
+
+    double rain;
+    double visibility;
+
+    bool storm;
+
+} HelicopterWeather;
+
+Wind:
+
+void apply_wind(
+    HelicopterFlight *f,
+    HelicopterWeather *weather,
+    double dt
+) {
+    double wind_x =
+        cos(weather->wind_direction) *
+        weather->wind_speed;
+
+    double wind_y =
+        sin(weather->wind_direction) *
+        weather->wind_speed;
+
+    f->x +=
+        wind_x * dt * 0.01;
+
+    f->y +=
+        wind_y * dt * 0.01;
+}
+
+During a storm:
+
+double flight_weather_modifier(
+    HelicopterWeather *weather
+) {
+    if (weather->storm)
+        return 0.65;
+
+    if (weather->rain > 0.5)
+        return 0.85;
+
+    return 1.0;
+}
+Damage
+void helicopter_damage(
+    Helicopter *h,
+    double impact
+) {
+    h->health -= impact;
+
+    if (h->health < 0)
+        h->health = 0;
+
+    if (h->health == 0) {
+
+        h->engine_running = false;
+
+        printf(
+            "HELICOPTER DISABLED.\n"
+        );
+    }
+}
+Open-world integration
+
+This becomes particularly interesting with the systems you've already built:
+
+                         MIAMI
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+             ▼             ▼             ▼
+          HIGHWAYS      BUILDINGS     AIRPORT
+             │             │
+             │             ▼
+             │        HELIPADS
+             │             │
+             └──────┬──────┘
+                    ▼
+              HELICOPTER
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+     CITY       EVERGLADES     COAST
+       │            │            │
+       │            ▼            ▼
+       │        HOVERCRAFT      SHIPS
+       │                         │
+       │                         ▼
+       │                    INTERNATIONAL
+       │                       WATERS
+       │
+       ▼
+   AIRSHIPS
+
+The helicopter should therefore be a proper transportation class, not merely a mission vehicle. The player could buy one, store it at a private hangar, fly between Miami and the Everglades, land on compatible helipads, pick up passengers, take sightseeing flights, race against other aircraft, or use it simply as an alternative way of traversing the open world.
+
+For the next layer, I'd add a full aircraft garage/economy system so helicopters have different manufacturers, prices, performance classes, maintenance costs, insurance, passenger capacity and resale values.
+
+
+
+
+
+
+
+
+C — Ron DeSantis International Airport
+/*
+ * ============================================================
+ * RON DESANTIS INTERNATIONAL AIRPORT
+ * ============================================================
+ *
+ * FICTIONAL GAME-WORLD AIRPORT
+ *
+ * A large international airport serving the Miami
+ * open-world environment.
+ *
+ * Designed to integrate with:
+ *
+ *   - Helicopters
+ *   - Airships
+ *   - Passenger aircraft
+ *   - Cargo aircraft
+ *   - Airport economy
+ *   - Railway
+ *   - Road network
+ *   - Cruise terminal
+ *   - NPC passengers
+ *   - Aircraft AI
+ *   - Flight schedules
+ *
+ * This is a gameplay simulation rather than a real
+ * airport operations model.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+
+#define MAX_TERMINALS       6
+#define MAX_GATES           120
+#define MAX_RUNWAYS         8
+#define MAX_AIRCRAFT        500
+#define MAX_PASSENGERS      50000
+#define MAX_FLIGHTS         1000
+#define MAX_BAGGAGE         10000
+#define MAX_CARGO           5000
+Airport structure
+typedef struct {
+
+    char name[128];
+
+    char iata[8];
+    char icao[8];
+
+    double x;
+    double y;
+
+    double area;
+
+    int terminals;
+    int gates;
+    int runways;
+
+    int passenger_capacity;
+    int cargo_capacity;
+
+    int current_passengers;
+    int current_aircraft;
+
+    double reputation;
+    double congestion;
+
+    bool open;
+    bool international;
+
+} Airport;
+
+Create the airport:
+
+Airport create_desantis_airport(void)
+{
+    Airport airport;
+
+    memset(&airport, 0, sizeof(airport));
+
+    strcpy(
+        airport.name,
+        "Ron DeSantis International Airport"
+    );
+
+    strcpy(airport.iata, "RDI");
+    strcpy(airport.icao, "KRD1");
+
+    airport.area = 4200.0;
+
+    airport.terminals = 6;
+    airport.gates = 120;
+    airport.runways = 6;
+
+    airport.passenger_capacity = 85000;
+    airport.cargo_capacity = 50000;
+
+    airport.reputation = 0.95;
+
+    airport.open = true;
+    airport.international = true;
+
+    return airport;
+}
+Airport layout
+
+I'd make it a major transport hub:
+
+                    RON DESANTIS
+                 INTERNATIONAL AIRPORT
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+          ▼              ▼              ▼
+      TERMINAL A     TERMINAL B     TERMINAL C
+          │              │              │
+          └───────┬──────┴──────┬───────┘
+                  │             │
+                  ▼             ▼
+             TERMINAL D     TERMINAL E
+                  │             │
+                  └──────┬──────┘
+                         ▼
+                    TERMINAL F
+                         │
+       ┌─────────────────┼─────────────────┐
+       ▼                 ▼                 ▼
+    RAILWAY           ROAD HUB          METRO
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         │
+                         ▼
+                       MIAMI
+
+And on the airside:
+
+                 RUNWAY 1
+══════════════════════════════════
+
+                 RUNWAY 2
+══════════════════════════════════
+
+       TAXIWAY ────────────────┐
+                               │
+       ┌───────────────────────┴──────┐
+       │          TERMINALS            │
+       │                               │
+       │ A  B  C  D  E  F              │
+       │                               │
+       └───────────────────────────────┘
+                    │
+              CARGO TERMINAL
+                    │
+              FREIGHT APRON
+                    │
+              MAINTENANCE
+Runways
+typedef struct {
+
+    int id;
+
+    char designation[16];
+
+    double length;
+    double width;
+
+    bool active;
+    bool wet;
+
+} Runway;
+
+Example:
+
+Runway runways[MAX_RUNWAYS] = {
+
+    {1, "09L/27R", 4200, 60, true, false},
+    {2, "09R/27L", 3900, 60, true, false},
+    {3, "10L/28R", 3600, 60, true, false},
+    {4, "10R/28L", 3400, 60, true, false},
+    {5, "11/29",   3000, 45, true, false},
+    {6, "12/30",   2800, 45, true, false}
+};
+Gates
+typedef enum {
+
+    GATE_DOMESTIC,
+    GATE_INTERNATIONAL,
+    GATE_WIDE_BODY,
+    GATE_CARGO,
+    GATE_PRIVATE,
+    GATE_HELICOPTER,
+    GATE_AIRSHIP
+
+} GateType;
+typedef struct {
+
+    int id;
+
+    int terminal;
+
+    GateType type;
+
+    bool occupied;
+
+    int aircraft_id;
+
+} Gate;
+
+This lets your helicopter and airship systems connect directly to the airport:
+
+AIRPORT
+ │
+ ├── AIRLINE GATES
+ │
+ ├── CARGO GATES
+ │
+ ├── PRIVATE AVIATION
+ │
+ ├── HELIPAD COMPLEX
+ │
+ └── AIRSHIP DOCK
+Passenger system
+typedef enum {
+
+    PASSENGER_TOURIST,
+    PASSENGER_BUSINESS,
+    PASSENGER_RESIDENT,
+    PASSENGER_TRANSIT,
+    PASSENGER_VIP,
+    PASSENGER_CREW
+
+} PassengerType;
+typedef struct {
+
+    int id;
+
+    PassengerType type;
+
+    int terminal;
+    int gate;
+
+    double money;
+    double patience;
+
+    bool checked_in;
+    bool security_cleared;
+    bool boarded;
+
+} AirportPassenger;
+
+Passengers move through the airport:
+
+ROAD / METRO
+     ↓
+ARRIVALS
+     ↓
+CHECK-IN
+     ↓
+BAGGAGE
+     ↓
+SECURITY
+     ↓
+AIR-SIDE
+     ↓
+GATE
+     ↓
+AIRCRAFT
+Flight system
+typedef enum {
+
+    FLIGHT_DOMESTIC,
+    FLIGHT_CARIBBEAN,
+    FLIGHT_LATIN_AMERICA,
+    FLIGHT_EUROPE,
+    FLIGHT_ASIA,
+    FLIGHT_AFRICA
+
+} FlightType;
+typedef struct {
+
+    int id;
+
+    char flight_number[16];
+
+    FlightType type;
+
+    char destination[64];
+
+    int gate;
+
+    int passengers;
+
+    double departure_time;
+    double arrival_time;
+
+    bool boarding;
+    bool departed;
+    bool arrived;
+
+} Flight;
+
+Example world schedule:
+
+Flight flights[] = {
+
+    {1, "RDI101", FLIGHT_DOMESTIC,
+     "New York", 12, 280, 8.00, 11.00,
+     false, false, false},
+
+    {2, "RDI202", FLIGHT_CARIBBEAN,
+     "Nassau", 22, 190, 9.30, 10.30,
+     false, false, false},
+
+    {3, "RDI303", FLIGHT_LATIN_AMERICA,
+     "Bogota", 31, 260, 10.00, 13.00,
+     false, false, false},
+
+    {4, "RDI404", FLIGHT_EUROPE,
+     "London", 44, 340, 21.00, 8.00,
+     false, false, false}
+};
+Dynamic airport congestion
+
+The airport should become busier depending on what's happening in the world.
+
+double calculate_congestion(
+    Airport *airport
+)
+{
+    double passenger_ratio =
+        (double)airport->current_passengers /
+        airport->passenger_capacity;
+
+    double aircraft_ratio =
+        (double)airport->current_aircraft /
+        MAX_AIRCRAFT;
+
+    double congestion =
+        passenger_ratio * 0.7 +
+        aircraft_ratio * 0.3;
+
+    return fmin(
+        congestion,
+        1.0
+    );
+}
+
+So:
+
+0–25%     QUIET
+25–50%    NORMAL
+50–75%    BUSY
+75–90%    CONGESTED
+90–100%   EXTREME
+Airport economy
+
+This connects the airport to the economic systems you've already built.
+
+typedef struct {
+
+    double landing_fees;
+    double gate_fees;
+    double fuel_sales;
+    double retail_sales;
+    double hotel_revenue;
+    double cargo_revenue;
+
+} AirportEconomy;
+double calculate_airport_revenue(
+    AirportEconomy *economy
+)
+{
+    return
+        economy->landing_fees +
+        economy->gate_fees +
+        economy->fuel_sales +
+        economy->retail_sales +
+        economy->hotel_revenue +
+        economy->cargo_revenue;
+}
+
+The airport becomes an economic engine:
+
+                    AIRPORT
+                       │
+       ┌───────────────┼────────────────┐
+       ▼               ▼                ▼
+   PASSENGERS        CARGO           AIRLINES
+       │               │                │
+       ▼               ▼                ▼
+    RETAIL          FREIGHT         LANDING FEES
+       │               │                │
+       └───────────────┼────────────────┘
+                       ▼
+                 AIRPORT ECONOMY
+                       │
+              ┌────────┼────────┐
+              ▼        ▼        ▼
+            JOBS     TAXES    SERVICES
+Airport rail connection
+
+Your existing railway network can connect directly to it.
+
+typedef struct {
+
+    bool connected;
+
+    int station_id;
+
+    double passenger_capacity;
+
+    double travel_time_to_city;
+
+} AirportRailLink;
+AirportRailLink airport_rail = {
+
+    true,
+    500,
+    12000,
+    18.0
+
+};
+
+So the player can arrive by:
+
+                    MIAMI
+                      │
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+        ROAD         METRO      RAIL
+          │           │           │
+          └───────────┼───────────┘
+                      ▼
+               RON DESANTIS
+             INTERNATIONAL
+                 AIRPORT
+                      │
+        ┌─────────────┼─────────────┐
+        ▼             ▼             ▼
+      PLANE       HELICOPTER      AIRSHIP
+Helicopter integration
+
+Your previously created helicopter can land at a dedicated aviation complex:
+
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    double landing_radius;
+
+    bool occupied;
+
+} Helipad;
+bool helicopter_can_land(
+    Helipad *pad,
+    double x,
+    double y
+)
+{
+    double dx = x - pad->x;
+    double dy = y - pad->y;
+
+    double distance =
+        sqrt(dx * dx + dy * dy);
+
+    return distance <=
+           pad->landing_radius;
+}
+Airship integration
+
+And your hydrogen airships can have a dedicated airship terminal:
+
+              AIRSHIP DOCK
+                   │
+          ┌────────┴────────┐
+          │                 │
+     PASSENGER           CARGO
+       AIRSHIP           AIRSHIP
+          │                 │
+          └────────┬────────┘
+                   ▼
+              AIRPORT
+World event system
+
+The airport can become a living location.
+
+typedef enum {
+
+    AIRPORT_NORMAL,
+    AIRPORT_RUSH_HOUR,
+    AIRPORT_STORM,
+    AIRPORT_DELAYED,
+    AIRPORT_CARGO_BOOM,
+    AIRPORT_LOW_TRAFFIC,
+    AIRPORT_MAJOR_EVENT
+
+} AirportState;
+
+For example, a huge event in Miami could cause:
+
+MAJOR EVENT
+     ↓
++ PASSENGERS
+     ↓
++ FLIGHTS
+     ↓
++ HOTEL DEMAND
+     ↓
++ TAXIS
+     ↓
++ RAIL DEMAND
+     ↓
++ AIRPORT REVENUE
+
+while a hurricane/storm could produce:
+
+STORM
+  ↓
+FLIGHT DELAYS
+  ↓
+AIRPORT CONGESTION
+  ↓
+PASSENGERS STRANDED
+  ↓
+HOTEL DEMAND ↑
+  ↓
+GROUND TRANSPORT ↑
+
+That gives Ron DeSantis International Airport a role much larger than simply being a runway: it becomes one of the major economic and transportation nodes of your Miami open world, linking your helicopters, airships, railway, roads, cruise ships and international travel system together.
+
+
+
+
+C — AIRPORT BAGGAGE WORLD
+/*
+ * ============================================================
+ * AIRPORT BAGGAGE WORLD
+ * ============================================================
+ *
+ * Fictional gameplay simulation.
+ *
+ * Concept:
+ *
+ * The passenger sees:
+ *
+ *      CHECK-IN
+ *          ↓
+ *       BAGGAGE
+ *
+ * But underneath the airport is a huge hidden world:
+ *
+ *      CONVEYORS
+ *      SORTERS
+ *      SERVICE TUNNELS
+ *      BAGGAGE CARTS
+ *      STORAGE ROOMS
+ *      LOADING AREAS
+ *
+ * Bags are simulated as individual entities.
+ *
+ * Inspired by the idea of a secret miniature world
+ * existing underneath a seemingly ordinary environment.
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+
+#define MAX_BAGS 20000
+#define MAX_CONVEYORS 500
+#define MAX_CARTS 250
+#define MAX_SORTERS 100
+Baggage entities
+typedef enum {
+
+    BAG_STANDARD,
+    BAG_OVERSIZED,
+    BAG_FRAGILE,
+    BAG_PRIORITY,
+    BAG_CREW,
+    BAG_LOST
+
+} BaggageType;
+typedef enum {
+
+    BAG_CHECKIN,
+    BAG_SORTING,
+    BAG_TRANSFER,
+    BAG_LOADING,
+    BAG_AIRCRAFT,
+    BAG_ARRIVAL,
+    BAG_CLAIM,
+    BAG_DELIVERED,
+    BAG_LOST_STATE
+
+} BaggageState;
+typedef struct {
+
+    int id;
+
+    char owner[64];
+
+    BaggageType type;
+    BaggageState state;
+
+    int destination_gate;
+
+    double x;
+    double y;
+
+    double velocity;
+
+    double weight;
+
+    bool priority;
+    bool damaged;
+
+} Baggage;
+Conveyor network
+
+Think of the baggage system as a second transportation network underneath the airport.
+
+TERMINAL A
+    │
+    ▼
+CHECK-IN
+    │
+    ▼
+════════════════════════════
+       MAIN CONVEYOR
+════════════════════════════
+    │
+    ├──────────────┐
+    ▼              ▼
+ SORTER A       SORTER B
+    │              │
+    ▼              ▼
+GATE GROUP 1   GATE GROUP 2
+    │              │
+    └──────┬───────┘
+           ▼
+      LOADING ZONE
+           │
+           ▼
+        AIRCRAFT
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    double length;
+
+    double speed;
+
+    int next_node;
+
+    bool operational;
+
+} Conveyor;
+Baggage carts
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    int capacity;
+    int bags_loaded;
+
+    double speed;
+
+    bool active;
+
+} BaggageCart;
+Hidden baggage workers
+
+Give the system its own NPC population.
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    double speed;
+
+    double efficiency;
+    double alertness;
+
+    int bags_processed;
+
+    bool working;
+
+} BaggageWorker;
+
+These NPCs can have schedules and personalities.
+
+WORKER
+   │
+   ├── moves around baggage world
+   │
+   ├── fixes broken equipment
+   │
+   ├── redirects bags
+   │
+   ├── loads carts
+   │
+   └── reacts to unusual events
+Baggage sorter
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    int destination_gate;
+
+    double processing_speed;
+
+    bool operational;
+
+} BaggageSorter;
+void sort_bag(
+    Baggage *bag,
+    BaggageSorter *sorter
+) {
+    if (!sorter->operational)
+        return;
+
+    bag->destination_gate =
+        sorter->destination_gate;
+
+    bag->state =
+        BAG_LOADING;
+}
+Bag movement
+void update_baggage(
+    Baggage *bag,
+    double dt
+) {
+    if (
+        bag->state ==
+        BAG_DELIVERED
+    )
+        return;
+
+    bag->x +=
+        bag->velocity * dt;
+}
+Conveyor failures
+
+The airport shouldn't behave perfectly.
+
+typedef enum {
+
+    FAILURE_NONE,
+    FAILURE_JAM,
+    FAILURE_POWER,
+    FAILURE_SENSOR,
+    FAILURE_CART
+
+} BaggageFailure;
+BaggageFailure generate_failure(void)
+{
+    double r =
+        (double)rand() / RAND_MAX;
+
+    if (r < 0.01)
+        return FAILURE_JAM;
+
+    if (r < 0.015)
+        return FAILURE_POWER;
+
+    if (r < 0.02)
+        return FAILURE_SENSOR;
+
+    return FAILURE_NONE;
+}
+The "living airport" system
+
+Now make the baggage world feel like its own ecosystem.
+
+typedef struct {
+
+    int bags_processed;
+    int bags_in_system;
+
+    int delayed_bags;
+    int lost_bags;
+
+    int active_workers;
+    int active_carts;
+
+    double efficiency;
+
+    BaggageFailure current_failure;
+
+} BaggageSystem;
+
+Update it continuously:
+
+void update_baggage_system(
+    BaggageSystem *system,
+    double dt
+) {
+    system->efficiency =
+        0.70 +
+        ((double)system->active_workers /
+         100.0) * 0.20;
+
+    if (
+        system->efficiency >
+        1.0
+    )
+        system->efficiency = 1.0;
+
+    if (
+        system->current_failure !=
+        FAILURE_NONE
+    ) {
+        system->efficiency *= 0.50;
+    }
+}
+Baggage personalities
+
+For the playful hidden-world feeling, individual bags can have simple behavioural properties.
+
+typedef struct {
+
+    int bag_id;
+
+    double confidence;
+    double panic;
+
+    double loyalty;
+    double curiosity;
+
+    bool wants_to_be_first;
+    bool wants_to_be_reunited;
+
+} BaggagePersonality;
+
+Example:
+
+BaggagePersonality create_bag_personality(void)
+{
+    BaggagePersonality p;
+
+    p.confidence =
+        (double)rand() / RAND_MAX;
+
+    p.panic =
+        (double)rand() / RAND_MAX;
+
+    p.loyalty =
+        (double)rand() / RAND_MAX;
+
+    p.curiosity =
+        (double)rand() / RAND_MAX;
+
+    p.wants_to_be_first =
+        p.confidence > 0.8;
+
+    p.wants_to_be_reunited = true;
+
+    return p;
+}
+
+That lets the baggage system become almost a miniature NPC society.
+
+Airport hidden level
+
+The player could eventually discover the underground baggage world.
+
+                 AIRPORT
+────────────────────────────────────
+
+ TERMINALS
+ ┌─────┐ ┌─────┐ ┌─────┐
+ │  A  │ │  B  │ │  C  │
+ └──┬──┘ └──┬──┘ └──┬──┘
+    │       │       │
+════╪═══════╪═══════╪══════════════
+             BAGGAGE LEVEL
+═══════════════════════════════════
+
+   CONVEYORS
+       │
+       ├──── SORTERS
+       │
+       ├──── CART DEPOT
+       │
+       ├──── WORKSHOP
+       │
+       ├──── STORAGE
+       │
+       └──── LOADING
+               │
+               ▼
+            AIRCRAFT
+
+The key design idea is that the airport has two worlds:
+
+Above ground
+
+passengers, check-in desks, shops, gates, restaurants, aircraft.
+
+Below ground
+
+conveyors, carts, workers, machines, luggage, sorting systems and hidden maintenance areas.
+
+And because your airport is an open-world location, the baggage system can actually run continuously in the background. If the player leaves Miami and comes back six hours later, baggage volumes, delayed bags, equipment failures and flight connections can have changed rather than everything resetting.
+
+
+
+
+
+
+
+
+
+
+
+
+I'd make it a fictional quest called THE GREAT TOY RUN: a shipment of rare toys disappears into the airport baggage system, and the player has to follow the trail from Miami to Japan, recover the toys, and eventually return them to the fictional Tri-State Area.
+
+C — "THE GREAT TOY RUN" QUEST
+/*
+ * ============================================================
+ * THE GREAT TOY RUN
+ * ============================================================
+ *
+ * Fictional open-world quest.
+ *
+ * PREMISE:
+ *
+ * A shipment of rare collectible toys disappears
+ * inside the airport's hidden baggage network.
+ *
+ * The toys are accidentally loaded onto an
+ * international flight bound for Japan.
+ *
+ * The player must:
+ *
+ *   1. Discover the missing shipment
+ *   2. Investigate the airport baggage world
+ *   3. Identify the flight
+ *   4. Travel to Japan
+ *   5. Locate the shipment
+ *   6. Recover the toys
+ *   7. Return to the Tri-State Area
+ *   8. Deliver the toys to their owner
+ *
+ * This is entirely fictional game logic.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_TOYS 100
+#define MAX_CLUES 32
+Quest states
+typedef enum {
+
+    QUEST_LOCKED,
+
+    QUEST_DISCOVERED,
+
+    QUEST_INVESTIGATE_BAGGAGE,
+
+    QUEST_FIND_MANIFEST,
+
+    QUEST_IDENTIFY_FLIGHT,
+
+    QUEST_TRAVEL_TO_JAPAN,
+
+    QUEST_SEARCH_JAPAN,
+
+    QUEST_FIND_TOYS,
+
+    QUEST_RECOVER_TOYS,
+
+    QUEST_RETURN_HOME,
+
+    QUEST_TRI_STATE_DELIVERY,
+
+    QUEST_COMPLETE,
+
+    QUEST_FAILED
+
+} ToyQuestState;
+The stolen toys
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double value;
+
+    bool rare;
+
+    bool recovered;
+
+    bool delivered;
+
+} Toy;
+
+Example shipment:
+
+Toy toy_shipment[] = {
+
+    {1, "Captain Comet", 2500.0, true, false, false},
+
+    {2, "Moon Rabbit", 1800.0, true, false, false},
+
+    {3, "Little Robot", 900.0, false, false, false},
+
+    {4, "Golden Bear", 5000.0, true, false, false},
+
+    {5, "Sky Ranger", 1200.0, false, false, false}
+
+};
+
+The rare toys are particularly valuable in the game's collectible economy.
+
+Quest structure
+typedef struct {
+
+    ToyQuestState state;
+
+    int toys_total;
+    int toys_recovered;
+
+    int clues_found;
+
+    bool baggage_area_discovered;
+    bool manifest_found;
+    bool flight_identified;
+
+    bool japan_reached;
+    bool shipment_found;
+
+    bool returned_to_tri_state;
+
+    double reward;
+
+} ToyQuest;
+
+Create it:
+
+ToyQuest create_toy_quest(void)
+{
+    ToyQuest quest;
+
+    quest.state =
+        QUEST_LOCKED;
+
+    quest.toys_total = 5;
+    quest.toys_recovered = 0;
+
+    quest.clues_found = 0;
+
+    quest.baggage_area_discovered = false;
+    quest.manifest_found = false;
+    quest.flight_identified = false;
+
+    quest.japan_reached = false;
+    quest.shipment_found = false;
+
+    quest.returned_to_tri_state = false;
+
+    quest.reward = 0.0;
+
+    return quest;
+}
+Quest discovery
+
+The quest starts when the player encounters a distressed toy collector at the airport.
+
+void discover_quest(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_LOCKED
+    )
+        return;
+
+    quest->state =
+        QUEST_DISCOVERED;
+
+    printf(
+        "\nQUEST DISCOVERED:\n"
+        "THE GREAT TOY RUN\n\n"
+    );
+
+    printf(
+        "A shipment of rare toys "
+        "has disappeared.\n"
+    );
+
+    printf(
+        "Last known location: "
+        "Miami International Airport.\n"
+    );
+}
+Enter the hidden baggage world
+void investigate_baggage(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_DISCOVERED
+    )
+        return;
+
+    quest->baggage_area_discovered = true;
+
+    quest->clues_found++;
+
+    quest->state =
+        QUEST_INVESTIGATE_BAGGAGE;
+
+    printf(
+        "You discover the hidden "
+        "baggage-processing level.\n"
+    );
+}
+
+Now the player enters the strange underground airport:
+
+AIRPORT TERMINALS
+       │
+       ▼
+CHECK-IN
+       │
+       ▼
+════════════════════
+ HIDDEN BAGGAGE WORLD
+════════════════════
+       │
+       ├── CONVEYORS
+       ├── CARTS
+       ├── SORTERS
+       ├── STORAGE
+       └── LOST BAGGAGE
+              │
+              ▼
+          TOY CLUE
+Finding the manifest
+void find_manifest(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_INVESTIGATE_BAGGAGE
+    )
+        return;
+
+    quest->manifest_found = true;
+
+    quest->clues_found++;
+
+    quest->state =
+        QUEST_FIND_MANIFEST;
+
+    printf(
+        "MANIFEST FOUND.\n"
+    );
+
+    printf(
+        "Destination: JAPAN\n"
+    );
+}
+Identifying the flight
+void identify_flight(
+    ToyQuest *quest
+) {
+    if (
+        !quest->manifest_found
+    )
+        return;
+
+    quest->flight_identified = true;
+
+    quest->clues_found++;
+
+    quest->state =
+        QUEST_IDENTIFY_FLIGHT;
+
+    printf(
+        "Flight identified.\n"
+        "The toys have left Miami.\n"
+    );
+}
+International journey
+
+The player's existing aircraft system can now be used.
+
+void board_international_flight(
+    ToyQuest *quest
+) {
+    if (
+        !quest->flight_identified
+    )
+        return;
+
+    quest->state =
+        QUEST_TRAVEL_TO_JAPAN;
+
+    printf(
+        "Boarding international flight.\n"
+    );
+
+    printf(
+        "Destination: JAPAN\n"
+    );
+}
+
+Then:
+
+void arrive_japan(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_TRAVEL_TO_JAPAN
+    )
+        return;
+
+    quest->japan_reached = true;
+
+    quest->state =
+        QUEST_SEARCH_JAPAN;
+
+    printf(
+        "ARRIVED IN JAPAN.\n"
+    );
+}
+Japan world zone
+
+Create a separate destination zone:
+
+typedef enum {
+
+    JAPAN_AIRPORT,
+    TOKYO,
+    OSAKA,
+    KYOTO,
+    PORT,
+    WAREHOUSE_DISTRICT
+
+} JapanZone;
+
+The quest can move between them:
+
+MIAMI
+  │
+  ▼
+AIRPORT
+  │
+  ▼
+INTERNATIONAL FLIGHT
+  │
+  ▼
+JAPAN
+  │
+  ├── AIRPORT
+  │
+  ├── TOKYO
+  │
+  ├── OSAKA
+  │
+  └── WAREHOUSE DISTRICT
+             │
+             ▼
+         TOY SHIPMENT
+Finding the toys
+void find_toy_shipment(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_SEARCH_JAPAN
+    )
+        return;
+
+    quest->shipment_found = true;
+
+    quest->state =
+        QUEST_FIND_TOYS;
+
+    printf(
+        "TOY SHIPMENT LOCATED.\n"
+    );
+
+    printf(
+        "Recover the missing toys.\n"
+    );
+}
+Recover individual toys
+void recover_toy(
+    ToyQuest *quest,
+    Toy *toy
+) {
+    if (
+        toy->recovered
+    )
+        return;
+
+    toy->recovered = true;
+
+    quest->toys_recovered++;
+
+    printf(
+        "Recovered: %s\n",
+        toy->name
+    );
+
+    if (
+        quest->toys_recovered >=
+        quest->toys_total
+    ) {
+
+        quest->state =
+            QUEST_RETURN_HOME;
+
+        printf(
+            "\nALL TOYS RECOVERED.\n"
+        );
+
+        printf(
+            "Return them to the "
+            "Tri-State Area.\n"
+        );
+    }
+}
+Rare toy economy
+
+The toys have dynamic value.
+
+double calculate_toy_value(
+    Toy *toy,
+    double collector_demand
+) {
+    double value =
+        toy->value;
+
+    if (toy->rare)
+        value *= 2.0;
+
+    value *=
+        1.0 + collector_demand;
+
+    return value;
+}
+
+So the player faces an interesting economic decision:
+
+RECOVERED TOY
+      │
+      ├───────────────┐
+      ▼               ▼
+ RETURN IT        SELL IT
+      │               │
+      ▼               ▼
+ QUEST REWARD    COLLECTOR MARKET
+      │               │
+      ▼               ▼
+ REPUTATION       MONEY
+
+Returning them should produce the larger long-term reputation reward, while selling them could provide immediate money but fail the quest.
+
+Return to the Tri-State Area
+void return_to_tri_state(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_RETURN_HOME
+    )
+        return;
+
+    quest->returned_to_tri_state = true;
+
+    quest->state =
+        QUEST_TRI_STATE_DELIVERY;
+
+    printf(
+        "Returned to the Tri-State Area.\n"
+    );
+}
+Final delivery
+void complete_toy_quest(
+    ToyQuest *quest
+) {
+    if (
+        quest->state !=
+        QUEST_TRI_STATE_DELIVERY
+    )
+        return;
+
+    quest->reward =
+        25000.0;
+
+    quest->state =
+        QUEST_COMPLETE;
+
+    printf(
+        "\nQUEST COMPLETE!\n"
+    );
+
+    printf(
+        "THE GREAT TOY RUN\n"
+    );
+
+    printf(
+        "Reward: $%.2f\n",
+        quest->reward
+    );
+}
+The complete adventure
+                 THE GREAT TOY RUN
+                         │
+                         ▼
+                MIAMI AIRPORT
+                         │
+                         ▼
+              HIDDEN BAGGAGE WORLD
+                         │
+                         ▼
+                 FIND MANIFEST
+                         │
+                         ▼
+                  FIND FLIGHT
+                         │
+                         ▼
+                  INTERNATIONAL
+                     JOURNEY
+                         │
+                         ▼
+                       JAPAN
+                         │
+                  ┌──────┴──────┐
+                  ▼             ▼
+                TOKYO       WAREHOUSE
+                                │
+                                ▼
+                         RARE TOYS FOUND
+                                │
+                                ▼
+                         RECOVER SHIPMENT
+                                │
+                                ▼
+                       RETURN TO AMERICA
+                                │
+                                ▼
+                    TRI-STATE AREA
+                                │
+                                ▼
+                         DELIVER TOYS
+                                │
+                                ▼
+                        QUEST COMPLETE
+A particularly fun final mechanic
+
+Make the Tri-State Area a fictionalised northeastern region of the game world containing the toys' original collector community. Once the player returns, the recovered toys could become permanent objects in a museum, toy shop or collector's mansion.
+
+That also gives you a nice persistent-world effect:
+
+before the quest: empty display cases → during quest: missing-toy investigation → after completion: the recovered toys physically appear in the world.
+
+The airport baggage system, international airline network, Japanese destination zone and collectible economy therefore all become interconnected rather than being isolated quest mechanics.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
