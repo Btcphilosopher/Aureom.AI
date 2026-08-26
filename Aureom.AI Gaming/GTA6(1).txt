@@ -18398,6 +18398,5337 @@ int main(void)
 
 
 
+#include <stdio.h>
+#include <stdbool.h>
+
+typedef enum {
+    FIELD_IDLE,
+    FIELD_GROWING,
+    FIELD_READY
+} FieldState;
+
+typedef struct {
+    char name[32];
+
+    double acres;
+    double growth;
+    double yield;
+
+    FieldState state;
+
+    double water;
+    double soil_quality;
+} Field;
+
+typedef struct {
+    double cash;
+
+    double grain;
+    double hay;
+    double vegetables;
+
+    double water;
+    double fuel;
+
+    double reputation;
+} FarmEconomy;
+
+typedef struct {
+
+    char name[64];
+
+    double land;
+
+    Field fields[8];
+
+    FarmEconomy economy;
+
+    bool barn;
+    bool tractor;
+    bool water_tank;
+
+    double rural_time;
+
+} SlowFarm;
+
+
+/* ------------------------------------------------------------
+   Initialise the remote farm
+   ------------------------------------------------------------ */
+
+void initialise_farm(SlowFarm *farm)
+{
+    farm->land = 1200.0;
+
+    farm->barn = true;
+    farm->tractor = false;
+    farm->water_tank = true;
+
+    farm->rural_time = 0.0;
+
+    farm->economy.cash = 75000.0;
+    farm->economy.water = 5000.0;
+    farm->economy.fuel = 500.0;
+    farm->economy.reputation = 0.50;
+
+    for (int i = 0; i < 8; i++) {
+
+        farm->fields[i].acres = 100.0;
+        farm->fields[i].growth = 0.0;
+        farm->fields[i].yield = 0.0;
+
+        farm->fields[i].state = FIELD_IDLE;
+
+        farm->fields[i].water = 1.0;
+        farm->fields[i].soil_quality = 0.75;
+    }
+}
+
+
+/* ------------------------------------------------------------
+   Plant a field
+   ------------------------------------------------------------ */
+
+void plant_field(Field *field)
+{
+    if (field->state != FIELD_IDLE)
+        return;
+
+    field->growth = 0.0;
+    field->yield = 0.0;
+
+    field->state = FIELD_GROWING;
+}
+
+
+/* ------------------------------------------------------------
+   Slow agricultural simulation
+   ------------------------------------------------------------ */
+
+void simulate_day(SlowFarm *farm)
+{
+    farm->rural_time += 1.0;
+
+    for (int i = 0; i < 8; i++) {
+
+        Field *field = &farm->fields[i];
+
+        if (field->state != FIELD_GROWING)
+            continue;
+
+        /*
+         * Very slow growth.
+         *
+         * The farm is intentionally not
+         * an action-heavy gameplay system.
+         */
+
+        double growth_rate =
+            0.035 *
+            field->soil_quality *
+            field->water;
+
+        field->growth += growth_rate;
+
+        if (field->growth >= 1.0) {
+
+            field->growth = 1.0;
+
+            field->yield =
+                field->acres *
+                field->soil_quality;
+
+            field->state = FIELD_READY;
+        }
+    }
+}
+
+
+/* ------------------------------------------------------------
+   Harvest
+   ------------------------------------------------------------ */
+
+void harvest_field(
+    SlowFarm *farm,
+    int field_id
+)
+{
+    if (field_id < 0 || field_id >= 8)
+        return;
+
+    Field *field =
+        &farm->fields[field_id];
+
+    if (field->state != FIELD_READY)
+        return;
+
+    farm->economy.grain +=
+        field->yield;
+
+    field->growth = 0.0;
+    field->yield = 0.0;
+
+    field->state = FIELD_IDLE;
+
+    farm->economy.reputation += 0.01;
+}
+
+
+/* ------------------------------------------------------------
+   Rural economy
+   ------------------------------------------------------------ */
+
+void rural_market(SlowFarm *farm)
+{
+    double grain_price = 42.0;
+    double hay_price = 28.0;
+    double vegetable_price = 65.0;
+
+    double revenue =
+        farm->economy.grain * grain_price +
+        farm->economy.hay * hay_price +
+        farm->economy.vegetables *
+        vegetable_price;
+
+    /*
+     * Selling is deliberately infrequent.
+     */
+
+    if (revenue > 0.0) {
+
+        farm->economy.cash += revenue;
+
+        farm->economy.grain = 0.0;
+        farm->economy.hay = 0.0;
+        farm->economy.vegetables = 0.0;
+    }
+}
+
+
+/* ------------------------------------------------------------
+   Farm operating costs
+   ------------------------------------------------------------ */
+
+void farm_costs(SlowFarm *farm)
+{
+    double maintenance = 250.0;
+
+    if (farm->tractor)
+        maintenance += 150.0;
+
+    farm->economy.cash -= maintenance;
+
+    if (farm->economy.cash < 0)
+        farm->economy.cash = 0;
+}
+
+
+/* ------------------------------------------------------------
+   Display
+   ------------------------------------------------------------ */
+
+void display_farm(
+    const SlowFarm *farm
+)
+{
+    printf("\n");
+    printf("====================================\n");
+    printf("          THE LONG ACRE\n");
+    printf("====================================\n");
+
+    printf("Land:       %.0f acres\n",
+           farm->land);
+
+    printf("Cash:       $%.2f\n",
+           farm->economy.cash);
+
+    printf("Grain:      %.1f\n",
+           farm->economy.grain);
+
+    printf("Hay:        %.1f\n",
+           farm->economy.hay);
+
+    printf("Vegetables: %.1f\n",
+           farm->economy.vegetables);
+
+    printf("Water:      %.1f\n",
+           farm->economy.water);
+
+    printf("Fuel:       %.1f\n",
+           farm->economy.fuel);
+
+    printf("Reputation: %.2f\n",
+           farm->economy.reputation);
+
+    printf("\nFIELDS\n");
+
+    for (int i = 0; i < 8; i++) {
+
+        const Field *field =
+            &farm->fields[i];
+
+        printf(
+            "Field %d | %.0f acres | growth %.1f%%\n",
+            i + 1,
+            field->acres,
+            field->growth * 100.0
+        );
+    }
+
+    printf("====================================\n");
+}
+
+
+/* ------------------------------------------------------------
+   Main simulation
+   ------------------------------------------------------------ */
+
+int main(void)
+{
+    SlowFarm farm;
+
+    initialise_farm(&farm);
+
+    /*
+     * Start several fields.
+     */
+
+    for (int i = 0; i < 4; i++)
+        plant_field(&farm.fields[i]);
+
+    /*
+     * Simulate an entire year.
+     */
+
+    for (int day = 1; day <= 365; day++) {
+
+        simulate_day(&farm);
+
+        /*
+         * Harvest periodically.
+         */
+
+        for (int i = 0; i < 8; i++)
+            harvest_field(&farm, i);
+
+        /*
+         * Monthly market cycle.
+         */
+
+        if (day % 30 == 0)
+            rural_market(&farm);
+
+        farm_costs(&farm);
+
+        if (day % 30 == 0)
+            display_farm(&farm);
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN WORLD
+ * HIDDEN DATA CENTRE SYSTEM
+ *
+ * Procedurally generated concealed computing facilities.
+ *
+ * Possible locations:
+ *   - Barn
+ *   - Jungle hut
+ *   - Abandoned warehouse
+ *   - Utility building
+ *   - Industrial shed
+ *   - Underground chamber
+ *   - Remote farm building
+ *   - Mountain / quarry facility
+ *
+ * The system supports:
+ *   - Random spawning
+ *   - Weighted location selection
+ *   - Facility rarity
+ *   - Compute capacity
+ *   - Power consumption
+ *   - Cooling
+ *   - Storage
+ *   - Economic value
+ *   - Discovery
+ *   - Ownership
+ *   - Procedural distribution
+ *
+ * Fictional game simulation.
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <time.h>
+#include <math.h>
+
+#define MAX_DATA_CENTRES 128
+#define MAP_WIDTH  10000.0
+#define MAP_HEIGHT 10000.0
+
+
+/* ================================================================
+ * LOCATION TYPES
+ * ================================================================ */
+
+typedef enum {
+
+    LOCATION_BARN,
+    LOCATION_JUNGLE_HUT,
+    LOCATION_WAREHOUSE,
+    LOCATION_UTILITY_SHED,
+    LOCATION_FARM_BUILDING,
+    LOCATION_UNDERGROUND,
+    LOCATION_INDUSTRIAL_SHED,
+    LOCATION_REMOTE_CABIN
+
+} LocationType;
+
+
+/* ================================================================
+ * DATA CENTRE
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    LocationType location_type;
+
+    double x;
+    double y;
+
+    double concealment;
+
+    double compute_capacity;
+    double storage_capacity;
+
+    double power_capacity;
+    double power_usage;
+
+    double cooling_capacity;
+
+    double market_value;
+
+    double operating_cost;
+
+    double reputation;
+
+    bool discovered;
+    bool operational;
+    bool player_owned;
+
+} HiddenDataCentre;
+
+
+/* ================================================================
+ * WORLD
+ * ================================================================ */
+
+typedef struct {
+
+    HiddenDataCentre centres[MAX_DATA_CENTRES];
+
+    int centre_count;
+
+    unsigned int seed;
+
+} DataCentreWorld;
+
+
+/* ================================================================
+ * RANDOM NUMBER
+ * ================================================================ */
+
+static double random_double(
+    double min,
+    double max
+)
+{
+    return min +
+        ((double)rand() / RAND_MAX)
+        * (max - min);
+}
+
+
+/* ================================================================
+ * LOCATION NAME
+ * ================================================================ */
+
+static const char *location_name(
+    LocationType type
+)
+{
+    switch(type) {
+
+        case LOCATION_BARN:
+            return "Remote Barn";
+
+        case LOCATION_JUNGLE_HUT:
+            return "Jungle Hutch";
+
+        case LOCATION_WAREHOUSE:
+            return "Abandoned Warehouse";
+
+        case LOCATION_UTILITY_SHED:
+            return "Utility Shed";
+
+        case LOCATION_FARM_BUILDING:
+            return "Farm Building";
+
+        case LOCATION_UNDERGROUND:
+            return "Underground Facility";
+
+        case LOCATION_INDUSTRIAL_SHED:
+            return "Industrial Shed";
+
+        case LOCATION_REMOTE_CABIN:
+            return "Remote Cabin";
+    }
+
+    return "Unknown";
+}
+
+
+/* ================================================================
+ * WEIGHTED LOCATION GENERATION
+ * ================================================================ */
+
+static LocationType random_location_type(void)
+{
+    double roll =
+        random_double(0.0, 1.0);
+
+    if (roll < 0.22)
+        return LOCATION_BARN;
+
+    if (roll < 0.40)
+        return LOCATION_JUNGLE_HUT;
+
+    if (roll < 0.57)
+        return LOCATION_WAREHOUSE;
+
+    if (roll < 0.70)
+        return LOCATION_UTILITY_SHED;
+
+    if (roll < 0.80)
+        return LOCATION_FARM_BUILDING;
+
+    if (roll < 0.88)
+        return LOCATION_INDUSTRIAL_SHED;
+
+    if (roll < 0.96)
+        return LOCATION_REMOTE_CABIN;
+
+    return LOCATION_UNDERGROUND;
+}
+
+
+/* ================================================================
+ * LOCATION CONCEALMENT
+ * ================================================================ */
+
+static double calculate_concealment(
+    LocationType type
+)
+{
+    switch(type) {
+
+        case LOCATION_BARN:
+            return 0.72;
+
+        case LOCATION_JUNGLE_HUT:
+            return 0.94;
+
+        case LOCATION_WAREHOUSE:
+            return 0.55;
+
+        case LOCATION_UTILITY_SHED:
+            return 0.76;
+
+        case LOCATION_FARM_BUILDING:
+            return 0.64;
+
+        case LOCATION_UNDERGROUND:
+            return 0.99;
+
+        case LOCATION_INDUSTRIAL_SHED:
+            return 0.48;
+
+        case LOCATION_REMOTE_CABIN:
+            return 0.87;
+    }
+
+    return 0.5;
+}
+
+
+/* ================================================================
+ * CAPACITY GENERATION
+ * ================================================================ */
+
+static void generate_capacity(
+    HiddenDataCentre *centre
+)
+{
+    double size_factor =
+        random_double(0.5, 1.5);
+
+    centre->compute_capacity =
+        100.0 *
+        size_factor;
+
+    centre->storage_capacity =
+        500.0 *
+        size_factor;
+
+    centre->power_capacity =
+        250.0 *
+        size_factor;
+
+    centre->power_usage =
+        centre->power_capacity *
+        random_double(0.45, 0.85);
+
+    centre->cooling_capacity =
+        centre->power_capacity *
+        random_double(0.90, 1.20);
+}
+
+
+/* ================================================================
+ * ECONOMIC VALUE
+ * ================================================================ */
+
+static void calculate_economics(
+    HiddenDataCentre *centre
+)
+{
+    centre->market_value =
+        centre->compute_capacity * 5000.0 +
+        centre->storage_capacity * 20.0;
+
+    centre->operating_cost =
+        centre->power_usage * 12.0;
+
+    centre->reputation =
+        random_double(0.40, 0.95);
+}
+
+
+/* ================================================================
+ * CREATE DATA CENTRE
+ * ================================================================ */
+
+static void create_data_centre(
+    DataCentreWorld *world
+)
+{
+    if (world->centre_count >=
+        MAX_DATA_CENTRES)
+        return;
+
+    HiddenDataCentre *centre =
+        &world->centres[
+            world->centre_count
+        ];
+
+    centre->id =
+        world->centre_count;
+
+    centre->location_type =
+        random_location_type();
+
+    centre->x =
+        random_double(
+            0.0,
+            MAP_WIDTH
+        );
+
+    centre->y =
+        random_double(
+            0.0,
+            MAP_HEIGHT
+        );
+
+    centre->concealment =
+        calculate_concealment(
+            centre->location_type
+        );
+
+    generate_capacity(
+        centre
+    );
+
+    calculate_economics(
+        centre
+    );
+
+    centre->discovered = false;
+    centre->operational = true;
+    centre->player_owned = false;
+
+    world->centre_count++;
+}
+
+
+/* ================================================================
+ * PROCEDURAL WORLD GENERATION
+ * ================================================================ */
+
+static void generate_data_centres(
+    DataCentreWorld *world,
+    int number
+)
+{
+    for (int i = 0;
+         i < number;
+         i++)
+    {
+        create_data_centre(
+            world
+        );
+    }
+}
+
+
+/* ================================================================
+ * DISCOVERY SYSTEM
+ * ================================================================ */
+
+static bool attempt_discovery(
+    HiddenDataCentre *centre,
+    double player_x,
+    double player_y,
+    double search_radius
+)
+{
+    double dx =
+        centre->x - player_x;
+
+    double dy =
+        centre->y - player_y;
+
+    double distance =
+        sqrt(
+            dx * dx +
+            dy * dy
+        );
+
+    if (distance > search_radius)
+        return false;
+
+    /*
+     * Highly concealed facilities
+     * require more exploration.
+     */
+
+    double discovery_probability =
+        1.0 -
+        centre->concealment;
+
+    if (random_double(0.0, 1.0)
+        < discovery_probability)
+    {
+        centre->discovered = true;
+        return true;
+    }
+
+    return false;
+}
+
+
+/* ================================================================
+ * PLAYER ACQUISITION
+ * ================================================================ */
+
+static bool purchase_centre(
+    HiddenDataCentre *centre,
+    double *player_cash
+)
+{
+    if (!centre->discovered)
+        return false;
+
+    if (centre->player_owned)
+        return false;
+
+    if (*player_cash <
+        centre->market_value)
+        return false;
+
+    *player_cash -=
+        centre->market_value;
+
+    centre->player_owned =
+        true;
+
+    return true;
+}
+
+
+/* ================================================================
+ * COMPUTE ECONOMY
+ * ================================================================ */
+
+static double calculate_compute_income(
+    HiddenDataCentre *centre
+)
+{
+    if (!centre->operational)
+        return 0.0;
+
+    double utilisation =
+        random_double(
+            0.35,
+            0.95
+        );
+
+    return centre->compute_capacity *
+           utilisation *
+           8.0;
+}
+
+
+/* ================================================================
+ * DATA CENTRE TICK
+ * ================================================================ */
+
+static double data_centre_tick(
+    HiddenDataCentre *centre
+)
+{
+    if (!centre->operational)
+        return 0.0;
+
+    double income =
+        calculate_compute_income(
+            centre
+        );
+
+    double profit =
+        income -
+        centre->operating_cost;
+
+    return profit;
+}
+
+
+/* ================================================================
+ * DISPLAY
+ * ================================================================ */
+
+static void display_centre(
+    const HiddenDataCentre *centre
+)
+{
+    printf(
+        "\n"
+        "--------------------------------------------\n"
+        "DATA CENTRE #%d\n"
+        "--------------------------------------------\n",
+        centre->id
+    );
+
+    printf(
+        "Location:       %s\n",
+        location_name(
+            centre->location_type
+        )
+    );
+
+    printf(
+        "Coordinates:    %.1f / %.1f\n",
+        centre->x,
+        centre->y
+    );
+
+    printf(
+        "Concealment:    %.2f\n",
+        centre->concealment
+    );
+
+    printf(
+        "Compute:        %.1f units\n",
+        centre->compute_capacity
+    );
+
+    printf(
+        "Storage:        %.1f TB\n",
+        centre->storage_capacity
+    );
+
+    printf(
+        "Power:          %.1f MW\n",
+        centre->power_usage
+    );
+
+    printf(
+        "Cooling:        %.1f MW\n",
+        centre->cooling_capacity
+    );
+
+    printf(
+        "Market Value:   $%.2f\n",
+        centre->market_value
+    );
+
+    printf(
+        "Discovered:     %s\n",
+        centre->discovered
+            ? "YES"
+            : "NO"
+    );
+
+    printf(
+        "Player Owned:   %s\n",
+        centre->player_owned
+            ? "YES"
+            : "NO"
+    );
+}
+
+
+/* ================================================================
+ * WORLD INITIALISATION
+ * ================================================================ */
+
+static void initialise_world(
+    DataCentreWorld *world
+)
+{
+    world->centre_count = 0;
+
+    world->seed =
+        (unsigned int)time(NULL);
+
+    srand(world->seed);
+}
+
+
+/* ================================================================
+ * WORLD REPORT
+ * ================================================================ */
+
+static void world_report(
+    DataCentreWorld *world
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "         HIDDEN COMPUTE NETWORK\n"
+        "====================================================\n"
+    );
+
+    printf(
+        "Facilities generated: %d\n",
+        world->centre_count
+    );
+
+    int discovered = 0;
+    int operational = 0;
+
+    double total_compute = 0.0;
+    double total_storage = 0.0;
+
+    for (int i = 0;
+         i < world->centre_count;
+         i++)
+    {
+        HiddenDataCentre *centre =
+            &world->centres[i];
+
+        if (centre->discovered)
+            discovered++;
+
+        if (centre->operational)
+            operational++;
+
+        total_compute +=
+            centre->compute_capacity;
+
+        total_storage +=
+            centre->storage_capacity;
+    }
+
+    printf(
+        "Discovered:            %d\n",
+        discovered
+    );
+
+    printf(
+        "Operational:           %d\n",
+        operational
+    );
+
+    printf(
+        "Total compute:         %.1f\n",
+        total_compute
+    );
+
+    printf(
+        "Total storage:         %.1f TB\n",
+        total_storage
+    );
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    DataCentreWorld world;
+
+    initialise_world(
+        &world
+    );
+
+    /*
+     * Generate facilities across
+     * the entire open-world map.
+     */
+
+    generate_data_centres(
+        &world,
+        50
+    );
+
+    world_report(
+        &world
+    );
+
+    /*
+     * Display several generated
+     * facilities.
+     */
+
+    for (int i = 0;
+         i < world.centre_count &&
+         i < 10;
+         i++)
+    {
+        display_centre(
+            &world.centres[i]
+        );
+    }
+
+    /*
+     * Example player position.
+     */
+
+    double player_x = 5000.0;
+    double player_y = 5000.0;
+
+    printf(
+        "\n"
+        "SEARCHING NEAR PLAYER...\n"
+    );
+
+    for (int i = 0;
+         i < world.centre_count;
+         i++)
+    {
+        if (
+            attempt_discovery(
+                &world.centres[i],
+                player_x,
+                player_y,
+                500.0
+            )
+        )
+        {
+            printf(
+                "DISCOVERED: "
+                "Data Centre #%d at %.1f, %.1f\n",
+
+                world.centres[i].id,
+
+                world.centres[i].x,
+
+                world.centres[i].y
+            );
+        }
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+/*
+ * ================================================================
+ * MALT WHISKEY
+ * FLORIDA RUSTBELT THEME PARK
+ *
+ * Fictional open-world game simulation
+ *
+ * Features:
+ *   - Procedural park generation
+ *   - Florida-style terrain
+ *   - Rusty retro attractions
+ *   - Rollercoaster
+ *   - Ferris wheel
+ *   - Monorail
+ *   - Swamp ride
+ *   - Arcade
+ *   - Food stands
+ *   - Maintenance system
+ *   - Visitor economy
+ *   - Dynamic weather
+ *   - Park reputation
+ *   - Day/night operation
+ *
+ * Compile:
+ *
+ *   gcc malt_whiskey.c -o malt_whiskey -lm
+ *
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+
+
+/* ================================================================
+ * CONFIGURATION
+ * ================================================================ */
+
+#define PARK_WIDTH  2400.0
+#define PARK_HEIGHT 1800.0
+
+#define MAX_RIDES       32
+#define MAX_BUILDINGS   64
+#define MAX_PATHS       128
+#define MAX_TREES       400
+#define MAX_PONDS       32
+#define MAX_SIGNAGE     32
+
+
+/* ================================================================
+ * BASIC VECTOR
+ * ================================================================ */
+
+typedef struct {
+
+    double x;
+    double y;
+
+} Vec2;
+
+
+/* ================================================================
+ * ZONES
+ * ================================================================ */
+
+typedef enum {
+
+    ZONE_ENTRANCE,
+    ZONE_MAIN_STREET,
+    ZONE_RUSTBELT,
+    ZONE_SWAMP,
+    ZONE_FAIRGROUND,
+    ZONE_ROCKET_VALLEY,
+    ZONE_WATERFRONT,
+    ZONE_ARCADE,
+    ZONE_BACKLOT,
+    ZONE_MAINTENANCE
+
+} ParkZone;
+
+
+/* ================================================================
+ * RIDE TYPES
+ * ================================================================ */
+
+typedef enum {
+
+    RIDE_ROLLERCOASTER,
+    RIDE_FERRIS_WHEEL,
+    RIDE_DARK_RIDE,
+    RIDE_WATER_RIDE,
+    RIDE_MONORAIL,
+    RIDE_CAROUSEL,
+    RIDE_DROP_TOWER,
+    RIDE_ARCADE
+
+} RideType;
+
+
+/* ================================================================
+ * RIDE
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    RideType type;
+
+    ParkZone zone;
+
+    Vec2 position;
+
+    double condition;
+    double reliability;
+
+    double popularity;
+
+    double capacity;
+    double cycle_time;
+
+    double maintenance_cost;
+
+    bool operating;
+    bool night_lighting;
+
+} Ride;
+
+
+/* ================================================================
+ * BUILDING
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Vec2 position;
+
+    double width;
+    double height;
+
+    ParkZone zone;
+
+    bool open;
+
+} Building;
+
+
+/* ================================================================
+ * PATH
+ * ================================================================ */
+
+typedef struct {
+
+    Vec2 start;
+    Vec2 end;
+
+    double width;
+
+    bool service_path;
+
+} ParkPath;
+
+
+/* ================================================================
+ * TREE / VEGETATION
+ * ================================================================ */
+
+typedef struct {
+
+    Vec2 position;
+
+    double height;
+
+    bool palm;
+    bool moss;
+
+} Tree;
+
+
+/* ================================================================
+ * POND / WATER
+ * ================================================================ */
+
+typedef struct {
+
+    Vec2 position;
+
+    double width;
+    double height;
+
+    bool swamp;
+
+} Pond;
+
+
+/* ================================================================
+ * SIGN
+ * ================================================================ */
+
+typedef struct {
+
+    Vec2 position;
+
+    char text[128];
+
+    double height;
+
+    bool neon;
+
+} Sign;
+
+
+/* ================================================================
+ * PARK ECONOMY
+ * ================================================================ */
+
+typedef struct {
+
+    double cash;
+
+    double ticket_price;
+
+    double visitors;
+
+    double ticket_revenue;
+    double food_revenue;
+    double merchandise_revenue;
+
+    double maintenance_cost;
+    double labour_cost;
+    double electricity_cost;
+
+    double reputation;
+
+    double tourism;
+
+    double weather;
+
+} ParkEconomy;
+
+
+/* ================================================================
+ * PARK
+ * ================================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    double width;
+    double height;
+
+    Ride rides[MAX_RIDES];
+    Building buildings[MAX_BUILDINGS];
+    ParkPath paths[MAX_PATHS];
+    Tree trees[MAX_TREES];
+    Pond ponds[MAX_PONDS];
+    Sign signs[MAX_SIGNAGE];
+
+    int ride_count;
+    int building_count;
+    int path_count;
+    int tree_count;
+    int pond_count;
+    int sign_count;
+
+    ParkEconomy economy;
+
+} ThemePark;
+
+
+/* ================================================================
+ * RANDOM
+ * ================================================================ */
+
+static double random_double(
+    double min,
+    double max
+)
+{
+    return min +
+        ((double)rand() / RAND_MAX)
+        * (max - min);
+}
+
+
+/* ================================================================
+ * RIDE NAMES
+ * ================================================================ */
+
+static const char *ride_type_name(
+    RideType type
+)
+{
+    switch(type) {
+
+        case RIDE_ROLLERCOASTER:
+            return "Roller Coaster";
+
+        case RIDE_FERRIS_WHEEL:
+            return "Ferris Wheel";
+
+        case RIDE_DARK_RIDE:
+            return "Dark Ride";
+
+        case RIDE_WATER_RIDE:
+            return "Water Ride";
+
+        case RIDE_MONORAIL:
+            return "Monorail";
+
+        case RIDE_CAROUSEL:
+            return "Carousel";
+
+        case RIDE_DROP_TOWER:
+            return "Drop Tower";
+
+        case RIDE_ARCADE:
+            return "Arcade";
+    }
+
+    return "Unknown";
+}
+
+
+/* ================================================================
+ * ZONE NAME
+ * ================================================================ */
+
+static const char *zone_name(
+    ParkZone zone
+)
+{
+    switch(zone) {
+
+        case ZONE_ENTRANCE:
+            return "Entrance";
+
+        case ZONE_MAIN_STREET:
+            return "Main Street";
+
+        case ZONE_RUSTBELT:
+            return "Rustbelt";
+
+        case ZONE_SWAMP:
+            return "Swamp";
+
+        case ZONE_FAIRGROUND:
+            return "Fairground";
+
+        case ZONE_ROCKET_VALLEY:
+            return "Rocket Valley";
+
+        case ZONE_WATERFRONT:
+            return "Waterfront";
+
+        case ZONE_ARCADE:
+            return "Arcade";
+
+        case ZONE_BACKLOT:
+            return "Back Lot";
+
+        case ZONE_MAINTENANCE:
+            return "Maintenance";
+    }
+
+    return "Unknown";
+}
+
+
+/* ================================================================
+ * ADD RIDE
+ * ================================================================ */
+
+static void add_ride(
+    ThemePark *park,
+    const char *name,
+    RideType type,
+    ParkZone zone,
+    double x,
+    double y,
+    double popularity,
+    double capacity
+)
+{
+    if (park->ride_count >= MAX_RIDES)
+        return;
+
+    Ride *ride =
+        &park->rides[park->ride_count];
+
+    memset(
+        ride,
+        0,
+        sizeof(*ride)
+    );
+
+    ride->id =
+        park->ride_count;
+
+    strncpy(
+        ride->name,
+        name,
+        sizeof(ride->name) - 1
+    );
+
+    ride->type = type;
+    ride->zone = zone;
+
+    ride->position.x = x;
+    ride->position.y = y;
+
+    ride->condition =
+        random_double(0.70, 0.98);
+
+    ride->reliability =
+        random_double(0.75, 0.99);
+
+    ride->popularity =
+        popularity;
+
+    ride->capacity =
+        capacity;
+
+    ride->cycle_time =
+        random_double(90.0, 240.0);
+
+    ride->maintenance_cost =
+        capacity * 2.5;
+
+    ride->operating = true;
+
+    ride->night_lighting =
+        true;
+
+    park->ride_count++;
+}
+
+
+/* ================================================================
+ * ADD BUILDING
+ * ================================================================ */
+
+static void add_building(
+    ThemePark *park,
+    const char *name,
+    ParkZone zone,
+    double x,
+    double y,
+    double width,
+    double height
+)
+{
+    if (park->building_count >= MAX_BUILDINGS)
+        return;
+
+    Building *building =
+        &park->buildings[
+            park->building_count
+        ];
+
+    memset(
+        building,
+        0,
+        sizeof(*building)
+    );
+
+    building->id =
+        park->building_count;
+
+    strncpy(
+        building->name,
+        name,
+        sizeof(building->name) - 1
+    );
+
+    building->zone = zone;
+
+    building->position.x = x;
+    building->position.y = y;
+
+    building->width = width;
+    building->height = height;
+
+    building->open = true;
+
+    park->building_count++;
+}
+
+
+/* ================================================================
+ * ADD PATH
+ * ================================================================ */
+
+static void add_path(
+    ThemePark *park,
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    double width,
+    bool service
+)
+{
+    if (park->path_count >= MAX_PATHS)
+        return;
+
+    ParkPath *path =
+        &park->paths[
+            park->path_count
+        ];
+
+    path->start.x = x1;
+    path->start.y = y1;
+
+    path->end.x = x2;
+    path->end.y = y2;
+
+    path->width = width;
+
+    path->service_path = service;
+
+    park->path_count++;
+}
+
+
+/* ================================================================
+ * ADD TREE
+ * ================================================================ */
+
+static void add_tree(
+    ThemePark *park,
+    double x,
+    double y,
+    bool palm
+)
+{
+    if (park->tree_count >= MAX_TREES)
+        return;
+
+    Tree *tree =
+        &park->trees[
+            park->tree_count
+        ];
+
+    tree->position.x = x;
+    tree->position.y = y;
+
+    tree->height =
+        random_double(4.0, 14.0);
+
+    tree->palm = palm;
+
+    tree->moss =
+        random_double(0.0, 1.0)
+        > 0.55;
+
+    park->tree_count++;
+}
+
+
+/* ================================================================
+ * ADD POND
+ * ================================================================ */
+
+static void add_pond(
+    ThemePark *park,
+    double x,
+    double y,
+    double width,
+    double height,
+    bool swamp
+)
+{
+    if (park->pond_count >= MAX_PONDS)
+        return;
+
+    Pond *pond =
+        &park->ponds[
+            park->pond_count
+        ];
+
+    pond->position.x = x;
+    pond->position.y = y;
+
+    pond->width = width;
+    pond->height = height;
+
+    pond->swamp = swamp;
+
+    park->pond_count++;
+}
+
+
+/* ================================================================
+ * ADD SIGN
+ * ================================================================ */
+
+static void add_sign(
+    ThemePark *park,
+    const char *text,
+    double x,
+    double y,
+    double height,
+    bool neon
+)
+{
+    if (park->sign_count >= MAX_SIGNAGE)
+        return;
+
+    Sign *sign =
+        &park->signs[
+            park->sign_count
+        ];
+
+    sign->position.x = x;
+    sign->position.y = y;
+
+    strncpy(
+        sign->text,
+        text,
+        sizeof(sign->text) - 1
+    );
+
+    sign->height = height;
+    sign->neon = neon;
+
+    park->sign_count++;
+}
+
+
+/* ================================================================
+ * MAIN PARK STRUCTURE
+ * ================================================================ */
+
+static void build_main_layout(
+    ThemePark *park
+)
+{
+    /*
+     * ENTRANCE
+     */
+
+    add_building(
+        park,
+        "Malt Whiskey Main Gate",
+        ZONE_ENTRANCE,
+        1200,
+        1650,
+        300,
+        80
+    );
+
+    add_sign(
+        park,
+        "MALT WHISKEY",
+        1200,
+        1720,
+        35,
+        true
+    );
+
+
+    /*
+     * MAIN STREET
+     */
+
+    add_building(
+        park,
+        "Malt Whiskey General Store",
+        ZONE_MAIN_STREET,
+        1200,
+        1450,
+        160,
+        80
+    );
+
+    add_building(
+        park,
+        "Malt Whiskey Diner",
+        ZONE_MAIN_STREET,
+        1450,
+        1450,
+        160,
+        80
+    );
+
+
+    /*
+     * RUSTBELT
+     */
+
+    add_ride(
+        park,
+        "RUSTBELT",
+        RIDE_ROLLERCOASTER,
+        ZONE_RUSTBELT,
+        650,
+        900,
+        0.98,
+        32
+    );
+
+
+    /*
+     * FERRIS WHEEL
+     */
+
+    add_ride(
+        park,
+        "WHISKEY WHEEL",
+        RIDE_FERRIS_WHEEL,
+        ZONE_FAIRGROUND,
+        1700,
+        900,
+        0.82,
+        48
+    );
+
+
+    /*
+     * SWAMP RUNNER
+     */
+
+    add_ride(
+        park,
+        "SWAMP RUNNER",
+        RIDE_WATER_RIDE,
+        ZONE_SWAMP,
+        1850,
+        500,
+        0.89,
+        16
+    );
+
+    add_pond(
+        park,
+        1850,
+        500,
+        500,
+        350,
+        true
+    );
+
+
+    /*
+     * DARK RIDE
+     */
+
+    add_ride(
+        park,
+        "THE GREAT FLORIDA PANIC",
+        RIDE_DARK_RIDE,
+        ZONE_BACKLOT,
+        400,
+        450,
+        0.75,
+        24
+    );
+
+
+    /*
+     * MONORAIL
+     */
+
+    add_ride(
+        park,
+        "MALT WHISKEY EXPRESS",
+        RIDE_MONORAIL,
+        ZONE_WATERFRONT,
+        1200,
+        700,
+        0.78,
+        80
+    );
+
+
+    /*
+     * CAROUSEL
+     */
+
+    add_ride(
+        park,
+        "MALTY'S CAROUSEL",
+        RIDE_CAROUSEL,
+        ZONE_FAIRGROUND,
+        1450,
+        800,
+        0.58,
+        30
+    );
+
+
+    /*
+     * DROP TOWER
+     */
+
+    add_ride(
+        park,
+        "FLORIDA DROP",
+        RIDE_DROP_TOWER,
+        ZONE_ROCKET_VALLEY,
+        900,
+        400,
+        0.86,
+        20
+    );
+
+
+    /*
+     * ARCADE
+     */
+
+    add_ride(
+        park,
+        "MALTY'S ARCADE",
+        RIDE_ARCADE,
+        ZONE_ARCADE,
+        1550,
+        1200,
+        0.72,
+        60
+    );
+}
+
+
+/* ================================================================
+ * SUPPORT BUILDINGS
+ * ================================================================ */
+
+static void build_support_facilities(
+    ThemePark *park
+)
+{
+    add_building(
+        park,
+        "Malt Whiskey Diner",
+        ZONE_MAIN_STREET,
+        1350,
+        1350,
+        180,
+        100
+    );
+
+    add_building(
+        park,
+        "Malt Whiskey Arcade",
+        ZONE_ARCADE,
+        1550,
+        1150,
+        220,
+        130
+    );
+
+    add_building(
+        park,
+        "Swamp Snacks",
+        ZONE_SWAMP,
+        1700,
+        650,
+        100,
+        60
+    );
+
+    add_building(
+        park,
+        "Rustbelt Maintenance Shed",
+        ZONE_MAINTENANCE,
+        500,
+        1100,
+        180,
+        100
+    );
+
+    add_building(
+        park,
+        "Malt Whiskey Fire Station",
+        ZONE_MAINTENANCE,
+        1000,
+        1450,
+        120,
+        80
+    );
+
+    add_building(
+        park,
+        "Back Lot Workshop",
+        ZONE_BACKLOT,
+        300,
+        700,
+        200,
+        120
+    );
+
+    add_building(
+        park,
+        "Park Administration",
+        ZONE_MAIN_STREET,
+        1000,
+        1350,
+        180,
+        100
+    );
+}
+
+
+/* ================================================================
+ * PATH NETWORK
+ * ================================================================ */
+
+static void build_paths(
+    ThemePark *park
+)
+{
+    /*
+     * Main entrance boulevard.
+     */
+
+    add_path(
+        park,
+        1200, 1650,
+        1200, 1400,
+        18,
+        false
+    );
+
+    /*
+     * Central spine.
+     */
+
+    add_path(
+        park,
+        1200, 1400,
+        1200, 900,
+        16,
+        false
+    );
+
+    /*
+     * Rustbelt.
+     */
+
+    add_path(
+        park,
+        1200, 1000,
+        650, 900,
+        14,
+        false
+    );
+
+    /*
+     * Fairground.
+     */
+
+    add_path(
+        park,
+        1200, 1000,
+        1700, 900,
+        14,
+        false
+    );
+
+    /*
+     * Swamp.
+     */
+
+    add_path(
+        park,
+        1700, 900,
+        1850, 500,
+        12,
+        false
+    );
+
+    /*
+     * Back lot.
+     */
+
+    add_path(
+        park,
+        1200, 1000,
+        400, 450,
+        12,
+        false
+    );
+
+    /*
+     * Rocket Valley.
+     */
+
+    add_path(
+        park,
+        1200, 1000,
+        900, 400,
+        12,
+        false
+    );
+
+    /*
+     * Maintenance network.
+     */
+
+    add_path(
+        park,
+        1200, 1400,
+        500, 1100,
+        8,
+        true
+    );
+
+    add_path(
+        park,
+        500, 1100,
+        300, 700,
+        8,
+        true
+    );
+}
+
+
+/* ================================================================
+ * VEGETATION
+ * ================================================================ */
+
+static void generate_vegetation(
+    ThemePark *park
+)
+{
+    for(int i = 0;
+        i < 300;
+        i++)
+    {
+        double x =
+            random_double(
+                50,
+                PARK_WIDTH - 50
+            );
+
+        double y =
+            random_double(
+                50,
+                PARK_HEIGHT - 50
+            );
+
+        /*
+         * Keep central entrance area
+         * relatively clear.
+         */
+
+        if(
+            x > 850 &&
+            x < 1550 &&
+            y > 1200
+        )
+            continue;
+
+        bool palm =
+            random_double(0,1)
+            > 0.45;
+
+        add_tree(
+            park,
+            x,
+            y,
+            palm
+        );
+    }
+}
+
+
+/* ================================================================
+ * WATER FEATURES
+ * ================================================================ */
+
+static void build_water_features(
+    ThemePark *park
+)
+{
+    add_pond(
+        park,
+        2050,
+        1150,
+        350,
+        220,
+        true
+    );
+
+    add_pond(
+        park,
+        500,
+        250,
+        300,
+        180,
+        false
+    );
+
+    add_pond(
+        park,
+        1900,
+        500,
+        600,
+        400,
+        true
+    );
+}
+
+
+/* ================================================================
+ * PARK ECONOMY
+ * ================================================================ */
+
+static void initialise_economy(
+    ThemePark *park
+)
+{
+    park->economy.cash =
+        25000000.0;
+
+    park->economy.ticket_price =
+        54.0;
+
+    park->economy.reputation =
+        0.76;
+
+    park->economy.tourism =
+        1.0;
+
+    park->economy.weather =
+        1.0;
+}
+
+
+/* ================================================================
+ * WEATHER
+ * ================================================================ */
+
+static void update_weather(
+    ThemePark *park
+)
+{
+    double roll =
+        random_double(0,1);
+
+    if(roll < 0.10) {
+
+        park->economy.weather =
+            0.45;
+
+        printf(
+            "[WEATHER] Heavy Florida rain.\n"
+        );
+    }
+
+    else if(roll < 0.18) {
+
+        park->economy.weather =
+            0.70;
+
+        printf(
+            "[WEATHER] Tropical showers.\n"
+        );
+    }
+
+    else {
+
+        park->economy.weather =
+            random_double(
+                0.90,
+                1.10
+            );
+    }
+}
+
+
+/* ================================================================
+ * VISITOR SIMULATION
+ * ================================================================ */
+
+static void simulate_visitors(
+    ThemePark *park
+)
+{
+    double base_visitors =
+        12000.0;
+
+    double weekend_factor =
+        random_double(
+            0.75,
+            1.45
+        );
+
+    double weather_factor =
+        park->economy.weather;
+
+    double reputation_factor =
+        0.70 +
+        park->economy.reputation;
+
+    park->economy.visitors =
+        base_visitors *
+        weekend_factor *
+        weather_factor *
+        reputation_factor;
+
+    /*
+     * Ticket revenue.
+     */
+
+    park->economy.ticket_revenue =
+        park->economy.visitors *
+        park->economy.ticket_price;
+
+    /*
+     * Food and merchandise.
+     */
+
+    park->economy.food_revenue =
+        park->economy.visitors *
+        random_double(
+            7.0,
+            18.0
+        );
+
+    park->economy.merchandise_revenue =
+        park->economy.visitors *
+        random_double(
+            3.0,
+            12.0
+        );
+}
+
+
+/* ================================================================
+ * RIDE OPERATIONS
+ * ================================================================ */
+
+static void simulate_rides(
+    ThemePark *park
+)
+{
+    for(int i = 0;
+        i < park->ride_count;
+        i++)
+    {
+        Ride *ride =
+            &park->rides[i];
+
+        /*
+         * Slowly deteriorate rides.
+         */
+
+        ride->condition -=
+            random_double(
+                0.001,
+                0.004
+            );
+
+        if(ride->condition < 0)
+            ride->condition = 0;
+
+        /*
+         * Poor condition reduces
+         * reliability.
+         */
+
+        ride->reliability =
+            ride->condition *
+            random_double(
+                0.85,
+                1.05
+            );
+
+        /*
+         * Automatic shutdown.
+         */
+
+        if(ride->condition < 0.25)
+        {
+            ride->operating = false;
+
+            printf(
+                "[MAINTENANCE] %s "
+                "taken offline.\n",
+                ride->name
+            );
+        }
+
+        /*
+         * Maintenance expenditure.
+         */
+
+        if(ride->operating)
+        {
+            park->economy.maintenance_cost +=
+                ride->maintenance_cost;
+        }
+    }
+}
+
+
+/* ================================================================
+ * MAINTENANCE
+ * ================================================================ */
+
+static void repair_rides(
+    ThemePark *park
+)
+{
+    for(int i = 0;
+        i < park->ride_count;
+        i++)
+    {
+        Ride *ride =
+            &park->rides[i];
+
+        if(
+            ride->condition < 0.70 ||
+            !ride->operating
+        )
+        {
+            double repair =
+                5000.0;
+
+            park->economy.cash -=
+                repair;
+
+            ride->condition +=
+                0.15;
+
+            if(ride->condition > 1.0)
+                ride->condition = 1.0;
+
+            if(ride->condition > 0.40)
+                ride->operating = true;
+        }
+    }
+}
+
+
+/* ================================================================
+ * DAILY ECONOMY
+ * ================================================================ */
+
+static void simulate_day(
+    ThemePark *park
+)
+{
+    park->economy.maintenance_cost =
+        0;
+
+    update_weather(
+        park
+    );
+
+    simulate_visitors(
+        park
+    );
+
+    simulate_rides(
+        park
+    );
+
+    repair_rides(
+        park
+    );
+
+    park->economy.labour_cost =
+        park->economy.visitors *
+        2.50;
+
+    park->economy.electricity_cost =
+        35000.0;
+
+    double revenue =
+        park->economy.ticket_revenue +
+        park->economy.food_revenue +
+        park->economy.merchandise_revenue;
+
+    double expenses =
+        park->economy.maintenance_cost +
+        park->economy.labour_cost +
+        park->economy.electricity_cost;
+
+    park->economy.cash +=
+        revenue -
+        expenses;
+}
+
+
+/* ================================================================
+ * PARK REPORT
+ * ================================================================ */
+
+static void park_report(
+    const ThemePark *park
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "                 MALT WHISKEY\n"
+        "====================================================\n"
+    );
+
+    printf(
+        "Park size:          %.0f x %.0f m\n",
+        park->width,
+        park->height
+    );
+
+    printf(
+        "Rides:              %d\n",
+        park->ride_count
+    );
+
+    printf(
+        "Buildings:          %d\n",
+        park->building_count
+    );
+
+    printf(
+        "Paths:              %d\n",
+        park->path_count
+    );
+
+    printf(
+        "Trees:              %d\n",
+        park->tree_count
+    );
+
+    printf(
+        "Water features:     %d\n",
+        park->pond_count
+    );
+
+    printf(
+        "Cash:               $%.2f\n",
+        park->economy.cash
+    );
+
+    printf(
+        "Daily visitors:     %.0f\n",
+        park->economy.visitors
+    );
+
+    printf(
+        "Ticket price:       $%.2f\n",
+        park->economy.ticket_price
+    );
+
+    printf(
+        "Reputation:         %.2f\n",
+        park->economy.reputation
+    );
+
+    printf(
+        "\nATTRACTIONS\n"
+    );
+
+    for(int i = 0;
+        i < park->ride_count;
+        i++)
+    {
+        const Ride *ride =
+            &park->rides[i];
+
+        printf(
+            "%-30s | "
+            "%-18s | "
+            "%-15s | "
+            "Condition %.0f%% | "
+            "%s\n",
+
+            ride->name,
+
+            ride_type_name(
+                ride->type
+            ),
+
+            zone_name(
+                ride->zone
+            ),
+
+            ride->condition * 100,
+
+            ride->operating
+                ? "OPEN"
+                : "CLOSED"
+        );
+    }
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+
+/* ================================================================
+ * BUILD COMPLETE PARK
+ * ================================================================ */
+
+static void create_malt_whiskey(
+    ThemePark *park
+)
+{
+    memset(
+        park,
+        0,
+        sizeof(*park)
+    );
+
+    strcpy(
+        park->name,
+        "Malt Whiskey"
+    );
+
+    park->width =
+        PARK_WIDTH;
+
+    park->height =
+        PARK_HEIGHT;
+
+    initialise_economy(
+        park
+    );
+
+    build_main_layout(
+        park
+    );
+
+    build_support_facilities(
+        park
+    );
+
+    build_paths(
+        park
+    );
+
+    build_water_features(
+        park
+    );
+
+    generate_vegetation(
+        park
+    );
+
+    printf(
+        "\n"
+        "MALT WHISKEY PARK CREATED.\n"
+    );
+}
+
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    ThemePark park;
+
+    create_malt_whiskey(
+        &park
+    );
+
+    park_report(
+        &park
+    );
+
+    /*
+     * Run 30 days of park operation.
+     */
+
+    for(int day = 1;
+        day <= 30;
+        day++)
+    {
+        printf(
+            "\n--- MALT WHISKEY DAY %02d ---\n",
+            day
+        );
+
+        simulate_day(
+            &park
+        );
+
+        printf(
+            "Visitors: %.0f\n",
+            park.economy.visitors
+        );
+
+        printf(
+            "Cash: $%.2f\n",
+            park.economy.cash
+        );
+    }
+
+    printf(
+        "\n"
+        "FINAL PARK STATE\n"
+    );
+
+    park_report(
+        &park
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * MALT WHISKEY — ROLLER COASTER SYSTEM
+ * ============================================================
+ *
+ * Fictional game-engine component.
+ *
+ * Models:
+ *   - Track geometry
+ *   - Hills and drops
+ *   - Curves
+ *   - Launch sections
+ *   - Braking sections
+ *   - Train physics
+ *   - Stations
+ *   - Passenger loading
+ *   - Ride condition
+ *   - Safety systems
+ *
+ * Compile:
+ *     gcc roller_coaster.c -o roller_coaster -lm
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_TRACK_POINTS 128
+#define MAX_TRAINS 4
+
+#define GRAVITY 9.81
+#define MAX_SAFE_SPEED 35.0
+
+
+/* ============================================================
+ * VECTOR
+ * ============================================================ */
+
+typedef struct {
+    double x;
+    double y;
+    double z;
+} Vec3;
+
+
+/* ============================================================
+ * TRACK TYPES
+ * ============================================================ */
+
+typedef enum {
+
+    TRACK_STRAIGHT,
+    TRACK_CURVE,
+    TRACK_CLIMB,
+    TRACK_DROP,
+    TRACK_BRAKE,
+    TRACK_LAUNCH,
+    TRACK_STATION
+
+} TrackType;
+
+
+/* ============================================================
+ * TRACK SEGMENT
+ * ============================================================ */
+
+typedef struct {
+
+    Vec3 position;
+
+    TrackType type;
+
+    double length;
+
+    double elevation;
+
+    double curvature;
+
+    double speed_limit;
+
+    double friction;
+
+} TrackSegment;
+
+
+/* ============================================================
+ * TRAIN
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    double track_position;
+
+    double speed;
+
+    double acceleration;
+
+    double mass;
+
+    int passengers;
+
+    int capacity;
+
+    bool brakes_active;
+    bool launched;
+    bool running;
+
+} CoasterTrain;
+
+
+/* ============================================================
+ * STATION
+ * ============================================================ */
+
+typedef struct {
+
+    Vec3 position;
+
+    int passengers_waiting;
+
+    int boarding_capacity;
+
+    double dwell_time;
+
+    bool loading;
+
+} Station;
+
+
+/* ============================================================
+ * COASTER
+ * ============================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    TrackSegment track[MAX_TRACK_POINTS];
+
+    int track_count;
+
+    CoasterTrain trains[MAX_TRAINS];
+
+    int train_count;
+
+    Station station;
+
+    double total_length;
+
+    double highest_point;
+
+    double lowest_point;
+
+    double condition;
+
+    double popularity;
+
+    bool operating;
+
+} RollerCoaster;
+
+
+/* ============================================================
+ * VECTOR DISTANCE
+ * ============================================================ */
+
+static double distance3(Vec3 a, Vec3 b)
+{
+    double dx = b.x - a.x;
+    double dy = b.y - a.y;
+    double dz = b.z - a.z;
+
+    return sqrt(
+        dx * dx +
+        dy * dy +
+        dz * dz
+    );
+}
+
+
+/* ============================================================
+ * ADD TRACK SEGMENT
+ * ============================================================ */
+
+static void add_track(
+    RollerCoaster *coaster,
+    TrackType type,
+    double x,
+    double y,
+    double z,
+    double length,
+    double curvature,
+    double speed_limit
+)
+{
+    if (coaster->track_count >= MAX_TRACK_POINTS)
+        return;
+
+    TrackSegment *segment =
+        &coaster->track[coaster->track_count];
+
+    segment->position.x = x;
+    segment->position.y = y;
+    segment->position.z = z;
+
+    segment->type = type;
+
+    segment->length = length;
+
+    segment->elevation = z;
+
+    segment->curvature = curvature;
+
+    segment->speed_limit = speed_limit;
+
+    segment->friction = 0.015;
+
+    coaster->total_length += length;
+
+    if (z > coaster->highest_point)
+        coaster->highest_point = z;
+
+    if (z < coaster->lowest_point)
+        coaster->lowest_point = z;
+
+    coaster->track_count++;
+}
+
+
+/* ============================================================
+ * BUILD RUSTBELT TRACK
+ * ============================================================ */
+
+static void build_rustbelt(
+    RollerCoaster *coaster
+)
+{
+    /*
+     * Station
+     */
+
+    add_track(
+        coaster,
+        TRACK_STATION,
+        0, 0, 4,
+        80,
+        0.0,
+        12
+    );
+
+    /*
+     * Launch.
+     */
+
+    add_track(
+        coaster,
+        TRACK_LAUNCH,
+        80, 0, 4,
+        100,
+        0.0,
+        28
+    );
+
+    /*
+     * First climb.
+     */
+
+    add_track(
+        coaster,
+        TRACK_CLIMB,
+        180, 0, 15,
+        160,
+        0.02,
+        22
+    );
+
+    add_track(
+        coaster,
+        TRACK_CLIMB,
+        340, 0, 35,
+        180,
+        0.02,
+        22
+    );
+
+    add_track(
+        coaster,
+        TRACK_CLIMB,
+        520, 0, 58,
+        160,
+        0.02,
+        22
+    );
+
+    /*
+     * Summit.
+     */
+
+    add_track(
+        coaster,
+        TRACK_STRAIGHT,
+        680, 0, 60,
+        80,
+        0.01,
+        24
+    );
+
+    /*
+     * First major drop.
+     */
+
+    add_track(
+        coaster,
+        TRACK_DROP,
+        760, 0, 45,
+        120,
+        0.015,
+        35
+    );
+
+    add_track(
+        coaster,
+        TRACK_DROP,
+        880, 0, 15,
+        140,
+        0.02,
+        35
+    );
+
+    /*
+     * High-speed valley.
+     */
+
+    add_track(
+        coaster,
+        TRACK_STRAIGHT,
+        1020, 0, 5,
+        180,
+        0.01,
+        35
+    );
+
+    /*
+     * Large curve.
+     */
+
+    add_track(
+        coaster,
+        TRACK_CURVE,
+        1200, 80, 12,
+        220,
+        0.08,
+        25
+    );
+
+    /*
+     * Second hill.
+     */
+
+    add_track(
+        coaster,
+        TRACK_CLIMB,
+        1420, 100, 30,
+        150,
+        0.03,
+        24
+    );
+
+    add_track(
+        coaster,
+        TRACK_CLIMB,
+        1570, 100, 48,
+        120,
+        0.03,
+        24
+    );
+
+    /*
+     * Second drop.
+     */
+
+    add_track(
+        coaster,
+        TRACK_DROP,
+        1690, 100, 25,
+        140,
+        0.04,
+        32
+    );
+
+    /*
+     * Brake run.
+     */
+
+    add_track(
+        coaster,
+        TRACK_BRAKE,
+        1830, 100, 5,
+        130,
+        0.0,
+        12
+    );
+
+    /*
+     * Return to station.
+     */
+
+    add_track(
+        coaster,
+        TRACK_STRAIGHT,
+        1960, 50, 5,
+        220,
+        0.02,
+        15
+    );
+
+    add_track(
+        coaster,
+        TRACK_STATION,
+        2180, 0, 4,
+        80,
+        0.0,
+        8
+    );
+}
+
+
+/* ============================================================
+ * INITIALISE TRAIN
+ * ============================================================ */
+
+static void initialise_train(
+    CoasterTrain *train,
+    int id
+)
+{
+    train->id = id;
+
+    train->track_position = 0.0;
+
+    train->speed = 0.0;
+
+    train->acceleration = 0.0;
+
+    train->mass = 8500.0;
+
+    train->capacity = 24;
+
+    train->passengers = 24;
+
+    train->brakes_active = true;
+
+    train->launched = false;
+
+    train->running = false;
+}
+
+
+/* ============================================================
+ * INITIALISE COASTER
+ * ============================================================ */
+
+static void initialise_coaster(
+    RollerCoaster *coaster
+)
+{
+    coaster->track_count = 0;
+
+    coaster->train_count = 1;
+
+    coaster->total_length = 0;
+
+    coaster->highest_point = 0;
+
+    coaster->lowest_point = 9999;
+
+    coaster->condition = 0.96;
+
+    coaster->popularity = 0.98;
+
+    coaster->operating = true;
+
+    build_rustbelt(coaster);
+
+    for (int i = 0; i < coaster->train_count; i++)
+        initialise_train(
+            &coaster->trains[i],
+            i
+        );
+
+    coaster->station.position.x = 0;
+    coaster->station.position.y = 0;
+    coaster->station.position.z = 4;
+
+    coaster->station.passengers_waiting = 120;
+
+    coaster->station.boarding_capacity = 24;
+
+    coaster->station.dwell_time = 20;
+
+    coaster->station.loading = true;
+}
+
+
+/* ============================================================
+ * GET TRACK SEGMENT
+ * ============================================================ */
+
+static TrackSegment *get_segment(
+    RollerCoaster *coaster,
+    double position
+)
+{
+    double accumulated = 0;
+
+    for (int i = 0;
+         i < coaster->track_count;
+         i++)
+    {
+        accumulated +=
+            coaster->track[i].length;
+
+        if (position <= accumulated)
+            return &coaster->track[i];
+    }
+
+    return &coaster->track[
+        coaster->track_count - 1
+    ];
+}
+
+
+/* ============================================================
+ * PHYSICS
+ * ============================================================ */
+
+static void update_train(
+    RollerCoaster *coaster,
+    CoasterTrain *train,
+    double dt
+)
+{
+    if (!train->running)
+        return;
+
+    TrackSegment *segment =
+        get_segment(
+            coaster,
+            train->track_position
+        );
+
+    double acceleration = 0.0;
+
+
+    /*
+     * Gravity component.
+     *
+     * Positive slope = climb
+     * Negative slope = drop.
+     */
+
+    if (segment->type == TRACK_DROP)
+    {
+        acceleration += 9.81;
+    }
+
+    else if (segment->type == TRACK_CLIMB)
+    {
+        acceleration -= 7.0;
+    }
+
+
+    /*
+     * Launch section.
+     */
+
+    if (segment->type == TRACK_LAUNCH)
+    {
+        acceleration += 12.0;
+
+        train->launched = true;
+    }
+
+
+    /*
+     * Friction.
+     */
+
+    acceleration -=
+        train->speed *
+        segment->friction;
+
+
+    /*
+     * Brake section.
+     */
+
+    if (segment->type == TRACK_BRAKE)
+    {
+        acceleration -= 18.0;
+
+        train->brakes_active = true;
+    }
+
+    else
+    {
+        train->brakes_active = false;
+    }
+
+
+    train->acceleration =
+        acceleration;
+
+    train->speed +=
+        acceleration * dt;
+
+
+    if (train->speed < 0)
+        train->speed = 0;
+
+
+    /*
+     * Track speed limit.
+     */
+
+    if (train->speed >
+        segment->speed_limit)
+    {
+        train->speed =
+            segment->speed_limit;
+    }
+
+
+    /*
+     * Move along track.
+     */
+
+    train->track_position +=
+        train->speed * dt;
+
+
+    /*
+     * Complete circuit.
+     */
+
+    if (train->track_position >=
+        coaster->total_length)
+    {
+        train->track_position = 0;
+
+        train->running = false;
+
+        printf(
+            "[RIDE] Train %d completed "
+            "the Rustbelt circuit.\n",
+            train->id
+        );
+    }
+}
+
+
+/* ============================================================
+ * BOARD PASSENGERS
+ * ============================================================ */
+
+static void board_train(
+    RollerCoaster *coaster,
+    CoasterTrain *train
+)
+{
+    if (train->running)
+        return;
+
+    if (coaster->station.passengers_waiting <= 0)
+        return;
+
+    int available =
+        train->capacity;
+
+    int boarding =
+        coaster->station.passengers_waiting;
+
+    if (boarding > available)
+        boarding = available;
+
+    train->passengers =
+        boarding;
+
+    coaster->station.passengers_waiting -=
+        boarding;
+
+    train->track_position = 0;
+
+    train->speed = 0;
+
+    train->running = true;
+
+    printf(
+        "[STATION] Train %d loaded "
+        "with %d passengers.\n",
+        train->id,
+        train->passengers
+    );
+}
+
+
+/* ============================================================
+ * SAFETY CHECK
+ * ============================================================ */
+
+static bool safety_check(
+    RollerCoaster *coaster,
+    CoasterTrain *train
+)
+{
+    if (coaster->condition < 0.50)
+        return false;
+
+    if (train->speed > MAX_SAFE_SPEED)
+        return false;
+
+    if (train->passengers >
+        train->capacity)
+        return false;
+
+    return true;
+}
+
+
+/* ============================================================
+ * SIMULATE RIDE
+ * ============================================================ */
+
+static void simulate_ride(
+    RollerCoaster *coaster,
+    double seconds
+)
+{
+    const double dt = 0.016;
+
+    double time = 0;
+
+    while (time < seconds)
+    {
+        for (int i = 0;
+             i < coaster->train_count;
+             i++)
+        {
+            CoasterTrain *train =
+                &coaster->trains[i];
+
+            if (!train->running)
+                board_train(
+                    coaster,
+                    train
+                );
+
+            if (!safety_check(
+                    coaster,
+                    train))
+            {
+                train->running = false;
+
+                printf(
+                    "[SAFETY] Train %d "
+                    "stopped.\n",
+                    train->id
+                );
+
+                continue;
+            }
+
+            update_train(
+                coaster,
+                train,
+                dt
+            );
+        }
+
+        time += dt;
+    }
+}
+
+
+/* ============================================================
+ * COASTER REPORT
+ * ============================================================ */
+
+static void print_coaster(
+    const RollerCoaster *coaster
+)
+{
+    printf(
+        "\n"
+        "================================================\n"
+        "                 RUSTBELT\n"
+        "================================================\n"
+    );
+
+    printf(
+        "Track segments:    %d\n",
+        coaster->track_count
+    );
+
+    printf(
+        "Track length:      %.0f m\n",
+        coaster->total_length
+    );
+
+    printf(
+        "Highest point:     %.0f m\n",
+        coaster->highest_point
+    );
+
+    printf(
+        "Lowest point:      %.0f m\n",
+        coaster->lowest_point
+    );
+
+    printf(
+        "Condition:         %.0f%%\n",
+        coaster->condition * 100
+    );
+
+    printf(
+        "Popularity:        %.0f%%\n",
+        coaster->popularity * 100
+    );
+
+    printf(
+        "Operating:         %s\n",
+        coaster->operating
+            ? "YES"
+            : "NO"
+    );
+
+    printf(
+        "\nTRACK\n"
+    );
+
+    for (int i = 0;
+         i < coaster->track_count;
+         i++)
+    {
+        const TrackSegment *s =
+            &coaster->track[i];
+
+        printf(
+            "%03d | length %5.0f m | "
+            "height %5.0f m | "
+            "limit %2.0f m/s\n",
+            i,
+            s->length,
+            s->elevation,
+            s->speed_limit
+        );
+    }
+
+    printf(
+        "================================================\n"
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    RollerCoaster rustbelt;
+
+    snprintf(
+        rustbelt.name,
+        sizeof(rustbelt.name),
+        "RUSTBELT"
+    );
+
+    initialise_coaster(
+        &rustbelt
+    );
+
+    print_coaster(
+        &rustbelt
+    );
+
+    printf(
+        "\nStarting ride simulation...\n"
+    );
+
+    simulate_ride(
+        &rustbelt,
+        180.0
+    );
+
+    printf(
+        "\nSimulation complete.\n"
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * MALT WHISKEY
+ * ELECTRIC MINIATURE RAILWAY
+ * ============================================================
+ *
+ * Fictional game-world transport system.
+ *
+ * Route:
+ *     MALT WHISKEY PARK
+ *             |
+ *             | 5 miles
+ *             |
+ *     MALT WHISKEY THEME PARK
+ *
+ * Features:
+ *     - Fully electric trains
+ *     - Fast acceleration
+ *     - Dedicated track
+ *     - Multiple stations
+ *     - Timetable
+ *     - Passenger demand
+ *     - Dynamic headways
+ *     - Energy consumption
+ *     - Regenerative braking
+ *     - AI passenger routing
+ *     - Service disruptions
+ *
+ * Compile:
+ *
+ *     gcc malt_railway.c -o malt_railway -lm
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_STATIONS 12
+#define MAX_TRAINS 8
+#define MAX_SERVICES 32
+
+#define ROUTE_LENGTH_MILES 5.0
+#define ROUTE_LENGTH_METERS 8046.72
+
+#define MAX_SPEED_KMH 80.0
+#define MAX_SPEED_MS (MAX_SPEED_KMH / 3.6)
+
+#define MAX_CAPACITY 64
+
+#define GRAVITY 9.81
+
+
+/* ============================================================
+ * TRANSPORT TYPES
+ * ============================================================ */
+
+typedef enum {
+
+    ELECTRIC_MINI_RAIL,
+    SHUTTLE,
+    WALKWAY,
+    MONORAIL
+
+} TransportMode;
+
+
+/* ============================================================
+ * STATION
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double position_m;
+
+    int waiting_passengers;
+
+    int platform_capacity;
+
+    bool open;
+
+} RailwayStation;
+
+
+/* ============================================================
+ * ELECTRIC TRAIN
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    double position_m;
+
+    double speed_ms;
+
+    double acceleration;
+
+    double target_speed;
+
+    double battery_kwh;
+
+    double battery_capacity_kwh;
+
+    int passengers;
+
+    int capacity;
+
+    int current_station;
+
+    int destination_station;
+
+    bool doors_open;
+
+    bool operating;
+
+    bool regenerative_braking;
+
+} ElectricMiniTrain;
+
+
+/* ============================================================
+ * TIMETABLE SERVICE
+ * ============================================================ */
+
+typedef struct {
+
+    int service_id;
+
+    int origin;
+
+    int destination;
+
+    double departure_time;
+
+    double arrival_time;
+
+    bool completed;
+
+} RailwayService;
+
+
+/* ============================================================
+ * RAILWAY
+ * ============================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    double length_m;
+
+    double maximum_speed;
+
+    double journey_time;
+
+    double electricity_price;
+
+    double total_energy_used;
+
+    double total_energy_recovered;
+
+    int passengers_carried;
+
+    int active_trains;
+
+    int station_count;
+
+    int train_count;
+
+    RailwayStation stations[MAX_STATIONS];
+
+    ElectricMiniTrain trains[MAX_TRAINS];
+
+    RailwayService services[MAX_SERVICES];
+
+} ElectricMiniRailway;
+
+
+/* ============================================================
+ * STATION CREATION
+ * ============================================================ */
+
+static void add_station(
+    ElectricMiniRailway *railway,
+    int id,
+    const char *name,
+    double position_m
+)
+{
+    if (railway->station_count >= MAX_STATIONS)
+        return;
+
+    RailwayStation *station =
+        &railway->stations[
+            railway->station_count
+        ];
+
+    station->id = id;
+
+    snprintf(
+        station->name,
+        sizeof(station->name),
+        "%s",
+        name
+    );
+
+    station->position_m = position_m;
+
+    station->waiting_passengers = 0;
+
+    station->platform_capacity = 100;
+
+    station->open = true;
+
+    railway->station_count++;
+}
+
+
+/* ============================================================
+ * BUILD ROUTE
+ * ============================================================ */
+
+static void build_route(
+    ElectricMiniRailway *railway
+)
+{
+    /*
+     * The railway is five miles long.
+     */
+
+    add_station(
+        railway,
+        0,
+        "Malt Whiskey Main Gate",
+        0
+    );
+
+    add_station(
+        railway,
+        1,
+        "Whiskey Village",
+        1300
+    );
+
+    add_station(
+        railway,
+        2,
+        "Everglades Boardwalk",
+        2800
+    );
+
+    add_station(
+        railway,
+        3,
+        "Old Fairground",
+        4300
+    );
+
+    add_station(
+        railway,
+        4,
+        "Malt Whiskey Theme Park",
+        ROUTE_LENGTH_METERS
+    );
+}
+
+
+/* ============================================================
+ * INITIALISE TRAIN
+ * ============================================================ */
+
+static void initialise_train(
+    ElectricMiniTrain *train,
+    int id
+)
+{
+    train->id = id;
+
+    train->position_m = 0;
+
+    train->speed_ms = 0;
+
+    train->acceleration = 0;
+
+    train->target_speed =
+        MAX_SPEED_MS;
+
+    train->battery_capacity_kwh =
+        350.0;
+
+    train->battery_kwh =
+        train->battery_capacity_kwh;
+
+    train->passengers = 0;
+
+    train->capacity =
+        MAX_CAPACITY;
+
+    train->current_station = 0;
+
+    train->destination_station = 4;
+
+    train->doors_open = true;
+
+    train->operating = false;
+
+    train->regenerative_braking = false;
+}
+
+
+/* ============================================================
+ * INITIALISE RAILWAY
+ * ============================================================ */
+
+static void initialise_railway(
+    ElectricMiniRailway *railway
+)
+{
+    snprintf(
+        railway->name,
+        sizeof(railway->name),
+        "Malt Whiskey Electric Miniature Railway"
+    );
+
+    railway->length_m =
+        ROUTE_LENGTH_METERS;
+
+    railway->maximum_speed =
+        MAX_SPEED_MS;
+
+    /*
+     * Approximate target end-to-end journey time.
+     */
+
+    railway->journey_time =
+        7.5 * 60.0;
+
+    railway->electricity_price =
+        0.18;
+
+    railway->total_energy_used = 0;
+
+    railway->total_energy_recovered = 0;
+
+    railway->passengers_carried = 0;
+
+    railway->active_trains = 0;
+
+    railway->station_count = 0;
+
+    railway->train_count = 4;
+
+    build_route(railway);
+
+    for (int i = 0;
+         i < railway->train_count;
+         i++)
+    {
+        initialise_train(
+            &railway->trains[i],
+            i
+        );
+    }
+}
+
+
+/* ============================================================
+ * PASSENGER DEMAND
+ * ============================================================ */
+
+static void generate_demand(
+    ElectricMiniRailway *railway,
+    int minute
+)
+{
+    /*
+     * Park opening surge.
+     */
+
+    if (minute >= 0 && minute < 60)
+    {
+        railway->stations[0]
+            .waiting_passengers += 8;
+    }
+
+    /*
+     * Midday movement between attractions.
+     */
+
+    if (minute >= 120 && minute < 300)
+    {
+        railway->stations[1]
+            .waiting_passengers += 3;
+
+        railway->stations[2]
+            .waiting_passengers += 5;
+    }
+
+    /*
+     * Evening return surge.
+     */
+
+    if (minute >= 360 && minute < 480)
+    {
+        railway->stations[4]
+            .waiting_passengers += 10;
+    }
+}
+
+
+/* ============================================================
+ * BOARDING
+ * ============================================================ */
+
+static void board_train(
+    ElectricMiniRailway *railway,
+    ElectricMiniTrain *train,
+    int station_id
+)
+{
+    RailwayStation *station =
+        &railway->stations[station_id];
+
+    int available =
+        train->capacity;
+
+    int passengers =
+        station->waiting_passengers;
+
+    if (passengers > available)
+        passengers = available;
+
+    train->passengers =
+        passengers;
+
+    station->waiting_passengers -=
+        passengers;
+
+    train->current_station =
+        station_id;
+
+    train->doors_open = false;
+
+    train->operating = true;
+
+    railway->active_trains++;
+
+    printf(
+        "[RAIL] Train %d departed %s "
+        "with %d passengers.\n",
+        train->id,
+        station->name,
+        train->passengers
+    );
+}
+
+
+/* ============================================================
+ * ACCELERATION
+ * ============================================================ */
+
+static double calculate_acceleration(
+    ElectricMiniTrain *train
+)
+{
+    double acceleration = 0;
+
+    /*
+     * Fast electric traction.
+     */
+
+    if (train->speed_ms <
+        train->target_speed)
+    {
+        acceleration = 2.2;
+    }
+
+    /*
+     * Cruise.
+     */
+
+    else
+    {
+        acceleration = 0;
+    }
+
+    return acceleration;
+}
+
+
+/* ============================================================
+ * ENERGY MODEL
+ * ============================================================ */
+
+static void consume_energy(
+    ElectricMiniRailway *railway,
+    ElectricMiniTrain *train,
+    double dt
+)
+{
+    /*
+     * Simplified traction energy model.
+     */
+
+    double power_kw =
+        100.0 +
+        fabs(train->acceleration) * 30.0;
+
+    double energy =
+        power_kw * dt / 3600.0;
+
+    train->battery_kwh -=
+        energy;
+
+    railway->total_energy_used +=
+        energy;
+
+    /*
+     * Regenerative braking.
+     */
+
+    if (train->regenerative_braking)
+    {
+        double recovered =
+            15.0 * dt / 3600.0;
+
+        train->battery_kwh +=
+            recovered;
+
+        railway->total_energy_recovered +=
+            recovered;
+    }
+
+    if (train->battery_kwh < 0)
+        train->battery_kwh = 0;
+}
+
+
+/* ============================================================
+ * TRAIN PHYSICS
+ * ============================================================ */
+
+static void update_train(
+    ElectricMiniRailway *railway,
+    ElectricMiniTrain *train,
+    double dt
+)
+{
+    if (!train->operating)
+        return;
+
+    train->acceleration =
+        calculate_acceleration(train);
+
+    /*
+     * Start braking before destination.
+     */
+
+    double remaining =
+        railway->length_m -
+        train->position_m;
+
+    if (remaining < 600.0)
+    {
+        train->acceleration = -2.0;
+
+        train->regenerative_braking = true;
+    }
+    else
+    {
+        train->regenerative_braking = false;
+    }
+
+
+    train->speed_ms +=
+        train->acceleration * dt;
+
+
+    if (train->speed_ms < 0)
+        train->speed_ms = 0;
+
+
+    if (train->speed_ms >
+        MAX_SPEED_MS)
+    {
+        train->speed_ms =
+            MAX_SPEED_MS;
+    }
+
+
+    train->position_m +=
+        train->speed_ms * dt;
+
+
+    consume_energy(
+        railway,
+        train,
+        dt
+    );
+
+
+    /*
+     * Arrival.
+     */
+
+    if (train->position_m >=
+        railway->length_m)
+    {
+        train->position_m =
+            railway->length_m;
+
+        train->speed_ms = 0;
+
+        train->operating = false;
+
+        train->doors_open = true;
+
+        railway->active_trains--;
+
+        railway->passengers_carried +=
+            train->passengers;
+
+        printf(
+            "[RAIL] Train %d arrived at "
+            "Malt Whiskey Theme Park.\n",
+            train->id
+        );
+    }
+}
+
+
+/* ============================================================
+ * SERVICE DISPATCH
+ * ============================================================ */
+
+static void dispatch_train(
+    ElectricMiniRailway *railway,
+    int train_id
+)
+{
+    if (train_id >= railway->train_count)
+        return;
+
+    ElectricMiniTrain *train =
+        &railway->trains[train_id];
+
+    if (train->operating)
+        return;
+
+    if (train->battery_kwh < 40.0)
+    {
+        printf(
+            "[RAIL] Train %d requires charging.\n",
+            train_id
+        );
+
+        return;
+    }
+
+    /*
+     * Begin from main gate.
+     */
+
+    train->position_m = 0;
+
+    train->speed_ms = 0;
+
+    train->current_station = 0;
+
+    train->destination_station = 4;
+
+    board_train(
+        railway,
+        train,
+        0
+    );
+}
+
+
+/* ============================================================
+ * FLEET MANAGEMENT
+ * ============================================================ */
+
+static void fleet_manager(
+    ElectricMiniRailway *railway
+)
+{
+    for (int i = 0;
+         i < railway->train_count;
+         i++)
+    {
+        ElectricMiniTrain *train =
+            &railway->trains[i];
+
+        if (!train->operating &&
+            train->battery_kwh > 40.0)
+        {
+            dispatch_train(
+                railway,
+                i
+            );
+        }
+    }
+}
+
+
+/* ============================================================
+ * CHARGE TRAIN
+ * ============================================================ */
+
+static void charge_train(
+    ElectricMiniTrain *train
+)
+{
+    train->battery_kwh =
+        train->battery_capacity_kwh;
+
+    printf(
+        "[POWER] Train %d fully charged.\n",
+        train->id
+    );
+}
+
+
+/* ============================================================
+ * NETWORK REPORT
+ * ============================================================ */
+
+static void print_report(
+    ElectricMiniRailway *railway
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "       MALT WHISKEY ELECTRIC MINI RAILWAY\n"
+        "====================================================\n"
+    );
+
+    printf(
+        "Route length:       %.2f miles\n",
+        railway->length_m / 1609.344
+    );
+
+    printf(
+        "Route length:       %.0f metres\n",
+        railway->length_m
+    );
+
+    printf(
+        "Maximum speed:      %.1f km/h\n",
+        railway->maximum_speed * 3.6
+    );
+
+    printf(
+        "Stations:           %d\n",
+        railway->station_count
+    );
+
+    printf(
+        "Trains:             %d\n",
+        railway->train_count
+    );
+
+    printf(
+        "Passengers carried: %d\n",
+        railway->passengers_carried
+    );
+
+    printf(
+        "Energy used:        %.2f kWh\n",
+        railway->total_energy_used
+    );
+
+    printf(
+        "Energy recovered:   %.2f kWh\n",
+        railway->total_energy_recovered
+    );
+
+    printf(
+        "Electricity cost:   $%.2f\n",
+        railway->total_energy_used *
+        railway->electricity_price
+    );
+
+    printf(
+        "\nSTATIONS\n"
+    );
+
+    for (int i = 0;
+         i < railway->station_count;
+         i++)
+    {
+        RailwayStation *s =
+            &railway->stations[i];
+
+        printf(
+            "%d. %-28s %6.0f m | "
+            "waiting: %d\n",
+            s->id,
+            s->name,
+            s->position_m,
+            s->waiting_passengers
+        );
+    }
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+
+/* ============================================================
+ * SIMULATION
+ * ============================================================ */
+
+static void simulate(
+    ElectricMiniRailway *railway,
+    double simulation_seconds
+)
+{
+    const double dt = 0.05;
+
+    double time = 0;
+
+    int last_minute = -1;
+
+    while (time < simulation_seconds)
+    {
+        int minute =
+            (int)(time / 60.0);
+
+        /*
+         * Generate passenger demand.
+         */
+
+        if (minute != last_minute)
+        {
+            generate_demand(
+                railway,
+                minute
+            );
+
+            last_minute = minute;
+        }
+
+
+        /*
+         * Dispatch fleet.
+         */
+
+        fleet_manager(
+            railway
+        );
+
+
+        /*
+         * Physics update.
+         */
+
+        for (int i = 0;
+             i < railway->train_count;
+             i++)
+        {
+            update_train(
+                railway,
+                &railway->trains[i],
+                dt
+            );
+        }
+
+        time += dt;
+    }
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    ElectricMiniRailway railway;
+
+    initialise_railway(
+        &railway
+    );
+
+
+    /*
+     * Give the route its initial demand.
+     */
+
+    railway.stations[0]
+        .waiting_passengers = 60;
+
+
+    /*
+     * Fully charge fleet.
+     */
+
+    for (int i = 0;
+         i < railway.train_count;
+         i++)
+    {
+        charge_train(
+            &railway.trains[i]
+        );
+    }
+
+
+    print_report(
+        &railway
+    );
+
+
+    printf(
+        "\nStarting railway simulation...\n\n"
+    );
+
+
+    simulate(
+        &railway,
+        480.0
+    );
+
+
+    print_report(
+        &railway
+    );
+
+
+    return 0;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ============================================================
+ * MALT WHISKEY THEME PARK
+ * RESTRICTED BACK-FIELD / WILDLIFE RESERVE
+ * ============================================================
+ *
+ * Fictional open-world game environment.
+ *
+ * Layout:
+ *
+ *       MAIN PARK
+ *           |
+ *       STAFF ROAD
+ *           |
+ *      [IRON GATE]
+ *           |
+ *    -----------------
+ *    |               |
+ *    |   OPEN FIELD  |
+ *    |               |
+ *    |  DEER ZONE    |
+ *    |               |
+ *    |       🌳      |
+ *    -----------------
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_DEER 32
+#define FIELD_WIDTH  800.0
+#define FIELD_LENGTH 1000.0
+
+#define GATE_X 400.0
+#define GATE_Z 0.0
+
+#define RARE_DEER_CHANCE 0.035
+
+
+/* ============================================================
+ * VECTOR
+ * ============================================================ */
+
+typedef struct {
+
+    double x;
+    double y;
+    double z;
+
+} Vec3;
+
+
+/* ============================================================
+ * DEER TYPES
+ * ============================================================ */
+
+typedef enum {
+
+    DEER_COMMON,
+    DEER_STAG,
+    DEER_RARE_WHITE,
+    DEER_RARE_GOLDEN
+
+} DeerType;
+
+
+/* ============================================================
+ * DEER
+ * ============================================================ */
+
+typedef struct {
+
+    int id;
+
+    Vec3 position;
+
+    Vec3 velocity;
+
+    DeerType type;
+
+    double speed;
+
+    double awareness;
+
+    double health;
+
+    bool alive;
+
+    bool fleeing;
+
+    bool inside_field;
+
+} Deer;
+
+
+/* ============================================================
+ * GATE
+ * ============================================================ */
+
+typedef struct {
+
+    Vec3 position;
+
+    bool open;
+
+    bool locked;
+
+    bool staff_access;
+
+} WildlifeGate;
+
+
+/* ============================================================
+ * FIELD
+ * ============================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    double width;
+    double length;
+
+    double grass_height;
+
+    double visibility;
+
+    int deer_count;
+
+    Deer deer[MAX_DEER];
+
+    WildlifeGate gate;
+
+    bool accessible;
+
+    bool public_access;
+
+} WildlifeField;
+
+
+/* ============================================================
+ * RANDOM
+ * ============================================================ */
+
+static double random_double(void)
+{
+    return (double)rand() / (double)RAND_MAX;
+}
+
+
+/* ============================================================
+ * DISTANCE
+ * ============================================================ */
+
+static double distance(
+    Vec3 a,
+    Vec3 b
+)
+{
+    double dx = a.x - b.x;
+    double dz = a.z - b.z;
+
+    return sqrt(
+        dx * dx +
+        dz * dz
+    );
+}
+
+
+/* ============================================================
+ * DEER NAME
+ * ============================================================ */
+
+static const char *deer_name(
+    DeerType type
+)
+{
+    switch (type)
+    {
+        case DEER_COMMON:
+            return "Common Deer";
+
+        case DEER_STAG:
+            return "Large Stag";
+
+        case DEER_RARE_WHITE:
+            return "Rare White Deer";
+
+        case DEER_RARE_GOLDEN:
+            return "Rare Golden Stag";
+    }
+
+    return "Unknown";
+}
+
+
+/* ============================================================
+ * CREATE DEER
+ * ============================================================ */
+
+static void spawn_deer(
+    WildlifeField *field,
+    int id
+)
+{
+    if (field->deer_count >= MAX_DEER)
+        return;
+
+    Deer *deer =
+        &field->deer[
+            field->deer_count
+        ];
+
+    deer->id = id;
+
+    deer->position.x =
+        random_double() *
+        field->width;
+
+    deer->position.y = 0;
+
+    deer->position.z =
+        random_double() *
+        field->length;
+
+    deer->velocity.x = 0;
+    deer->velocity.y = 0;
+    deer->velocity.z = 0;
+
+    /*
+     * Base population.
+     */
+
+    deer->type = DEER_COMMON;
+
+    /*
+     * Rare wildlife.
+     */
+
+    double rarity =
+        random_double();
+
+    if (rarity < 0.005)
+    {
+        deer->type =
+            DEER_RARE_GOLDEN;
+    }
+
+    else if (rarity < 0.035)
+    {
+        deer->type =
+            DEER_RARE_WHITE;
+    }
+
+    else if (rarity < 0.15)
+    {
+        deer->type =
+            DEER_STAG;
+    }
+
+    deer->speed = 8.0;
+
+    deer->awareness =
+        0.35 +
+        random_double() * 0.45;
+
+    deer->health = 100;
+
+    deer->alive = true;
+
+    deer->fleeing = false;
+
+    deer->inside_field = true;
+
+    field->deer_count++;
+
+    printf(
+        "[WILDLIFE] Spawned %s #%d\n",
+        deer_name(deer->type),
+        deer->id
+    );
+}
+
+
+/* ============================================================
+ * INITIALISE FIELD
+ * ============================================================ */
+
+static void initialise_field(
+    WildlifeField *field
+)
+{
+    snprintf(
+        field->name,
+        sizeof(field->name),
+        "Malt Whiskey Back Field"
+    );
+
+    field->width =
+        FIELD_WIDTH;
+
+    field->length =
+        FIELD_LENGTH;
+
+    field->grass_height =
+        0.25;
+
+    field->visibility =
+        0.85;
+
+    field->deer_count = 0;
+
+    field->accessible = true;
+
+    field->public_access = false;
+
+
+    /*
+     * Gate.
+     */
+
+    field->gate.position.x =
+        GATE_X;
+
+    field->gate.position.y =
+        0;
+
+    field->gate.position.z =
+        GATE_Z;
+
+    field->gate.open = false;
+
+    field->gate.locked = false;
+
+    field->gate.staff_access = true;
+
+
+    /*
+     * Generate wildlife population.
+     */
+
+    for (int i = 0; i < 18; i++)
+    {
+        spawn_deer(
+            field,
+            i
+        );
+    }
+}
+
+
+/* ============================================================
+ * GATE ACCESS
+ * ============================================================ */
+
+static bool enter_field(
+    WildlifeField *field,
+    bool player_has_access
+)
+{
+    if (!field->accessible)
+        return false;
+
+    if (!player_has_access)
+    {
+        printf(
+            "[GATE] Restricted wildlife "
+            "area.\n"
+        );
+
+        return false;
+    }
+
+    if (field->gate.locked)
+    {
+        printf(
+            "[GATE] Gate is locked.\n"
+        );
+
+        return false;
+    }
+
+    field->gate.open = true;
+
+    printf(
+        "[GATE] Back-field gate opened.\n"
+    );
+
+    return true;
+}
+
+
+/* ============================================================
+ * DEER AI
+ * ============================================================ */
+
+static void update_deer(
+    Deer *deer,
+    Vec3 player_position,
+    bool player_visible,
+    double dt
+)
+{
+    if (!deer->alive)
+        return;
+
+    double player_distance =
+        distance(
+            deer->position,
+            player_position
+        );
+
+    /*
+     * Deer detect approaching player.
+     */
+
+    if (player_visible &&
+        player_distance <
+        60.0 * deer->awareness)
+    {
+        deer->fleeing = true;
+    }
+
+
+    if (deer->fleeing)
+    {
+        /*
+         * Simplified flee direction.
+         */
+
+        double dx =
+            deer->position.x -
+            player_position.x;
+
+        double dz =
+            deer->position.z -
+            player_position.z;
+
+        double magnitude =
+            sqrt(dx * dx + dz * dz);
+
+        if (magnitude > 0.01)
+        {
+            dx /= magnitude;
+            dz /= magnitude;
+        }
+
+        deer->velocity.x =
+            dx * deer->speed;
+
+        deer->velocity.z =
+            dz * deer->speed;
+    }
+
+
+    /*
+     * Move deer.
+     */
+
+    deer->position.x +=
+        deer->velocity.x * dt;
+
+    deer->position.z +=
+        deer->velocity.z * dt;
+
+
+    /*
+     * Keep deer inside field.
+     */
+
+    if (deer->position.x < 0)
+        deer->position.x = 0;
+
+    if (deer->position.x >
+        FIELD_WIDTH)
+        deer->position.x =
+            FIELD_WIDTH;
+
+    if (deer->position.z < 0)
+        deer->position.z = 0;
+
+    if (deer->position.z >
+        FIELD_LENGTH)
+        deer->position.z =
+            FIELD_LENGTH;
+}
+
+
+/* ============================================================
+ * FICTIONAL GAME HUNTING ACTION
+ * ============================================================ */
+
+static bool game_hunting_action(
+    Deer *deer,
+    bool player_has_hunting_access
+)
+{
+    if (!player_has_hunting_access)
+    {
+        printf(
+            "[FIELD] Hunting access denied.\n"
+        );
+
+        return false;
+    }
+
+    if (!deer->alive)
+        return false;
+
+    /*
+     * Fictional game-state action.
+     *
+     * No real-world weapon modelling.
+     */
+
+    deer->alive = false;
+
+    printf(
+        "[GAME] %s #%d was taken.\n",
+        deer_name(deer->type),
+        deer->id
+    );
+
+    /*
+     * Rare wildlife reward.
+     */
+
+    if (deer->type ==
+        DEER_RARE_WHITE)
+    {
+        printf(
+            "[RARE] Rare White Deer "
+            "encounter completed!\n"
+        );
+    }
+
+    if (deer->type ==
+        DEER_RARE_GOLDEN)
+    {
+        printf(
+            "[LEGENDARY] Golden Stag "
+            "encounter completed!\n"
+        );
+    }
+
+    return true;
+}
+
+
+/* ============================================================
+ * FIELD UPDATE
+ * ============================================================ */
+
+static void update_field(
+    WildlifeField *field,
+    Vec3 player_position,
+    bool player_visible,
+    double dt
+)
+{
+    for (int i = 0;
+         i < field->deer_count;
+         i++)
+    {
+        update_deer(
+            &field->deer[i],
+            player_position,
+            player_visible,
+            dt
+        );
+    }
+}
+
+
+/* ============================================================
+ * FIELD REPORT
+ * ============================================================ */
+
+static void field_report(
+    WildlifeField *field
+)
+{
+    int living = 0;
+    int rare = 0;
+
+    for (int i = 0;
+         i < field->deer_count;
+         i++)
+    {
+        Deer *deer =
+            &field->deer[i];
+
+        if (deer->alive)
+        {
+            living++;
+
+            if (deer->type ==
+                    DEER_RARE_WHITE ||
+                deer->type ==
+                    DEER_RARE_GOLDEN)
+            {
+                rare++;
+            }
+        }
+    }
+
+    printf(
+        "\n"
+        "===========================================\n"
+        "       MALT WHISKEY BACK FIELD\n"
+        "===========================================\n"
+    );
+
+    printf(
+        "Area:          %.0f x %.0f metres\n",
+        field->width,
+        field->length
+    );
+
+    printf(
+        "Living deer:   %d\n",
+        living
+    );
+
+    printf(
+        "Rare deer:     %d\n",
+        rare
+    );
+
+    printf(
+        "Gate:          %s\n",
+        field->gate.open
+            ? "OPEN"
+            : "CLOSED"
+    );
+
+    printf(
+        "Public access: %s\n",
+        field->public_access
+            ? "YES"
+            : "NO"
+    );
+
+    printf(
+        "===========================================\n"
+    );
+}
+
+
+/* ============================================================
+ * MAIN
+ * ============================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    WildlifeField field;
+
+    initialise_field(
+        &field
+    );
+
+    field_report(
+        &field
+    );
+
+    /*
+     * Demonstrate authorised access.
+     */
+
+    enter_field(
+        &field,
+        true
+    );
+
+
+    /*
+     * Player position.
+     */
+
+    Vec3 player = {
+        400,
+        0,
+        100
+    };
+
+
+    /*
+     * Run wildlife simulation.
+     */
+
+    for (int frame = 0;
+         frame < 600;
+         frame++)
+    {
+        update_field(
+            &field,
+            player,
+            true,
+            0.016
+        );
+    }
+
+
+    field_report(
+        &field
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
