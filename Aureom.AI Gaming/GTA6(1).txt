@@ -1,0 +1,2417 @@
+C — Everglades Hovercraft Racing Engine
+/*
+ * AEROKRAFT EVERGLADES HOVERCRAFT RACING
+ *
+ * Fictional game-world racing system.
+ *
+ * Integrates with:
+ *   - Hovercraft physics
+ *   - Everglades terrain
+ *   - Weather
+ *   - Vehicle economy
+ *   - NPC AI
+ *   - Sponsorship
+ *   - Championship standings
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+
+#define MAX_RACERS       64
+#define MAX_WAYPOINTS    256
+#define MAX_LAPS         20
+#define MAX_RACES        32
+#define MAX_SPONSORS     32
+Race classes
+typedef enum {
+
+    CLASS_AMATEUR,
+    CLASS_PRODUCTION,
+    CLASS_PERFORMANCE,
+    CLASS_AEROKRAFT_GT,
+    CLASS_OPEN
+
+} RaceClass;
+Terrain
+typedef enum {
+
+    SURFACE_WATER,
+    SURFACE_MARSH,
+    SURFACE_MUD,
+    SURFACE_SAWGRASS,
+    SURFACE_DRY_GROUND
+
+} RaceSurface;
+Waypoints
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    RaceSurface surface;
+
+    double width;
+
+    double recommended_speed;
+
+} RaceWaypoint;
+Race circuit
+
+The track isn't necessarily a conventional road. It can be a sequence of navigational gates through the wetlands.
+
+typedef struct {
+
+    int id;
+
+    char name[128];
+
+    RaceWaypoint waypoints[
+        MAX_WAYPOINTS
+    ];
+
+    int waypoint_count;
+
+    int laps;
+
+    double length;
+
+    double prize_pool;
+
+    RaceClass race_class;
+
+    bool night_race;
+    bool championship;
+
+} HovercraftRace;
+
+Example fictional circuit:
+
+HovercraftRace everglades_gp = {
+
+    1,
+    "Everglades Grand Prix",
+
+    {0},
+
+    0,
+
+    0,
+    10,
+
+    250000.0,
+
+    CLASS_AEROKRAFT_GT,
+
+    false,
+    true
+
+};
+Generate a circuit
+void add_waypoint(
+    HovercraftRace *race,
+    double x,
+    double y,
+    RaceSurface surface
+) {
+    if (race->waypoint_count >=
+        MAX_WAYPOINTS)
+        return;
+
+    RaceWaypoint *w =
+        &race->waypoints[
+            race->waypoint_count++
+        ];
+
+    w->id =
+        race->waypoint_count - 1;
+
+    w->x = x;
+    w->y = y;
+
+    w->surface = surface;
+
+    w->width = 40.0;
+
+    switch (surface) {
+
+        case SURFACE_WATER:
+            w->recommended_speed = 30.0;
+            break;
+
+        case SURFACE_MARSH:
+            w->recommended_speed = 23.0;
+            break;
+
+        case SURFACE_MUD:
+            w->recommended_speed = 18.0;
+            break;
+
+        case SURFACE_SAWGRASS:
+            w->recommended_speed = 15.0;
+            break;
+
+        default:
+            w->recommended_speed = 25.0;
+    }
+}
+
+You can create a circuit:
+
+void build_everglades_gp(
+    HovercraftRace *race
+) {
+    strcpy(
+        race->name,
+        "Everglades Grand Prix"
+    );
+
+    race->race_class =
+        CLASS_AEROKRAFT_GT;
+
+    race->laps = 5;
+
+    race->prize_pool =
+        250000.0;
+
+    add_waypoint(
+        race, 100, 100,
+        SURFACE_WATER
+    );
+
+    add_waypoint(
+        race, 500, 140,
+        SURFACE_WATER
+    );
+
+    add_waypoint(
+        race, 850, 400,
+        SURFACE_MARSH
+    );
+
+    add_waypoint(
+        race, 700, 800,
+        SURFACE_SAWGRASS
+    );
+
+    add_waypoint(
+        race, 300, 900,
+        SURFACE_MUD
+    );
+
+    add_waypoint(
+        race, 100, 600,
+        SURFACE_WATER
+    );
+}
+
+This produces something more like:
+
+             EVERGLADES GP
+
+       START
+         ●──────────────●
+         │              \
+         │               \
+         │                ●
+         │             MARSH
+         │                  \
+         │                   \
+         ●                    ●
+       WATER                SAWGRASS
+         \                    /
+          \                  /
+           ●───────●────────
+             MUD
+Racer
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Hovercraft *vehicle;
+
+    double skill;
+    double aggression;
+    double consistency;
+
+    double current_lap;
+
+    int current_waypoint;
+
+    double race_time;
+
+    double best_lap;
+
+    double damage;
+
+    double fuel;
+
+    bool finished;
+    bool retired;
+
+} Racer;
+AI racing line
+
+The AI looks at the next waypoint and adjusts its speed.
+
+double calculate_target_speed(
+    Racer *racer,
+    RaceWaypoint *waypoint
+) {
+    double skill_bonus =
+        racer->skill * 8.0;
+
+    double target =
+        waypoint->recommended_speed +
+        skill_bonus;
+
+    if (target >
+        racer->vehicle->maximum_speed)
+
+        target =
+            racer->vehicle->maximum_speed;
+
+    return target;
+}
+Steering toward the waypoint
+double angle_to_waypoint(
+    Hovercraft *vehicle,
+    RaceWaypoint *waypoint
+) {
+    double dx =
+        waypoint->x -
+        vehicle->position.x;
+
+    double dy =
+        waypoint->y -
+        vehicle->position.y;
+
+    double target =
+        atan2(dy, dx);
+
+    double difference =
+        target -
+        vehicle->position.heading;
+
+    while (difference > M_PI)
+        difference -=
+            2.0 * M_PI;
+
+    while (difference < -M_PI)
+        difference +=
+            2.0 * M_PI;
+
+    return difference;
+}
+
+AI steering:
+
+double racing_ai_steering(
+    Racer *racer,
+    RaceWaypoint *waypoint
+) {
+    double angle =
+        angle_to_waypoint(
+            racer->vehicle,
+            waypoint
+        );
+
+    double response =
+        1.0 +
+        racer->skill;
+
+    return
+        angle * response;
+}
+Race positioning
+double distance_to_waypoint(
+    Hovercraft *vehicle,
+    RaceWaypoint *waypoint
+) {
+    double dx =
+        waypoint->x -
+        vehicle->position.x;
+
+    double dy =
+        waypoint->y -
+        vehicle->position.y;
+
+    return sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+void check_waypoint(
+    Racer *racer,
+    HovercraftRace *race
+) {
+    RaceWaypoint *waypoint =
+        &race->waypoints[
+            racer->current_waypoint
+        ];
+
+    double distance =
+        distance_to_waypoint(
+            racer->vehicle,
+            waypoint
+        );
+
+    if (distance < waypoint->width) {
+
+        racer->current_waypoint++;
+
+        if (racer->current_waypoint >=
+            race->waypoint_count) {
+
+            racer->current_waypoint = 0;
+
+            racer->current_lap++;
+
+            if (racer->current_lap >=
+                race->laps) {
+
+                racer->finished = true;
+            }
+        }
+    }
+}
+Weather
+
+Weather should substantially change races.
+
+typedef struct {
+
+    double rain;
+    double wind;
+    double temperature;
+
+    double visibility;
+
+    bool storm;
+
+} RaceWeather;
+double weather_speed_modifier(
+    RaceWeather *weather
+) {
+    double modifier = 1.0;
+
+    modifier -=
+        weather->rain *
+        0.003;
+
+    modifier -=
+        weather->wind *
+        0.001;
+
+    if (weather->storm)
+        modifier *= 0.65;
+
+    if (modifier < 0.35)
+        modifier = 0.35;
+
+    return modifier;
+}
+
+A storm can therefore transform a race:
+
+SUNNY
+  ↓
+HIGH SPEED
+  ↓
+CLOSE RACING
+
+          WEATHER CHANGE
+                ↓
+             STORM
+                ↓
+        LOWER VISIBILITY
+                ↓
+          WET SURFACE
+                ↓
+        DIFFERENT RACING
+                ↓
+         SKILLED DRIVERS
+          GAIN ADVANTAGE
+Vehicle damage
+void apply_race_stress(
+    Racer *racer,
+    double throttle,
+    double delta_time
+) {
+    double stress =
+        throttle *
+        delta_time *
+        0.01;
+
+    racer->damage +=
+        stress;
+
+    /*
+     * Poor-condition vehicles
+     * suffer more.
+     */
+
+    if (racer->vehicle->condition < 0.5) {
+
+        racer->damage +=
+            stress * 2.0;
+    }
+
+    if (racer->damage >= 1.0) {
+
+        racer->retired = true;
+        racer->finished = false;
+    }
+}
+Pit / service area
+
+Hovercraft don't need traditional Formula 1-style pits, but service stations around the circuit can repair and refuel them.
+
+typedef struct {
+
+    double x;
+    double y;
+
+    double repair_capacity;
+    double fuel_capacity;
+
+    double service_time;
+
+} RaceServiceStation;
+void service_racer(
+    Racer *racer,
+    RaceServiceStation *station
+) {
+    if (racer->damage > 0.0) {
+
+        racer->damage -=
+            station->repair_capacity;
+
+        if (racer->damage < 0)
+            racer->damage = 0;
+    }
+
+    racer->fuel =
+        racer->vehicle->fuel_capacity;
+}
+Championship system
+typedef struct {
+
+    char name[64];
+
+    Racer *racers[MAX_RACERS];
+
+    int points[MAX_RACERS];
+
+    int race_count;
+
+} HovercraftChampionship;
+
+Points:
+
+int race_points(
+    int position
+) {
+    switch (position) {
+
+        case 1: return 100;
+        case 2: return 75;
+        case 3: return 60;
+        case 4: return 50;
+        case 5: return 40;
+        case 6: return 32;
+        case 7: return 25;
+        case 8: return 20;
+        case 9: return 15;
+        case 10: return 10;
+
+        default:
+            return 0;
+    }
+}
+Sponsorship
+
+This connects racing back into the corporate economy.
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double sponsorship_value;
+
+    double performance_bonus;
+
+    double reputation_bonus;
+
+} RacingSponsor;
+
+AeroKraft itself can sponsor a championship:
+
+RacingSponsor aerokraft_sponsor = {
+
+    1,
+
+    "AeroKraft Inc.",
+
+    5000000.0,
+
+    0.15,
+
+    0.20
+
+};
+
+Now winning the race increases the player's relationship with AeroKraft and potentially unlocks better vehicles.
+
+Prize economy
+double calculate_prize(
+    HovercraftRace *race,
+    int position
+) {
+    double percentages[] = {
+
+        0.40,
+        0.22,
+        0.14,
+        0.09,
+        0.06,
+        0.04,
+        0.025,
+        0.015,
+        0.005,
+        0.001
+
+    };
+
+    if (position < 1 ||
+        position > 10)
+        return 0.0;
+
+    return
+        race->prize_pool *
+        percentages[position - 1];
+}
+
+So the winner of a $250,000 race gets:
+
+1st       $100,000
+2nd        $55,000
+3rd        $35,000
+4th        $22,500
+5th        $15,000
+...
+Race reputation
+
+Winning should matter beyond cash.
+
+void update_racer_reputation(
+    Racer *racer,
+    int position
+) {
+    double reputation_gain =
+        (11 - position) *
+        0.05;
+
+    racer->skill +=
+        reputation_gain * 0.01;
+}
+
+Over multiple races:
+
+LOCAL RACE
+    ↓
+REGIONAL
+    ↓
+PRO
+    ↓
+AEROKRAFT CUP
+    ↓
+EVERGLADES GRAND PRIX
+    ↓
+INTERNATIONAL SERIES
+The complete gameplay loop
+                    MIAMI
+                      │
+                      ▼
+              HOVERCRAFT DEALER
+                      │
+                      ▼
+                 BUY / BUILD
+                      │
+                      ▼
+                 EVERGLADES
+                      │
+             ┌────────┴────────┐
+             │                 │
+          TRAINING           RACING
+             │                 │
+             │                 ▼
+             │             QUALIFYING
+             │                 │
+             │                 ▼
+             │                RACE
+             │                 │
+             │       ┌─────────┼─────────┐
+             │       ▼         ▼         ▼
+             │    WEATHER    DAMAGE    FUEL
+             │       │         │         │
+             └───────┴─────────┴─────────┘
+                         │
+                         ▼
+                       RESULT
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+            MONEY     REPUTATION   SPONSORS
+              │          │          │
+              └──────────┼──────────┘
+                         ▼
+                   BETTER VEHICLE
+
+And I'd make the Everglades Grand Prix one of the major recurring events in the Miami world: a temporary race infrastructure appears in the wetlands, AeroKraft brings its latest machines, NPC teams arrive from across Florida, spectators travel out from Miami, local businesses respond to the influx, weather can change the race dynamically, and the player's performance feeds back into their wealth, reputation and relationship with AeroKraft.
+
+
+
+
+
+C — Ferrari F-1–style Hypercar
+/*
+ * ============================================================
+ * AEROF1 F-1
+ * ============================================================
+ *
+ * Fictional game vehicle inspired by modern Formula 1 cars.
+ *
+ * Role:
+ *     Fastest land vehicle in the game.
+ *
+ * Designed for:
+ *     - Racing
+ *     - High-speed handling
+ *     - Aerodynamic simulation
+ *     - Tyre simulation
+ *     - Energy deployment
+ *     - Damage
+ *     - Weather
+ *     - AI racing
+ *
+ * Units:
+ *     distance = metres
+ *     time     = seconds
+ *     speed    = metres/second
+ *     mass     = kg
+ */
+
+#include <stdio.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define PI 3.14159265358979323846
+#define GRAVITY 9.80665
+
+#define MAX_SPEED_KMH 380.0
+#define MAX_SPEED_MS  (MAX_SPEED_KMH / 3.6)
+Vehicle specification
+typedef struct {
+
+    char name[64];
+
+    double mass;
+
+    double engine_power;
+    double electric_power;
+
+    double top_speed;
+
+    double acceleration;
+
+    double braking;
+
+    double steering;
+
+    double downforce;
+
+    double drag;
+
+    double grip;
+
+    double tyre_temperature;
+
+    double tyre_wear;
+
+    double fuel;
+
+    double battery;
+
+    double battery_capacity;
+
+    double damage;
+
+    bool active;
+
+} FerrariF1;
+Create the car
+FerrariF1 create_ferrari_f1(void)
+{
+    FerrariF1 car = {
+
+        "Ferrari F-1",
+
+        800.0,       /* mass */
+
+        550000.0,    /* combustion power */
+        120000.0,    /* electric power */
+
+        MAX_SPEED_MS,
+
+        5.5,         /* acceleration */
+        11.0,        /* braking */
+        2.8,         /* steering */
+
+        1.0,
+
+        0.30,
+
+        1.20,
+
+        80.0,
+
+        0.0,
+
+        1.0,
+
+        100.0,
+
+        100.0,
+
+        0.0,
+
+        true
+    };
+
+    return car;
+}
+Physics state
+typedef struct {
+
+    double x;
+    double y;
+
+    double velocity_x;
+    double velocity_y;
+
+    double heading;
+
+    double yaw_rate;
+
+    double throttle;
+    double brake;
+
+    double steering;
+
+    double speed;
+
+} VehiclePhysics;
+Aerodynamic downforce
+
+The important characteristic is that downforce increases rapidly with speed.
+
+double calculate_downforce(
+    FerrariF1 *car,
+    double speed
+) {
+    /*
+     * Simplified game approximation.
+     *
+     * Downforce ∝ velocity²
+     */
+
+    double normalized =
+        speed / car->top_speed;
+
+    return
+        car->downforce *
+        normalized *
+        normalized;
+}
+
+At low speed:
+
+LOW SPEED
+   ↓
+LOW DOWNFORCE
+   ↓
+LIMITED GRIP
+
+At high speed:
+
+HIGH SPEED
+   ↓
+HIGH DOWNFORCE
+   ↓
+EXTREME CORNERING
+
+That gives the car its characteristic F1-style behaviour.
+
+Total grip
+double calculate_grip(
+    FerrariF1 *car,
+    VehiclePhysics *physics
+) {
+    double downforce =
+        calculate_downforce(
+            car,
+            physics->speed
+        );
+
+    double aerodynamic_grip =
+        downforce / 1000.0;
+
+    double mechanical_grip =
+        car->grip;
+
+    return
+        mechanical_grip +
+        aerodynamic_grip;
+}
+Acceleration
+double calculate_acceleration(
+    FerrariF1 *car,
+    VehiclePhysics *physics
+) {
+    double combustion =
+        car->engine_power *
+        physics->throttle;
+
+    double electric =
+        car->electric_power *
+        physics->throttle *
+        (car->battery / car->battery_capacity);
+
+    double total_power =
+        combustion +
+        electric;
+
+    double acceleration =
+        total_power /
+        car->mass /
+        fmax(
+            physics->speed,
+            1.0
+        );
+
+    /*
+     * Prevent unrealistic acceleration.
+     */
+
+    if (acceleration >
+        car->acceleration)
+
+        acceleration =
+            car->acceleration;
+
+    return acceleration;
+}
+Energy deployment
+
+Give the player control over the hybrid system.
+
+typedef enum {
+
+    ENERGY_BALANCED,
+    ENERGY_ATTACK,
+    ENERGY_DEFEND,
+    ENERGY_RECHARGE
+
+} EnergyMode;
+void update_energy(
+    FerrariF1 *car,
+    EnergyMode mode,
+    double delta_time
+) {
+    double usage = 0.0;
+
+    switch (mode) {
+
+        case ENERGY_ATTACK:
+
+            usage = 4.0;
+            break;
+
+        case ENERGY_DEFEND:
+
+            usage = 2.0;
+            break;
+
+        case ENERGY_BALANCED:
+
+            usage = 1.5;
+            break;
+
+        case ENERGY_RECHARGE:
+
+            usage = -1.0;
+            break;
+    }
+
+    car->battery -=
+        usage * delta_time;
+
+    if (car->battery < 0)
+        car->battery = 0;
+
+    if (car->battery >
+        car->battery_capacity)
+
+        car->battery =
+            car->battery_capacity;
+}
+
+This creates a strategic choice:
+
+ATTACK MODE
+    ↓
+MAXIMUM POWER
+    ↓
+FASTEST LAP
+    ↓
+BATTERY DRAINS
+
+RECHARGE
+    ↓
+LOWER PERFORMANCE
+    ↓
+BATTERY RECOVERED
+Braking
+double calculate_braking(
+    FerrariF1 *car,
+    VehiclePhysics *physics
+) {
+    double grip =
+        calculate_grip(
+            car,
+            physics
+        );
+
+    return
+        car->braking *
+        grip *
+        physics->brake;
+}
+Steering
+void apply_steering(
+    FerrariF1 *car,
+    VehiclePhysics *physics,
+    double delta_time
+) {
+    double grip =
+        calculate_grip(
+            car,
+            physics
+        );
+
+    double steering_force =
+        physics->steering *
+        grip;
+
+    physics->yaw_rate +=
+        steering_force *
+        delta_time;
+
+    physics->heading +=
+        physics->yaw_rate *
+        delta_time;
+}
+Drag
+double calculate_drag(
+    FerrariF1 *car,
+    double speed
+) {
+    return
+        car->drag *
+        speed *
+        speed;
+}
+Update physics
+void update_ferrari_f1(
+    FerrariF1 *car,
+    VehiclePhysics *physics,
+    EnergyMode energy_mode,
+    double delta_time
+) {
+    if (!car->active)
+        return;
+
+    double acceleration =
+        calculate_acceleration(
+            car,
+            physics
+        );
+
+    double braking =
+        calculate_braking(
+            car,
+            physics
+        );
+
+    double drag =
+        calculate_drag(
+            car,
+            physics->speed
+        );
+
+    double net_acceleration =
+        acceleration -
+        braking -
+        drag / car->mass;
+
+    physics->speed +=
+        net_acceleration *
+        delta_time;
+
+    if (physics->speed < 0)
+        physics->speed = 0;
+
+    if (physics->speed >
+        car->top_speed)
+
+        physics->speed =
+            car->top_speed;
+
+    /*
+     * Position integration.
+     */
+
+    physics->velocity_x =
+        cos(physics->heading) *
+        physics->speed;
+
+    physics->velocity_y =
+        sin(physics->heading) *
+        physics->speed;
+
+    physics->x +=
+        physics->velocity_x *
+        delta_time;
+
+    physics->y +=
+        physics->velocity_y *
+        delta_time;
+
+    apply_steering(
+        car,
+        physics,
+        delta_time
+    );
+
+    update_energy(
+        car,
+        energy_mode,
+        delta_time
+    );
+}
+Tyres
+
+Tyres should be a major part of the simulation.
+
+typedef enum {
+
+    TYRE_SOFT,
+    TYRE_MEDIUM,
+    TYRE_HARD,
+    TYRE_INTERMEDIATE,
+    TYRE_WET
+
+} TyreCompound;
+double tyre_grip(
+    FerrariF1 *car,
+    TyreCompound compound
+) {
+    double grip = 1.0;
+
+    switch (compound) {
+
+        case TYRE_SOFT:
+            grip = 1.20;
+            break;
+
+        case TYRE_MEDIUM:
+            grip = 1.10;
+            break;
+
+        case TYRE_HARD:
+            grip = 1.00;
+            break;
+
+        case TYRE_INTERMEDIATE:
+            grip = 0.85;
+            break;
+
+        case TYRE_WET:
+            grip = 0.70;
+            break;
+    }
+
+    /*
+     * Temperature penalty.
+     */
+
+    double temperature_error =
+        fabs(
+            car->tyre_temperature -
+            90.0
+        );
+
+    grip -=
+        temperature_error *
+        0.002;
+
+    return fmax(
+        grip,
+        0.40
+    );
+}
+Damage
+void damage_f1(
+    FerrariF1 *car,
+    double impact
+) {
+    car->damage +=
+        impact;
+
+    if (car->damage >= 1.0) {
+
+        car->damage = 1.0;
+
+        car->active = false;
+    }
+}
+
+Performance degradation:
+
+double performance_modifier(
+    FerrariF1 *car
+) {
+    return
+        1.0 -
+        car->damage *
+        0.65;
+}
+Weather
+double weather_modifier(
+    FerrariF1 *car,
+    bool raining
+) {
+    if (!raining)
+        return 1.0;
+
+    /*
+     * F1-style car is extremely
+     * compromised in heavy rain.
+     */
+
+    return 0.55;
+}
+
+This is useful for your wider world because the fastest car isn't automatically the best vehicle everywhere.
+
+              FERRARI F-1
+                   │
+          ┌────────┼────────┐
+          ↓        ↓        ↓
+       DRY ROAD   TRACK    HIGHWAY
+        ★★★★★     ★★★★★    ★★★★★
+
+          ↓
+
+      HEAVY RAIN
+          ★★☆
+
+      MARSH
+          ★
+
+      EVERGLADES
+          ☆
+
+That makes your existing hovercraft system meaningful: the F-1 is unbeatable on suitable pavement, while an Everglades hovercraft dominates wetlands.
+
+AI driver
+typedef struct {
+
+    double racing_skill;
+    double aggression;
+    double consistency;
+    double bravery;
+
+    int preferred_line;
+
+} F1DriverAI;
+double calculate_racing_speed(
+    FerrariF1 *car,
+    F1DriverAI *driver,
+    double corner_angle
+) {
+    double base =
+        car->top_speed;
+
+    double corner_penalty =
+        fabs(corner_angle) *
+        0.55;
+
+    double skill_bonus =
+        driver->racing_skill *
+        20.0;
+
+    double target =
+        base -
+        corner_penalty +
+        skill_bonus;
+
+    return fmax(
+        target,
+        20.0
+    );
+}
+The game-world specification
+
+I'd make the fictional F-1 something the player cannot simply buy at the beginning.
+
+FERRARI F-1
+────────────────────────────
+
+Class:       F1
+Top Speed:   380 km/h
+Power:       Extreme
+Handling:    Extreme
+Braking:     Extreme
+Wet Grip:    Poor
+Off-road:    Terrible
+
+Availability:
+    ★★★★★ Rarity
+
+Price:
+    EXTREME
+
+Requirements:
+    Elite racing reputation
+    Championship victory
+    Special contract
+
+Primary use:
+    Professional racing
+
+And in the wider open-world economy:
+
+AEROKRAFT / MOTORSPORT INDUSTRY
+              │
+              ▼
+        RACING ECONOMY
+              │
+       ┌──────┼──────┐
+       ▼      ▼      ▼
+     TEAMS   DRIVERS  SPONSORS
+       │      │       │
+       └──────┼───────┘
+              ▼
+          GRAND PRIX
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+    PRIZE MONEY   REPUTATION
+       │             │
+       └──────┬──────┘
+              ▼
+         ELITE CARS
+
+One important game-design distinction: I'd call it a fictional Ferrari-derived F-1 machine (or use an original manufacturer/model name) rather than reproducing Ferrari's exact real-world F1 car and branding. That gives you much more freedom to make its performance, upgrades and economics completely yours.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+C — TITANIC / OLYMPIA CRUISE LINE
+/*
+ * ============================================================
+ * TITANIC / OLYMPIA INTERNATIONAL CRUISE LINE
+ * ============================================================
+ *
+ * Fictional open-world cruise-ship simulation.
+ *
+ * Features:
+ *
+ *   - Two identical sister ships
+ *   - Docking / departure
+ *   - Passenger simulation
+ *   - Internal explorable decks
+ *   - Cabins
+ *   - Restaurants
+ *   - Shops
+ *   - Entertainment
+ *   - Crew
+ *   - Cargo
+ *   - Fuel / energy
+ *   - Weather
+ *   - Navigation
+ *   - International-water boundary
+ *   - Different game rules by maritime zone
+ *
+ * The maritime boundary is a GAMEPLAY abstraction,
+ * not a simulation of real-world legal jurisdiction.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+
+#define MAX_PASSENGERS 4000
+#define MAX_CREW 1500
+#define MAX_DECKS 18
+#define MAX_PORTS 32
+#define MAX_ROOMS 1000
+#define MAX_CARGO 100
+1. Ship classes
+typedef enum {
+
+    SHIP_TITANIC,
+    SHIP_OLYMPIA
+
+} ShipName;
+
+Both use exactly the same technical specification.
+
+typedef struct {
+
+    ShipName name;
+
+    char callsign[32];
+
+    double length;
+    double beam;
+    double height;
+
+    double mass;
+
+    double max_speed;
+    double cruising_speed;
+
+    double fuel;
+    double fuel_capacity;
+
+    double hull_integrity;
+
+    int passenger_capacity;
+    int crew_capacity;
+
+    int current_passengers;
+    int current_crew;
+
+    int current_deck;
+
+    double x;
+    double y;
+
+    double heading;
+
+    bool docked;
+    bool underway;
+    bool boarding;
+    bool disembarking;
+
+} CruiseShip;
+2. Create the sister ships
+CruiseShip create_ship(ShipName name)
+{
+    CruiseShip ship;
+
+    memset(&ship, 0, sizeof(ship));
+
+    ship.name = name;
+
+    ship.length = 290.0;
+    ship.beam = 36.0;
+    ship.height = 55.0;
+
+    ship.mass = 60000.0;
+
+    ship.max_speed = 24.0;
+    ship.cruising_speed = 19.0;
+
+    ship.fuel_capacity = 1000000.0;
+    ship.fuel = ship.fuel_capacity;
+
+    ship.hull_integrity = 1.0;
+
+    ship.passenger_capacity = 4000;
+    ship.crew_capacity = 1500;
+
+    ship.current_passengers = 0;
+    ship.current_crew = 0;
+
+    ship.current_deck = 1;
+
+    ship.docked = true;
+    ship.underway = false;
+
+    if (name == SHIP_TITANIC)
+        strcpy(ship.callsign, "TITANIC");
+
+    else
+        strcpy(ship.callsign, "OLYMPIA");
+
+    return ship;
+}
+
+You therefore get:
+
+              SISTER SHIPS
+                   │
+          ┌────────┴────────┐
+          │                 │
+       TITANIC           OLYMPIA
+          │                 │
+          └────────┬────────┘
+                   │
+             IDENTICAL
+             PARAMETERS
+3. The playable ship interior
+
+The ship isn't just a vehicle marker.
+
+It is effectively a small open world inside the open world.
+
+typedef enum {
+
+    ROOM_BRIDGE,
+    ROOM_ENGINEERING,
+    ROOM_CABIN,
+    ROOM_RESTAURANT,
+    ROOM_BAR,
+    ROOM_THEATRE,
+    ROOM_CASINO,
+    ROOM_SHOP,
+    ROOM_POOL,
+    ROOM_GYM,
+    ROOM_LOUNGE,
+    ROOM_CREW_AREA,
+    ROOM_CARGO,
+    ROOM_MEDICAL,
+    ROOM_CORRIDOR
+
+} ShipRoomType;
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    ShipRoomType type;
+
+    int deck;
+
+    double x;
+    double y;
+
+    int capacity;
+
+    bool accessible;
+
+} ShipRoom;
+
+Example interior:
+
+DECK 15
+────────────────────────
+      SUN DECK
+────────────────────────
+
+DECK 12
+────────────────────────
+  POOL │ RESTAURANT │ BAR
+────────────────────────
+
+DECK 10
+────────────────────────
+ CABINS │ THEATRE │ SHOP
+────────────────────────
+
+DECK 8
+────────────────────────
+ CABINS │ DINING │ LOUNGE
+────────────────────────
+
+DECK 5
+────────────────────────
+      MAIN DECK
+────────────────────────
+
+DECK 2
+────────────────────────
+ ENGINEERING │ CARGO
+────────────────────────
+
+DECK 1
+────────────────────────
+        KEEL
+────────────────────────
+4. Passenger simulation
+typedef enum {
+
+    PASSENGER_TOURIST,
+    PASSENGER_BUSINESS,
+    PASSENGER_WEALTHY,
+    PASSENGER_FAMILY,
+    PASSENGER_ADVENTURER,
+    PASSENGER_CREW
+
+} PassengerType;
+typedef struct {
+
+    int id;
+
+    PassengerType type;
+
+    int cabin;
+
+    double money;
+
+    double satisfaction;
+
+    double spending_rate;
+
+    bool aboard;
+
+} Passenger;
+
+Passengers move around the ship.
+
+void passenger_update(
+    Passenger *p,
+    CruiseShip *ship,
+    double delta_time
+) {
+    if (!p->aboard)
+        return;
+
+    /*
+     * Passengers spend money
+     * while exploring the ship.
+     */
+
+    p->money -=
+        p->spending_rate *
+        delta_time;
+
+    if (p->money < 0)
+        p->money = 0;
+
+    /*
+     * Satisfaction gradually
+     * changes during the voyage.
+     */
+
+    p->satisfaction +=
+        0.001 *
+        delta_time;
+
+    if (p->satisfaction > 1.0)
+        p->satisfaction = 1.0;
+}
+5. Ports
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    double docking_radius;
+
+    bool international_port;
+
+} CruisePort;
+
+Example fictional network:
+
+                 ATLANTIC
+                    │
+                    │
+             ┌──────▼──────┐
+             │    MIAMI    │
+             └──────┬──────┘
+                    │
+                    ▼
+              OPEN OCEAN
+                    │
+             ┌──────┴──────┐
+             ▼             ▼
+          NASSAU        HAVANA
+             │
+             ▼
+          CARIBBEAN
+             │
+             ▼
+       CRUISE DESTINATION
+6. Docking
+double distance_to_port(
+    CruiseShip *ship,
+    CruisePort *port
+) {
+    double dx =
+        ship->x - port->x;
+
+    double dy =
+        ship->y - port->y;
+
+    return sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+bool ship_can_dock(
+    CruiseShip *ship,
+    CruisePort *port
+) {
+    return
+        distance_to_port(ship, port)
+        <= port->docking_radius;
+}
+7. Departure
+void depart_port(
+    CruiseShip *ship
+) {
+    if (!ship->docked)
+        return;
+
+    if (ship->current_passengers <= 0)
+        return;
+
+    ship->docked = false;
+    ship->boarding = false;
+    ship->disembarking = false;
+
+    ship->underway = true;
+
+    printf(
+        "%s has departed.\n",
+        ship->callsign
+    );
+}
+8. International-water system
+
+For the game, create a Maritime Zone System.
+
+typedef enum {
+
+    ZONE_PORT,
+    ZONE_TERRITORIAL,
+    ZONE_INTERNATIONAL,
+    ZONE_DESTINATION
+
+} MaritimeZone;
+
+The world determines the current zone:
+
+MaritimeZone get_maritime_zone(
+    double x,
+    double y
+) {
+    /*
+     * Simplified game-world boundary.
+     *
+     * Real-world maritime boundaries are
+     * much more complicated and should not
+     * be treated as exact legal boundaries.
+     */
+
+    double distance_from_coast =
+        sqrt(
+            x * x +
+            y * y
+        );
+
+    if (distance_from_coast < 10.0)
+        return ZONE_PORT;
+
+    if (distance_from_coast < 50.0)
+        return ZONE_TERRITORIAL;
+
+    return ZONE_INTERNATIONAL;
+}
+9. Rules change at the international line
+typedef struct {
+
+    bool normal_port_rules;
+
+    bool international_navigation;
+
+    bool open_ocean_events;
+
+    bool special_missions;
+
+    double encounter_probability;
+
+    double weather_probability;
+
+} MaritimeRules;
+MaritimeRules get_maritime_rules(
+    MaritimeZone zone
+) {
+    MaritimeRules rules = {0};
+
+    switch (zone) {
+
+        case ZONE_PORT:
+
+            rules.normal_port_rules = true;
+            rules.international_navigation = false;
+            rules.open_ocean_events = false;
+
+            break;
+
+        case ZONE_TERRITORIAL:
+
+            rules.normal_port_rules = true;
+            rules.international_navigation = true;
+            rules.open_ocean_events = false;
+
+            break;
+
+        case ZONE_INTERNATIONAL:
+
+            rules.normal_port_rules = false;
+            rules.international_navigation = true;
+            rules.open_ocean_events = true;
+
+            rules.special_missions = true;
+
+            rules.encounter_probability = 0.10;
+            rules.weather_probability = 0.20;
+
+            break;
+
+        case ZONE_DESTINATION:
+
+            rules.normal_port_rules = true;
+
+            break;
+    }
+
+    return rules;
+}
+
+Thus the game can visibly show:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+          INTERNATIONAL
+          MARITIME LINE
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+           MIAMI
+             │
+             │
+        TERRITORIAL
+          WATERS
+             │
+             │
+             ▼
+       ═════════════
+       INTERNATIONAL
+       WATER LINE
+       ═════════════
+             │
+             ▼
+        OPEN OCEAN
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. Crossing the boundary
+void check_maritime_transition(
+    CruiseShip *ship,
+    MaritimeZone previous,
+    MaritimeZone current
+) {
+    if (
+        previous != ZONE_INTERNATIONAL &&
+        current == ZONE_INTERNATIONAL
+    ) {
+
+        printf(
+            "%s has entered international waters.\n",
+            ship->callsign
+        );
+
+        printf(
+            "Open-ocean game systems enabled.\n"
+        );
+    }
+
+    if (
+        previous == ZONE_INTERNATIONAL &&
+        current != ZONE_INTERNATIONAL
+    ) {
+
+        printf(
+            "%s has left international waters.\n",
+            ship->callsign
+        );
+    }
+}
+11. Open-ocean events
+
+Once the ship crosses the line, the game can activate a different event pool.
+
+typedef enum {
+
+    EVENT_NONE,
+    EVENT_STORM,
+    EVENT_MECHANICAL,
+    EVENT_WILDLIFE,
+    EVENT_OTHER_SHIP,
+    EVENT_SUNSET,
+    EVENT_NAVIGATION,
+    EVENT_PARTY,
+    EVENT_RARE_ENCOUNTER
+
+} OceanEvent;
+OceanEvent generate_ocean_event(
+    MaritimeRules *rules
+) {
+    if (!rules->open_ocean_events)
+        return EVENT_NONE;
+
+    double r =
+        (double)rand() /
+        RAND_MAX;
+
+    if (r < 0.02)
+        return EVENT_STORM;
+
+    if (r < 0.04)
+        return EVENT_MECHANICAL;
+
+    if (r < 0.07)
+        return EVENT_OTHER_SHIP;
+
+    if (r < 0.10)
+        return EVENT_PARTY;
+
+    return EVENT_NONE;
+}
+12. Cruise timetable
+
+Now the ships become part of the wider world economy.
+
+typedef struct {
+
+    CruisePort *departure;
+    CruisePort *destination;
+
+    int departure_hour;
+    int arrival_hour;
+
+    int passenger_demand;
+
+} CruiseRoute;
+
+For example:
+
+TITANIC
+
+MONDAY
+08:00  MIAMI
+       ↓
+       OPEN OCEAN
+       ↓
+20:00  DESTINATION
+       ↓
+NEXT DAY
+       ↓
+RETURN
+
+
+OLYMPIA
+
+TUESDAY
+08:00  MIAMI
+       ↓
+       OPEN OCEAN
+       ↓
+20:00  DESTINATION
+
+Because they're sister ships, their schedules can alternate.
+
+13. Dynamic ticket economy
+double calculate_ticket_price(
+    int demand,
+    int capacity
+) {
+    double occupancy =
+        (double)demand /
+        (double)capacity;
+
+    double base_price = 750.0;
+
+    if (occupancy > 0.90)
+        base_price *= 1.50;
+
+    else if (occupancy > 0.70)
+        base_price *= 1.20;
+
+    else if (occupancy < 0.30)
+        base_price *= 0.75;
+
+    return base_price;
+}
+
+This connects directly into your existing economy:
+
+MIAMI
+  │
+  ▼
+TICKET SALES
+  │
+  ├── CABINS
+  ├── RESTAURANTS
+  ├── SHOPS
+  ├── ENTERTAINMENT
+  └── PREMIUM SERVICES
+          │
+          ▼
+     SHIP REVENUE
+          │
+          ▼
+     CRUISE COMPANY
+14. Player exploration
+
+The player can freely move between accessible rooms:
+
+void enter_room(
+    CruiseShip *ship,
+    ShipRoom *room
+) {
+    if (!room->accessible) {
+
+        printf(
+            "Access restricted.\n"
+        );
+
+        return;
+    }
+
+    ship->current_deck =
+        room->deck;
+
+    printf(
+        "Entering %s — Deck %d\n",
+        room->name,
+        room->deck
+    );
+}
+
+This means the player can experience:
+
+PORT
+ │
+ ▼
+BOARD SHIP
+ │
+ ▼
+CABIN
+ │
+ ├── RESTAURANT
+ ├── BAR
+ ├── THEATRE
+ ├── SHOP
+ ├── POOL
+ ├── CASINO
+ ├── LOUNGE
+ └── SUN DECK
+ │
+ ▼
+SHIP DEPARTS
+ │
+ ▼
+MIAMI DISAPPEARS
+BEHIND THE SHIP
+ │
+ ▼
+OPEN OCEAN
+The really interesting part
+
+I'd make the cruise ships persistent entities, rather than spawning them only when the player visits.
+
+                OPEN WORLD
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+     TITANIC                 OLYMPIA
+        │                       │
+   SCHEDULED                 SCHEDULED
+   ROUTE                     ROUTE
+        │                       │
+        ▼                       ▼
+     MIAMI                   MIAMI
+        │                       │
+        ▼                       ▼
+    DEPARTURE               DEPARTURE
+        │                       │
+        ▼                       ▼
+  INTERNATIONAL          INTERNATIONAL
+     WATERS                  WATERS
+        │                       │
+        ▼                       ▼
+   DESTINATION             DESTINATION
+        │                       │
+        └───────────┬───────────┘
+                    ▼
+              RETURN JOURNEY
+
+So if the player boards Titanic at 8 AM, sails out of Miami, crosses the game's international-water boundary and spends several in-game hours exploring the vessel, the ship is genuinely travelling through the world underneath them.
+
+And because Titanic and Olympia share the same underlying ship specification, the interesting distinction becomes their persistent histories: different passengers, reputation, accumulated wear, crew morale, scheduled routes, onboard events and player interactions can cause the two ostensibly identical sister ships to gradually develop completely different identities.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Yes — make him a ruthless but non-lethal ticket-enforcement NPC. I wouldn't code him throwing passengers out of an aircraft/ship, but we can make him intimidating: he can identify fare evaders, confiscate access privileges, summon security, lock restricted areas, and have the passenger removed at the next safe docking point.
+
+C — Captain / Ruthless Ticket Inspector
+/*
+ * ============================================================
+ * CAPTAIN HAROLD VANE
+ * RUTHLESS TICKET INSPECTOR
+ * ============================================================
+ *
+ * Fictional game NPC.
+ *
+ * Captain Vane operates aboard:
+ *     TITANIC
+ *     OLYMPIA
+ *     AEROKRAFT AIRSHIPS
+ *
+ * He is obsessed with ticket enforcement.
+ *
+ * Gameplay:
+ *     - Ticket inspection
+ *     - Passenger identification
+ *     - Suspicion
+ *     - Security escalation
+ *     - Restricted-area access
+ *     - Removal at next safe port
+ *     - Fines / reputation penalties
+ *
+ * No physical harm is simulated.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+typedef enum {
+
+    TICKET_VALID,
+    TICKET_EXPIRED,
+    TICKET_INVALID,
+    TICKET_MISSING,
+    TICKET_WRONG_CLASS
+
+} TicketStatus;
+
+typedef enum {
+
+    INSPECTION_NORMAL,
+    INSPECTION_SUSPICIOUS,
+    INSPECTION_SECURITY,
+    INSPECTION_REMOVAL
+
+} InspectionState;
+Captain
+typedef struct {
+
+    char name[64];
+
+    double strictness;
+    double suspicion;
+    double patience;
+    double authority;
+
+    bool armed_with_ticket_scanner;
+    bool captain_on_duty;
+
+} Captain;
+
+Create him:
+
+Captain create_captain(void)
+{
+    Captain captain = {
+
+        "Captain Harold Vane",
+
+        0.99,   /* strictness */
+        0.85,   /* suspicion */
+        0.08,   /* patience */
+        0.98,   /* authority */
+
+        true,
+        true
+    };
+
+    return captain;
+}
+Passenger
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    TicketStatus ticket;
+
+    int ticket_class;
+
+    bool aboard;
+    bool cooperative;
+
+    double reputation;
+
+    InspectionState state;
+
+} Passenger;
+Inspection
+InspectionState inspect_passenger(
+    Captain *captain,
+    Passenger *passenger
+) {
+    if (!captain->captain_on_duty)
+        return INSPECTION_NORMAL;
+
+    switch (passenger->ticket) {
+
+        case TICKET_VALID:
+
+            return INSPECTION_NORMAL;
+
+        case TICKET_EXPIRED:
+
+            return INSPECTION_SUSPICIOUS;
+
+        case TICKET_WRONG_CLASS:
+
+            return INSPECTION_SUSPICIOUS;
+
+        case TICKET_INVALID:
+
+            return INSPECTION_SECURITY;
+
+        case TICKET_MISSING:
+
+            return INSPECTION_SECURITY;
+    }
+
+    return INSPECTION_NORMAL;
+}
+Captain dialogue
+void captain_address_passenger(
+    Captain *captain,
+    Passenger *passenger
+) {
+    switch (
+        inspect_passenger(
+            captain,
+            passenger
+        )
+    ) {
+
+        case INSPECTION_NORMAL:
+
+            printf(
+                "Vane: Ticket is in order. "
+                "Enjoy the voyage.\n"
+            );
+
+            break;
+
+        case INSPECTION_SUSPICIOUS:
+
+            printf(
+                "Vane: Your ticket does not "
+                "appear to be valid for this voyage.\n"
+            );
+
+            break;
+
+        case INSPECTION_SECURITY:
+
+            printf(
+                "Vane: You will remain here "
+                "while this matter is resolved.\n"
+            );
+
+            break;
+
+        default:
+            break;
+    }
+}
+Escalation
+void escalate_ticket_case(
+    Captain *captain,
+    Passenger *passenger
+) {
+    if (
+        passenger->ticket ==
+        TICKET_VALID
+    ) {
+        passenger->state =
+            INSPECTION_NORMAL;
+
+        return;
+    }
+
+    if (
+        passenger->ticket ==
+        TICKET_EXPIRED ||
+        passenger->ticket ==
+        TICKET_WRONG_CLASS
+    ) {
+        passenger->state =
+            INSPECTION_SUSPICIOUS;
+
+        return;
+    }
+
+    passenger->state =
+        INSPECTION_SECURITY;
+}
+Removal from the voyage
+
+Rather than ejecting someone from a moving ship or airship, the captain can have them escorted off at the next safe port.
+
+void remove_at_next_port(
+    Passenger *passenger
+) {
+    if (
+        passenger->state !=
+        INSPECTION_SECURITY
+    )
+        return;
+
+    printf(
+        "Passenger %s will be removed "
+        "at the next safe port.\n",
+        passenger->name
+    );
+
+    passenger->state =
+        INSPECTION_REMOVAL;
+}
+Vane's reputation
+void update_captain_reputation(
+    Captain *captain,
+    bool enforced_rules
+) {
+    if (enforced_rules) {
+
+        captain->authority += 0.01;
+
+        if (captain->authority > 1.0)
+            captain->authority = 1.0;
+    }
+}
+
+This gives you a fun recurring NPC:
+
+             CAPTAIN VANE
+                   │
+          ┌────────┴────────┐
+          ▼                 ▼
+       CRUISES          AIRSHIPS
+          │                 │
+          └────────┬────────┘
+                   ▼
+             TICKET CHECK
+                   │
+          ┌────────┼────────┐
+          ▼        ▼        ▼
+        VALID    WRONG     NONE
+          │      CLASS       │
+          ▼        ▼         ▼
+        PASS     WARNING   SECURITY
+                              │
+                              ▼
+                       NEXT SAFE PORT
+                              │
+                              ▼
+                      REMOVED FROM SHIP
+
+The character can become a running joke / antagonist in the open world: extraordinarily formal, completely humourless, and capable of appearing on different transport services. His reputation could become so extreme that NPCs start buying tickets specifically because "Vane is aboard."
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
