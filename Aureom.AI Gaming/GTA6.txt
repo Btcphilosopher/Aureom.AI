@@ -12919,6 +12919,3443 @@ For example, a legendary exclusive track might cause a 500-person underground ev
 
 
 
+C — Everglades Hovercraft
+#include <stdio.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define GRAVITY 9.81
+#define AIR_DENSITY 1.225
+
+typedef enum {
+    HOVER_WATER,
+    HOVER_MARSH,
+    HOVER_MUD,
+    HOVER_SAWGRASS,
+    HOVER_DRY_GROUND,
+    HOVER_ROCK
+} HoverSurface;
+
+typedef struct {
+    double x;
+    double y;
+    double z;
+
+    double vx;
+    double vy;
+    double vz;
+
+    double heading;
+} Vector3;
+
+typedef struct {
+
+    char name[64];
+
+    Vector3 position;
+
+    double mass;
+
+    /* Lift system */
+    double lift_force;
+    double lift_power;
+    double skirt_height;
+
+    /* Propulsion */
+    double thrust;
+    double maximum_thrust;
+
+    double drag;
+    double water_drag;
+
+    /* Handling */
+    double steering;
+    double yaw_rate;
+
+    /* Performance */
+    double maximum_speed;
+    double acceleration;
+
+    /* Engine */
+    double fuel;
+    double fuel_capacity;
+    double fuel_consumption;
+
+    bool engine_running;
+    bool skirt_deployed;
+
+} Hovercraft;
+Create a vehicle
+Hovercraft create_hovercraft(
+    const char *name,
+    double x,
+    double y
+) {
+    Hovercraft h = {0};
+
+    snprintf(
+        h.name,
+        sizeof(h.name),
+        "%s",
+        name
+    );
+
+    h.position.x = x;
+    h.position.y = y;
+    h.position.z = 0.5;
+
+    h.mass = 4500.0;
+
+    h.lift_power = 75000.0;
+    h.lift_force = 0.0;
+
+    h.skirt_height = 0.45;
+
+    h.thrust = 0.0;
+    h.maximum_thrust = 30000.0;
+
+    h.drag = 0.015;
+    h.water_drag = 0.05;
+
+    h.steering = 0.0;
+    h.yaw_rate = 0.0;
+
+    h.maximum_speed = 32.0;
+    h.acceleration = 4.0;
+
+    h.fuel_capacity = 800.0;
+    h.fuel = 800.0;
+
+    h.fuel_consumption = 0.12;
+
+    h.engine_running = false;
+    h.skirt_deployed = false;
+
+    return h;
+}
+Lift
+
+The hovercraft needs to generate enough lift to support its weight.
+
+void calculate_lift(
+    Hovercraft *h,
+    double throttle
+) {
+    if (!h->engine_running) {
+
+        h->lift_force = 0.0;
+        return;
+    }
+
+    h->lift_force =
+        h->lift_power *
+        throttle;
+
+    double required =
+        h->mass * GRAVITY;
+
+    if (h->lift_force >= required) {
+
+        h->skirt_deployed = true;
+
+    } else {
+
+        h->skirt_deployed = false;
+    }
+}
+
+Then calculate altitude:
+
+void update_hover_height(
+    Hovercraft *h,
+    double delta_time
+) {
+    double weight =
+        h->mass * GRAVITY;
+
+    double net_force =
+        h->lift_force -
+        weight;
+
+    double acceleration =
+        net_force /
+        h->mass;
+
+    h->vz +=
+        acceleration *
+        delta_time;
+
+    h->position.z +=
+        h->vz *
+        delta_time;
+
+    /*
+     * Maintain a low hover.
+     */
+
+    if (h->position.z < 0.25) {
+
+        h->position.z = 0.25;
+        h->vz = 0.0;
+    }
+
+    if (h->position.z >
+        h->skirt_height) {
+
+        h->position.z =
+            h->skirt_height;
+
+        h->vz = 0.0;
+    }
+}
+Everglades terrain interaction
+
+This connects directly to your terrain system.
+
+double surface_speed_modifier(
+    HoverSurface surface
+) {
+    switch (surface) {
+
+        case HOVER_WATER:
+            return 1.00;
+
+        case HOVER_MARSH:
+            return 0.82;
+
+        case HOVER_MUD:
+            return 0.75;
+
+        case HOVER_SAWGRASS:
+            return 0.65;
+
+        case HOVER_DRY_GROUND:
+            return 0.90;
+
+        case HOVER_ROCK:
+            return 0.35;
+
+        default:
+            return 0.0;
+    }
+}
+
+Unlike a normal car:
+
+CAR
+
+ROAD ────────────────→ FAST
+
+MUD ─────────────────→ STUCK
+
+MARSH ───────────────→ STUCK
+
+WATER ───────────────→ NO
+
+
+HOVERCRAFT
+
+ROAD ────────────────→ FAST
+MUD ─────────────────→ GOOD
+MARSH ───────────────→ GOOD
+SAWGRASS ────────────→ MODERATE
+SHALLOW WATER ───────→ EXCELLENT
+DEEP WATER ──────────→ EXCELLENT
+Propulsion
+void update_hovercraft_motion(
+    Hovercraft *h,
+    double throttle,
+    double steering,
+    HoverSurface surface,
+    double delta_time
+) {
+    if (!h->engine_running)
+        return;
+
+    double modifier =
+        surface_speed_modifier(
+            surface
+        );
+
+    h->thrust =
+        h->maximum_thrust *
+        throttle;
+
+    /*
+     * Convert thrust into acceleration.
+     */
+
+    double acceleration =
+        h->thrust /
+        h->mass;
+
+    acceleration *= modifier;
+
+    /*
+     * Forward movement.
+     */
+
+    double fx =
+        cos(h->position.heading);
+
+    double fy =
+        sin(h->position.heading);
+
+    h->vx +=
+        fx *
+        acceleration *
+        delta_time;
+
+    h->vy +=
+        fy *
+        acceleration *
+        delta_time;
+
+    /*
+     * Steering.
+     */
+
+    h->yaw_rate =
+        steering *
+        1.5 *
+        modifier;
+
+    h->position.heading +=
+        h->yaw_rate *
+        delta_time;
+
+    /*
+     * Drag.
+     */
+
+    h->vx *=
+        1.0 -
+        h->drag *
+        delta_time;
+
+    h->vy *=
+        1.0 -
+        h->drag *
+        delta_time;
+
+    /*
+     * Speed limiter.
+     */
+
+    double speed =
+        sqrt(
+            h->vx * h->vx +
+            h->vy * h->vy
+        );
+
+    double maximum =
+        h->maximum_speed *
+        modifier;
+
+    if (speed > maximum) {
+
+        h->vx *=
+            maximum / speed;
+
+        h->vy *=
+            maximum / speed;
+    }
+
+    h->position.x +=
+        h->vx *
+        delta_time;
+
+    h->position.y +=
+        h->vy *
+        delta_time;
+}
+Fuel economy
+void update_hovercraft_fuel(
+    Hovercraft *h,
+    double throttle,
+    double delta_time
+) {
+    if (!h->engine_running)
+        return;
+
+    double consumption =
+        h->fuel_consumption *
+        (0.25 + throttle);
+
+    h->fuel -=
+        consumption *
+        delta_time;
+
+    if (h->fuel < 0.0) {
+
+        h->fuel = 0.0;
+        h->engine_running = false;
+        h->thrust = 0.0;
+        h->lift_force = 0.0;
+    }
+}
+
+This makes fuel an actual economic consideration in your existing game economy.
+
+Water spray and environmental effects
+
+You can also expose effects to the graphics engine:
+
+typedef struct {
+
+    double spray_intensity;
+    double wake_length;
+    double vegetation_disturbance;
+    double noise_level;
+
+} HovercraftEffects;
+
+
+HovercraftEffects calculate_effects(
+    Hovercraft *h,
+    HoverSurface surface
+) {
+    HovercraftEffects e = {0};
+
+    double speed =
+        sqrt(
+            h->vx * h->vx +
+            h->vy * h->vy
+        );
+
+    if (surface == HOVER_WATER) {
+
+        e.spray_intensity =
+            speed * 0.4;
+
+        e.wake_length =
+            speed * 3.0;
+    }
+
+    if (surface == HOVER_SAWGRASS ||
+        surface == HOVER_MARSH) {
+
+        e.vegetation_disturbance =
+            speed * 0.15;
+    }
+
+    e.noise_level =
+        h->thrust / 1000.0;
+
+    return e;
+}
+
+So visually the vehicle produces:
+
+                 HOVERCRAFT
+                     ▲
+                     │
+              ENGINE / FAN
+                     │
+              ┌─────────────┐
+              │             │
+              │   CABIN     │
+              │             │
+              └─────────────┘
+            ═══════════════════
+              AIR CUSHION
+          ~~~~~~~~~~~~~~~~~~~~~
+             WATER / MARSH
+       ~~~~~~~~    ~~~~~~~~~~~~
+              ╲  ╱
+               ╲╱
+              WAKE
+Connect it to your Everglades map
+
+Your terrain cell already contains:
+
+TerrainCell {
+    elevation;
+    water_depth;
+    soil_moisture;
+    vegetation;
+    ...
+}
+
+So create a conversion function:
+
+HoverSurface terrain_to_hover_surface(
+    TerrainCell *cell
+) {
+    switch (cell->type) {
+
+        case TERRAIN_DEEP_WATER:
+        case TERRAIN_SHALLOW_WATER:
+            return HOVER_WATER;
+
+        case TERRAIN_MARSH:
+            return HOVER_MARSH;
+
+        case TERRAIN_MUD:
+            return HOVER_MUD;
+
+        case TERRAIN_SAWGRASS:
+            return HOVER_SAWGRASS;
+
+        case TERRAIN_DRY_GROUND:
+            return HOVER_DRY_GROUND;
+
+        case TERRAIN_ROCK:
+            return HOVER_ROCK;
+
+        default:
+            return HOVER_MUD;
+    }
+}
+
+Now the complete simulation becomes:
+
+                  MIAMI
+                    │
+                    │
+              ROAD NETWORK
+                    │
+             ┌──────┴──────┐
+             │             │
+          CARS          TRAINS
+                           │
+                           │
+                     EVERGLADES EDGE
+                           │
+                  ┌────────┴────────┐
+                  │                 │
+                BOATS          HOVERCRAFT
+                  │                 │
+                  └────────┬────────┘
+                           ↓
+                ┌───────────────────┐
+                │    WETLAND        │
+                │                   │
+                │ ~~~ WATER ~~~~~   │
+                │   SAWGRASS        │
+                │      ● HAMMOCK    │
+                │ ~~~ CHANNEL ~~~   │
+                │                   │
+                └───────────────────┘
+
+The next layer I'd add is airboat + hovercraft + swamp buggy + helicopter physics, all sharing the same Everglades terrain API. That would let the player choose transportation based on water depth, mud, vegetation, weather, fuel prices and terrain accessibility rather than having vehicles behave identically everywhere.
+
+
+
+
+
+C — Hovercraft Dealer Network
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_DEALERS   32
+#define MAX_VEHICLES  128
+#define MAX_INVENTORY 32
+
+
+/* =========================================================
+   DEALER TYPES
+   ========================================================= */
+
+typedef enum {
+
+    DEALER_SALVAGE,
+    DEALER_BARGAIN,
+    DEALER_AUTOSHOP,
+    DEALER_MARINE,
+    DEALER_SPECIALIST,
+    DEALER_PREMIUM,
+    DEALER_GERMAN
+
+} DealerType;
+
+
+/* =========================================================
+   HOVERCRAFT QUALITY
+   ========================================================= */
+
+typedef enum {
+
+    QUALITY_WRECK,
+    QUALITY_USED,
+    QUALITY_STANDARD,
+    QUALITY_GOOD,
+    QUALITY_PREMIUM,
+    QUALITY_ELITE
+
+} VehicleQuality;
+
+
+/* =========================================================
+   HOVERCRAFT
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char model[64];
+    char manufacturer[64];
+
+    double price;
+
+    double mass;
+    double engine_power;
+
+    double maximum_speed;
+
+    double fuel_capacity;
+    double fuel_consumption;
+
+    double reliability;
+    double handling;
+
+    double comfort;
+    double prestige;
+
+    double condition;
+
+    VehicleQuality quality;
+
+    bool amphibious;
+    bool luxury;
+    bool military_style;
+
+} HovercraftModel;
+
+
+/* =========================================================
+   DEALER
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    DealerType type;
+
+    double reputation;
+
+    double wealth;
+
+    double markup;
+
+    double service_quality;
+
+    HovercraftModel inventory[
+        MAX_INVENTORY
+    ];
+
+    int inventory_count;
+
+} HovercraftDealer;
+Dealer classes
+
+Each shop gets a distinct economic identity.
+
+double dealer_markup(
+    DealerType type
+) {
+    switch (type) {
+
+        case DEALER_SALVAGE:
+            return 0.70;
+
+        case DEALER_BARGAIN:
+            return 0.90;
+
+        case DEALER_AUTOSHOP:
+            return 1.00;
+
+        case DEALER_MARINE:
+            return 1.10;
+
+        case DEALER_SPECIALIST:
+            return 1.25;
+
+        case DEALER_PREMIUM:
+            return 1.50;
+
+        case DEALER_GERMAN:
+            return 1.80;
+
+        default:
+            return 1.00;
+    }
+}
+
+So the player gets a market like:
+
+CHEAPEST
+   │
+   ▼
+Salvage Yard
+    ↓
+Bargain Dealer
+    ↓
+General Autoshop
+    ↓
+Marine Specialist
+    ↓
+Performance Dealer
+    ↓
+Premium Dealer
+    ↓
+AEROKRAFT
+   │
+   ▼
+MOST EXPENSIVE
+AeroKraft Inc.
+
+Your fictional German manufacturer can sit at the very top.
+
+HovercraftModel create_aerokraft(
+    const char *model
+) {
+    HovercraftModel h = {0};
+
+    snprintf(
+        h.model,
+        sizeof(h.model),
+        "%s",
+        model
+    );
+
+    snprintf(
+        h.manufacturer,
+        sizeof(h.manufacturer),
+        "AeroKraft Inc."
+    );
+
+    h.mass = 4200.0;
+
+    h.engine_power = 520.0;
+
+    h.maximum_speed = 38.0;
+
+    h.fuel_capacity = 900.0;
+
+    h.fuel_consumption = 0.10;
+
+    h.reliability = 0.98;
+
+    h.handling = 0.92;
+
+    h.comfort = 0.90;
+
+    h.prestige = 0.95;
+
+    h.condition = 1.0;
+
+    h.quality =
+        QUALITY_ELITE;
+
+    h.amphibious = true;
+
+    h.luxury = true;
+
+    h.military_style = false;
+
+    return h;
+}
+
+Models could include:
+
+HovercraftModel aero_100 =
+    create_aerokraft(
+        "AeroKraft A-100"
+    );
+
+HovercraftModel aero_200 =
+    create_aerokraft(
+        "AeroKraft A-200"
+    );
+
+HovercraftModel aero_gt =
+    create_aerokraft(
+        "AeroKraft GT"
+    );
+
+The GT can be the aspirational machine:
+
+AEROKRAFT GT
+
+        ┌─────────────────────┐
+        │     AEROKRAFT       │
+        │        GT           │
+        └─────────────────────┘
+
+     German engineering
+     High-performance fans
+     Premium cabin
+     Advanced navigation
+     Exceptional reliability
+
+          $$$$$$$$$$$
+Bargain basement
+
+At the other end:
+
+HovercraftModel create_bargain(
+    const char *model
+) {
+    HovercraftModel h = {0};
+
+    snprintf(
+        h.model,
+        sizeof(h.model),
+        "%s",
+        model
+    );
+
+    snprintf(
+        h.manufacturer,
+        sizeof(h.manufacturer),
+        "Bayline Used Marine"
+    );
+
+    h.mass = 5000.0;
+
+    h.engine_power = 240.0;
+
+    h.maximum_speed = 20.0;
+
+    h.fuel_capacity = 500.0;
+
+    h.fuel_consumption = 0.25;
+
+    h.reliability = 0.45;
+
+    h.handling = 0.50;
+
+    h.comfort = 0.30;
+
+    h.prestige = 0.05;
+
+    h.condition = 0.60;
+
+    h.quality =
+        QUALITY_USED;
+
+    h.amphibious = true;
+
+    h.luxury = false;
+
+    h.military_style = false;
+
+    return h;
+}
+
+This creates an important gameplay choice:
+
+$8,000 USED HOVERCRAFT
+        │
+        ├── cheap
+        ├── unreliable
+        ├── slow
+        └── easy to repair
+
+              VS
+
+$250,000 AEROKRAFT
+        │
+        ├── expensive
+        ├── extremely reliable
+        ├── fast
+        ├── prestigious
+        └── advanced
+Dealer creation
+HovercraftDealer create_dealer(
+    int id,
+    const char *name,
+    DealerType type
+) {
+    HovercraftDealer d = {0};
+
+    d.id = id;
+
+    snprintf(
+        d.name,
+        sizeof(d.name),
+        "%s",
+        name
+    );
+
+    d.type = type;
+
+    d.reputation =
+        0.50;
+
+    d.wealth =
+        1000000.0;
+
+    d.markup =
+        dealer_markup(type);
+
+    d.service_quality =
+        0.50;
+
+    d.inventory_count = 0;
+
+    return d;
+}
+Miami dealer network
+
+You could populate the city with dramatically different dealerships:
+
+void create_miami_dealers(
+    HovercraftDealer dealers[]
+) {
+
+    dealers[0] =
+        create_dealer(
+            0,
+            "Swamp Rat Motors",
+            DEALER_SALVAGE
+        );
+
+    dealers[1] =
+        create_dealer(
+            1,
+            "Bargain Bay Autos",
+            DEALER_BARGAIN
+        );
+
+    dealers[2] =
+        create_dealer(
+            2,
+            "Miami Amphibious Motors",
+            DEALER_AUTOSHOP
+        );
+
+    dealers[3] =
+        create_dealer(
+            3,
+            "Florida Marine Systems",
+            DEALER_MARINE
+        );
+
+    dealers[4] =
+        create_dealer(
+            4,
+            "Everglades Performance",
+            DEALER_SPECIALIST
+        );
+
+    dealers[5] =
+        create_dealer(
+            5,
+            "Miami Executive Hovercraft",
+            DEALER_PREMIUM
+        );
+
+    dealers[6] =
+        create_dealer(
+            6,
+            "AeroKraft Inc.",
+            DEALER_GERMAN
+        );
+}
+Dynamic pricing
+
+Don't make prices fixed.
+
+double calculate_vehicle_price(
+    HovercraftDealer *dealer,
+    HovercraftModel *vehicle
+) {
+    double price =
+        vehicle->price;
+
+    /*
+     * Dealer markup.
+     */
+
+    price *=
+        dealer->markup;
+
+    /*
+     * Condition.
+     */
+
+    price *=
+        0.70 +
+        vehicle->condition *
+        0.30;
+
+    /*
+     * Prestige premium.
+     */
+
+    price *=
+        1.0 +
+        vehicle->prestige *
+        0.20;
+
+    return price;
+}
+
+This allows a damaged premium hovercraft to become affordable.
+
+Used market
+
+Players should also be able to sell vehicles back.
+
+double trade_in_value(
+    HovercraftModel *vehicle
+) {
+    double value =
+        vehicle->price;
+
+    value *=
+        vehicle->condition;
+
+    value *=
+        0.45;
+
+    return value;
+}
+
+So:
+
+NEW AEROKRAFT
+£250,000
+     ↓
+USED
+£170,000
+     ↓
+OLDER
+£110,000
+     ↓
+DAMAGED
+£45,000
+     ↓
+SALVAGE
+£12,000
+Service economy
+
+This is particularly important for the cheap vehicles.
+
+double repair_cost(
+    HovercraftModel *vehicle
+) {
+    double damage =
+        1.0 -
+        vehicle->condition;
+
+    double complexity =
+        1.0 +
+        vehicle->prestige;
+
+    return
+        vehicle->price *
+        damage *
+        0.15 *
+        complexity;
+}
+
+An AeroKraft therefore costs more to repair, but breaks down far less often.
+
+Reliability simulation
+bool vehicle_breakdown(
+    HovercraftModel *vehicle,
+    double stress
+) {
+    double probability =
+        stress *
+        (1.0 -
+         vehicle->reliability);
+
+    double roll =
+        (double)rand() /
+        RAND_MAX;
+
+    return roll < probability;
+}
+
+You could then get emergent situations like:
+
+PLAYER
+  │
+  └── Buys $12k swamp hovercraft
+             │
+             ↓
+       EVERGLADES TRIP
+             │
+             ↓
+       ENGINE STRESS
+             │
+             ↓
+          BREAKDOWN
+             │
+       ┌─────┴─────┐
+       ↓           ↓
+    REPAIR       TOW
+       │           │
+       └─────┬─────┘
+             ↓
+          $$$ COST
+
+Whereas:
+
+AEROKRAFT GT
+      │
+      ↓
+EVERGLADES
+      │
+      ↓
+HIGH RELIABILITY
+      │
+      ↓
+LOW BREAKDOWN
+      │
+      ↓
+HIGH PURCHASE PRICE
+The resulting vehicle market
+
+You'd effectively have a GTA-style marine/aviation dealership ecosystem:
+
+Dealer	Price	Quality	Reliability	Speciality
+Swamp Rat Motors	$	Salvage	★	Wrecks
+Bargain Bay Autos	$$	Used	★★	Cheap vehicles
+Miami Amphibious Motors	$$$	Standard	★★★	General purpose
+Florida Marine Systems	$$$$	Good	★★★★	Utility
+Everglades Performance	$$$$$	Premium	★★★★	Speed
+Miami Executive Hovercraft	$$$$$$	Luxury	★★★★★	Prestige
+AeroKraft Inc.	$$$$$$$	Elite	★★★★★	German engineering
+
+That also gives you a nice status/economic progression: the player can start with a barely functioning swamp machine, make money exploring/working around the Everglades, upgrade through increasingly sophisticated dealers, and eventually own an elite AeroKraft that becomes as much a status symbol as a high-end car or aircraft.
+
+
+
+
+
+
+
+
+C — AeroKraft Inc. Corporate Simulation
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_EMPLOYEES       5000
+#define MAX_MODELS          64
+#define MAX_DEALERS         128
+#define MAX_FACTORIES       32
+#define MAX_INVESTORS       128
+#define MAX_EXECUTIVES      32
+#define MAX_CONTRACTS       128
+
+
+/* =========================================================
+   CORPORATE DEPARTMENTS
+   ========================================================= */
+
+typedef enum {
+
+    DEPT_EXECUTIVE,
+    DEPT_ENGINEERING,
+    DEPT_MANUFACTURING,
+    DEPT_SALES,
+    DEPT_MARKETING,
+    DEPT_FINANCE,
+    DEPT_LEGAL,
+    DEPT_RND,
+    DEPT_LOGISTICS,
+    DEPT_SERVICE
+
+} Department;
+
+
+/* =========================================================
+   CORPORATE LOCATIONS
+   ========================================================= */
+
+typedef enum {
+
+    LOCATION_MIAMI_HQ,
+    LOCATION_GERMANY_RND,
+    LOCATION_GERMANY_FACTORY,
+    LOCATION_FLORIDA_FACTORY,
+    LOCATION_DEALER,
+    LOCATION_PORT
+
+} CorporateLocation;
+
+
+/* =========================================================
+   EMPLOYEE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Department department;
+
+    CorporateLocation location;
+
+    double salary;
+
+    double productivity;
+
+    double skill;
+
+    double morale;
+
+    bool employed;
+
+} Employee;
+
+
+/* =========================================================
+   EXECUTIVE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    char title[64];
+
+    double salary;
+
+    double competence;
+
+    double risk_tolerance;
+
+    double ambition;
+
+    double approval;
+
+} Executive;
+
+
+/* =========================================================
+   FACTORY
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    CorporateLocation location;
+
+    double production_capacity;
+
+    double current_production;
+
+    double operating_cost;
+
+    double efficiency;
+
+    double automation;
+
+    bool operational;
+
+} Factory;
+
+
+/* =========================================================
+   INVESTOR
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double ownership;
+
+    double investment;
+
+    double expected_return;
+
+    double patience;
+
+} Investor;
+
+
+/* =========================================================
+   VEHICLE MODEL
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double development_cost;
+
+    double manufacturing_cost;
+
+    double retail_price;
+
+    double performance;
+
+    double reliability;
+
+    double prestige;
+
+    double demand;
+
+    double production;
+
+    bool in_production;
+
+} AeroKraftModel;
+
+
+/* =========================================================
+   CONTRACT
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char customer[128];
+
+    char description[256];
+
+    double value;
+
+    double completion;
+
+    double deadline;
+
+    bool active;
+
+} CorporateContract;
+The corporation
+typedef struct {
+
+    char name[64];
+
+    char ticker[16];
+
+    int founded_year;
+
+    int headquarters_city;
+
+    double cash;
+
+    double revenue;
+
+    double expenses;
+
+    double profit;
+
+    double market_value;
+
+    double reputation;
+
+    double brand_value;
+
+    double research_budget;
+
+    double marketing_budget;
+
+    double dividend_rate;
+
+    Employee employees[MAX_EMPLOYEES];
+
+    int employee_count;
+
+    Executive executives[MAX_EXECUTIVES];
+
+    int executive_count;
+
+    Factory factories[MAX_FACTORIES];
+
+    int factory_count;
+
+    Investor investors[MAX_INVESTORS];
+
+    int investor_count;
+
+    AeroKraftModel models[MAX_MODELS];
+
+    int model_count;
+
+    CorporateContract contracts[MAX_CONTRACTS];
+
+    int contract_count;
+
+} AeroKraftCorporation;
+Miami headquarters
+
+The HQ should be a significant building in your open world.
+
+void create_aerokraft_hq(
+    AeroKraftCorporation *company
+) {
+    strcpy(
+        company->name,
+        "AeroKraft Inc."
+    );
+
+    strcpy(
+        company->ticker,
+        "AKFT"
+    );
+
+    company->founded_year =
+        1987;
+
+    company->headquarters_city =
+        LOCATION_MIAMI_HQ;
+
+    company->cash =
+        850000000.0;
+
+    company->revenue = 0.0;
+    company->expenses = 0.0;
+
+    company->profit = 0.0;
+
+    company->market_value =
+        2400000000.0;
+
+    company->reputation =
+        0.88;
+
+    company->brand_value =
+        0.92;
+
+    company->research_budget =
+        100000000.0;
+
+    company->marketing_budget =
+        40000000.0;
+
+    company->dividend_rate =
+        0.20;
+}
+
+In the world:
+
+                    AEROKRAFT INC.
+                   MIAMI HEAD OFFICE
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+        CORPORATE HQ              SHOWROOM
+              │
+     ┌────────┼──────────┐
+     ↓        ↓          ↓
+    CEO     CFO         CTO
+     │        │          │
+     │        │      GERMAN R&D
+     │        │          │
+     │        │      ENGINEERING
+     │        │          │
+     └────────┴──────────┴─────┐
+                                ↓
+                         GLOBAL FACTORIES
+Corporate hierarchy
+void create_executives(
+    AeroKraftCorporation *company
+) {
+    company->executives[0] =
+        (Executive) {
+            0,
+            "Klaus Reinhardt",
+            "Chief Executive Officer",
+            2500000,
+            0.92,
+            0.60,
+            0.90,
+            0.85
+        };
+
+    company->executives[1] =
+        (Executive) {
+            1,
+            "Elena Marquez",
+            "Chief Financial Officer",
+            1800000,
+            0.95,
+            0.35,
+            0.70,
+            0.88
+        };
+
+    company->executives[2] =
+        (Executive) {
+            2,
+            "Hans Vogel",
+            "Chief Technology Officer",
+            2100000,
+            0.98,
+            0.75,
+            0.85,
+            0.94
+        };
+
+    company->executive_count = 3;
+}
+
+Now executives can actually disagree.
+
+For example:
+
+CEO
+ │
+ ├── "Launch the A-500"
+ │
+ ↓
+CFO
+ │
+ └── "Too expensive."
+ │
+ ↓
+CTO
+ │
+ └── "Technology is ready."
+ │
+ ↓
+BOARD DECISION
+
+That can create emergent corporate behaviour.
+
+German engineering division
+void create_german_factory(
+    AeroKraftCorporation *company
+) {
+    Factory *factory =
+        &company->factories[
+            company->factory_count++
+        ];
+
+    factory->id = 0;
+
+    strcpy(
+        factory->name,
+        "AeroKraft Deutschland"
+    );
+
+    factory->location =
+        LOCATION_GERMANY_FACTORY;
+
+    factory->production_capacity =
+        2500;
+
+    factory->current_production =
+        0;
+
+    factory->operating_cost =
+        80000000;
+
+    factory->efficiency =
+        0.96;
+
+    factory->automation =
+        0.85;
+
+    factory->operational =
+        true;
+}
+
+And Miami could eventually get its own assembly facility:
+
+void create_miami_factory(
+    AeroKraftCorporation *company
+) {
+    Factory *factory =
+        &company->factories[
+            company->factory_count++
+        ];
+
+    factory->id = 1;
+
+    strcpy(
+        factory->name,
+        "AeroKraft Florida Assembly"
+    );
+
+    factory->location =
+        LOCATION_FLORIDA_FACTORY;
+
+    factory->production_capacity =
+        1500;
+
+    factory->current_production =
+        0;
+
+    factory->operating_cost =
+        50000000;
+
+    factory->efficiency =
+        0.88;
+
+    factory->automation =
+        0.75;
+
+    factory->operational =
+        true;
+}
+R&D economy
+
+AeroKraft's competitive advantage should come from continuous R&D.
+
+void run_research(
+    AeroKraftCorporation *company,
+    AeroKraftModel *model,
+    double years
+) {
+    double investment =
+        company->research_budget *
+        years;
+
+    model->performance +=
+        investment /
+        100000000.0 *
+        0.02;
+
+    model->reliability +=
+        investment /
+        100000000.0 *
+        0.01;
+
+    if (model->performance > 1.0)
+        model->performance = 1.0;
+
+    if (model->reliability > 1.0)
+        model->reliability = 1.0;
+}
+
+This creates technological competition:
+
+R&D
+ ↓
+BETTER HOVERCRAFT
+ ↓
+HIGHER PERFORMANCE
+ ↓
+HIGHER REPUTATION
+ ↓
+HIGHER PRICE
+ ↓
+MORE PROFIT
+ ↓
+MORE R&D
+Corporate financials
+void update_corporate_finances(
+    AeroKraftCorporation *company
+) {
+    company->profit =
+        company->revenue -
+        company->expenses;
+
+    company->cash +=
+        company->profit;
+
+    company->market_value =
+        company->revenue *
+        3.5;
+
+    if (company->market_value < 0)
+        company->market_value = 0;
+}
+Stock market
+
+You can make AeroKraft publicly traded.
+
+double calculate_share_price(
+    AeroKraftCorporation *company,
+    double shares_outstanding
+) {
+    if (shares_outstanding <= 0)
+        return 0;
+
+    return
+        company->market_value /
+        shares_outstanding;
+}
+
+The player could therefore own:
+
+AEROKRAFT INC.
+────────────────────────
+Ticker: AKFT
+
+Market Cap       $2.4B
+Revenue          $720M
+Profit           $110M
+R&D              $100M
+
+Share Price      $48.20
+
+CEO              Klaus Reinhardt
+HQ               Miami
+Engineering      Germany
+
+And company events can move the price:
+
+NEW AEROKRAFT MODEL
+        ↓
+INVESTOR CONFIDENCE ↑
+        ↓
+SHARE PRICE ↑
+
+FAILED MODEL
+        ↓
+CONFIDENCE ↓
+        ↓
+SHARE PRICE ↓
+Dealer network
+
+The corporation can own its own dealerships.
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double inventory;
+
+    double sales;
+
+    double reputation;
+
+    double operating_cost;
+
+} AeroKraftDealer;
+
+A Miami showroom might become one of the game's prestige locations:
+
+╔════════════════════════════════════╗
+║          AEROKRAFT INC.             ║
+║             MIAMI                  ║
+║                                    ║
+║       A-100       A-200            ║
+║                                    ║
+║              GT                    ║
+║                                    ║
+║        GERMAN ENGINEERING          ║
+╚════════════════════════════════════╝
+Corporate AI
+
+The really interesting part for your open-world simulation is to give AeroKraft a corporate decision loop.
+
+void corporate_ai(
+    AeroKraftCorporation *company
+) {
+    /*
+     * Expand when profitable.
+     */
+
+    if (company->profit > 100000000) {
+
+        company->research_budget *=
+            1.10;
+
+        company->marketing_budget *=
+            1.05;
+    }
+
+    /*
+     * Defend against declining demand.
+     */
+
+    if (company->reputation < 0.60) {
+
+        company->marketing_budget *=
+            1.20;
+    }
+
+    /*
+     * Strong demand increases
+     * manufacturing.
+     */
+
+    if (company->revenue > 0) {
+
+        for (int i = 0;
+             i < company->factory_count;
+             i++) {
+
+            company->factories[i]
+                .current_production *=
+                1.05;
+        }
+    }
+}
+
+That means AeroKraft isn't a static shop. It becomes an autonomous economic actor in your Miami simulation:
+
+                    AEROKRAFT INC.
+                          │
+        ┌─────────────────┼──────────────────┐
+        ↓                 ↓                  ↓
+     MIAMI HQ          GERMAN R&D        FACTORIES
+        │                 │                  │
+        ↓                 ↓                  ↓
+     FINANCE          TECHNOLOGY         PRODUCTION
+        │                 │                  │
+        └─────────────────┼──────────────────┘
+                          ↓
+                       DEALERS
+                          │
+                          ↓
+                     CUSTOMERS
+                          │
+                          ↓
+                     HOVERCRAFT
+                          │
+                          ↓
+                     EVERGLADES
+
+And because you've already built the Everglades terrain + hovercraft + dealer + rave + transport economies, AeroKraft can participate in all of them: demand for hovercraft rises when the Everglades becomes a major activity zone, the corporation expands production, German engineering improves the next generation, Miami headquarters hires more workers, dealerships respond to local demand, and the company's valuation changes accordingly.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+AeroKraft Inc. Tower — C Structure
+/*
+ * AEROKRAFT INC. TOWER
+ * Miami Corporate Headquarters
+ *
+ * Fictional game-world building.
+ *
+ * Systems:
+ *   - Building geometry
+ *   - Floors
+ *   - Departments
+ *   - NPC occupancy
+ *   - Elevators
+ *   - Security
+ *   - Retail showroom
+ *   - Corporate offices
+ *   - R&D
+ *   - Boardroom
+ *   - Finance
+ *   - Rooftop
+ *   - Parking
+ *   - Day/night activity
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_FLOORS          80
+#define MAX_ROOMS           800
+#define MAX_ELEVATORS       12
+#define MAX_EMPLOYEES       5000
+#define MAX_VISITORS        2000
+#define MAX_SECURITY        100
+#define MAX_VEHICLES        500
+#define MAX_RETAIL_MODELS   32
+1. Building types
+typedef enum {
+
+    FLOOR_LOBBY,
+    FLOOR_RETAIL,
+    FLOOR_SHOWROOM,
+    FLOOR_OFFICE,
+    FLOOR_ENGINEERING,
+    FLOOR_RND,
+    FLOOR_FINANCE,
+    FLOOR_LEGAL,
+    FLOOR_MARKETING,
+    FLOOR_EXECUTIVE,
+    FLOOR_BOARD,
+    FLOOR_SERVICE,
+    FLOOR_PARKING,
+    FLOOR_MECHANICAL,
+    FLOOR_ROOFTOP
+
+} FloorType;
+2. Corporate departments
+typedef enum {
+
+    DEPARTMENT_CEO,
+    DEPARTMENT_CFO,
+    DEPARTMENT_CTO,
+
+    DEPARTMENT_ENGINEERING,
+    DEPARTMENT_RND,
+
+    DEPARTMENT_FINANCE,
+    DEPARTMENT_SALES,
+    DEPARTMENT_MARKETING,
+
+    DEPARTMENT_LEGAL,
+    DEPARTMENT_HR,
+
+    DEPARTMENT_SECURITY,
+    DEPARTMENT_LOGISTICS,
+
+    DEPARTMENT_RETAIL,
+    DEPARTMENT_MAINTENANCE
+
+} Department;
+3. Floor structure
+typedef struct {
+
+    int number;
+
+    char name[64];
+
+    FloorType type;
+
+    double floor_area;
+
+    double ceiling_height;
+
+    int maximum_occupancy;
+
+    int current_occupancy;
+
+    Department department;
+
+    bool public_access;
+    bool employee_access;
+    bool executive_access;
+
+} TowerFloor;
+4. Rooms
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    int floor;
+
+    double x;
+    double y;
+
+    double width;
+    double length;
+
+    int capacity;
+
+    Department department;
+
+    bool occupied;
+
+    bool public_access;
+    bool restricted;
+
+} TowerRoom;
+
+This lets you create individual spaces such as:
+
+Floor 1
+ ├── Main Entrance
+ ├── Reception
+ ├── Security
+ ├── Customer Lounge
+ └── AeroKraft Showroom
+
+Floor 25
+ ├── Engineering
+ ├── CAD Studio
+ ├── Simulation Lab
+ └── Prototype Review
+
+Floor 60
+ ├── Executive Lounge
+ ├── CEO Office
+ ├── CFO Office
+ └── Boardroom
+5. Elevators
+typedef struct {
+
+    int id;
+
+    char name[32];
+
+    int current_floor;
+
+    int target_floor;
+
+    int minimum_floor;
+    int maximum_floor;
+
+    double speed;
+
+    int capacity;
+
+    bool moving;
+    bool doors_open;
+
+} TowerElevator;
+
+Movement:
+
+void update_elevator(
+    TowerElevator *e,
+    double delta_time
+) {
+    if (e->current_floor ==
+        e->target_floor) {
+
+        e->moving = false;
+        e->doors_open = true;
+
+        return;
+    }
+
+    e->moving = true;
+    e->doors_open = false;
+
+    double distance =
+        e->speed *
+        delta_time;
+
+    if (e->current_floor <
+        e->target_floor) {
+
+        e->current_floor +=
+            (int)ceil(distance);
+
+    } else {
+
+        e->current_floor -=
+            (int)ceil(distance);
+    }
+
+    if (e->current_floor ==
+        e->target_floor) {
+
+        e->moving = false;
+        e->doors_open = true;
+    }
+}
+6. Security
+typedef enum {
+
+    SECURITY_PUBLIC,
+    SECURITY_EMPLOYEE,
+    SECURITY_RESTRICTED,
+    SECURITY_EXECUTIVE
+
+} SecurityLevel;
+
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    int floor;
+
+    double x;
+    double y;
+
+    SecurityLevel level;
+
+    bool active;
+
+} SecurityCheckpoint;
+
+Access function:
+
+bool can_enter_floor(
+    SecurityLevel clearance,
+    TowerFloor *floor
+) {
+    if (floor->public_access)
+        return true;
+
+    if (clearance >=
+        SECURITY_EMPLOYEE &&
+        floor->employee_access)
+        return true;
+
+    if (clearance >=
+        SECURITY_EXECUTIVE &&
+        floor->executive_access)
+        return true;
+
+    return false;
+}
+7. Tower itself
+typedef struct {
+
+    char name[128];
+
+    char company[128];
+
+    char city[64];
+
+    double x;
+    double y;
+    double z;
+
+    double height;
+
+    double width;
+    double depth;
+
+    int floor_count;
+
+    TowerFloor floors[
+        MAX_FLOORS
+    ];
+
+    TowerRoom rooms[
+        MAX_ROOMS
+    ];
+
+    int room_count;
+
+    TowerElevator elevators[
+        MAX_ELEVATORS
+    ];
+
+    int elevator_count;
+
+    SecurityCheckpoint security[
+        MAX_SECURITY
+    ];
+
+    int security_count;
+
+    int employee_count;
+    int visitor_count;
+
+    double electricity_usage;
+    double cooling_load;
+
+    double corporate_activity;
+
+    bool open;
+    bool emergency_mode;
+
+} AeroKraftTower;
+8. Generate the tower
+AeroKraftTower create_aerokraft_tower(
+    double x,
+    double y
+) {
+    AeroKraftTower tower = {0};
+
+    snprintf(
+        tower.name,
+        sizeof(tower.name),
+        "AeroKraft Inc. Tower"
+    );
+
+    snprintf(
+        tower.company,
+        sizeof(tower.company),
+        "AeroKraft Inc."
+    );
+
+    snprintf(
+        tower.city,
+        sizeof(tower.city),
+        "Miami"
+    );
+
+    tower.x = x;
+    tower.y = y;
+    tower.z = 0.0;
+
+    tower.height = 360.0;
+
+    tower.width = 90.0;
+    tower.depth = 90.0;
+
+    tower.floor_count = 72;
+
+    tower.open = true;
+
+    return tower;
+}
+
+I'd make it around 72 floors in the game world — large enough to be a major Miami landmark without competing with your separate mega-skyscraper projects.
+
+9. Floor generation
+void generate_tower_floors(
+    AeroKraftTower *tower
+) {
+    for (int i = 0;
+         i < tower->floor_count;
+         i++) {
+
+        TowerFloor *floor =
+            &tower->floors[i];
+
+        floor->number = i + 1;
+
+        floor->floor_area =
+            tower->width *
+            tower->depth;
+
+        floor->ceiling_height =
+            5.0;
+
+        floor->maximum_occupancy =
+            250;
+
+        floor->current_occupancy =
+            0;
+
+        floor->public_access = false;
+        floor->employee_access = true;
+        floor->executive_access = false;
+
+        floor->type =
+            FLOOR_OFFICE;
+
+        floor->department =
+            DEPARTMENT_ENGINEERING;
+    }
+}
+
+Then customise the important floors.
+
+10. Architectural programme
+void configure_special_floors(
+    AeroKraftTower *tower
+) {
+    /*
+     * Ground floor.
+     */
+
+    tower->floors[0].type =
+        FLOOR_LOBBY;
+
+    tower->floors[0].public_access =
+        true;
+
+    tower->floors[0].employee_access =
+        true;
+
+
+    /*
+     * Retail / showroom.
+     */
+
+    tower->floors[1].type =
+        FLOOR_SHOWROOM;
+
+    tower->floors[1].public_access =
+        true;
+
+
+    /*
+     * Engineering floors.
+     */
+
+    for (int i = 10; i < 20; i++) {
+
+        tower->floors[i].type =
+            FLOOR_ENGINEERING;
+
+        tower->floors[i].department =
+            DEPARTMENT_ENGINEERING;
+    }
+
+
+    /*
+     * R&D.
+     */
+
+    for (int i = 20; i < 30; i++) {
+
+        tower->floors[i].type =
+            FLOOR_RND;
+
+        tower->floors[i].department =
+            DEPARTMENT_RND;
+    }
+
+
+    /*
+     * Corporate finance.
+     */
+
+    for (int i = 30; i < 38; i++) {
+
+        tower->floors[i].type =
+            FLOOR_FINANCE;
+
+        tower->floors[i].department =
+            DEPARTMENT_FINANCE;
+    }
+
+
+    /*
+     * Sales and marketing.
+     */
+
+    for (int i = 38; i < 48; i++) {
+
+        tower->floors[i].type =
+            FLOOR_MARKETING;
+
+        tower->floors[i].department =
+            DEPARTMENT_MARKETING;
+    }
+
+
+    /*
+     * Executive zone.
+     */
+
+    for (int i = 60; i < 68; i++) {
+
+        tower->floors[i].type =
+            FLOOR_EXECUTIVE;
+
+        tower->floors[i].executive_access =
+            true;
+    }
+
+
+    /*
+     * Board floor.
+     */
+
+    tower->floors[68].type =
+        FLOOR_BOARD;
+
+    tower->floors[68].executive_access =
+        true;
+
+
+    /*
+     * Mechanical systems.
+     */
+
+    tower->floors[69].type =
+        FLOOR_MECHANICAL;
+
+    tower->floors[70].type =
+        FLOOR_MECHANICAL;
+
+
+    /*
+     * Rooftop.
+     */
+
+    tower->floors[71].type =
+        FLOOR_ROOFTOP;
+}
+11. The tower programme
+
+That gives you:
+
+                    AEROKRAFT TOWER
+                         MIAMI
+                          │
+                 ┌────────┴────────┐
+                 │     ROOFTOP     │
+                 │ helipad / HVAC  │
+                 ├─────────────────┤
+                 │ EXECUTIVE CLUB  │
+                 │ CEO / CFO / CTO │
+                 ├─────────────────┤
+                 │ BOARDROOM       │
+                 ├─────────────────┤
+                 │ CORPORATE       │
+                 │ FINANCE         │
+                 ├─────────────────┤
+                 │ SALES           │
+                 │ MARKETING       │
+                 ├─────────────────┤
+                 │ R&D             │
+                 │ SIMULATION LABS │
+                 ├─────────────────┤
+                 │ ENGINEERING     │
+                 │ CAD / DESIGN    │
+                 ├─────────────────┤
+                 │ SHOWROOM        │
+                 │ AEROKRAFT GT    │
+                 ├─────────────────┤
+                 │ GRAND LOBBY     │
+                 │ RECEPTION       │
+                 └─────────────────┘
+12. AeroKraft showroom
+
+The showroom can connect directly to the hovercraft economy.
+
+typedef struct {
+
+    int model_id;
+
+    char model_name[64];
+
+    double price;
+
+    double display_x;
+    double display_y;
+
+    bool available;
+
+} ShowroomVehicle;
+void add_showroom_vehicle(
+    ShowroomVehicle *vehicle,
+    const char *name,
+    double price
+) {
+    snprintf(
+        vehicle->model_name,
+        sizeof(vehicle->model_name),
+        "%s",
+        name
+    );
+
+    vehicle->price = price;
+    vehicle->available = true;
+}
+
+The player walks into the building and sees:
+
+AEROKRAFT INC.
+────────────────────────────────
+
+             A-100
+
+        [ HOVERCRAFT ]
+
+             A-200
+
+        [ HOVERCRAFT ]
+
+              GT
+
+        [ PERFORMANCE ]
+
+────────────────────────────────
+       SPEAK TO SALES
+13. Corporate NPC simulation
+
+Employees should have destinations.
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Department department;
+
+    int current_floor;
+    int destination_floor;
+
+    double work_start;
+    double work_end;
+
+    bool at_work;
+    bool travelling;
+
+} TowerEmployee;
+
+Update:
+
+void update_employee(
+    TowerEmployee *employee,
+    double hour
+) {
+    if (hour >= employee->work_start &&
+        hour <= employee->work_end) {
+
+        employee->at_work = true;
+
+    } else {
+
+        employee->at_work = false;
+    }
+
+    if (employee->at_work &&
+        employee->current_floor !=
+        employee->destination_floor) {
+
+        employee->travelling = true;
+
+    } else {
+
+        employee->travelling = false;
+    }
+}
+
+Now the tower feels alive:
+
+07:00 ─ Security arrives
+07:30 ─ Maintenance
+08:00 ─ Employees arrive
+08:30 ─ Engineering fills
+09:00 ─ R&D active
+10:00 ─ Showroom busy
+12:00 ─ Lunch rush
+14:00 ─ Executive meetings
+17:00 ─ Staff leave
+19:00 ─ Cleaning
+23:00 ─ Tower mostly empty
+14. Corporate events
+
+The building can generate events from the wider corporate simulation.
+
+typedef enum {
+
+    EVENT_PRODUCT_LAUNCH,
+    EVENT_BOARD_MEETING,
+    EVENT_INVESTOR_DAY,
+    EVENT_PRESS_CONFERENCE,
+    EVENT_RND_DEMONSTRATION,
+    EVENT_DEALER_CONFERENCE
+
+} CorporateEvent;
+
+
+void trigger_corporate_event(
+    AeroKraftTower *tower,
+    CorporateEvent event
+) {
+    tower->corporate_activity += 0.25;
+
+    switch (event) {
+
+        case EVENT_PRODUCT_LAUNCH:
+            tower->visitor_count += 500;
+            break;
+
+        case EVENT_BOARD_MEETING:
+            tower->visitor_count += 30;
+            break;
+
+        case EVENT_INVESTOR_DAY:
+            tower->visitor_count += 200;
+            break;
+
+        case EVENT_PRESS_CONFERENCE:
+            tower->visitor_count += 100;
+            break;
+
+        case EVENT_RND_DEMONSTRATION:
+            tower->visitor_count += 150;
+            break;
+
+        case EVENT_DEALER_CONFERENCE:
+            tower->visitor_count += 300;
+            break;
+    }
+}
+15. Building energy
+
+Because it's a large corporate tower, give it an actual building-energy model.
+
+void update_tower_energy(
+    AeroKraftTower *tower,
+    double temperature,
+    double occupancy
+) {
+    double lighting =
+        occupancy * 0.15;
+
+    double computers =
+        occupancy * 0.30;
+
+    double cooling =
+        temperature *
+        occupancy *
+        0.02;
+
+    double elevators =
+        tower->elevator_count *
+        0.50;
+
+    tower->electricity_usage =
+        lighting +
+        computers +
+        cooling +
+        elevators;
+
+    tower->cooling_load =
+        cooling;
+}
+
+That can eventually connect to your broader Miami electricity/grid economy.
+
+16. Emergency state
+void tower_emergency(
+    AeroKraftTower *tower,
+    bool emergency
+) {
+    tower->emergency_mode =
+        emergency;
+
+    if (emergency) {
+
+        tower->open = false;
+
+        for (int i = 0;
+             i < tower->elevator_count;
+             i++) {
+
+            tower->elevators[i].doors_open =
+                false;
+        }
+    }
+}
+17. External architecture
+
+I'd represent the physical building separately from its simulation.
+
+typedef struct {
+
+    double width;
+    double depth;
+    double height;
+
+    double facade_glass_ratio;
+
+    double podium_height;
+
+    double tower_setback;
+
+    double crown_height;
+
+    bool rooftop_helipad;
+    bool illuminated_logo;
+
+} TowerArchitecture;
+
+And instantiate:
+
+TowerArchitecture aero_arch = {
+
+    90.0,
+    90.0,
+    360.0,
+
+    0.72,
+
+    30.0,
+
+    120.0,
+
+    35.0,
+
+    true,
+    true
+};
+
+So aesthetically the building becomes a high-end Anglo-German/American futurist corporate tower rather than a generic glass box:
+
+                         ▲
+                         │
+                    AEROKRAFT
+                       LOGO
+                         │
+                   ┌─────────┐
+                  /           \
+                 /  CROWN      \
+                /───────────────\
+               │   EXECUTIVE    │
+               │                │
+               │      ╱╲        │
+               │     ╱  ╲       │
+               │    ╱    ╲      │
+               ├────────────────┤
+               │                │
+               │    TOWER       │
+               │                │
+               │                │
+               │                │
+               │                │
+               ├────────────────┤
+               │    PODIUM      │
+               │  SHOWROOM      │
+               │                │
+               └────────────────┘
+
+The important architectural/game-design decision is that the Tower becomes the physical anchor for the entire AeroKraft corporation. Its showroom connects to the hovercraft dealership, its R&D floors connect to vehicle development, its finance floors connect to the corporate stock/economic simulation, its employees populate the building, and the rooftop/mechanical systems connect to the wider city infrastructure.
+
+That makes it a genuine interactive corporate institution in Miami, rather than simply another enterable building.
+
+
+
+
+
+
+
+
+
+Yes — I'd make the AeroKraft board a fully simulated NPC cast, with each director having personality, incentives, relationships, voting behaviour, wealth and a different vision for the company. That gives the boardroom gameplay rather than having NPCs simply deliver exposition.
+
+AeroKraft Inc. — Executive Board
+/*
+ * AEROKRAFT INC.
+ * EXECUTIVE BOARD SIMULATION
+ *
+ * Fictional game-world characters.
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_BOARD_MEMBERS 16
+#define MAX_RELATIONSHIPS 32
+Character traits
+typedef enum {
+
+    TRAIT_AGGRESSIVE,
+    TRAIT_CONSERVATIVE,
+    TRAIT_INNOVATIVE,
+    TRAIT_DIPLOMATIC,
+    TRAIT_AMBITIOUS,
+    TRAIT_ANALYTICAL,
+    TRAIT_LOYAL,
+    TRAIT_OPPORTUNISTIC,
+    TRAIT_VISIONARY
+
+} CharacterTrait;
+
+
+typedef enum {
+
+    ROLE_CHAIRMAN,
+    ROLE_CEO,
+    ROLE_CFO,
+    ROLE_CTO,
+    ROLE_COO,
+    ROLE_GENERAL_COUNSEL,
+    ROLE_CMO,
+    ROLE_CSO,
+    ROLE_INDEPENDENT_DIRECTOR
+
+} BoardRole;
+Character structure
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    char nationality[32];
+
+    char role_name[64];
+
+    BoardRole role;
+
+    /*
+     * Personality.
+     */
+
+    double ambition;
+    double caution;
+    double intelligence;
+    double charisma;
+    double loyalty;
+    double risk_tolerance;
+
+    /*
+     * Corporate priorities.
+     */
+
+    double profit_priority;
+    double technology_priority;
+    double expansion_priority;
+    double reputation_priority;
+
+    /*
+     * Political capital.
+     */
+
+    double board_influence;
+    double employee_support;
+    double investor_support;
+
+    /*
+     * Relationships.
+     */
+
+    double trust[MAX_BOARD_MEMBERS];
+
+    CharacterTrait primary_trait;
+
+    bool present;
+    bool voting_member;
+
+} AeroKraftExecutive;
+1. Sir Alexander Beaumont — Chairman
+
+Role: Chairman of the Board
+Background: British-American industrial financier
+Personality: Traditional, strategic, extremely patient
+Vision: Turn AeroKraft into a century-scale industrial company.
+
+AeroKraftExecutive Alexander = {
+
+    0,
+
+    "Alexander Beaumont",
+    "British-American",
+    "Chairman of the Board",
+
+    ROLE_CHAIRMAN,
+
+    0.78,   /* ambition */
+    0.82,   /* caution */
+    0.91,   /* intelligence */
+    0.86,   /* charisma */
+    0.94,   /* loyalty */
+    0.55,   /* risk */
+
+    0.88,   /* profit */
+    0.72,   /* technology */
+    0.80,   /* expansion */
+    0.95,   /* reputation */
+
+    0.95,
+    0.82,
+    0.91,
+
+    {0},
+
+    TRAIT_VISIONARY,
+
+    true,
+    true
+};
+
+His board philosophy:
+
+"Do not build the largest company.
+
+Build the company that is still here
+when everyone else has disappeared."
+2. Klaus Reinhardt — CEO
+
+Role: Chief Executive Officer
+Background: German aerospace and industrial executive
+Personality: Competitive, intense, engineering-focused
+Vision: Make AeroKraft the world's dominant hovercraft manufacturer.
+
+AeroKraftExecutive Klaus = {
+
+    1,
+
+    "Klaus Reinhardt",
+    "German",
+    "Chief Executive Officer",
+
+    ROLE_CEO,
+
+    0.94,
+    0.48,
+    0.93,
+    0.82,
+    0.88,
+    0.81,
+
+    0.82,
+    0.96,
+    0.94,
+    0.72,
+
+    0.94,
+    0.91,
+    0.87,
+
+    {0},
+
+    TRAIT_AGGRESSIVE,
+
+    true,
+    true
+};
+
+His objective:
+
+GERMANY
+   ↓
+ENGINEERING
+   ↓
+AEROKRAFT
+   ↓
+GLOBAL MARKET
+   ↓
+DOMINANCE
+3. Elena Marquez — CFO
+
+Role: Chief Financial Officer
+Background: Miami financial sector
+Personality: Extremely analytical and conservative.
+
+AeroKraftExecutive Elena = {
+
+    2,
+
+    "Elena Marquez",
+    "American",
+    "Chief Financial Officer",
+
+    ROLE_CFO,
+
+    0.67,
+    0.94,
+    0.97,
+    0.73,
+    0.91,
+    0.29,
+
+    0.99,
+    0.71,
+    0.54,
+    0.93,
+
+    0.92,
+    0.96,
+    0.94,
+
+    {0},
+
+    TRAIT_ANALYTICAL,
+
+    true,
+    true
+};
+
+She is the person most likely to say:
+
+"No."
+
+when the CEO proposes spending $800 million.
+
+4. Hans Vogel — CTO
+
+Role: Chief Technology Officer
+Background: German aerospace engineer
+Personality: Obsessive inventor.
+
+AeroKraftExecutive Hans = {
+
+    3,
+
+    "Hans Vogel",
+    "German",
+    "Chief Technology Officer",
+
+    ROLE_CTO,
+
+    0.82,
+    0.32,
+    0.99,
+    0.55,
+    0.96,
+    0.88,
+
+    0.55,
+    1.00,
+    0.83,
+    0.61,
+
+    0.84,
+    0.97,
+    0.74,
+
+    {0},
+
+    TRAIT_INNOVATIVE,
+
+    true,
+    true
+};
+
+His obsession:
+
+LIGHTER
+FASTER
+QUIETER
+MORE EFFICIENT
+
+He continually wants to fund another generation of prototypes.
+
+5. Sofia Alvarez — COO
+
+Role: Chief Operating Officer
+Background: Florida logistics and manufacturing
+Personality: Practical, direct and operationally ruthless.
+
+AeroKraftExecutive Sofia = {
+
+    4,
+
+    "Sofia Alvarez",
+    "American",
+    "Chief Operating Officer",
+
+    ROLE_COO,
+
+    0.74,
+    0.72,
+    0.89,
+    0.79,
+    0.95,
+    0.58,
+
+    0.90,
+    0.79,
+    0.91,
+    0.82,
+
+    0.89,
+    0.94,
+    0.88,
+
+    {0},
+
+    TRAIT_LOYAL,
+
+    true,
+    true
+};
+
+Her philosophy:
+
+ENGINEERING
+     ↓
+FACTORY
+     ↓
+DEALER
+     ↓
+CUSTOMER
+
+"If one link fails,
+the whole company fails."
+6. Richard Mercer — General Counsel
+
+Role: General Counsel
+Background: International corporate law
+Personality: Extremely cautious, sophisticated and politically aware.
+
+AeroKraftExecutive Richard = {
+
+    5,
+
+    "Richard Mercer",
+    "British",
+    "General Counsel",
+
+    ROLE_GENERAL_COUNSEL,
+
+    0.61,
+    0.97,
+    0.94,
+    0.76,
+    0.87,
+    0.21,
+
+    0.78,
+    0.54,
+    0.48,
+    0.99,
+
+    0.81,
+    0.76,
+    0.92,
+
+    {0},
+
+    TRAIT_CONSERVATIVE,
+
+    true,
+    true
+};
+
+His job is to stop everyone else getting AeroKraft into trouble.
+
+7. Isabelle Laurent — CMO
+
+Role: Chief Marketing Officer
+Background: Luxury brands and automotive marketing
+Personality: Charismatic, ambitious, image-conscious.
+
+AeroKraftExecutive Isabelle = {
+
+    6,
+
+    "Isabelle Laurent",
+    "French-American",
+    "Chief Marketing Officer",
+
+    ROLE_CMO,
+
+    0.91,
+    0.41,
+    0.86,
+    0.98,
+    0.72,
+    0.69,
+
+    0.76,
+    0.69,
+    0.89,
+    0.99,
+
+    0.87,
+    0.91,
+    0.83,
+
+    {0},
+
+    TRAIT_AMBITIOUS,
+
+    true,
+    true
+};
+
+She wants AeroKraft to become a luxury technological brand, not simply an industrial manufacturer.
+
+8. Marcus Reed — Chief Security Officer
+AeroKraftExecutive Marcus = {
+
+    7,
+
+    "Marcus Reed",
+    "American",
+    "Chief Security Officer",
+
+    ROLE_CSO,
+
+    0.59,
+    0.91,
+    0.88,
+    0.65,
+    0.94,
+    0.34,
+
+    0.71,
+    0.62,
+    0.55,
+    0.97,
+
+    0.79,
+    0.86,
+    0.88,
+
+    {0},
+
+    TRAIT_CONSERVATIVE,
+
+    true,
+    true
+};
+
+He's responsible for protecting:
+
+corporate facilities
+prototypes
+executive security
+sensitive R&D
+corporate information
+9. Naomi Chen — Independent Director
+
+Role: Independent Director
+Background: Technology investor
+Personality: Highly analytical but willing to take calculated risks.
+
+AeroKraftExecutive Naomi = {
+
+    8,
+
+    "Naomi Chen",
+    "American",
+    "Independent Director",
+
+    ROLE_INDEPENDENT_DIRECTOR,
+
+    0.80,
+    0.54,
+    0.98,
+    0.71,
+    0.77,
+    0.76,
+
+    0.84,
+    0.94,
+    0.79,
+    0.81,
+
+    0.75,
+    0.79,
+    0.97,
+
+    {0},
+
+    TRAIT_ANALYTICAL,
+
+    true,
+    true
+};
+
+She constantly asks:
+
+"Where is the next technological discontinuity?"
+
+10. Board relationships
+
+Now give the characters actual relationships.
+
+void initialise_relationships(
+    AeroKraftExecutive board[],
+    int count
+) {
+    for (int i = 0; i < count; i++) {
+
+        for (int j = 0; j < count; j++) {
+
+            if (i == j)
+                board[i].trust[j] = 1.0;
+
+            else
+                board[i].trust[j] =
+                    0.50 +
+                    ((rand() % 40) / 100.0);
+        }
+    }
+}
+
+But hand-coded relationships can make the story much better:
+
+void create_key_relationships(
+    AeroKraftExecutive board[]
+) {
+    /*
+     * CEO ↔ CTO
+     *
+     * Strong alliance.
+     */
+
+    board[1].trust[3] = 0.94;
+    board[3].trust[1] = 0.96;
+
+
+    /*
+     * CEO ↔ CFO
+     *
+     * Respect, frequent disagreement.
+     */
+
+    board[1].trust[2] = 0.61;
+    board[2].trust[1] = 0.68;
+
+
+    /*
+     * CFO ↔ General Counsel
+     */
+
+    board[2].trust[5] = 0.91;
+    board[5].trust[2] = 0.90;
+
+
+    /*
+     * CMO ↔ CEO
+     */
+
+    board[6].trust[1] = 0.87;
+    board[1].trust[6] = 0.83;
+
+
+    /*
+     * CTO ↔ CFO
+     *
+     * Constant budget tension.
+     */
+
+    board[3].trust[2] = 0.42;
+    board[2].trust[3] = 0.39;
+}
+Board voting
+
+Now board decisions become emergent.
+
+typedef enum {
+
+    DECISION_NEW_FACTORY,
+    DECISION_NEW_MODEL,
+    DECISION_RND_EXPANSION,
+    DECISION_ACQUISITION,
+    DECISION_DIVIDEND,
+    DECISION_PRICE_CUT,
+    DECISION_GLOBAL_EXPANSION
+
+} BoardDecision;
+
+Each executive calculates a vote:
+
+double executive_vote(
+    AeroKraftExecutive *e,
+    BoardDecision decision
+) {
+    double score = 0.0;
+
+    switch (decision) {
+
+        case DECISION_NEW_FACTORY:
+
+            score =
+                e->expansion_priority;
+
+            break;
+
+        case DECISION_NEW_MODEL:
+
+            score =
+                e->technology_priority;
+
+            break;
+
+        case DECISION_RND_EXPANSION:
+
+            score =
+                e->technology_priority *
+                e->risk_tolerance;
+
+            break;
+
+        case DECISION_ACQUISITION:
+
+            score =
+                e->ambition *
+                e->risk_tolerance;
+
+            break;
+
+        case DECISION_DIVIDEND:
+
+            score =
+                e->profit_priority;
+
+            break;
+
+        case DECISION_PRICE_CUT:
+
+            score =
+                e->expansion_priority *
+                e->risk_tolerance;
+
+            break;
+
+        case DECISION_GLOBAL_EXPANSION:
+
+            score =
+                e->expansion_priority *
+                e->ambition;
+
+            break;
+    }
+
+    return score;
+}
+
+Then:
+
+bool board_vote(
+    AeroKraftExecutive board[],
+    int count,
+    BoardDecision decision
+) {
+    int yes = 0;
+    int votes = 0;
+
+    for (int i = 0; i < count; i++) {
+
+        if (!board[i].voting_member)
+            continue;
+
+        double vote =
+            executive_vote(
+                &board[i],
+                decision
+            );
+
+        if (vote > 0.50)
+            yes++;
+
+        votes++;
+    }
+
+    return yes >
+        votes / 2;
+}
+Boardroom dynamics
+
+This gives you situations like:
+
+              AEROKRAFT BOARD
+                     │
+              NEW A-500 MODEL
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+        CTO                   CFO
+       "YES"                  "NO"
+          │                     │
+      CEO "YES"           LEGAL "CAUTION"
+          │                     │
+          └──────────┬──────────┘
+                     ↓
+                 VOTE: 6–3
+                     ↓
+                PROJECT GOES
+                   AHEAD
+
+And because every character has ambition, loyalty, reputation, relationships and competing incentives, those votes can change over time.
+
+The player could eventually become involved in AeroKraft's corporate world — for example, influencing individual executives, investing in the company, competing against it, working for it, or becoming important enough that the board starts discussing the player's actions in its meetings.
+
+That makes the AeroKraft Tower's boardroom a genuine living institution in the Miami simulation, rather than merely a cutscene location.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
