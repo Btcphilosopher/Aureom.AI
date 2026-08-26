@@ -1,0 +1,11 @@
+# Core: none. APEX HORIZON ENGINE's simulation stack (physics, AI, world,
+# progression, economy) is deliberately pure standard-library Python --
+# math/random/dataclasses/enum/collections -- so it runs anywhere Python
+# 3.11+ runs with no install step beyond the package itself.
+
+# Testing
+pytest>=7.4
+
+# --- Optional extras (not required by any code path) ---
+# matplotlib>=3.7   # for a future telemetry/track-map plotting front end;
+#                   # nothing in the engine currently imports it.
