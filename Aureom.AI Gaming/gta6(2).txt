@@ -10533,3 +10533,5807 @@ That fits nicely with the wider economic systems you've been building: the hunti
 
 
 
+
+
+
+
+C — MIAMI POSTAL NETWORK
+/*
+ * ============================================================
+ * MIAMI POSTAL & PARCEL NETWORK
+ * ============================================================
+ *
+ * Open-world logistics simulation.
+ *
+ * Models:
+ *   - addresses
+ *   - letters
+ *   - parcels
+ *   - sorting centres
+ *   - post offices
+ *   - delivery routes
+ *   - postal vehicles
+ *   - NPC mail
+ *   - business logistics
+ *   - delivery missions
+ *   - delays
+ *   - weather disruption
+ *
+ * Designed as a gameplay simulation rather than a real
+ * postal-service implementation.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX_ADDRESSES 10000
+#define MAX_ITEMS     50000
+#define MAX_VEHICLES  500
+#define MAX_ROUTES    1000
+#define MAX_FACILITIES 128
+#define MAX_NPCS      5000
+
+
+typedef enum
+{
+    MAIL_LETTER,
+    MAIL_DOCUMENT,
+    MAIL_PARCEL,
+    MAIL_FREIGHT,
+    MAIL_EXPRESS
+
+} MailType;
+
+
+typedef enum
+{
+    MAIL_CREATED,
+    MAIL_COLLECTED,
+    MAIL_SORTING,
+    MAIL_IN_TRANSIT,
+    MAIL_OUT_FOR_DELIVERY,
+    MAIL_DELIVERED,
+    MAIL_RETURNED,
+    MAIL_LOST
+
+} MailStatus;
+
+
+typedef enum
+{
+    FACILITY_POST_OFFICE,
+    FACILITY_SORTING_CENTRE,
+    FACILITY_DISTRIBUTION_HUB,
+    FACILITY_PARCEL_DEPOT
+
+} FacilityType;
+Addresses
+
+Every building can have a postal identity.
+
+typedef struct
+{
+    int id;
+
+    char street[64];
+    char city[64];
+    char postcode[16];
+
+    double x;
+    double y;
+
+    bool residential;
+    bool commercial;
+
+} PostalAddress;
+
+That means apartments, mansions, shops, banks, farms and industrial buildings can all receive mail.
+
+Mail objects
+typedef struct
+{
+    unsigned long tracking_number;
+
+    MailType type;
+    MailStatus status;
+
+    int sender;
+    int recipient;
+
+    int origin_address;
+    int destination_address;
+
+    double weight;
+    double value;
+
+    float priority;
+    float condition;
+
+    int current_facility;
+
+    double creation_time;
+    double expected_delivery;
+
+} MailItem;
+
+Every parcel therefore exists as an actual simulation object.
+
+TRACKING: GA-84291827
+
+ORIGIN
+Miami Central
+
+DESTINATION
+Coral District
+
+STATUS
+IN TRANSIT
+
+EXPECTED
+18:42
+
+PRIORITY
+EXPRESS
+Postal facilities
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    FacilityType type;
+
+    double x;
+    double y;
+
+    int processing_capacity;
+    int current_load;
+
+    float efficiency;
+
+    bool operational;
+
+} PostalFacility;
+
+Example world facilities:
+
+MIAMI CENTRAL POST OFFICE
+        ↓
+CENTRAL SORTING FACILITY
+        ↓
+NORTH DISTRIBUTION HUB
+        ↓
+BEACH DEPOT
+        ↓
+EVERGLADES RURAL DEPOT
+
+The rural network can be deliberately sparse.
+
+CITY
+████████████████
+
+SUBURBS
+██████████
+
+COUNTRYSIDE
+███
+
+EVERGLADES
+█
+
+That creates interesting delivery missions.
+
+Postal vehicles
+typedef enum
+{
+    VEHICLE_VAN,
+    VEHICLE_TRUCK,
+    VEHICLE_ELECTRIC_VAN,
+    VEHICLE_MOTORBIKE,
+    VEHICLE_RAIL_CONTAINER
+
+} PostalVehicleType;
+
+
+typedef struct
+{
+    int id;
+
+    PostalVehicleType type;
+
+    double x;
+    double y;
+
+    float speed;
+    float capacity;
+    float fuel_or_charge;
+
+    int route_id;
+
+    bool active;
+
+} PostalVehicle;
+
+The electric vans can become especially useful for urban deliveries.
+
+Routes
+typedef struct
+{
+    int id;
+
+    int origin_facility;
+    int destination_facility;
+
+    float distance;
+    float traffic;
+
+    float weather_risk;
+    float congestion;
+
+    bool active;
+
+} PostalRoute;
+
+The game can dynamically alter routes.
+
+NORMAL
+
+POST OFFICE
+     ↓
+SORTING CENTRE
+     ↓
+DEPOT
+     ↓
+CUSTOMER
+
+
+STORM
+
+POST OFFICE
+     ↓
+████ CLOSED ROUTE ████
+     ↓
+ALTERNATIVE DEPOT
+     ↓
+CUSTOMER
+Delivery engine
+void update_delivery(
+    MailItem *mail,
+    double current_time
+)
+{
+    if (mail->status == MAIL_OUT_FOR_DELIVERY)
+    {
+        if (current_time >= mail->expected_delivery)
+        {
+            mail->status =
+                MAIL_DELIVERED;
+        }
+    }
+}
+Dynamic delivery delays
+void apply_postal_disruption(
+    MailItem *mail,
+    float traffic,
+    float weather,
+    float facility_stress
+)
+{
+    double delay =
+        traffic * 0.5 +
+        weather * 2.0 +
+        facility_stress * 1.5;
+
+    mail->expected_delivery +=
+        delay;
+}
+
+This allows the whole network to respond to the world.
+
+For example:
+
+HURRICANE
+   ↓
+ROAD CLOSURES
+   ↓
+DELIVERY DELAYS
+   ↓
+SORTING BACKLOG
+   ↓
+PARCEL DEPOT OVERLOAD
+   ↓
+NPC COMPLAINTS
+NPC mail generation
+
+The city should constantly generate ordinary mail.
+
+void generate_npc_mail(
+    MailItem *mail,
+    int sender,
+    int recipient,
+    int origin,
+    int destination,
+    unsigned long tracking
+)
+{
+    memset(mail, 0, sizeof(*mail));
+
+    mail->tracking_number =
+        tracking;
+
+    mail->type =
+        MAIL_LETTER;
+
+    mail->status =
+        MAIL_CREATED;
+
+    mail->sender =
+        sender;
+
+    mail->recipient =
+        recipient;
+
+    mail->origin_address =
+        origin;
+
+    mail->destination_address =
+        destination;
+
+    mail->priority =
+        0.5f;
+
+    mail->condition =
+        1.0f;
+}
+
+Businesses generate much larger volumes:
+
+RESTAURANTS
+→ supplies
+
+BANKS
+→ documents
+
+SHOPS
+→ parcels
+
+ONLINE BUSINESSES
+→ thousands of parcels
+
+PRIVATE CLIENTS
+→ express deliveries
+Player postal missions
+
+The protagonist can interact with the network directly.
+
+typedef enum
+{
+    POSTAL_MISSION_NONE,
+    POSTAL_DELIVERY,
+    EXPRESS_DELIVERY,
+    RECOVERY,
+    URGENT_DOCUMENT,
+    DEPOT_RUN,
+    RURAL_DELIVERY
+
+} PostalMissionType;
+
+For example:
+
+MISSION:
+
+THE LAST DELIVERY
+
+A high-priority package has missed
+three delivery attempts.
+
+Pick it up at Miami Central.
+
+Deliver it before 20:00.
+
+REWARD: $8,500
+
+Or:
+
+MISSION:
+
+EVERGLADES EXPRESS
+
+One isolated property has
+received no mail for six days.
+
+Take the electric postal vehicle
+through the rural network.
+
+REWARD: $14,000
+Postal economy
+
+Businesses pay for different service levels:
+
+double calculate_postage(
+    MailType type,
+    double weight,
+    float priority
+)
+{
+    double base = 5.0;
+
+    switch (type)
+    {
+        case MAIL_LETTER:
+            base = 2.0;
+            break;
+
+        case MAIL_DOCUMENT:
+            base = 4.0;
+            break;
+
+        case MAIL_PARCEL:
+            base = 8.0;
+            break;
+
+        case MAIL_FREIGHT:
+            base = 25.0;
+            break;
+
+        case MAIL_EXPRESS:
+            base = 20.0;
+            break;
+    }
+
+    return base +
+           weight * 1.5 +
+           priority * 10.0;
+}
+Network-wide simulation
+
+The important part is that the postal system interacts with the rest of the game.
+
+                    MIAMI POSTAL NETWORK
+                             │
+        ┌────────────────────┼────────────────────┐
+        ↓                    ↓                    ↓
+     RESIDENTS           BUSINESSES             PLAYER
+        │                    │                    │
+        ↓                    ↓                    ↓
+      MAIL                PARCELS             MISSIONS
+        │                    │                    │
+        └────────────────────┼────────────────────┘
+                             ↓
+                     SORTING NETWORK
+                             │
+                ┌────────────┼────────────┐
+                ↓            ↓            ↓
+             ROAD         RAIL          DEPOT
+                │            │            │
+                └────────────┼────────────┘
+                             ↓
+                         DELIVERY
+
+And because this is your open-world game, the postal network can become a background indicator of how healthy the city is.
+
+A functioning Miami might have:
+
+POSTAL NETWORK
+████████████████████ 98%
+
+ON TIME:       94%
+BACKLOG:        3%
+LOST:           0.2%
+EXPRESS:       97%
+
+During a major city event:
+
+POSTAL NETWORK
+██████████░░░░░░░░░░ 51%
+
+TRAFFIC:       HIGH
+BACKLOG:       SEVERE
+DEPOTS:        OVERLOADED
+EXPRESS:       DELAYED
+
+That also gives you some excellent environmental storytelling: mail trucks moving around the city, sorting centres operating at night, parcels accumulating during storms, rural delivery routes, NPCs waiting for important letters, and the protagonist being able to physically use the network as part of missions.
+
+
+
+
+
+
+
+
+
+
+HARD C — OPEN-WORLD COURIER SYSTEM
+/*
+ * ============================================================
+ * OPEN-WORLD COURIER ENGINE
+ * ============================================================
+ *
+ * Fictional GTA-style gameplay system.
+ *
+ * Courier jobs are generated dynamically from:
+ *
+ *   NPCs
+ *   Businesses
+ *   Postal network
+ *   Restaurants
+ *   Shops
+ *   Banks
+ *   Events
+ *   Weather
+ *   Traffic
+ *   Economic activity
+ *
+ * The courier system is deliberately independent from
+ * rendering, allowing it to run as a standalone simulation.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_COURIER_JOBS       4096
+#define MAX_COURIERS           512
+#define MAX_LOCATIONS          2048
+#define MAX_ROUTE_POINTS       64
+
+
+/* ============================================================
+ * ENUMERATIONS
+ * ============================================================ */
+
+typedef enum
+{
+    JOB_STANDARD,
+    JOB_EXPRESS,
+    JOB_URGENT,
+    JOB_FRAGILE,
+    JOB_BULK,
+    JOB_HIGH_VALUE,
+    JOB_BUSINESS,
+    JOB_PERSONAL
+
+} CourierJobType;
+
+
+typedef enum
+{
+    JOB_AVAILABLE,
+    JOB_ACCEPTED,
+    JOB_COLLECTING,
+    JOB_IN_TRANSIT,
+    JOB_DELIVERED,
+    JOB_FAILED,
+    JOB_CANCELLED
+
+} CourierJobState;
+
+
+typedef enum
+{
+    VEHICLE_BICYCLE,
+    VEHICLE_MOTORBIKE,
+    VEHICLE_CAR,
+    VEHICLE_VAN,
+    VEHICLE_ELECTRIC_VAN,
+    VEHICLE_TRUCK
+
+} CourierVehicle;
+
+
+/* ============================================================
+ * LOCATION
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    bool residential;
+    bool commercial;
+    bool industrial;
+
+} CourierLocation;
+
+
+/* ============================================================
+ * PACKAGE
+ * ============================================================ */
+
+typedef struct
+{
+    unsigned long id;
+
+    double weight;
+    double value;
+
+    float fragility;
+    float priority;
+
+    bool requires_signature;
+
+} CourierPackage;
+
+
+/* ============================================================
+ * JOB
+ * ============================================================ */
+
+typedef struct
+{
+    unsigned long id;
+
+    CourierJobType type;
+    CourierJobState state;
+
+    int pickup_location;
+    int delivery_location;
+
+    CourierPackage package;
+
+    double created_at;
+    double deadline;
+
+    double base_reward;
+    double current_reward;
+
+    float distance;
+    float difficulty;
+
+    int assigned_courier;
+
+} CourierJob;
+
+
+/* ============================================================
+ * COURIER
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    CourierVehicle vehicle;
+
+    double x;
+    double y;
+
+    float driving_skill;
+    float navigation_skill;
+    float reliability;
+
+    double money;
+
+    int active_job;
+
+} Courier;
+
+
+/* ============================================================
+ * WORLD CONDITIONS
+ * ============================================================ */
+
+typedef struct
+{
+    float traffic;
+    float weather;
+    float congestion;
+
+    float economic_activity;
+    float emergency_level;
+
+} CourierWorldState;
+
+
+/* ============================================================
+ * COURIER NETWORK
+ * ============================================================ */
+
+typedef struct
+{
+    CourierJob jobs[MAX_COURIER_JOBS];
+
+    Courier couriers[MAX_COURIERS];
+
+    CourierLocation locations[MAX_LOCATIONS];
+
+    CourierWorldState world;
+
+    int job_count;
+    int courier_count;
+    int location_count;
+
+    unsigned long next_job_id;
+
+} CourierNetwork;
+Vehicle performance
+
+Different vehicles make different courier strategies viable.
+
+static float vehicle_speed(
+    CourierVehicle vehicle
+)
+{
+    switch (vehicle)
+    {
+        case VEHICLE_BICYCLE:
+            return 0.45f;
+
+        case VEHICLE_MOTORBIKE:
+            return 0.80f;
+
+        case VEHICLE_CAR:
+            return 0.75f;
+
+        case VEHICLE_VAN:
+            return 0.60f;
+
+        case VEHICLE_ELECTRIC_VAN:
+            return 0.62f;
+
+        case VEHICLE_TRUCK:
+            return 0.45f;
+    }
+
+    return 0.50f;
+}
+
+A motorbike might be fast through downtown, while a van becomes more useful for bulk commercial jobs.
+
+Distance calculation
+static float calculate_distance(
+    const CourierLocation *a,
+    const CourierLocation *b
+)
+{
+    double dx = b->x - a->x;
+    double dy = b->y - a->y;
+
+    return (float)sqrt(
+        dx * dx + dy * dy
+    );
+}
+Dynamic reward system
+static double calculate_reward(
+    CourierJobType type,
+    float distance,
+    float difficulty,
+    const CourierWorldState *world
+)
+{
+    double reward = 25.0;
+
+    reward += distance * 8.0;
+
+    switch (type)
+    {
+        case JOB_EXPRESS:
+            reward *= 1.50;
+            break;
+
+        case JOB_URGENT:
+            reward *= 2.00;
+            break;
+
+        case JOB_FRAGILE:
+            reward *= 1.35;
+            break;
+
+        case JOB_BULK:
+            reward *= 1.75;
+            break;
+
+        case JOB_HIGH_VALUE:
+            reward *= 2.50;
+            break;
+
+        case JOB_BUSINESS:
+            reward *= 1.40;
+            break;
+
+        default:
+            break;
+    }
+
+    reward +=
+        difficulty * 100.0;
+
+    /*
+     * Economic activity increases courier demand.
+     */
+
+    reward *=
+        1.0 + world->economic_activity * 0.30;
+
+    /*
+     * Severe weather increases compensation.
+     */
+
+    reward *=
+        1.0 + world->weather * 0.25;
+
+    return reward;
+}
+Job generation
+CourierJob *create_courier_job(
+    CourierNetwork *network,
+    CourierJobType type,
+    int pickup,
+    int delivery,
+    double current_time
+)
+{
+    if (network->job_count >= MAX_COURIER_JOBS)
+        return NULL;
+
+    CourierJob *job =
+        &network->jobs[
+            network->job_count++
+        ];
+
+    memset(
+        job,
+        0,
+        sizeof(*job)
+    );
+
+    job->id =
+        network->next_job_id++;
+
+    job->type = type;
+
+    job->state =
+        JOB_AVAILABLE;
+
+    job->pickup_location =
+        pickup;
+
+    job->delivery_location =
+        delivery;
+
+    job->created_at =
+        current_time;
+
+    const CourierLocation *a =
+        &network->locations[pickup];
+
+    const CourierLocation *b =
+        &network->locations[delivery];
+
+    job->distance =
+        calculate_distance(a, b);
+
+    job->difficulty =
+        fminf(
+            1.0f,
+            job->distance / 20.0f
+        );
+
+    job->package.id =
+        job->id;
+
+    job->package.weight =
+        1.0 + job->distance * 0.2;
+
+    job->package.value =
+        100.0 + job->distance * 50.0;
+
+    job->base_reward =
+        calculate_reward(
+            type,
+            job->distance,
+            job->difficulty,
+            &network->world
+        );
+
+    job->current_reward =
+        job->base_reward;
+
+    job->deadline =
+        current_time +
+        30.0 +
+        (20.0 * vehicle_speed(
+            VEHICLE_CAR
+        ));
+
+    return job;
+}
+Accepting jobs
+bool accept_courier_job(
+    CourierNetwork *network,
+    int courier_id,
+    unsigned long job_id
+)
+{
+    if (courier_id < 0 ||
+        courier_id >= network->courier_count)
+        return false;
+
+    Courier *courier =
+        &network->couriers[courier_id];
+
+    if (courier->active_job >= 0)
+        return false;
+
+    for (int i = 0;
+         i < network->job_count;
+         ++i)
+    {
+        CourierJob *job =
+            &network->jobs[i];
+
+        if (job->id != job_id)
+            continue;
+
+        if (job->state != JOB_AVAILABLE)
+            return false;
+
+        job->state =
+            JOB_ACCEPTED;
+
+        job->assigned_courier =
+            courier_id;
+
+        courier->active_job =
+            i;
+
+        return true;
+    }
+
+    return false;
+}
+Time pressure
+
+The interesting gameplay comes from the deadline.
+
+static void update_job_deadline(
+    CourierNetwork *network,
+    CourierJob *job,
+    double current_time
+)
+{
+    if (job->state != JOB_IN_TRANSIT)
+        return;
+
+    if (current_time > job->deadline)
+    {
+        /*
+         * Don't necessarily fail immediately.
+         *
+         * Late delivery becomes a quality-of-service
+         * problem first.
+         */
+
+        job->difficulty += 0.05f;
+
+        if (job->difficulty > 1.5f)
+            job->state = JOB_FAILED;
+    }
+}
+
+That gives you:
+
+ON TIME
+   ↓
+FULL PAYMENT
+   ↓
+REPUTATION +
+
+SLIGHTLY LATE
+   ↓
+REDUCED PAYMENT
+
+VERY LATE
+   ↓
+CUSTOMER COMPLAINT
+
+FAILED
+   ↓
+NO PAYMENT
+   ↓
+REPUTATION -
+Successful delivery
+double complete_delivery(
+    CourierNetwork *network,
+    Courier *courier,
+    CourierJob *job,
+    double current_time
+)
+{
+    if (job->state != JOB_IN_TRANSIT)
+        return 0.0;
+
+    double reward =
+        job->current_reward;
+
+    if (current_time > job->deadline)
+    {
+        double lateness =
+            current_time -
+            job->deadline;
+
+        reward *=
+            fmax(
+                0.20,
+                1.0 - lateness * 0.05
+            );
+    }
+
+    job->state =
+        JOB_DELIVERED;
+
+    courier->money +=
+        reward;
+
+    courier->active_job =
+        -1;
+
+    return reward;
+}
+Dynamic courier market
+
+The courier board should change constantly:
+
+MIAMI COURIER EXCHANGE
+─────────────────────────────────────
+
+EXPRESS
+Downtown → Beach
+$420
+8 min
+
+BUSINESS
+Industrial → Central
+$780
+18 min
+
+URGENT
+Central → Island
+$1,240
+12 min
+
+BULK
+Warehouse → Retail District
+$2,100
+31 min
+
+HIGH VALUE
+Private Club → Financial District
+$3,800
+15 min
+
+The jobs themselves are generated by the wider simulation:
+
+void generate_market_jobs(
+    CourierNetwork *network,
+    double time
+)
+{
+    if (network->world.economic_activity > 0.7f)
+    {
+        create_courier_job(
+            network,
+            JOB_BUSINESS,
+            2,
+            8,
+            time
+        );
+
+        create_courier_job(
+            network,
+            JOB_EXPRESS,
+            5,
+            12,
+            time
+        );
+    }
+
+    if (network->world.emergency_level > 0.6f)
+    {
+        create_courier_job(
+            network,
+            JOB_URGENT,
+            1,
+            15,
+            time
+        );
+    }
+}
+
+So a hurricane, festival, sporting event, financial boom, airport disruption, or major city event can suddenly transform the courier market.
+
+Reputation
+typedef struct
+{
+    float reputation;
+
+    int deliveries;
+    int successful;
+    int failed;
+
+    double lifetime_earnings;
+
+} CourierReputation;
+
+
+void update_reputation(
+    CourierReputation *r,
+    bool successful
+)
+{
+    r->deliveries++;
+
+    if (successful)
+    {
+        r->successful++;
+        r->reputation += 0.015f;
+    }
+    else
+    {
+        r->failed++;
+        r->reputation -= 0.05f;
+    }
+
+    if (r->reputation < 0.0f)
+        r->reputation = 0.0f;
+
+    if (r->reputation > 1.0f)
+        r->reputation = 1.0f;
+}
+
+High reputation unlocks increasingly valuable contracts:
+
+NOVICE
+↓
+LOCAL COURIER
+↓
+EXPRESS CONTRACTOR
+↓
+CORPORATE COURIER
+↓
+PRIVATE CLIENT COURIER
+↓
+ELITE COURIER
+
+The result is a living courier economy: the player isn't just doing repetitive fetch quests—the city generates delivery demand, prices respond to conditions, different vehicles create different strategies, deadlines create pressure, and the player's reputation determines which jobs appear.
+
+
+
+
+
+HARD C — COURIER INTERCEPTOR SYSTEM
+/*
+ * ============================================================
+ * OPEN-WORLD COURIER INTERCEPTOR SYSTEM
+ * ============================================================
+ *
+ * Fictional gameplay AI.
+ *
+ * Interceptors attempt to:
+ *
+ *   - predict courier movement
+ *   - cut off routes
+ *   - create roadblocks
+ *   - pressure the courier
+ *   - abandon pursuit when unsuccessful
+ *   - coordinate with other interceptors
+ *
+ * This is a game simulation and does not model real-world
+ * interception tactics.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+
+#define MAX_INTERCEPTORS 64
+#define MAX_TARGETS      32
+#define MAX_WAYPOINTS    128
+
+
+/* ============================================================
+ * VECTOR
+ * ============================================================ */
+
+typedef struct
+{
+    double x;
+    double y;
+
+} Vec2;
+
+
+static double distance_2d(Vec2 a, Vec2 b)
+{
+    double dx = b.x - a.x;
+    double dy = b.y - a.y;
+
+    return sqrt(dx * dx + dy * dy);
+}
+
+
+/* ============================================================
+ * INTERCEPTOR TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    INTERCEPTOR_SCOUT,
+    INTERCEPTOR_PURSUIT,
+    INTERCEPTOR_HEAVY,
+    INTERCEPTOR_AERIAL,
+    INTERCEPTOR_DECOY
+
+} InterceptorType;
+
+
+/* ============================================================
+ * AI STATES
+ * ============================================================ */
+
+typedef enum
+{
+    AI_IDLE,
+    AI_SEARCHING,
+    AI_TRACKING,
+    AI_INTERCEPTING,
+    AI_BLOCKING,
+    AI_LOST,
+    AI_RETURNING
+
+} InterceptorState;
+
+
+/* ============================================================
+ * COURIER TARGET
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    Vec2 position;
+    Vec2 velocity;
+
+    float speed;
+    float detection;
+
+    bool active;
+
+} InterceptorTarget;
+
+
+/* ============================================================
+ * INTERCEPTOR
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    InterceptorType type;
+    InterceptorState state;
+
+    Vec2 position;
+    Vec2 velocity;
+
+    float maximum_speed;
+    float acceleration;
+    float handling;
+
+    float detection_range;
+    float prediction_strength;
+
+    int target_id;
+
+    float alert_level;
+
+    bool active;
+
+} Interceptor;
+
+
+/* ============================================================
+ * INTERCEPTOR MANAGER
+ * ============================================================ */
+
+typedef struct
+{
+    Interceptor interceptors[MAX_INTERCEPTORS];
+
+    InterceptorTarget targets[MAX_TARGETS];
+
+    int interceptor_count;
+    int target_count;
+
+} InterceptorSystem;
+Different interceptor personalities
+static void configure_interceptor(
+    Interceptor *i,
+    InterceptorType type
+)
+{
+    memset(i, 0, sizeof(*i));
+
+    i->type = type;
+    i->state = AI_IDLE;
+    i->target_id = -1;
+    i->active = true;
+
+    switch (type)
+    {
+        case INTERCEPTOR_SCOUT:
+
+            strcpy(i->name, "Scout");
+
+            i->maximum_speed = 0.85f;
+            i->acceleration = 0.90f;
+            i->handling = 0.95f;
+
+            i->detection_range = 18.0f;
+            i->prediction_strength = 0.50f;
+
+            break;
+
+
+        case INTERCEPTOR_PURSUIT:
+
+            strcpy(i->name, "Pursuit");
+
+            i->maximum_speed = 1.00f;
+            i->acceleration = 0.85f;
+            i->handling = 0.80f;
+
+            i->detection_range = 14.0f;
+            i->prediction_strength = 0.75f;
+
+            break;
+
+
+        case INTERCEPTOR_HEAVY:
+
+            strcpy(i->name, "Heavy");
+
+            i->maximum_speed = 0.65f;
+            i->acceleration = 0.55f;
+            i->handling = 0.50f;
+
+            i->detection_range = 12.0f;
+            i->prediction_strength = 0.40f;
+
+            break;
+
+
+        case INTERCEPTOR_AERIAL:
+
+            strcpy(i->name, "Aerial");
+
+            i->maximum_speed = 1.20f;
+            i->acceleration = 1.00f;
+            i->handling = 0.90f;
+
+            i->detection_range = 30.0f;
+            i->prediction_strength = 0.90f;
+
+            break;
+
+
+        case INTERCEPTOR_DECOY:
+
+            strcpy(i->name, "Decoy");
+
+            i->maximum_speed = 0.75f;
+            i->acceleration = 0.75f;
+            i->handling = 0.90f;
+
+            i->detection_range = 10.0f;
+            i->prediction_strength = 0.30f;
+
+            break;
+    }
+}
+Predictive targeting
+
+Instead of driving directly toward the courier:
+
+BAD AI
+
+INTERCEPTOR
+     ↓
+     ↓
+  COURIER
+
+the interceptor estimates where the courier is likely to be:
+
+COURIER
+   ↓
+   ↓
+   ↓
+   X  predicted position
+
+INTERCEPTOR ─────────────→ X
+static Vec2 predict_target(
+    const Interceptor *interceptor,
+    const InterceptorTarget *target
+)
+{
+    double distance =
+        distance_2d(
+            interceptor->position,
+            target->position
+        );
+
+    double speed =
+        fmax(
+            0.1,
+            interceptor->maximum_speed
+        );
+
+    double time =
+        distance / speed;
+
+    time *=
+        interceptor->prediction_strength;
+
+    Vec2 prediction;
+
+    prediction.x =
+        target->position.x +
+        target->velocity.x * time;
+
+    prediction.y =
+        target->position.y +
+        target->velocity.y * time;
+
+    return prediction;
+}
+Choosing a target
+static int select_target(
+    InterceptorSystem *system,
+    Interceptor *interceptor
+)
+{
+    int best_target = -1;
+    double best_score = -1.0;
+
+    for (int n = 0;
+         n < system->target_count;
+         ++n)
+    {
+        InterceptorTarget *target =
+            &system->targets[n];
+
+        if (!target->active)
+            continue;
+
+        double distance =
+            distance_2d(
+                interceptor->position,
+                target->position
+            );
+
+        if (distance >
+            interceptor->detection_range)
+            continue;
+
+        double score =
+            target->detection /
+            (distance + 1.0);
+
+        if (score > best_score)
+        {
+            best_score = score;
+            best_target = n;
+        }
+    }
+
+    return best_target;
+}
+Interception movement
+static Vec2 steer_toward(
+    Vec2 current,
+    Vec2 target,
+    float strength
+)
+{
+    double dx =
+        target.x - current.x;
+
+    double dy =
+        target.y - current.y;
+
+    double length =
+        sqrt(dx * dx + dy * dy);
+
+    Vec2 result = {0.0, 0.0};
+
+    if (length < 0.001)
+        return result;
+
+    result.x =
+        (dx / length) * strength;
+
+    result.y =
+        (dy / length) * strength;
+
+    return result;
+}
+
+Then the AI loop becomes:
+
+static void update_interceptor(
+    InterceptorSystem *system,
+    Interceptor *interceptor,
+    double dt
+)
+{
+    if (!interceptor->active)
+        return;
+
+    /*
+     * Acquire target.
+     */
+
+    if (interceptor->target_id < 0)
+    {
+        interceptor->target_id =
+            select_target(
+                system,
+                interceptor
+            );
+
+        if (interceptor->target_id >= 0)
+            interceptor->state =
+                AI_TRACKING;
+        else
+            interceptor->state =
+                AI_SEARCHING;
+    }
+
+    if (interceptor->target_id < 0)
+        return;
+
+    InterceptorTarget *target =
+        &system->targets[
+            interceptor->target_id
+        ];
+
+    /*
+     * Target disappeared.
+     */
+
+    if (!target->active)
+    {
+        interceptor->target_id = -1;
+        interceptor->state = AI_LOST;
+        return;
+    }
+
+    /*
+     * Predict future position.
+     */
+
+    Vec2 predicted =
+        predict_target(
+            interceptor,
+            target
+        );
+
+    interceptor->state =
+        AI_INTERCEPTING;
+
+    Vec2 steering =
+        steer_toward(
+            interceptor->position,
+            predicted,
+            interceptor->acceleration *
+            (float)dt
+        );
+
+    interceptor->velocity.x +=
+        steering.x;
+
+    interceptor->velocity.y +=
+        steering.y;
+
+    interceptor->position.x +=
+        interceptor->velocity.x *
+        dt;
+
+    interceptor->position.y +=
+        interceptor->velocity.y *
+        dt;
+}
+Route blocking
+
+For a more sophisticated GTA-style system, some interceptors shouldn't pursue the courier at all.
+
+They become blockers.
+
+static Vec2 calculate_block_position(
+    const InterceptorTarget *target
+)
+{
+    Vec2 position;
+
+    position.x =
+        target->position.x +
+        target->velocity.x * 8.0;
+
+    position.y =
+        target->position.y +
+        target->velocity.y * 8.0;
+
+    return position;
+}
+
+That creates much more interesting behaviour:
+
+COURIER
+   ↓
+   ↓
+   ↓
+   ↓
+   X ← BLOCKER
+
+             ↑
+             |
+        INTERCEPTOR
+
+The courier then has to choose another route.
+
+Interceptor escalation
+static int determine_interceptor_count(
+    float alert_level
+)
+{
+    if (alert_level < 0.20f)
+        return 0;
+
+    if (alert_level < 0.40f)
+        return 1;
+
+    if (alert_level < 0.60f)
+        return 2;
+
+    if (alert_level < 0.80f)
+        return 3;
+
+    return 5;
+}
+
+So a normal courier mission might be:
+
+ALERT: 12%
+
+No interceptors
+
+while a valuable express package becomes:
+
+ALERT: 74%
+
+1 Scout
+1 Pursuit
+1 Blocker
+
+And a major story event:
+
+ALERT: 96%
+
+INTERCEPTOR EVENT
+
+2 Scouts
+2 Pursuit vehicles
+1 Heavy
+1 Aerial observer
+The really useful part: adaptive behaviour
+
+Have the interceptor system remember what the courier does.
+
+typedef struct
+{
+    float motorway_preference;
+    float urban_preference;
+    float rural_preference;
+    float tunnel_preference;
+    float water_preference;
+
+    float average_speed;
+    float risk_tolerance;
+
+} CourierBehaviourModel;
+
+Then:
+
+static InterceptorType
+choose_interceptor_for_target(
+    const CourierBehaviourModel *model
+)
+{
+    if (model->average_speed > 0.85f)
+        return INTERCEPTOR_PURSUIT;
+
+    if (model->rural_preference > 0.70f)
+        return INTERCEPTOR_SCOUT;
+
+    if (model->risk_tolerance < 0.30f)
+        return INTERCEPTOR_HEAVY;
+
+    return INTERCEPTOR_DECOY;
+}
+
+This produces the GTA-style feeling you're after:
+
+The interceptor system isn't simply spawning faster cars. It's responding to the player's courier behaviour.
+
+You can then connect it directly to the postal/courier economy:
+
+                COURIER NETWORK
+                       │
+                       ↓
+                 HIGH-VALUE JOB
+                       │
+                       ↓
+                 PLAYER ACCEPTS
+                       │
+                       ↓
+                PACKAGE IN TRANSIT
+                       │
+                       ↓
+                 RISK CALCULATION
+                       │
+             ┌─────────┴─────────┐
+             ↓                   ↓
+          LOW RISK            HIGH RISK
+             │                   │
+        NORMAL TRAFFIC       INTERCEPTORS
+                                 │
+                    ┌────────────┼────────────┐
+                    ↓            ↓            ↓
+                  SCOUT       PURSUIT       BLOCKER
+                    │            │            │
+                    └────────────┼────────────┘
+                                 ↓
+                         PLAYER ADAPTS
+                                 ↓
+                         NEW ROUTE
+                                 ↓
+                     INTERCEPTOR AI UPDATES
+
+That makes courier driving, the city's logistics network, NPC traffic and the interceptor AI one interconnected gameplay system, rather than separate mission mechanics.
+
+
+
+
+
+HARD C — FLORIDA HORSE RACING TRACK
+/*
+ * ============================================================
+ * FLORIDA HORSE RACING VENUE
+ * ============================================================
+ *
+ * Fictional open-world horse racing system.
+ *
+ * Includes:
+ *
+ *   - racecourse
+ *   - turf track
+ *   - dirt track
+ *   - starting gates
+ *   - paddock
+ *   - stables
+ *   - jockeys
+ *   - horses
+ *   - race cards
+ *   - standings
+ *   - sponsors
+ *   - spectators
+ *   - weather
+ *   - race simulation
+ *
+ * All simulation logic is independent of rendering.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_HORSES      64
+#define MAX_JOCKEYS     32
+#define MAX_RACES       32
+#define MAX_SPONSORS    32
+#define TRACK_POINTS    128
+#define MAX_STABLES     32
+
+#define PI 3.14159265358979323846
+
+
+/* ============================================================
+ * TRACK TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    TRACK_TURF,
+    TRACK_DIRT,
+    TRACK_SYNTHETIC
+
+} TrackSurface;
+
+
+/* ============================================================
+ * HORSE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    float speed;
+    float acceleration;
+    float stamina;
+
+    float turning;
+    float starting_speed;
+
+    float condition;
+    float confidence;
+
+    float fatigue;
+
+    bool injured;
+    bool active;
+
+} RaceHorse;
+
+
+/* ============================================================
+ * JOCKEY
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    float skill;
+    float tactical_skill;
+    float starting_skill;
+
+    float confidence;
+
+    int wins;
+    int races;
+
+} Jockey;
+
+
+/* ============================================================
+ * TRACK
+ * ============================================================ */
+
+typedef struct
+{
+    char name[64];
+
+    TrackSurface surface;
+
+    float length;
+    float width;
+
+    float banking;
+    float elevation_change;
+
+    Vec2 points[TRACK_POINTS];
+
+    int point_count;
+
+} RaceTrack;
+
+There is one small correction needed above: define the vector before RaceTrack.
+
+typedef struct
+{
+    float x;
+    float y;
+
+} Vec2;
+
+So the final ordering is:
+
+typedef struct
+{
+    float x;
+    float y;
+
+} Vec2;
+
+
+typedef struct
+{
+    char name[64];
+
+    TrackSurface surface;
+
+    float length;
+    float width;
+
+    float banking;
+    float elevation_change;
+
+    Vec2 points[TRACK_POINTS];
+
+    int point_count;
+
+} RaceTrack;
+The Florida track
+
+Give it a distinctive fictional identity:
+
+void initialise_track(
+    RaceTrack *track
+)
+{
+    strcpy(
+        track->name,
+        "Gulf Atlantic Downs"
+    );
+
+    track->surface =
+        TRACK_TURF;
+
+    track->length =
+        2400.0f;
+
+    track->width =
+        22.0f;
+
+    track->banking =
+        8.0f;
+
+    track->elevation_change =
+        12.0f;
+
+    track->point_count =
+        TRACK_POINTS;
+}
+
+The physical venue can contain:
+
+                 GULF ATLANTIC DOWNS
+                         │
+        ┌────────────────┼────────────────┐
+        ↓                ↓                ↓
+      PADDOCK         GRANDSTAND        STABLES
+        │                │                │
+        └────────────────┼────────────────┘
+                         ↓
+                    STARTING GATES
+                         ↓
+              ╭──────────────────╮
+              │                  │
+              │     TURF LOOP    │
+              │                  │
+              ╰──────────────────╯
+                         ↓
+                    FINISH LINE
+Horses
+void create_horse(
+    RaceHorse *horse,
+    int id,
+    const char *name,
+    float speed,
+    float acceleration,
+    float stamina
+)
+{
+    horse->id = id;
+
+    strncpy(
+        horse->name,
+        name,
+        sizeof(horse->name) - 1
+    );
+
+    horse->speed =
+        speed;
+
+    horse->acceleration =
+        acceleration;
+
+    horse->stamina =
+        stamina;
+
+    horse->turning =
+        0.75f;
+
+    horse->starting_speed =
+        0.70f;
+
+    horse->condition =
+        1.0f;
+
+    horse->confidence =
+        0.50f;
+
+    horse->fatigue =
+        0.0f;
+
+    horse->injured =
+        false;
+
+    horse->active =
+        true;
+}
+
+Example race field:
+
+create_horse(
+    &horses[0],
+    0,
+    "Palm Shadow",
+    0.91f,
+    0.88f,
+    0.72f
+);
+
+create_horse(
+    &horses[1],
+    1,
+    "Golden Current",
+    0.86f,
+    0.94f,
+    0.80f
+);
+
+create_horse(
+    &horses[2],
+    2,
+    "Everglade Crown",
+    0.89f,
+    0.81f,
+    0.92f
+);
+
+create_horse(
+    &horses[3],
+    3,
+    "Miami Comet",
+    0.96f,
+    0.86f,
+    0.67f
+);
+Race simulation
+
+Don't simply give the fastest horse first place.
+
+Introduce stamina and race tactics.
+
+typedef struct
+{
+    int horse_id;
+    int jockey_id;
+
+    float distance;
+    float speed;
+
+    float fatigue;
+
+    int position;
+
+    bool finished;
+
+} RaceEntry;
+static float calculate_race_speed(
+    const RaceHorse *horse,
+    const Jockey *jockey,
+    float track_condition
+)
+{
+    float speed =
+        horse->speed;
+
+    speed *=
+        horse->condition;
+
+    speed *=
+        (0.80f +
+         jockey->skill * 0.20f);
+
+    speed *=
+        track_condition;
+
+    speed -=
+        horse->fatigue * 0.20f;
+
+    return fmaxf(
+        0.05f,
+        speed
+    );
+}
+Stamina
+static void update_horse_fatigue(
+    RaceHorse *horse,
+    float speed,
+    float dt
+)
+{
+    float exertion =
+        speed * speed;
+
+    horse->fatigue +=
+        exertion *
+        (1.0f - horse->stamina) *
+        dt;
+
+    if (horse->fatigue > 1.0f)
+        horse->fatigue = 1.0f;
+}
+
+This creates different race styles:
+
+SPRINTER
+fast early
+weak finish
+
+STAYER
+slow early
+strong finish
+
+ALL-ROUNDER
+balanced
+
+FRONT-RUNNER
+tries to control race
+
+CLOSER
+saves energy
+finishes strongly
+Jockey tactics
+typedef enum
+{
+    TACTIC_FRONT,
+    TACTIC_STALK,
+    TACTIC_MIDFIELD,
+    TACTIC_CLOSER
+
+} RaceTactic;
+static float tactical_modifier(
+    RaceTactic tactic,
+    float race_progress
+)
+{
+    switch (tactic)
+    {
+        case TACTIC_FRONT:
+            return race_progress < 0.50f
+                ? 1.08f
+                : 0.94f;
+
+        case TACTIC_STALK:
+            return 1.02f;
+
+        case TACTIC_MIDFIELD:
+            return 0.98f;
+
+        case TACTIC_CLOSER:
+            return race_progress < 0.65f
+                ? 0.90f
+                : 1.15f;
+    }
+
+    return 1.0f;
+}
+Weather
+
+Florida weather should materially change the race.
+
+typedef enum
+{
+    WEATHER_CLEAR,
+    WEATHER_HUMID,
+    WEATHER_RAIN,
+    WEATHER_STORM
+
+} RaceWeather;
+static float weather_modifier(
+    RaceWeather weather,
+    TrackSurface surface
+)
+{
+    if (weather == WEATHER_CLEAR)
+        return 1.0f;
+
+    if (weather == WEATHER_HUMID)
+        return 0.97f;
+
+    if (weather == WEATHER_RAIN)
+    {
+        if (surface == TRACK_TURF)
+            return 0.91f;
+
+        return 0.95f;
+    }
+
+    if (weather == WEATHER_STORM)
+        return 0.80f;
+
+    return 1.0f;
+}
+
+That gives you dynamic race days:
+
+CLEAR
+→ fast turf
+
+HUMID
+→ stamina becomes important
+
+RAIN
+→ slower track
+
+STORM
+→ race delayed
+Starting gates
+typedef struct
+{
+    int lane;
+
+    bool occupied;
+
+    int horse_id;
+
+} StartingGate;
+void load_starting_gate(
+    StartingGate *gate,
+    int horse_id
+)
+{
+    gate->occupied =
+        true;
+
+    gate->horse_id =
+        horse_id;
+}
+
+Race start:
+
+void release_gate(
+    StartingGate *gate
+)
+{
+    gate->occupied =
+        false;
+
+    gate->horse_id =
+        -1;
+}
+Race event system
+
+Add dynamic events:
+
+typedef enum
+{
+    EVENT_NONE,
+    EVENT_FAST_START,
+    EVENT_POSITION_CHANGE,
+    EVENT_LATE_SURGE,
+    EVENT_PHYSICAL_WEATHER_CHANGE,
+    EVENT_PHOTO_FINISH
+
+} RaceEvent;
+
+The race announcer can generate commentary from the simulation:
+
+GULF ATLANTIC DOWNS
+
+"MIAMI COMET HAS TAKEN THE LEAD!"
+
+"EVERGLADE CROWN IS MOVING UP
+ON THE OUTSIDE!"
+
+"GOLDEN CURRENT IS SAVING ENERGY
+FOR THE FINAL STRAIGHT!"
+
+"THEY'RE INTO THE FINAL 400 METRES!"
+Standings
+typedef struct
+{
+    int horse_id;
+
+    int starts;
+    int wins;
+    int seconds;
+    int thirds;
+
+    double prize_money;
+
+} HorseStanding;
+
+Then the venue maintains a season table:
+
+GULF ATLANTIC DOWNS — SEASON
+
+HORSE              WINS     PRIZE MONEY
+────────────────────────────────────────
+Miami Comet          5       $420,000
+Everglade Crown      4       $390,000
+Golden Current       3       $280,000
+Palm Shadow          2       $210,000
+Sponsors
+typedef struct
+{
+    char name[64];
+
+    double sponsorship;
+
+    float visibility;
+
+    bool active;
+
+} RaceSponsor;
+
+Example fictional sponsors:
+
+RaceSponsor sponsors[] =
+{
+    {
+        "Gulf Atlantic",
+        2500000.0,
+        0.95f,
+        true
+    },
+
+    {
+        "AeroKraft",
+        1200000.0,
+        0.75f,
+        true
+    },
+
+    {
+        "Palm Meridian Motors",
+        900000.0,
+        0.70f,
+        true
+    }
+};
+Race-day economy
+
+The racecourse can become another economic node in the open world:
+
+HORSE OWNERS
+     ↓
+STABLES
+     ↓
+TRAINERS
+     ↓
+JOCKEYS
+     ↓
+RACECOURSE
+     ↓
+SPECTATORS
+     ↓
+RESTAURANTS / SHOPS / HOTELS
+     ↓
+MIAMI ECONOMY
+
+Attendance can respond to the race card:
+
+int calculate_attendance(
+    float race_quality,
+    float weather,
+    float reputation
+)
+{
+    float attendance =
+        5000.0f;
+
+    attendance +=
+        race_quality * 15000.0f;
+
+    attendance +=
+        reputation * 10000.0f;
+
+    attendance *=
+        weather;
+
+    return (int)attendance;
+}
+
+So an ordinary Tuesday might produce:
+
+ATTENDANCE
+7,420
+
+while a championship race becomes:
+
+ATTENDANCE
+28,914
+Overall game integration
+
+The course can ultimately connect to the other systems you've been building:
+
+                    GULF ATLANTIC DOWNS
+                             │
+          ┌──────────────────┼──────────────────┐
+          ↓                  ↓                  ↓
+       RACING             BETTING            SPONSORS
+          │                  │                  │
+          ↓                  ↓                  ↓
+       HORSES             ECONOMY          CORPORATIONS
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             ↓
+                       RACE-DAY WORLD
+                             │
+          ┌──────────────────┼──────────────────┐
+          ↓                  ↓                  ↓
+       TRAFFIC            CROWD             NPC EVENTS
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             ↓
+                        OPEN WORLD
+
+For the game, I'd make Gulf Atlantic Downs a persistent venue: races occur on a calendar even when the protagonist isn't there, NPC horses develop careers, jockeys change teams, sponsors come and go, weather changes race conditions, and the player can return months later to find a completely different championship table.
+
+
+
+
+
+
+
+
+Yes. For the fictional game, you can make the horse-racing economy considerably deeper by having legal betting, rumours, tips, and an explicitly fictional “insider information” system. The latter can affect which horses the protagonist knows are favoured, without providing real-world instructions for manipulating an actual betting market.
+
+HARD C — HORSE-RACING BETTING & INSIDER INFORMATION ENGINE
+/*
+ * ============================================================
+ * GULF ATLANTIC DOWNS
+ * HORSE RACING BETTING ENGINE
+ * ============================================================
+ *
+ * Fictional open-world game system.
+ *
+ * FEATURES:
+ *
+ *   - Win betting
+ *   - Place betting
+ *   - Each-way betting
+ *   - Dynamic odds
+ *   - Horse form
+ *   - Jockey form
+ *   - Weather effects
+ *   - Market confidence
+ *   - NPC betting
+ *   - Rumours
+ *   - Fictional insider-information events
+ *   - Race results
+ *   - Player bankroll
+ *   - Reputation
+ *
+ * The "insider" system is an abstract game mechanic:
+ * certain NPCs may possess privileged fictional knowledge
+ * about race outcomes.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_HORSES       32
+#define MAX_BETS         512
+#define MAX_TIPS         128
+#define MAX_NPCS         128
+
+#define MIN_ODDS         1.05
+#define MAX_ODDS         100.0
+
+
+/* ============================================================
+ * HORSE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double speed;
+    double stamina;
+    double acceleration;
+
+    double form;
+    double confidence;
+
+    int recent_wins;
+    int recent_places;
+
+    bool active;
+
+} BettingHorse;
+
+
+/* ============================================================
+ * BET TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    BET_WIN,
+    BET_PLACE,
+    BET_EACH_WAY
+
+} BetType;
+
+
+/* ============================================================
+ * BET
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    int player_id;
+    int horse_id;
+
+    BetType type;
+
+    double stake;
+    double odds;
+
+    bool settled;
+
+    double payout;
+
+} HorseBet;
+
+
+/* ============================================================
+ * INFORMATION TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    INFO_PUBLIC,
+    INFO_RUMOUR,
+    INFO_PRIVATE,
+    INFO_INSIDER
+
+} InformationType;
+
+
+/* ============================================================
+ * INFORMATION
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    int horse_id;
+
+    InformationType type;
+
+    double confidence;
+
+    char source[64];
+
+    bool verified;
+
+} RaceInformation;
+
+
+/* ============================================================
+ * PLAYER
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    double bankroll;
+
+    double lifetime_winnings;
+
+    int bets;
+
+    int winning_bets;
+
+    float reputation;
+
+} Bettor;
+
+
+/* ============================================================
+ * BETTING MARKET
+ * ============================================================ */
+
+typedef struct
+{
+    BettingHorse horses[MAX_HORSES];
+
+    HorseBet bets[MAX_BETS];
+
+    RaceInformation information[MAX_TIPS];
+
+    Bettor players[MAX_NPCS];
+
+    int horse_count;
+    int bet_count;
+    int information_count;
+    int player_count;
+
+} BettingMarket;
+Horse win probability
+
+The market calculates an estimated probability from the horse's characteristics.
+
+static double horse_strength(
+    const BettingHorse *horse
+)
+{
+    return
+        horse->speed * 0.35 +
+        horse->stamina * 0.20 +
+        horse->acceleration * 0.15 +
+        horse->form * 0.20 +
+        horse->confidence * 0.10;
+}
+
+Convert that into a market probability:
+
+static double implied_probability(
+    const BettingHorse *horse
+)
+{
+    double strength =
+        horse_strength(horse);
+
+    if (strength < 0.01)
+        strength = 0.01;
+
+    return strength;
+}
+
+Then normalize the entire field:
+
+void calculate_probabilities(
+    BettingMarket *market,
+    double *probabilities
+)
+{
+    double total = 0.0;
+
+    for (int i = 0;
+         i < market->horse_count;
+         ++i)
+    {
+        probabilities[i] =
+            implied_probability(
+                &market->horses[i]
+            );
+
+        total += probabilities[i];
+    }
+
+    if (total <= 0.0)
+        return;
+
+    for (int i = 0;
+         i < market->horse_count;
+         ++i)
+    {
+        probabilities[i] /= total;
+    }
+}
+Dynamic odds
+double probability_to_odds(
+    double probability
+)
+{
+    if (probability <= 0.001)
+        return MAX_ODDS;
+
+    double odds =
+        1.0 / probability;
+
+    if (odds < MIN_ODDS)
+        odds = MIN_ODDS;
+
+    if (odds > MAX_ODDS)
+        odds = MAX_ODDS;
+
+    return odds;
+}
+
+The board could therefore display:
+
+GULF ATLANTIC DOWNS
+────────────────────────────────
+
+HORSE             ODDS
+
+Miami Comet       3.20
+Everglade Crown   4.10
+Golden Current    5.50
+Palm Shadow       7.25
+Blue Meridian    12.00
+Storm Harbour    18.00
+Betting
+bool place_bet(
+    BettingMarket *market,
+    Bettor *player,
+    int horse_id,
+    BetType type,
+    double stake,
+    double odds
+)
+{
+    if (stake <= 0.0)
+        return false;
+
+    if (player->bankroll < stake)
+        return false;
+
+    if (market->bet_count >= MAX_BETS)
+        return false;
+
+    HorseBet *bet =
+        &market->bets[
+            market->bet_count++
+        ];
+
+    bet->id =
+        market->bet_count;
+
+    bet->player_id =
+        player->id;
+
+    bet->horse_id =
+        horse_id;
+
+    bet->type =
+        type;
+
+    bet->stake =
+        stake;
+
+    bet->odds =
+        odds;
+
+    bet->settled =
+        false;
+
+    bet->payout =
+        0.0;
+
+    player->bankroll -=
+        stake;
+
+    player->bets++;
+
+    return true;
+}
+Fictional insider-information system
+
+This is where the game gets interesting.
+
+Some NPCs have information unavailable to ordinary spectators:
+
+TRAINER
+JOCKEY
+STABLE HAND
+OWNER
+RACECOURSE OFFICIAL
+CORPORATE SPONSOR
+SPORTS JOURNALIST
+WEALTHY GAMBLER
+
+They can generate game-world information events.
+
+RaceInformation *create_information(
+    BettingMarket *market,
+    int horse_id,
+    InformationType type,
+    double confidence,
+    const char *source
+)
+{
+    if (market->information_count >=
+        MAX_TIPS)
+        return NULL;
+
+    RaceInformation *info =
+        &market->information[
+            market->information_count++
+        ];
+
+    info->id =
+        market->information_count;
+
+    info->horse_id =
+        horse_id;
+
+    info->type =
+        type;
+
+    info->confidence =
+        confidence;
+
+    strncpy(
+        info->source,
+        source,
+        sizeof(info->source) - 1
+    );
+
+    info->verified = false;
+
+    return info;
+}
+
+For example, a story NPC could give the protagonist:
+
+PRIVATE MESSAGE
+
+SOURCE:
+Stable Manager
+
+"Everglade Crown is running
+better than the public thinks."
+
+CONFIDENCE
+82%
+
+Or a more powerful fictional insider event:
+
+CONFIDENTIAL TIP
+
+SOURCE:
+Racing Team Executive
+
+HORSE:
+Miami Comet
+
+PRIVATE WIN PROBABILITY:
+71%
+
+PUBLIC MARKET:
+31%
+Information quality
+
+Not every tip should be correct.
+
+static double information_reliability(
+    InformationType type
+)
+{
+    switch (type)
+    {
+        case INFO_PUBLIC:
+            return 0.50;
+
+        case INFO_RUMOUR:
+            return 0.35;
+
+        case INFO_PRIVATE:
+            return 0.70;
+
+        case INFO_INSIDER:
+            return 0.90;
+    }
+
+    return 0.50;
+}
+
+The game can therefore create a distinction between:
+
+PUBLIC TIP
+"I hear Miami Comet is fast."
+
+RUMOUR
+"Someone at the stables says
+Miami Comet is flying."
+
+PRIVATE
+"The trainer thinks Miami Comet
+will run exceptionally well."
+
+INSIDER
+"An NPC with privileged access
+has information indicating that
+Miami Comet is unusually likely
+to win."
+Insider event generator
+void generate_insider_event(
+    BettingMarket *market,
+    int horse_id
+)
+{
+    const char *sources[] =
+    {
+        "Stable Manager",
+        "Jockey",
+        "Trainer",
+        "Horse Owner",
+        "Race Official"
+    };
+
+    int source =
+        rand() % 5;
+
+    create_information(
+        market,
+        horse_id,
+        INFO_INSIDER,
+        0.75 +
+        ((double)rand() / RAND_MAX)
+        * 0.20,
+        sources[source]
+    );
+}
+Player information advantage
+
+The protagonist can receive information that ordinary NPC bettors don't possess.
+
+double player_information_bonus(
+    const RaceInformation *info
+)
+{
+    if (info->type == INFO_INSIDER)
+        return info->confidence;
+
+    if (info->type == INFO_PRIVATE)
+        return info->confidence * 0.5;
+
+    if (info->type == INFO_RUMOUR)
+        return info->confidence * 0.2;
+
+    return 0.0;
+}
+
+This creates a gameplay choice:
+
+                 RACE
+                  │
+          ┌───────┴───────┐
+          ↓               ↓
+     PUBLIC MARKET    PRIVATE INFO
+          │               │
+          ↓               ↓
+       NORMAL ODDS     PLAYER KNOWS
+          │               │
+          └───────┬───────┘
+                  ↓
+               BET?
+Race result
+
+The race itself remains probabilistic.
+
+int simulate_winner(
+    BettingMarket *market
+)
+{
+    double probabilities[MAX_HORSES];
+
+    calculate_probabilities(
+        market,
+        probabilities
+    );
+
+    double random_value =
+        (double)rand() / RAND_MAX;
+
+    double cumulative = 0.0;
+
+    for (int i = 0;
+         i < market->horse_count;
+         ++i)
+    {
+        cumulative +=
+            probabilities[i];
+
+        if (random_value <= cumulative)
+            return market->horses[i].id;
+    }
+
+    return market->horses[
+        market->horse_count - 1
+    ].id;
+}
+
+This is important: even privileged information shouldn't guarantee the result. It should make the player unusually well-informed while preserving uncertainty.
+
+Settlement
+void settle_bet(
+    HorseBet *bet,
+    int winning_horse
+)
+{
+    if (bet->settled)
+        return;
+
+    bet->settled = true;
+
+    if (bet->horse_id !=
+        winning_horse)
+    {
+        bet->payout = 0.0;
+        return;
+    }
+
+    switch (bet->type)
+    {
+        case BET_WIN:
+
+            bet->payout =
+                bet->stake *
+                bet->odds;
+
+            break;
+
+        case BET_PLACE:
+
+            bet->payout =
+                bet->stake *
+                (bet->odds * 0.35);
+
+            break;
+
+        case BET_EACH_WAY:
+
+            bet->payout =
+                bet->stake *
+                bet->odds *
+                0.50;
+
+            break;
+    }
+}
+Market reaction
+
+The really fun part is allowing NPC betting behaviour to move the odds.
+
+void update_market_odds(
+    BettingMarket *market,
+    int horse_id,
+    double money_wagered
+)
+{
+    for (int i = 0;
+         i < market->horse_count;
+         ++i)
+    {
+        if (market->horses[i].id ==
+            horse_id)
+        {
+            /*
+             * Large betting interest
+             * shortens the displayed odds.
+             */
+
+            market->horses[i].confidence +=
+                money_wagered * 0.00001;
+
+            if (market->horses[i].confidence > 1.0)
+                market->horses[i].confidence = 1.0;
+        }
+    }
+}
+
+So you can have a visible market movement:
+
+10:00
+
+MIAMI COMET
+7/2
+
+10:15
+
+Large betting activity detected
+
+MIAMI COMET
+3/1
+
+10:30
+
+Heavy market interest
+
+MIAMI COMET
+5/2
+
+The protagonist may notice that something unusual is happening without necessarily knowing why.
+
+Story missions
+
+This gives you a much richer set of quests:
+
+MISSION: THE TIP
+
+An NPC gives you privileged information
+about an upcoming race.
+
+Do you:
+
+[BET]
+[IGNORE IT]
+[TELL THE JOURNALIST]
+[INVESTIGATE THE SOURCE]
+
+Another:
+
+MISSION: THE MARKET MOVES
+
+The protagonist notices enormous
+betting activity on an outsider.
+
+Find out why.
+
+Possible explanations:
+
+→ genuine information
+→ rumour
+→ NPC superstition
+→ horse unexpectedly improved
+→ deliberately misleading gossip
+
+And a high-level storyline:
+
+                 HORSE RACING
+                      │
+              ┌───────┴────────┐
+              ↓                ↓
+        PUBLIC MARKET      PRIVATE NETWORK
+              │                │
+              ↓                ↓
+           NORMAL             TIPS
+           BETTING              │
+              │          ┌──────┴──────┐
+              │          ↓             ↓
+              │       ACCURATE       FALSE
+              │          │             │
+              └──────────┴─────────────┘
+                         ↓
+                    RACE RESULT
+                         ↓
+                    PAYOUTS
+                         ↓
+                  PLAYER ECONOMY
+
+That makes the horse-racing venue a genuine information economy: the odds reflect public opinion, NPCs possess different levels of knowledge, privileged fictional information can give the protagonist an edge, and the race itself remains uncertain rather than becoming a guaranteed-money exploit.
+
+
+
+
+
+
+
+
+
+Hard C — Three spontaneous Arabian horse spawns
+/*
+ * ============================================================
+ * GULF ATLANTIC DOWNS
+ * RANDOM ARABIAN HORSE GENERATOR
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#define ARABIAN_SPAWN_COUNT 3
+
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+    char bloodline[64];
+    char owner[64];
+
+    float speed;
+    float acceleration;
+    float stamina;
+    float agility;
+
+    float condition;
+    float temperament;
+
+    int age;
+    int races;
+    int wins;
+
+    bool rare_spawn;
+    bool active;
+
+} ArabianHorse;
+
+
+/* ------------------------------------------------------------
+ * Random helper
+ * ------------------------------------------------------------ */
+
+static float random_float(float min, float max)
+{
+    return min +
+        ((float)rand() / (float)RAND_MAX)
+        * (max - min);
+}
+
+
+/* ------------------------------------------------------------
+ * Name generator
+ * ------------------------------------------------------------ */
+
+static void generate_arabian_name(
+    ArabianHorse *horse,
+    int index
+)
+{
+    const char *prefix[] =
+    {
+        "Desert",
+        "Sultan",
+        "Golden",
+        "Royal",
+        "Azure",
+        "Silver",
+        "Midnight",
+        "Imperial",
+        "Falcon",
+        "Crescent"
+    };
+
+    const char *suffix[] =
+    {
+        "Star",
+        "Wind",
+        "Crown",
+        "Mirage",
+        "Moon",
+        "Prince",
+        "Spirit",
+        "Arrow",
+        "Thunder",
+        "Dawn"
+    };
+
+    int a = rand() % 10;
+    int b = rand() % 10;
+
+    snprintf(
+        horse->name,
+        sizeof(horse->name),
+        "%s %s",
+        prefix[a],
+        suffix[b]
+    );
+
+    /*
+     * Ensure the three spontaneous horses
+     * have distinct IDs.
+     */
+
+    horse->id = 9000 + index;
+}
+
+
+/* ------------------------------------------------------------
+ * Generate one Arabian horse
+ * ------------------------------------------------------------ */
+
+static ArabianHorse generate_arabian(
+    int index
+)
+{
+    ArabianHorse horse;
+
+    memset(
+        &horse,
+        0,
+        sizeof(horse)
+    );
+
+    generate_arabian_name(
+        &horse,
+        index
+    );
+
+    strcpy(
+        horse.bloodline,
+        "Desert Crown"
+    );
+
+    strcpy(
+        horse.owner,
+        "Unknown Owner"
+    );
+
+    /*
+     * Arabian characteristics.
+     *
+     * Values are normalized 0.0 - 1.0.
+     */
+
+    horse.speed =
+        random_float(0.78f, 0.94f);
+
+    horse.acceleration =
+        random_float(0.80f, 0.98f);
+
+    horse.stamina =
+        random_float(0.85f, 0.99f);
+
+    horse.agility =
+        random_float(0.82f, 0.97f);
+
+    horse.condition =
+        random_float(0.65f, 1.00f);
+
+    horse.temperament =
+        random_float(0.40f, 0.95f);
+
+    horse.age =
+        3 + rand() % 7;
+
+    horse.races =
+        rand() % 15;
+
+    horse.wins =
+        rand() %
+        (horse.races + 1);
+
+    horse.rare_spawn =
+        true;
+
+    horse.active =
+        true;
+
+    return horse;
+}
+Spontaneous spawning
+
+The important part is that they aren't always there.
+
+typedef struct
+{
+    ArabianHorse horses[ARABIAN_SPAWN_COUNT];
+
+    int count;
+
+    double next_spawn_time;
+
+} ArabianSpawnSystem;
+static void spawn_three_arabians(
+    ArabianSpawnSystem *system
+)
+{
+    system->count =
+        ARABIAN_SPAWN_COUNT;
+
+    for (int i = 0;
+         i < ARABIAN_SPAWN_COUNT;
+         ++i)
+    {
+        system->horses[i] =
+            generate_arabian(i);
+    }
+
+    printf(
+        "\n*** RARE HORSE EVENT ***\n"
+    );
+
+    for (int i = 0;
+         i < system->count;
+         ++i)
+    {
+        printf(
+            "%s has appeared at "
+            "Gulf Atlantic Downs.\n",
+            system->horses[i].name
+        );
+    }
+}
+Random event probability
+static bool should_spawn_arabians(
+    float event_probability
+)
+{
+    float roll =
+        random_float(0.0f, 1.0f);
+
+    return roll <
+        event_probability;
+}
+
+For example:
+
+void update_arabian_event(
+    ArabianSpawnSystem *system,
+    double game_time
+)
+{
+    if (game_time <
+        system->next_spawn_time)
+        return;
+
+    /*
+     * Very uncommon event.
+     */
+
+    if (should_spawn_arabians(0.025f))
+    {
+        spawn_three_arabians(system);
+
+        /*
+         * Don't immediately repeat
+         * the event.
+         */
+
+        system->next_spawn_time =
+            game_time +
+            3600.0 +
+            random_float(
+                0.0f,
+                7200.0f
+            );
+    }
+}
+
+So the open-world simulation might suddenly produce:
+
+════════════════════════════════════
+       GULF ATLANTIC DOWNS
+════════════════════════════════════
+
+          RARE HORSE ARRIVAL
+
+      ★ Desert Moon
+      ★ Imperial Wind
+      ★ Falcon Crown
+
+Status: UNREGISTERED
+Origin: PRIVATE STABLE
+Rarity: VERY RARE
+
+════════════════════════════════════
+
+And because their statistics are generated rather than fixed, one event might produce an ordinary trio while another produces an exceptional horse:
+
+DESERT MOON
+Speed          0.91
+Acceleration   0.96
+Stamina        0.94
+Agility        0.89
+Form           UNKNOWN
+
+That creates an interesting discovery mechanic: the player sees three unusual horses arrive with almost no public racing history, and has to decide whether they're potential champions before the wider betting market catches up.
+
+
+
+
+
+
+
+
+HARD C — RIDEABLE HORSE SYSTEM
+/*
+ * ============================================================
+ * OPEN-WORLD HORSE SYSTEM
+ * ============================================================
+ *
+ * Rideable horses for the fictional open-world game.
+ *
+ * Features:
+ *   - Mount / dismount
+ *   - Speed
+ *   - Acceleration
+ *   - Stamina
+ *   - Gallop
+ *   - Terrain modifiers
+ *   - Jumping
+ *   - Turning
+ *   - Temperament
+ *   - Bonding
+ *   - Fatigue
+ *   - Health
+ *   - Horse inventory
+ *   - Race compatibility
+ *
+ * Simulation is independent of rendering.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+
+#define MAX_HORSES 128
+
+typedef struct
+{
+    float x;
+    float y;
+
+} Vec2;
+
+
+/* ============================================================
+ * HORSE STATES
+ * ============================================================ */
+
+typedef enum
+{
+    HORSE_IDLE,
+    HORSE_WALK,
+    HORSE_TROT,
+    HORSE_CANTER,
+    HORSE_GALLOP,
+    HORSE_JUMP,
+    HORSE_TIRED,
+    HORSE_FLEEING
+
+} HorseState;
+
+
+/* ============================================================
+ * TERRAIN
+ * ============================================================ */
+
+typedef enum
+{
+    TERRAIN_ROAD,
+    TERRAIN_GRASS,
+    TERRAIN_MUD,
+    TERRAIN_SAND,
+    TERRAIN_FOREST,
+    TERRAIN_HILL,
+    TERRAIN_WATER_EDGE
+
+} HorseTerrain;
+
+
+/* ============================================================
+ * HORSE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    Vec2 position;
+    Vec2 velocity;
+
+    float heading;
+
+    /*
+     * Core performance.
+     */
+
+    float walk_speed;
+    float trot_speed;
+    float canter_speed;
+    float gallop_speed;
+
+    float acceleration;
+    float turning;
+
+    /*
+     * Endurance.
+     */
+
+    float stamina;
+    float max_stamina;
+
+    float fatigue;
+
+    /*
+     * Physical characteristics.
+     */
+
+    float jump_power;
+    float agility;
+    float strength;
+
+    /*
+     * Behaviour.
+     */
+
+    float temperament;
+    float courage;
+    float responsiveness;
+
+    /*
+     * Relationship with player.
+     */
+
+    float bond;
+
+    /*
+     * Current condition.
+     */
+
+    float health;
+    float condition;
+
+    HorseState state;
+
+    bool mounted;
+    bool active;
+
+} Horse;
+Horse creation
+static void initialise_horse(
+    Horse *horse,
+    int id,
+    const char *name
+)
+{
+    memset(
+        horse,
+        0,
+        sizeof(Horse)
+    );
+
+    horse->id = id;
+
+    strncpy(
+        horse->name,
+        name,
+        sizeof(horse->name) - 1
+    );
+
+    horse->walk_speed   = 2.0f;
+    horse->trot_speed   = 4.5f;
+    horse->canter_speed = 7.0f;
+    horse->gallop_speed = 12.0f;
+
+    horse->acceleration =
+        5.0f;
+
+    horse->turning =
+        0.85f;
+
+    horse->max_stamina =
+        100.0f;
+
+    horse->stamina =
+        100.0f;
+
+    horse->fatigue =
+        0.0f;
+
+    horse->jump_power =
+        0.80f;
+
+    horse->agility =
+        0.80f;
+
+    horse->strength =
+        0.75f;
+
+    horse->temperament =
+        0.70f;
+
+    horse->courage =
+        0.70f;
+
+    horse->responsiveness =
+        0.80f;
+
+    horse->bond =
+        0.10f;
+
+    horse->health =
+        100.0f;
+
+    horse->condition =
+        1.00f;
+
+    horse->state =
+        HORSE_IDLE;
+
+    horse->mounted =
+        false;
+
+    horse->active =
+        true;
+}
+Mounting
+bool mount_horse(
+    Horse *horse
+)
+{
+    if (!horse->active)
+        return false;
+
+    if (horse->health <= 0.0f)
+        return false;
+
+    if (horse->fatigue >= 95.0f)
+        return false;
+
+    horse->mounted =
+        true;
+
+    horse->state =
+        HORSE_WALK;
+
+    return true;
+}
+
+Dismounting:
+
+void dismount_horse(
+    Horse *horse
+)
+{
+    horse->mounted =
+        false;
+
+    horse->state =
+        HORSE_IDLE;
+
+    horse->velocity.x = 0.0f;
+    horse->velocity.y = 0.0f;
+}
+Gaits
+
+The player can progressively increase speed:
+
+WALK
+ ↓
+TROT
+ ↓
+CANTER
+ ↓
+GALLOP
+static float gait_speed(
+    const Horse *horse
+)
+{
+    switch (horse->state)
+    {
+        case HORSE_WALK:
+            return horse->walk_speed;
+
+        case HORSE_TROT:
+            return horse->trot_speed;
+
+        case HORSE_CANTER:
+            return horse->canter_speed;
+
+        case HORSE_GALLOP:
+            return horse->gallop_speed;
+
+        default:
+            return 0.0f;
+    }
+}
+Stamina system
+
+Galloping should be powerful but expensive.
+
+static void update_stamina(
+    Horse *horse,
+    float speed,
+    float dt
+)
+{
+    float exertion =
+        speed / horse->gallop_speed;
+
+    if (exertion > 0.55f)
+    {
+        horse->stamina -=
+            exertion *
+            12.0f *
+            dt;
+
+        horse->fatigue +=
+            exertion *
+            8.0f *
+            dt;
+    }
+    else
+    {
+        horse->stamina +=
+            5.0f * dt;
+
+        horse->fatigue -=
+            3.0f * dt;
+    }
+
+    if (horse->stamina < 0.0f)
+        horse->stamina = 0.0f;
+
+    if (horse->stamina >
+        horse->max_stamina)
+        horse->stamina =
+            horse->max_stamina;
+
+    if (horse->fatigue < 0.0f)
+        horse->fatigue = 0.0f;
+
+    if (horse->fatigue > 100.0f)
+        horse->fatigue = 100.0f;
+}
+
+If the horse becomes exhausted:
+
+if (horse->stamina < 10.0f)
+{
+    horse->state =
+        HORSE_TIRED;
+}
+Terrain
+
+Different horses perform differently depending on terrain.
+
+static float terrain_modifier(
+    const Horse *horse,
+    HorseTerrain terrain
+)
+{
+    switch (terrain)
+    {
+        case TERRAIN_ROAD:
+            return 0.95f;
+
+        case TERRAIN_GRASS:
+            return 1.00f;
+
+        case TERRAIN_MUD:
+            return 0.65f;
+
+        case TERRAIN_SAND:
+            return 0.72f;
+
+        case TERRAIN_FOREST:
+            return 0.58f;
+
+        case TERRAIN_HILL:
+            return
+                0.65f +
+                horse->strength * 0.25f;
+
+        case TERRAIN_WATER_EDGE:
+            return 0.45f;
+    }
+
+    return 1.0f;
+}
+
+So the open world can have:
+
+ROAD
+★★★★★
+
+GRASS
+★★★★★
+
+MUD
+★★★
+
+SAND
+★★★
+
+FOREST
+★★
+
+HILLS
+★★★★
+
+WATER
+★
+Movement
+static void update_horse_movement(
+    Horse *horse,
+    HorseTerrain terrain,
+    float dt
+)
+{
+    if (!horse->mounted)
+        return;
+
+    float target_speed =
+        gait_speed(horse);
+
+    target_speed *=
+        terrain_modifier(
+            horse,
+            terrain
+        );
+
+    target_speed *=
+        horse->condition;
+
+    target_speed *=
+        (1.0f -
+        horse->fatigue * 0.004f);
+
+    float current_speed =
+        sqrtf(
+            horse->velocity.x *
+            horse->velocity.x +
+            horse->velocity.y *
+            horse->velocity.y
+        );
+
+    float difference =
+        target_speed -
+        current_speed;
+
+    float acceleration =
+        horse->acceleration *
+        horse->responsiveness;
+
+    if (difference > 0.0f)
+    {
+        current_speed +=
+            acceleration * dt;
+
+        if (current_speed >
+            target_speed)
+            current_speed =
+                target_speed;
+    }
+    else
+    {
+        current_speed +=
+            acceleration * dt;
+
+        if (current_speed <
+            target_speed)
+            current_speed =
+                target_speed;
+    }
+
+    horse->velocity.x =
+        cosf(horse->heading) *
+        current_speed;
+
+    horse->velocity.y =
+        sinf(horse->heading) *
+        current_speed;
+
+    horse->position.x +=
+        horse->velocity.x * dt;
+
+    horse->position.y +=
+        horse->velocity.y * dt;
+
+    update_stamina(
+        horse,
+        current_speed,
+        dt
+    );
+}
+Jumping
+bool horse_jump(
+    Horse *horse
+)
+{
+    if (!horse->mounted)
+        return false;
+
+    if (horse->stamina < 8.0f)
+        return false;
+
+    if (horse->state ==
+        HORSE_TIRED)
+        return false;
+
+    horse->state =
+        HORSE_JUMP;
+
+    horse->stamina -=
+        8.0f;
+
+    return true;
+}
+
+The jump system can later connect to actual collision geometry:
+
+HORSE
+  ↓
+JUMP
+  ↓
+┌───────────────┐
+│ stone wall    │
+└───────────────┘
+  ↓
+LAND
+  ↓
+CANTER
+Bonding
+
+A horse shouldn't behave like a generic vehicle.
+
+void update_bond(
+    Horse *horse,
+    float time_ridden,
+    bool successful_race,
+    bool player_treated_horse_well
+)
+{
+    if (time_ridden > 0.0f)
+        horse->bond +=
+            0.001f *
+            time_ridden;
+
+    if (successful_race)
+        horse->bond += 0.05f;
+
+    if (player_treated_horse_well)
+        horse->bond += 0.02f;
+
+    if (horse->bond > 1.0f)
+        horse->bond = 1.0f;
+}
+
+Higher bond improves responsiveness:
+
+float effective_control(
+    const Horse *horse
+)
+{
+    return
+        horse->responsiveness *
+        (0.70f +
+         horse->bond * 0.30f);
+}
+Horse profiles
+
+You can now make dramatically different horses.
+
+DESERT MOON
+────────────────────────
+Gallop       12.8
+Stamina      94
+Acceleration 96
+Agility      89
+Temperament  61
+Bond         22
+
+Excellent endurance horse.
+
+versus:
+
+MIAMI COMET
+────────────────────────
+Gallop       14.2
+Stamina      64
+Acceleration 99
+Agility      91
+Temperament  78
+Bond         18
+
+Extremely fast.
+Burns stamina quickly.
+
+And:
+
+EVERGLADE CROWN
+────────────────────────
+Gallop       11.6
+Stamina      98
+Acceleration 81
+Agility      94
+Temperament  86
+Bond         44
+
+Exceptional long-distance
+and rough-terrain horse.
+Open-world integration
+
+The interesting part is that these aren't restricted to the racetrack:
+
+                    HORSE
+                      │
+       ┌──────────────┼──────────────┐
+       ↓              ↓              ↓
+    RACING         EXPLORATION    TRANSPORT
+       │              │              │
+       ↓              ↓              ↓
+  Racecourses      Countryside    NPC towns
+       │              │              │
+       └──────────────┼──────────────┘
+                      ↓
+                OPEN WORLD
+
+A horse can therefore become an alternative to cars:
+
+CAR
+Fast
+Road-dependent
+Fuel/energy
+High visibility
+
+HORSE
+Moderate speed
+Off-road capable
+No fuel
+Can enter narrow trails
+Can cross rural terrain
+Requires stamina management
+
+That also makes your rare Arabian spawns meaningful: finding one isn't merely collecting an NPC horse — you could discover an unusually fast, high-stamina mount and then develop its bond, racing career and performance over the course of the game.
+
+
+
+
+
+
+
+
+
+
+HARD C — WILD HORSE + CAPTURE + BREEDING SYSTEM
+/*
+ * ============================================================
+ * OPEN-WORLD WILD HORSE SYSTEM
+ * ============================================================
+ *
+ * Features:
+ *
+ *   - Wild herds
+ *   - Individual horse genetics
+ *   - Random traits
+ *   - Temperament
+ *   - Capture / taming
+ *   - Bonding
+ *   - Stable management
+ *   - Breeding
+ *   - Foals
+ *   - Rare bloodlines
+ *   - Mutations / exceptional traits
+ *   - Horse discovery
+ *
+ * Fictional game simulation.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_HORSES       512
+#define MAX_HERDS        64
+#define MAX_STABLES      32
+#define MAX_BREEDINGS    256
+
+#define RARE_THRESHOLD   0.90f
+
+
+/* ============================================================
+ * VECTOR
+ * ============================================================ */
+
+typedef struct
+{
+    float x;
+    float y;
+
+} Vec2;
+
+
+/* ============================================================
+ * HORSE ORIGIN
+ * ============================================================ */
+
+typedef enum
+{
+    HORSE_WILD,
+    HORSE_CAPTURED,
+    HORSE_DOMESTIC,
+    HORSE_RACEHORSE
+
+} HorseOrigin;
+
+
+/* ============================================================
+ * HORSE STATE
+ * ============================================================ */
+
+typedef enum
+{
+    HORSE_ROAMING,
+    HORSE_ALERT,
+    HORSE_FLEEING,
+    HORSE_TAMING,
+    HORSE_TAMED,
+    HORSE_STABLE,
+    HORSE_RACING
+
+} HorseState;
+
+
+/* ============================================================
+ * GENETICS
+ * ============================================================ */
+
+typedef struct
+{
+    float speed_gene;
+    float stamina_gene;
+    float acceleration_gene;
+    float agility_gene;
+
+    float strength_gene;
+    float endurance_gene;
+    float temperament_gene;
+
+    float coat_gene;
+    float size_gene;
+
+} HorseGenes;
+
+
+/* ============================================================
+ * HORSE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    Vec2 position;
+    Vec2 velocity;
+
+    HorseGenes genes;
+
+    float speed;
+    float stamina;
+    float acceleration;
+    float agility;
+
+    float strength;
+    float temperament;
+
+    float health;
+    float condition;
+
+    float bond;
+    float taming_progress;
+
+    int age;
+    int generation;
+
+    int father_id;
+    int mother_id;
+
+    HorseOrigin origin;
+    HorseState state;
+
+    bool captured;
+    bool bred;
+    bool rare;
+    bool active;
+
+} Horse;
+Wild herds
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    Vec2 centre;
+
+    float radius;
+
+    int horse_ids[MAX_HORSES];
+    int horse_count;
+
+    float population;
+
+    bool active;
+
+} WildHerd;
+
+Each herd can have its own genetic characteristics.
+
+HERD A
+────────────────────
+Fast
+High stamina
+Skittish
+
+HERD B
+────────────────────
+Large
+Calm
+Strong
+
+HERD C
+────────────────────
+Extremely rare
+High agility
+Excellent endurance
+Generating wild horses
+static float random_float(
+    float min,
+    float max
+)
+{
+    return min +
+        ((float)rand() /
+         (float)RAND_MAX)
+        * (max - min);
+}
+
+
+static HorseGenes generate_wild_genes(
+    void
+)
+{
+    HorseGenes genes;
+
+    genes.speed_gene =
+        random_float(0.45f, 0.90f);
+
+    genes.stamina_gene =
+        random_float(0.45f, 0.95f);
+
+    genes.acceleration_gene =
+        random_float(0.40f, 0.90f);
+
+    genes.agility_gene =
+        random_float(0.45f, 0.95f);
+
+    genes.strength_gene =
+        random_float(0.40f, 0.90f);
+
+    genes.endurance_gene =
+        random_float(0.45f, 0.95f);
+
+    genes.temperament_gene =
+        random_float(0.20f, 0.90f);
+
+    genes.coat_gene =
+        random_float(0.0f, 1.0f);
+
+    genes.size_gene =
+        random_float(0.40f, 0.90f);
+
+    return genes;
+}
+Exceptional wild horses
+
+Occasionally the world generates something genuinely unusual.
+
+static void generate_rare_genetics(
+    HorseGenes *genes
+)
+{
+    genes->speed_gene =
+        random_float(0.90f, 0.99f);
+
+    genes->stamina_gene =
+        random_float(0.90f, 0.99f);
+
+    genes->acceleration_gene =
+        random_float(0.88f, 0.99f);
+
+    genes->agility_gene =
+        random_float(0.90f, 0.99f);
+
+    genes->strength_gene =
+        random_float(0.80f, 0.98f);
+
+    genes->endurance_gene =
+        random_float(0.92f, 0.99f);
+
+    genes->temperament_gene =
+        random_float(0.60f, 0.95f);
+
+    genes->coat_gene =
+        random_float(0.0f, 1.0f);
+
+    genes->size_gene =
+        random_float(0.55f, 0.90f);
+}
+
+Then:
+
+static bool is_exceptional(
+    const HorseGenes *g
+)
+{
+    float score =
+        g->speed_gene +
+        g->stamina_gene +
+        g->acceleration_gene +
+        g->agility_gene +
+        g->endurance_gene;
+
+    return score >= 4.60f;
+}
+Wild horse behaviour
+
+Wild horses shouldn't stand around waiting for the player.
+
+static void update_wild_horse(
+    Horse *horse,
+    Vec2 player_position,
+    float dt
+)
+{
+    if (horse->captured)
+        return;
+
+    float dx =
+        player_position.x -
+        horse->position.x;
+
+    float dy =
+        player_position.y -
+        horse->position.y;
+
+    float distance =
+        sqrtf(dx * dx + dy * dy);
+
+    if (distance < 30.0f)
+    {
+        horse->state =
+            HORSE_ALERT;
+    }
+
+    if (distance < 15.0f)
+    {
+        horse->state =
+            HORSE_FLEEING;
+    }
+
+    if (horse->state ==
+        HORSE_FLEEING)
+    {
+        horse->velocity.x =
+            -dx / (distance + 0.01f)
+            * horse->speed;
+
+        horse->velocity.y =
+            -dy / (distance + 0.01f)
+            * horse->speed;
+
+        horse->position.x +=
+            horse->velocity.x * dt;
+
+        horse->position.y +=
+            horse->velocity.y * dt;
+    }
+}
+
+That gives you actual encounters:
+
+PLAYER
+   ↓
+spots distant herd
+   ↓
+approaches
+   ↓
+herd becomes alert
+   ↓
+some horses flee
+   ↓
+others remain
+   ↓
+player identifies exceptional horse
+Capture / taming
+
+Rather than simply pressing a button to "capture", make it a short gameplay sequence.
+
+bool begin_taming(
+    Horse *horse
+)
+{
+    if (horse->captured)
+        return false;
+
+    horse->state =
+        HORSE_TAMING;
+
+    horse->taming_progress =
+        0.0f;
+
+    return true;
+}
+
+Progress depends upon temperament and player behaviour:
+
+void update_taming(
+    Horse *horse,
+    float player_skill,
+    float dt
+)
+{
+    if (horse->state !=
+        HORSE_TAMING)
+        return;
+
+    float difficulty =
+        1.0f -
+        horse->temperament;
+
+    float progress =
+        player_skill *
+        (0.5f + difficulty) *
+        dt;
+
+    horse->taming_progress +=
+        progress;
+
+    if (horse->taming_progress >=
+        1.0f)
+    {
+        horse->captured = true;
+
+        horse->state =
+            HORSE_TAMED;
+
+        horse->origin =
+            HORSE_CAPTURED;
+
+        horse->bond =
+            0.15f;
+    }
+}
+Breeding
+
+Now the genetics system becomes important.
+
+typedef struct
+{
+    int sire_id;
+    int dam_id;
+
+    int foal_id;
+
+    bool successful;
+
+} BreedingRecord;
+
+The foal inherits characteristics from both parents.
+
+static float inherit_gene(
+    float father,
+    float mother
+)
+{
+    float average =
+        (father + mother) * 0.5f;
+
+    /*
+     * Small genetic variation.
+     */
+
+    float variation =
+        random_float(
+            -0.06f,
+             0.06f
+        );
+
+    return fmaxf(
+        0.0f,
+        fminf(
+            1.0f,
+            average + variation
+        )
+    );
+}
+
+Then:
+
+static HorseGenes breed_genes(
+    const Horse *father,
+    const Horse *mother
+)
+{
+    HorseGenes foal;
+
+    foal.speed_gene =
+        inherit_gene(
+            father->genes.speed_gene,
+            mother->genes.speed_gene
+        );
+
+    foal.stamina_gene =
+        inherit_gene(
+            father->genes.stamina_gene,
+            mother->genes.stamina_gene
+        );
+
+    foal.acceleration_gene =
+        inherit_gene(
+            father->genes.acceleration_gene,
+            mother->genes.acceleration_gene
+        );
+
+    foal.agility_gene =
+        inherit_gene(
+            father->genes.agility_gene,
+            mother->genes.agility_gene
+        );
+
+    foal.strength_gene =
+        inherit_gene(
+            father->genes.strength_gene,
+            mother->genes.strength_gene
+        );
+
+    foal.endurance_gene =
+        inherit_gene(
+            father->genes.endurance_gene,
+            mother->genes.endurance_gene
+        );
+
+    foal.temperament_gene =
+        inherit_gene(
+            father->genes.temperament_gene,
+            mother->genes.temperament_gene
+        );
+
+    foal.coat_gene =
+        inherit_gene(
+            father->genes.coat_gene,
+            mother->genes.coat_gene
+        );
+
+    foal.size_gene =
+        inherit_gene(
+            father->genes.size_gene,
+            mother->genes.size_gene
+        );
+
+    return foal;
+}
+Rare-bloodline discovery
+
+A particularly strong combination can create a rare horse.
+
+static void evaluate_foal(
+    Horse *foal
+)
+{
+    if (is_exceptional(
+            &foal->genes))
+    {
+        foal->rare =
+            true;
+    }
+}
+
+So the player could eventually discover:
+
+                 WILD HERD
+                    │
+          ┌─────────┴─────────┐
+          ↓                   ↓
+      HORSE A              HORSE B
+      Speed 88             Speed 91
+      Stamina 94           Stamina 87
+          │                   │
+          └─────────┬─────────┘
+                    ↓
+                  FOAL
+                    │
+             GENETIC INHERITANCE
+                    │
+                    ↓
+              Speed 94
+              Stamina 96
+              Agility 93
+                    │
+                    ↓
+             ★ RARE HORSE
+Bloodline system
+typedef struct
+{
+    char name[64];
+
+    float speed;
+    float stamina;
+    float agility;
+    float endurance;
+
+    int generation;
+
+} Bloodline;
+
+A rare horse might eventually establish:
+
+DESERT CROWN
+Generation 1
+      ↓
+DESERT CROWN II
+Generation 2
+      ↓
+DESERT CROWN III
+Generation 3
+      ↓
+DESERT CROWN IMPERIAL
+Generation 4
+
+The player could build a private racing stable around these bloodlines.
+
+Open-world loop
+EXPLORE
+   ↓
+FIND WILD HERD
+   ↓
+OBSERVE HORSES
+   ↓
+IDENTIFY EXCEPTIONAL INDIVIDUAL
+   ↓
+TAME
+   ↓
+STABLE
+   ↓
+TRAIN
+   ↓
+RACE
+   ↓
+BREED
+   ↓
+FOAL
+   ↓
+RARE GENETICS
+   ↓
+NEW BLOODLINE
+   ↓
+CHAMPIONSHIP
+
+And importantly, the wild population remains persistent. Capturing the fastest horse in a herd can change that herd's future genetics, while leaving exceptional animals in the wild allows the game to generate new bloodlines naturally. This makes horse collection a long-term open-world system rather than a one-off side activity.
+
+
+
+
+
+
+
+
+Yes — for a fictional open-world game, you can model a sniper weapon class without tying it to real-world weapon construction. I'd structure it around gameplay statistics, AI behaviour, ammunition abstractions, optics, recoil, and NPC roles.
+
+HARD C — SNIPER WEAPON SYSTEM
+/*
+ * ============================================================
+ * FICTIONAL OPEN-WORLD GAME
+ * SNIPER WEAPON SYSTEM
+ * ============================================================
+ *
+ * Gameplay-only abstraction.
+ *
+ * Models:
+ *   - Weapon classes
+ *   - Damage
+ *   - Range
+ *   - Accuracy
+ *   - Recoil
+ *   - Rate of fire
+ *   - Magazine capacity
+ *   - Handling
+ *   - Suppression
+ *   - Optics
+ *   - NPC suitability
+ *
+ * No real-world construction or modification data.
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_SNIPERS 16
+
+
+/* ============================================================
+ * SNIPER TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    SNIPER_LIGHT,
+    SNIPER_PRECISION,
+    SNIPER_HEAVY,
+    SNIPER_SEMI_AUTO,
+    SNIPER_FUTURISTIC
+
+} SniperType;
+
+
+/* ============================================================
+ * OPTICS
+ * ============================================================ */
+
+typedef enum
+{
+    OPTIC_BASIC,
+    OPTIC_LONG_RANGE,
+    OPTIC_THERMAL,
+    OPTIC_NIGHT,
+    OPTIC_ADVANCED
+
+} OpticType;
+
+
+/* ============================================================
+ * WEAPON
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+    char manufacturer[64];
+
+    SniperType type;
+    OpticType optic;
+
+    /*
+     * Gameplay statistics.
+     */
+
+    float damage;
+    float effective_range;
+    float accuracy;
+
+    float recoil;
+    float handling;
+
+    float reload_time;
+    float fire_rate;
+
+    int magazine_capacity;
+    int ammunition;
+
+    /*
+     * Game-specific concealment.
+     */
+
+    float detection_signature;
+
+    /*
+     * AI compatibility.
+     */
+
+    float npc_precision;
+    float npc_detection;
+
+    bool rare;
+    bool equipped;
+
+} Sniper;
+
+
+/* ============================================================
+ * FICTIONAL SNIPER DATABASE
+ * ============================================================ */
+
+static Sniper create_sniper(
+    int id,
+    const char *name,
+    const char *manufacturer,
+    SniperType type,
+    float damage,
+    float range,
+    float accuracy,
+    float recoil,
+    float handling,
+    int magazine
+)
+{
+    Sniper s;
+
+    memset(
+        &s,
+        0,
+        sizeof(s)
+    );
+
+    s.id = id;
+
+    strncpy(
+        s.name,
+        name,
+        sizeof(s.name) - 1
+    );
+
+    strncpy(
+        s.manufacturer,
+        manufacturer,
+        sizeof(s.manufacturer) - 1
+    );
+
+    s.type = type;
+
+    s.damage = damage;
+    s.effective_range = range;
+    s.accuracy = accuracy;
+
+    s.recoil = recoil;
+    s.handling = handling;
+
+    s.reload_time = 2.5f;
+    s.fire_rate = 0.25f;
+
+    s.magazine_capacity =
+        magazine;
+
+    s.ammunition =
+        magazine;
+
+    s.detection_signature =
+        0.50f;
+
+    s.npc_precision =
+        accuracy;
+
+    s.npc_detection =
+        0.75f;
+
+    s.rare = false;
+    s.equipped = false;
+
+    return s;
+}
+The fictional sniper roster
+static void create_sniper_roster(
+    Sniper *roster,
+    int *count
+)
+{
+    *count = 0;
+
+    roster[(*count)++] =
+        create_sniper(
+            100,
+            "AeroKraft Falcon",
+            "AeroKraft Arms",
+            SNIPER_LIGHT,
+            72.0f,
+            650.0f,
+            0.82f,
+            0.35f,
+            0.88f,
+            5
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            101,
+            "Gulf Sentinel",
+            "Gulf Atlantic Defence",
+            SNIPER_PRECISION,
+            88.0f,
+            850.0f,
+            0.94f,
+            0.42f,
+            0.70f,
+            5
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            102,
+            "Everglade Hunter",
+            "Florida Tactical Systems",
+            SNIPER_PRECISION,
+            81.0f,
+            720.0f,
+            0.91f,
+            0.38f,
+            0.78f,
+            6
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            103,
+            "Miami Spectre",
+            "Spectre Industries",
+            SNIPER_SEMI_AUTO,
+            67.0f,
+            550.0f,
+            0.84f,
+            0.28f,
+            0.91f,
+            10
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            104,
+            "Atlas Longshot",
+            "Atlas Engineering",
+            SNIPER_HEAVY,
+            100.0f,
+            1000.0f,
+            0.89f,
+            0.65f,
+            0.48f,
+            4
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            105,
+            "Nightfall",
+            "Blackwater Dynamics",
+            SNIPER_PRECISION,
+            84.0f,
+            780.0f,
+            0.92f,
+            0.40f,
+            0.74f,
+            5
+        );
+
+    roster[(*count)++] =
+        create_sniper(
+            106,
+            "Aero Null",
+            "AeroKraft Advanced",
+            SNIPER_FUTURISTIC,
+            91.0f,
+            900.0f,
+            0.97f,
+            0.30f,
+            0.82f,
+            6
+        );
+
+    roster[(*count) - 1].rare = true;
+}
+NPC sniper behaviour
+
+The interesting part for an open-world game is the AI, rather than simply having different guns.
+
+typedef enum
+{
+    SNIPER_IDLE,
+    SNIPER_SEARCHING,
+    SNIPER_TRACKING,
+    SNIPER_AIMING,
+    SNIPER_RELOCATING,
+    SNIPER_RETREATING
+
+} SniperAIState;
+
+
+typedef struct
+{
+    int npc_id;
+
+    Sniper *weapon;
+
+    SniperAIState state;
+
+    float awareness;
+    float patience;
+    float accuracy;
+
+    float target_confidence;
+
+    float position_x;
+    float position_y;
+
+} SniperNPC;
+
+Target acquisition:
+
+static void update_sniper_ai(
+    SniperNPC *npc,
+    float target_distance,
+    float target_visibility,
+    float dt
+)
+{
+    float detection =
+        target_visibility *
+        npc->weapon->npc_detection;
+
+    if (target_distance >
+        npc->weapon->effective_range)
+    {
+        npc->state =
+            SNIPER_SEARCHING;
+
+        return;
+    }
+
+    if (detection > 0.70f)
+    {
+        npc->state =
+            SNIPER_TRACKING;
+
+        npc->target_confidence +=
+            0.25f * dt;
+    }
+
+    if (npc->target_confidence >
+        0.75f)
+    {
+        npc->state =
+            SNIPER_AIMING;
+    }
+}
+Relocation behaviour
+
+Don't make NPC snipers remain permanently in one location.
+
+static void relocate_sniper(
+    SniperNPC *npc
+)
+{
+    npc->state =
+        SNIPER_RELOCATING;
+
+    npc->target_confidence =
+        0.0f;
+
+    /*
+     * World navigation system would
+     * select a new valid observation
+     * location here.
+     */
+}
+
+That lets you create encounters such as:
+
+PLAYER ENTERS DISTRICT
+        ↓
+SNIPER DETECTS PLAYER
+        ↓
+TRACKING
+        ↓
+AIMING
+        ↓
+PLAYER BREAKS LINE OF SIGHT
+        ↓
+SNIPER RELOCATES
+        ↓
+PLAYER TAKES ALTERNATIVE ROUTE
+        ↓
+SNIPER SEARCHES
+Weapon rarity
+typedef enum
+{
+    WEAPON_COMMON,
+    WEAPON_UNCOMMON,
+    WEAPON_RARE,
+    WEAPON_LEGENDARY
+
+} WeaponRarity;
+
+A legendary fictional weapon could therefore appear as:
+
+╔══════════════════════════════════════╗
+║           AERO NULL                  ║
+║                                      ║
+║  CLASS       PRECISION               ║
+║  DAMAGE      91                      ║
+║  RANGE       900                     ║
+║  ACCURACY    97%                     ║
+║  HANDLING    82%                     ║
+║                                      ║
+║  ★ LEGENDARY                         ║
+╚══════════════════════════════════════╝
+
+This gives you a foundation for sniper NPCs, weapon pickups, faction-specific equipment, rare weapons, and dynamically generated sniper encounters while keeping the weapon system entirely game-oriented.
+
+
+
+
+HARD C — MIAMI GUN RANGE SYSTEM
+/*
+ * ============================================================
+ * MIAMI OPEN-WORLD GAME
+ * GUN RANGE / SHOOTING SPORTS FACILITY
+ * ============================================================
+ *
+ * Gameplay simulation only.
+ *
+ * Systems:
+ *   - Shooting lanes
+ *   - Target systems
+ *   - Timed sessions
+ *   - Scoring
+ *   - NPC visitors
+ *   - Range officers
+ *   - Memberships
+ *   - Competitions
+ *   - Safety state
+ *   - Economy
+ *   - Leaderboards
+ *
+ * ============================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX_LANES       24
+#define MAX_TARGETS     128
+#define MAX_PLAYERS     32
+#define MAX_EVENTS      16
+
+
+/* ============================================================
+ * RANGE STATE
+ * ============================================================ */
+
+typedef enum
+{
+    RANGE_CLOSED,
+    RANGE_OPEN,
+    RANGE_CEASE_FIRE,
+    RANGE_MAINTENANCE,
+    RANGE_EMERGENCY
+
+} RangeState;
+
+
+/* ============================================================
+ * TARGET TYPES
+ * ============================================================ */
+
+typedef enum
+{
+    TARGET_STANDARD,
+    TARGET_MOVING,
+    TARGET_POPUP,
+    TARGET_REACTION,
+    TARGET_COMPETITION
+
+} TargetType;
+
+
+/* ============================================================
+ * TARGET
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    TargetType type;
+
+    float distance;
+    float health;
+
+    int score_value;
+
+    bool active;
+    bool hit;
+
+} Target;
+
+
+/* ============================================================
+ * LANE
+ * ============================================================ */
+
+typedef struct
+{
+    int id;
+
+    float distance;
+
+    bool occupied;
+    bool active;
+
+    int player_id;
+
+    Target targets[8];
+    int target_count;
+
+    float session_time;
+    float remaining_time;
+
+} RangeLane;
+
+
+/* ============================================================
+ * PLAYER SESSION
+ * ============================================================ */
+
+typedef struct
+{
+    int player_id;
+
+    int lane_id;
+
+    int shots;
+    int hits;
+
+    int score;
+
+    float accuracy;
+
+    float session_time;
+
+    bool active;
+
+} RangeSession;
+
+
+/* ============================================================
+ * RANGE FACILITY
+ * ============================================================ */
+
+typedef struct
+{
+    char name[96];
+
+    char location[96];
+
+    RangeState state;
+
+    RangeLane lanes[MAX_LANES];
+
+    int lane_count;
+
+    float revenue;
+
+    int visitors;
+
+    bool competition_active;
+
+} GunRange;
+Creating the facility
+void initialise_gun_range(
+    GunRange *range
+)
+{
+    memset(
+        range,
+        0,
+        sizeof(GunRange)
+    );
+
+    strcpy(
+        range->name,
+        "Gulf Atlantic Sporting Arms"
+    );
+
+    strcpy(
+        range->location,
+        "Miami, Florida"
+    );
+
+    range->state =
+        RANGE_OPEN;
+
+    range->lane_count =
+        18;
+
+    for (int i = 0;
+         i < range->lane_count;
+         ++i)
+    {
+        RangeLane *lane =
+            &range->lanes[i];
+
+        lane->id = i;
+
+        lane->distance =
+            10.0f +
+            (float)(i % 6) * 10.0f;
+
+        lane->occupied = false;
+        lane->active = true;
+
+        lane->target_count = 0;
+    }
+}
+Target system
+
+Targets can be generated dynamically.
+
+void create_targets(
+    RangeLane *lane
+)
+{
+    lane->target_count = 4;
+
+    for (int i = 0;
+         i < lane->target_count;
+         ++i)
+    {
+        Target *target =
+            &lane->targets[i];
+
+        target->id =
+            lane->id * 100 + i;
+
+        target->type =
+            TARGET_STANDARD;
+
+        target->distance =
+            lane->distance;
+
+        target->health =
+            100.0f;
+
+        target->score_value =
+            10;
+
+        target->active =
+            true;
+
+        target->hit =
+            false;
+    }
+}
+Shooting-sports scoring
+
+The actual weapon mechanics can remain abstract:
+
+typedef struct
+{
+    float hit_quality;
+
+    bool target_hit;
+
+} ShotResult;
+ShotResult register_shot(
+    Target *target,
+    float hit_quality
+)
+{
+    ShotResult result;
+
+    result.hit_quality =
+        hit_quality;
+
+    result.target_hit =
+        false;
+
+    if (!target->active)
+        return result;
+
+    if (hit_quality >= 0.50f)
+    {
+        target->hit = true;
+
+        result.target_hit =
+            true;
+    }
+
+    return result;
+}
+
+Score:
+
+int calculate_score(
+    const ShotResult *shot,
+    const Target *target
+)
+{
+    if (!shot->target_hit)
+        return 0;
+
+    return (int)(
+        target->score_value *
+        shot->hit_quality
+    );
+}
+Session system
+bool start_session(
+    GunRange *range,
+    int lane_id,
+    int player_id,
+    float duration
+)
+{
+    if (range->state != RANGE_OPEN)
+        return false;
+
+    if (lane_id < 0 ||
+        lane_id >= range->lane_count)
+        return false;
+
+    RangeLane *lane =
+        &range->lanes[lane_id];
+
+    if (lane->occupied)
+        return false;
+
+    lane->occupied =
+        true;
+
+    lane->player_id =
+        player_id;
+
+    lane->session_time =
+        0.0f;
+
+    lane->remaining_time =
+        duration;
+
+    create_targets(lane);
+
+    range->visitors++;
+
+    return true;
+}
+
+Session update:
+
+void update_session(
+    RangeLane *lane,
+    float dt
+)
+{
+    if (!lane->occupied)
+        return;
+
+    lane->session_time += dt;
+
+    lane->remaining_time -= dt;
+
+    if (lane->remaining_time <= 0.0f)
+    {
+        lane->remaining_time =
+            0.0f;
+
+        lane->occupied =
+            false;
+
+        lane->player_id =
+            -1;
+    }
+}
+Range safety state
+
+The facility can enter a complete cease-fire state.
+
+void set_range_state(
+    GunRange *range,
+    RangeState state
+)
+{
+    range->state =
+        state;
+
+    if (state ==
+        RANGE_CEASE_FIRE ||
+        state ==
+        RANGE_EMERGENCY)
+    {
+        for (int i = 0;
+             i < range->lane_count;
+             ++i)
+        {
+            range->lanes[i].active =
+                false;
+        }
+    }
+    else if (state ==
+             RANGE_OPEN)
+    {
+        for (int i = 0;
+             i < range->lane_count;
+             ++i)
+        {
+            range->lanes[i].active =
+                true;
+        }
+    }
+}
+NPC range visitors
+
+Give the location its own population of characters.
+
+typedef enum
+{
+    NPC_BEGINNER,
+    NPC_SPORT_SHOOTER,
+    NPC_COLLECTOR,
+    NPC_COMPETITOR,
+    NPC_SECURITY,
+    NPC_RANGE_OFFICER
+
+} RangeNPCType;
+
+
+typedef struct
+{
+    int id;
+
+    char name[64];
+
+    RangeNPCType type;
+
+    float skill;
+    float patience;
+    float spending;
+
+    int favourite_lane;
+
+    bool active;
+
+} RangeNPC;
+
+Examples:
+
+MARCUS VEGA
+Sport Shooter
+Skill: 0.82
+Patience: 0.71
+Spending: $$
+Favourite lane: 7
+ELENA CROSS
+Collector
+Skill: 0.64
+Patience: 0.91
+Spending: $$$$
+Favourite lane: 12
+JACK HARPER
+Competitor
+Skill: 0.94
+Patience: 0.42
+Spending: $$$
+Favourite lane: 3
+Competition mode
+typedef struct
+{
+    char name[96];
+
+    int participants;
+
+    int duration;
+
+    int highest_score;
+
+    int winner_id;
+
+    bool active;
+
+} RangeCompetition;
+
+Start:
+
+void start_competition(
+    RangeCompetition *event,
+    const char *name,
+    int duration
+)
+{
+    memset(
+        event,
+        0,
+        sizeof(RangeCompetition)
+    );
+
+    strncpy(
+        event->name,
+        name,
+        sizeof(event->name) - 1
+    );
+
+    event->duration =
+        duration;
+
+    event->highest_score =
+        0;
+
+    event->winner_id =
+        -1;
+
+    event->active =
+        true;
+}
+Open-world integration
+
+The range becomes an actual location rather than a menu:
+
+                    GULF ATLANTIC
+                   SPORTING ARMS
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+    RECEPTION          LANES           CLUBHOUSE
+       │                 │                 │
+   Membership        Practice         Bar / Lounge
+   Registration      Sessions         NPCs
+   Equipment         Competitions     Economy
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         │
+                   LEADERBOARD
+
+You can then connect it to the wider game economy:
+
+PLAYER
+  ↓
+BUY MEMBERSHIP
+  ↓
+VISIT RANGE
+  ↓
+PRACTICE
+  ↓
+IMPROVE SCORE
+  ↓
+ENTER COMPETITION
+  ↓
+DEFEAT NPC RIVALS
+  ↓
+WIN PRIZE
+  ↓
+REPUTATION
+  ↓
+VIP MEMBERSHIP
+
+The gun range itself remains a controlled sporting facility, while the wider game can use its leaderboard, NPC rivalries, membership tiers and competitions to make it another persistent social location in the Miami open world.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
