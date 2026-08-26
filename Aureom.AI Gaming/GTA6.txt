@@ -5603,6 +5603,1867 @@ That architecture gives you a foundation where the player can become a railway o
 
 
 
+C: Cypherpunk Refuge simulation
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_HACKERS 32
+#define MAX_NODES 10000
+#define MAX_MISSIONS 128
+
+typedef enum {
+    HACKER_CODER,
+    HACKER_OPERATOR,
+    HACKER_TRADER,
+    HACKER_DJ,
+    HACKER_ARCHIVIST
+} HackerRole;
+
+typedef struct {
+    char name[64];
+
+    HackerRole role;
+
+    double skill;
+    double reputation;
+    double stress;
+
+    bool active;
+} Hacker;
+
+
+typedef struct {
+    char name[64];
+
+    double depth;
+    double security;
+
+    double electricity;
+    double computing_power;
+
+    double crypto_reserves;
+    double cash;
+
+    double heat;
+
+    bool operational;
+} Refuge;
+
+
+/*
+ * Fictional network resource.
+ *
+ * These are entirely abstract game entities,
+ * not real compromised computers.
+ */
+typedef struct {
+    int total_nodes;
+    int active_nodes;
+
+    double network_power;
+    double reliability;
+
+    double detection_risk;
+} NetworkPool;
+
+
+/* =========================================================
+   REFUGE
+   ========================================================= */
+
+Refuge create_refuge(void)
+{
+    Refuge r = {0};
+
+    snprintf(
+        r.name,
+        sizeof(r.name),
+        "THE CRYPT"
+    );
+
+    r.depth = 85.0;
+    r.security = 92.0;
+
+    r.electricity = 1000.0;
+    r.computing_power = 500.0;
+
+    r.crypto_reserves = 250.0;
+    r.cash = 500000.0;
+
+    r.heat = 12.0;
+
+    r.operational = true;
+
+    return r;
+}
+
+
+/* =========================================================
+   NETWORK POOL
+   ========================================================= */
+
+NetworkPool create_network(void)
+{
+    NetworkPool n = {0};
+
+    n.total_nodes = 5000;
+    n.active_nodes = 3200;
+
+    n.network_power = 72.0;
+    n.reliability = 0.84;
+
+    n.detection_risk = 8.0;
+
+    return n;
+}
+
+
+void update_network(
+    NetworkPool *network,
+    Refuge *refuge,
+    double hours
+) {
+    /*
+     * Fictional resource degradation.
+     */
+
+    double degradation =
+        0.5 * hours;
+
+    network->reliability -=
+        degradation * 0.01;
+
+    if (network->reliability < 0.1)
+        network->reliability = 0.1;
+
+    /*
+     * Computing infrastructure restores
+     * network capability.
+     */
+
+    network->network_power +=
+        refuge->computing_power *
+        0.001 *
+        hours;
+
+    if (network->network_power > 100.0)
+        network->network_power = 100.0;
+}
+Hacker population
+void update_hacker(
+    Hacker *hacker,
+    Refuge *refuge,
+    double hours
+) {
+    if (!hacker->active)
+        return;
+
+    /*
+     * Underground life creates stress.
+     */
+
+    hacker->stress +=
+        0.2 * hours;
+
+    /*
+     * Secure infrastructure reduces stress.
+     */
+
+    hacker->stress -=
+        refuge->security *
+        0.01 *
+        hours;
+
+    if (hacker->stress < 0.0)
+        hacker->stress = 0.0;
+
+    if (hacker->stress > 100.0)
+        hacker->stress = 100.0;
+}
+The nightclub/music system
+
+The refuge could have a surprisingly important music/energy mechanic.
+
+typedef struct {
+
+    double bpm;
+
+    double crowd_energy;
+    double atmosphere;
+
+    bool drum_and_bass;
+    bool techno;
+
+} MusicSystem;
+
+
+void update_music(
+    MusicSystem *music,
+    double hours
+) {
+    double target_energy = 0.0;
+
+    if (music->drum_and_bass)
+        target_energy += 65.0;
+
+    if (music->techno)
+        target_energy += 35.0;
+
+    music->crowd_energy +=
+        (target_energy -
+         music->crowd_energy) *
+        0.1 *
+        hours;
+
+    music->atmosphere =
+        music->crowd_energy;
+}
+
+So the refuge might display:
+
+╔══════════════════════════════════════════╗
+║              THE CRYPT                   ║
+║                                          ║
+║       85 METRES BELOW MIAMI              ║
+╠══════════════════════════════════════════╣
+║                                          ║
+║ COMPUTE              487 / 500           ║
+║ NETWORK              3,218 NODES         ║
+║ SECURITY              92%                ║
+║ HEAT                  12%                ║
+║ POWER                 81%                ║
+║                                          ║
+║ ──────────────────────────────────────── ║
+║                                          ║
+║              LIVE SESSION                ║
+║                                          ║
+║             TECHNO / D&B                 ║
+║               174 BPM                    ║
+║                                          ║
+║ CROWD ENERGY        █████████░ 91%       ║
+║                                          ║
+╚══════════════════════════════════════════╝
+Mission abstraction
+
+Instead of implementing real hacking, missions can operate on fictional game resources:
+
+typedef enum {
+    MISSION_RESEARCH,
+    MISSION_DATA_HEIST,
+    MISSION_CRYPTO_OPERATION,
+    MISSION_NETWORK_OPERATION,
+    MISSION_COUNTER_SURVEILLANCE
+} MissionType;
+
+
+typedef struct {
+
+    MissionType type;
+
+    double difficulty;
+    double reward;
+
+    double heat_generated;
+
+    bool completed;
+
+} CyberMission;
+
+A mission then becomes:
+
+bool execute_mission(
+    CyberMission *mission,
+    Refuge *refuge,
+    Hacker *operator
+) {
+    if (!operator->active)
+        return false;
+
+    double capability =
+        operator->skill +
+        refuge->computing_power * 0.05;
+
+    double success =
+        capability /
+        (capability +
+         mission->difficulty);
+
+    if (success > 0.65) {
+
+        refuge->cash +=
+            mission->reward;
+
+        refuge->heat +=
+            mission->heat_generated;
+
+        mission->completed = true;
+
+        return true;
+    }
+
+    refuge->heat +=
+        mission->heat_generated * 2.0;
+
+    return false;
+}
+
+This gives you a nice risk/reward loop:
+
+       THE CRYPT
+           │
+     ┌─────┴─────┐
+     ↓           ↓
+  COMPUTE       PEOPLE
+     │           │
+     └─────┬─────┘
+           ↓
+       OPERATIONS
+           ↓
+       REVENUE
+           ↓
+      BETTER TECH
+           ↓
+       MORE POWER
+           ↓
+      MORE HEAT
+           ↓
+    POLICE / RIVALS
+           ↓
+   REFUGE SECURITY
+
+And because this is part of your wider world, The Crypt can interact with your railway, hydrogen and commodity simulations: it can consume electricity, rent underground space, purchase computing hardware, use rail freight, trade abstract digital assets, attract NPC hackers and DJs, and become a faction that the player can visit, join, oppose, or eventually take over.
+
+
+
+
+
+
+C: Data Centre / Network-Attack Simulation
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_DATACENTRES 64
+#define MAX_TARGETS 256
+
+typedef struct {
+
+    char name[64];
+
+    double compute_capacity;
+    double network_capacity;
+
+    double available_compute;
+    double available_network;
+
+    double electricity;
+    double cooling;
+
+    double security;
+
+    bool operational;
+
+} DataCentre;
+
+
+typedef struct {
+
+    char name[64];
+
+    double server_capacity;
+    double current_load;
+
+    double security;
+
+    double recovery_rate;
+
+    bool operational;
+
+} GameServer;
+
+
+typedef struct {
+
+    int source_datacentre;
+    int target_server;
+
+    double intensity;
+
+    double duration;
+
+    double accumulated_load;
+
+    double detection;
+
+    bool active;
+
+} NetworkOperation;
+Data-centre resource model
+
+Each data centre becomes a strategic asset.
+
+DataCentre create_datacentre(
+    const char *name,
+    double compute,
+    double network
+) {
+    DataCentre dc = {0};
+
+    snprintf(
+        dc.name,
+        sizeof(dc.name),
+        "%s",
+        name
+    );
+
+    dc.compute_capacity = compute;
+    dc.network_capacity = network;
+
+    dc.available_compute = compute;
+    dc.available_network = network;
+
+    dc.electricity = 100.0;
+    dc.cooling = 100.0;
+
+    dc.security = 80.0;
+
+    dc.operational = true;
+
+    return dc;
+}
+Abstract network operation
+bool start_network_operation(
+    DataCentre *dc,
+    GameServer *target,
+    NetworkOperation *operation,
+    double intensity
+) {
+    if (!dc->operational ||
+        !target->operational)
+        return false;
+
+    if (intensity <= 0.0)
+        return false;
+
+    if (intensity > dc->available_network)
+        intensity = dc->available_network;
+
+    operation->intensity = intensity;
+
+    operation->accumulated_load = 0.0;
+    operation->duration = 0.0;
+
+    operation->detection = 0.0;
+
+    operation->active = true;
+
+    return true;
+}
+Server overload mechanic
+
+This is deliberately a fictional game equation, not a real traffic-generation algorithm:
+
+void update_network_operation(
+    NetworkOperation *operation,
+    DataCentre *dc,
+    GameServer *target,
+    double seconds
+) {
+    if (!operation->active)
+        return;
+
+    double generated_load =
+        operation->intensity *
+        seconds *
+        0.1;
+
+    operation->accumulated_load +=
+        generated_load;
+
+    target->current_load +=
+        generated_load;
+
+    operation->duration +=
+        seconds;
+
+    /*
+     * Detection increases with
+     * operation duration and intensity.
+     */
+
+    operation->detection +=
+        operation->intensity *
+        seconds *
+        0.001;
+
+    /*
+     * Target has been overloaded.
+     */
+
+    if (target->current_load >
+        target->server_capacity) {
+
+        printf(
+            "GAME SERVER %s: OVERLOADED\n",
+            target->name
+        );
+    }
+
+    /*
+     * Detection threshold.
+     */
+
+    if (operation->detection >
+        target->security) {
+
+        printf(
+            "NETWORK DEFENCE DETECTED OPERATION\n"
+        );
+
+        operation->active = false;
+    }
+}
+Server recovery
+
+The world shouldn't permanently break every time an operation succeeds.
+
+void update_server_recovery(
+    GameServer *server,
+    double seconds
+) {
+    if (!server->operational)
+        return;
+
+    server->current_load -=
+        server->recovery_rate *
+        seconds;
+
+    if (server->current_load < 0.0)
+        server->current_load = 0.0;
+}
+Defensive data centres
+
+You can make cybersecurity infrastructure itself a commodity.
+
+typedef struct {
+
+    double firewall;
+    double monitoring;
+    double redundancy;
+    double incident_response;
+
+} CyberDefence;
+
+Then calculate resilience:
+
+double calculate_resilience(
+    CyberDefence *defence
+) {
+    return
+        defence->firewall * 0.30 +
+        defence->monitoring * 0.25 +
+        defence->redundancy * 0.25 +
+        defence->incident_response * 0.20;
+}
+
+That creates a proper attacker vs defender economy:
+
+             DATA CENTRE
+                  │
+        ┌─────────┴─────────┐
+        ↓                   ↓
+   COMPUTE POWER       CYBER DEFENCE
+        │                   │
+        ↓                   ↓
+ NETWORK POWER        MONITORING
+        │                   │
+        └─────────┬─────────┘
+                  ↓
+             OPERATIONS
+                  ↓
+          TARGET SERVERS
+                  ↓
+       ┌──────────┴──────────┐
+       ↓                     ↓
+   SUCCESS                DETECTION
+       ↓                     ↓
+  GAME REWARD           COUNTERMEASURES
+Data-centre “army”
+
+For your world, you could make each data centre contribute Network Power to a faction:
+
+double calculate_network_army(
+    DataCentre centres[],
+    int count
+) {
+    double total = 0.0;
+
+    for (int i = 0; i < count; i++) {
+
+        if (!centres[i].operational)
+            continue;
+
+        total +=
+            centres[i].available_network *
+            centres[i].security *
+            0.01;
+    }
+
+    return total;
+}
+
+So the map could display:
+
+THE CRYPT — NETWORK WAR
+
+YOUR NETWORK POWER
+████████████████░░░░  82%
+
+COMPUTE NODES       14
+DATA CENTRES          5
+NETWORK POWER      8,420
+
+TARGET SYSTEMS
+────────────────────────
+
+Miami Exchange       74%
+Port Authority       31%
+MegaCorp Cloud       92%
+Rail Control         18%
+
+DEFENCE ALERT
+████████░░  HIGH
+
+HEAT
+██████░░░░  61%
+
+The resulting gameplay loop is:
+
+build/acquire data-centre capacity → allocate fictional network power → attempt a network operation → target's load rises → defenders react → operation succeeds or is detected → reputation/reward/heat changes → both sides upgrade infrastructure.
+
+That gives you the feel of a botnet/data-centre cyberwar system while keeping the C code confined to the game's internal simulation rather than creating a functional botnet or intrusion tool.
+
+
+
+
+
+
+
+For the game, I'd make heavy corporate data centres into high-security infrastructure assets with layered physical, network, power, cooling, redundancy and response systems. The security model can feed directly into the fictional cyber/economic simulation you’re building.
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_DATACENTRES 64
+#define MAX_SECURITY_EVENTS 256
+
+typedef enum {
+    SECURITY_NORMAL,
+    SECURITY_ELEVATED,
+    SECURITY_HIGH,
+    SECURITY_CRITICAL,
+    SECURITY_LOCKDOWN
+} SecurityLevel;
+
+typedef enum {
+    EVENT_NONE,
+    EVENT_PHYSICAL_INTRUSION,
+    EVENT_NETWORK_ANOMALY,
+    EVENT_POWER_FAILURE,
+    EVENT_COOLING_FAILURE,
+    EVENT_FIRE,
+    EVENT_INSIDER_ALERT,
+    EVENT_SYSTEM_ATTACK
+} SecurityEventType;
+
+
+/* =========================================================
+   SECURITY LAYERS
+   ========================================================= */
+
+typedef struct {
+
+    double perimeter;
+    double access_control;
+    double cameras;
+    double guards;
+
+    double building_security;
+
+} PhysicalSecurity;
+
+
+typedef struct {
+
+    double firewall;
+    double monitoring;
+    double authentication;
+    double segmentation;
+    double detection;
+
+} CyberSecurity;
+
+
+typedef struct {
+
+    double generators;
+    double battery_backup;
+    double grid_redundancy;
+
+    double cooling_redundancy;
+    double network_redundancy;
+
+} InfrastructureSecurity;
+
+
+/* =========================================================
+   DATA CENTRE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+    char name[64];
+
+    double compute_capacity;
+    double network_capacity;
+
+    double current_load;
+
+    double electricity;
+    double cooling;
+
+    PhysicalSecurity physical;
+    CyberSecurity cyber;
+    InfrastructureSecurity infrastructure;
+
+    double staff_security;
+    double incident_response;
+
+    double corporate_value;
+
+    double heat;
+
+    SecurityLevel security_level;
+
+    bool operational;
+    bool lockdown;
+
+} CorporateDataCentre;
+
+
+/* =========================================================
+   SECURITY EVENT
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    SecurityEventType type;
+
+    double severity;
+    double progress;
+
+    bool detected;
+    bool resolved;
+    bool active;
+
+} SecurityEvent;
+
+
+/* =========================================================
+   SECURITY SCORE
+   ========================================================= */
+
+double calculate_physical_security(
+    CorporateDataCentre *dc
+) {
+    return
+        dc->physical.perimeter * 0.20 +
+        dc->physical.access_control * 0.25 +
+        dc->physical.cameras * 0.20 +
+        dc->physical.guards * 0.20 +
+        dc->physical.building_security * 0.15;
+}
+
+
+double calculate_cyber_security(
+    CorporateDataCentre *dc
+) {
+    return
+        dc->cyber.firewall * 0.20 +
+        dc->cyber.monitoring * 0.25 +
+        dc->cyber.authentication * 0.20 +
+        dc->cyber.segmentation * 0.15 +
+        dc->cyber.detection * 0.20;
+}
+
+
+double calculate_infrastructure_security(
+    CorporateDataCentre *dc
+) {
+    return
+        dc->infrastructure.generators * 0.25 +
+        dc->infrastructure.battery_backup * 0.15 +
+        dc->infrastructure.grid_redundancy * 0.20 +
+        dc->infrastructure.cooling_redundancy * 0.20 +
+        dc->infrastructure.network_redundancy * 0.20;
+}
+
+
+/* =========================================================
+   OVERALL SECURITY
+   ========================================================= */
+
+double calculate_security_score(
+    CorporateDataCentre *dc
+) {
+    double physical =
+        calculate_physical_security(dc);
+
+    double cyber =
+        calculate_cyber_security(dc);
+
+    double infrastructure =
+        calculate_infrastructure_security(dc);
+
+    double response =
+        dc->incident_response;
+
+    double score =
+        physical * 0.25 +
+        cyber * 0.35 +
+        infrastructure * 0.25 +
+        response * 0.15;
+
+    return score;
+}
+
+
+/* =========================================================
+   SECURITY LEVEL
+   ========================================================= */
+
+SecurityLevel determine_security_level(
+    double score,
+    double threat
+) {
+    double effective =
+        score - threat * 0.25;
+
+    if (effective >= 90.0)
+        return SECURITY_NORMAL;
+
+    if (effective >= 75.0)
+        return SECURITY_ELEVATED;
+
+    if (effective >= 55.0)
+        return SECURITY_HIGH;
+
+    if (effective >= 30.0)
+        return SECURITY_CRITICAL;
+
+    return SECURITY_LOCKDOWN;
+}
+
+
+/* =========================================================
+   THREAT ENGINE
+   ========================================================= */
+
+double calculate_threat(
+    CorporateDataCentre *dc
+) {
+    double load_pressure =
+        dc->current_load /
+        dc->compute_capacity;
+
+    double threat =
+        dc->heat * 0.40 +
+        load_pressure * 30.0 +
+        (100.0 -
+         dc->cyber.detection) * 0.20;
+
+    if (threat < 0.0)
+        threat = 0.0;
+
+    if (threat > 100.0)
+        threat = 100.0;
+
+    return threat;
+}
+
+
+/* =========================================================
+   UPDATE SECURITY
+   ========================================================= */
+
+void update_security(
+    CorporateDataCentre *dc
+) {
+    if (!dc->operational)
+        return;
+
+    double threat =
+        calculate_threat(dc);
+
+    double score =
+        calculate_security_score(dc);
+
+    dc->security_level =
+        determine_security_level(
+            score,
+            threat
+        );
+
+    /*
+     * Critical conditions trigger lockdown.
+     */
+
+    if (dc->security_level ==
+        SECURITY_LOCKDOWN) {
+
+        dc->lockdown = true;
+
+        printf(
+            "[SECURITY] %s LOCKDOWN\n",
+            dc->name
+        );
+    }
+}
+
+
+/* =========================================================
+   EVENT CREATION
+   ========================================================= */
+
+void create_security_event(
+    SecurityEvent *event,
+    SecurityEventType type,
+    double severity
+) {
+    event->type = type;
+    event->severity = severity;
+
+    event->progress = 0.0;
+
+    event->detected = false;
+    event->resolved = false;
+    event->active = true;
+}
+
+
+/* =========================================================
+   EVENT DETECTION
+   ========================================================= */
+
+void detect_event(
+    CorporateDataCentre *dc,
+    SecurityEvent *event
+) {
+    if (!event->active)
+        return;
+
+    double detection =
+        dc->cyber.detection +
+        dc->incident_response * 0.5;
+
+    double threshold =
+        event->severity * 100.0;
+
+    if (detection >= threshold) {
+
+        event->detected = true;
+
+        printf(
+            "[SOC] SECURITY EVENT DETECTED\n"
+        );
+    }
+}
+
+
+/* =========================================================
+   INCIDENT RESPONSE
+   ========================================================= */
+
+void respond_to_event(
+    CorporateDataCentre *dc,
+    SecurityEvent *event,
+    double seconds
+) {
+    if (!event->active ||
+        !event->detected)
+        return;
+
+    double response_power =
+        dc->incident_response *
+        seconds *
+        0.01;
+
+    event->progress +=
+        response_power;
+
+    if (event->progress >=
+        event->severity * 100.0) {
+
+        event->resolved = true;
+        event->active = false;
+
+        printf(
+            "[SOC] INCIDENT RESOLVED\n"
+        );
+    }
+}
+
+
+/* =========================================================
+   LOCKDOWN RECOVERY
+   ========================================================= */
+
+void recover_from_lockdown(
+    CorporateDataCentre *dc,
+    double seconds
+) {
+    if (!dc->lockdown)
+        return;
+
+    double recovery =
+        dc->incident_response *
+        seconds *
+        0.005;
+
+    dc->heat -= recovery;
+
+    if (dc->heat < 10.0)
+        dc->lockdown = false;
+
+    if (dc->heat < 0.0)
+        dc->heat = 0.0;
+}
+
+
+/* =========================================================
+   POWER / COOLING RESILIENCE
+   ========================================================= */
+
+bool infrastructure_failure(
+    CorporateDataCentre *dc,
+    double severity
+) {
+    double resilience =
+        calculate_infrastructure_security(dc);
+
+    double protection =
+        resilience / 100.0;
+
+    double probability =
+        severity *
+        (1.0 - protection);
+
+    return probability > 0.75;
+}
+
+
+/* =========================================================
+   CORPORATE DATA CENTRE REPORT
+   ========================================================= */
+
+void print_security_report(
+    CorporateDataCentre *dc
+) {
+    double physical =
+        calculate_physical_security(dc);
+
+    double cyber =
+        calculate_cyber_security(dc);
+
+    double infrastructure =
+        calculate_infrastructure_security(dc);
+
+    double total =
+        calculate_security_score(dc);
+
+    printf(
+        "\n"
+        "====================================\n"
+        " CORPORATE DATA CENTRE SECURITY\n"
+        "====================================\n"
+    );
+
+    printf(
+        "Facility:        %s\n",
+        dc->name
+    );
+
+    printf(
+        "Physical:        %.1f%%\n",
+        physical
+    );
+
+    printf(
+        "Cyber:           %.1f%%\n",
+        cyber
+    );
+
+    printf(
+        "Infrastructure:  %.1f%%\n",
+        infrastructure
+    );
+
+    printf(
+        "Total Security:  %.1f%%\n",
+        total
+    );
+
+    printf(
+        "Heat:            %.1f%%\n",
+        dc->heat
+    );
+
+    printf(
+        "Load:            %.1f%%\n",
+        (dc->current_load /
+         dc->compute_capacity) *
+        100.0
+    );
+
+    printf(
+        "Lockdown:        %s\n",
+        dc->lockdown ?
+        "YES" : "NO"
+    );
+
+    printf(
+        "====================================\n"
+    );
+}
+The resulting game model
+
+A major corporate facility could have a profile like:
+
+╔══════════════════════════════════════════╗
+║       HELIOS CORPORATE DATA CAMPUS       ║
+╠══════════════════════════════════════════╣
+║                                          ║
+║ PHYSICAL SECURITY       94%              ║
+║ CYBER SECURITY          97%              ║
+║ POWER RESILIENCE        99%              ║
+║ COOLING REDUNDANCY      98%              ║
+║ NETWORK REDUNDANCY      96%              ║
+║                                          ║
+║ COMPUTE LOAD            71%              ║
+║ SECURITY OPERATIONS     ACTIVE           ║
+║ INCIDENT RESPONSE       93%              ║
+║                                          ║
+║ THREAT LEVEL            LOW              ║
+║ STATUS                  NORMAL           ║
+╚══════════════════════════════════════════╝
+
+The nice thing about this architecture is that security isn't a single number. A corporation can have phenomenal cyber security but poor physical security, or excellent physical protection but weak power redundancy.
+
+That creates gameplay such as:
+
+POWER FAILURE
+      ↓
+BACKUP GENERATORS
+      ↓
+COOLING LOAD INCREASES
+      ↓
+DATA CENTRE LOAD SHIFTS
+      ↓
+AUTOMATIC FAILOVER
+      ↓
+SECURITY OPERATIONS MONITOR
+      ↓
+FACILITY RECOVERS
+
+And for your open-world economy, security becomes another investment decision:
+
+more security → higher operating cost → greater resilience → lower expected losses → higher corporate asset value.
+
+You could then have different classes of facilities, from ordinary server rooms through regional corporate campuses to enormous Tier-4-style hyperscale data-centre complexes, each consuming electricity, cooling capacity and network resources and each becoming a strategically important asset in the simulated economy.
+
+
+
+
+
+
+
+
+Yes. For the game engine, I’d make a data centre a physical simulated facility, not just a compute_capacity number. Each building has rooms, racks, power systems, cooling, network rooms, security zones, loading areas and operational states.
+
+The code below is deliberately a game-world abstraction rather than an engineering blueprint for a real facility.
+
+C: Data Centre Facility Engine
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_ROOMS       128
+#define MAX_RACKS       4096
+#define MAX_FACILITIES  32
+#define MAX_LINKS       256
+
+/* =========================================================
+   FACILITY TYPES
+   ========================================================= */
+
+typedef enum {
+    ROOM_LOBBY,
+    ROOM_SECURITY,
+    ROOM_OFFICE,
+
+    ROOM_SERVER_HALL,
+    ROOM_NETWORK,
+    ROOM_POWER,
+    ROOM_BATTERY,
+    ROOM_GENERATOR,
+    ROOM_COOLING,
+
+    ROOM_LOADING,
+    ROOM_STORAGE,
+    ROOM_CONTROL,
+
+    ROOM_MAINTENANCE
+} RoomType;
+
+
+/* =========================================================
+   FACILITY ROOM
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    RoomType type;
+
+    double x;
+    double y;
+
+    double width;
+    double length;
+
+    double power_capacity;
+    double cooling_capacity;
+
+    double current_power;
+    double current_heat;
+
+    bool operational;
+    bool restricted;
+
+} DataCentreRoom;
+
+
+/* =========================================================
+   SERVER RACK
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    int room_id;
+
+    double compute_capacity;
+    double network_capacity;
+
+    double current_compute;
+    double current_network;
+
+    double power_consumption;
+    double heat_output;
+
+    bool operational;
+
+} ServerRack;
+
+
+/* =========================================================
+   POWER SYSTEM
+   ========================================================= */
+
+typedef struct {
+
+    double grid_capacity;
+
+    double generator_capacity;
+    double battery_capacity;
+
+    double current_battery;
+
+    double load;
+
+    bool grid_online;
+    bool generators_online;
+
+} PowerSystem;
+
+
+/* =========================================================
+   COOLING SYSTEM
+   ========================================================= */
+
+typedef struct {
+
+    double total_capacity;
+    double current_load;
+
+    double efficiency;
+
+    bool primary_online;
+    bool backup_online;
+
+} CoolingSystem;
+
+
+/* =========================================================
+   NETWORK CORE
+   ========================================================= */
+
+typedef struct {
+
+    double backbone_capacity;
+    double current_load;
+
+    double redundancy;
+
+    bool internet_connected;
+    bool internal_network_online;
+
+} NetworkSystem;
+
+
+/* =========================================================
+   DATA CENTRE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    double floor_area;
+
+    DataCentreRoom rooms[MAX_ROOMS];
+    int room_count;
+
+    ServerRack racks[MAX_RACKS];
+    int rack_count;
+
+    PowerSystem power;
+    CoolingSystem cooling;
+    NetworkSystem network;
+
+    double total_compute;
+    double total_network;
+
+    double current_compute;
+    double current_network;
+
+    double operating_cost;
+
+    double security_level;
+
+    bool operational;
+
+} DataCentre;
+Building the facility
+
+You can generate a facility procedurally:
+
+void add_room(
+    DataCentre *dc,
+    RoomType type,
+    const char *name,
+    double x,
+    double y,
+    double width,
+    double length
+) {
+    if (dc->room_count >= MAX_ROOMS)
+        return;
+
+    DataCentreRoom *room =
+        &dc->rooms[dc->room_count];
+
+    room->id = dc->room_count;
+
+    snprintf(
+        room->name,
+        sizeof(room->name),
+        "%s",
+        name
+    );
+
+    room->type = type;
+
+    room->x = x;
+    room->y = y;
+
+    room->width = width;
+    room->length = length;
+
+    room->operational = true;
+
+    room->restricted =
+        (type != ROOM_LOBBY &&
+         type != ROOM_OFFICE);
+
+    dc->room_count++;
+}
+
+Then create a large facility:
+
+void build_data_centre(
+    DataCentre *dc
+) {
+    dc->room_count = 0;
+    dc->rack_count = 0;
+
+    add_room(
+        dc,
+        ROOM_LOBBY,
+        "Main Lobby",
+        0, 0, 30, 20
+    );
+
+    add_room(
+        dc,
+        ROOM_SECURITY,
+        "Security Operations",
+        30, 0, 25, 20
+    );
+
+    add_room(
+        dc,
+        ROOM_SERVER_HALL,
+        "Server Hall A",
+        0, 30, 100, 80
+    );
+
+    add_room(
+        dc,
+        ROOM_SERVER_HALL,
+        "Server Hall B",
+        110, 30, 100, 80
+    );
+
+    add_room(
+        dc,
+        ROOM_NETWORK,
+        "Network Core",
+        215, 30, 35, 35
+    );
+
+    add_room(
+        dc,
+        ROOM_POWER,
+        "Electrical Plant",
+        215, 70, 35, 35
+    );
+
+    add_room(
+        dc,
+        ROOM_BATTERY,
+        "Energy Storage",
+        260, 70, 40, 30
+    );
+
+    add_room(
+        dc,
+        ROOM_COOLING,
+        "Cooling Plant",
+        260, 30, 40, 30
+    );
+
+    add_room(
+        dc,
+        ROOM_LOADING,
+        "Loading Bay",
+        0, 120, 50, 30
+    );
+
+    add_room(
+        dc,
+        ROOM_STORAGE,
+        "Equipment Storage",
+        60, 120, 70, 30
+    );
+
+    add_room(
+        dc,
+        ROOM_CONTROL,
+        "Operations Control",
+        140, 120, 50, 30
+    );
+}
+
+That gives the game an actual spatial facility:
+
+┌───────────────────────────────────────────────────────┐
+│                    MAIN LOBBY                         │
+├─────────────────┬─────────────────────────────────────┤
+│ SECURITY / SOC  │             NETWORK CORE             │
+├─────────────────┴─────────────────────────────────────┤
+│                                                       │
+│                 SERVER HALL A                         │
+│                                                       │
+│   [R][R][R][R][R][R][R][R][R][R]                    │
+│   [R][R][R][R][R][R][R][R][R][R]                    │
+│                                                       │
+├───────────────────────────────────────────────────────┤
+│                 SERVER HALL B                         │
+│                                                       │
+│   [R][R][R][R][R][R][R][R][R][R]                    │
+│   [R][R][R][R][R][R][R][R][R][R]                    │
+│                                                       │
+├──────────────┬─────────────┬──────────────┬───────────┤
+│ LOADING      │ STORAGE     │ OPERATIONS   │ POWER     │
+│              │             │ CONTROL      │           │
+├──────────────┴─────────────┴──────────────┼───────────┤
+│              COOLING / ENERGY SYSTEMS     │ BATTERY   │
+└───────────────────────────────────────────┴───────────┘
+Populate server halls
+void add_server_rack(
+    DataCentre *dc,
+    int room_id,
+    double compute,
+    double network
+) {
+    if (dc->rack_count >= MAX_RACKS)
+        return;
+
+    ServerRack *rack =
+        &dc->racks[dc->rack_count];
+
+    rack->id = dc->rack_count;
+
+    rack->room_id = room_id;
+
+    rack->compute_capacity =
+        compute;
+
+    rack->network_capacity =
+        network;
+
+    rack->power_consumption =
+        compute * 0.5;
+
+    rack->heat_output =
+        compute * 0.4;
+
+    rack->operational = true;
+
+    dc->total_compute +=
+        compute;
+
+    dc->total_network +=
+        network;
+
+    dc->rack_count++;
+}
+
+Then:
+
+void populate_server_hall(
+    DataCentre *dc,
+    int room_id,
+    int rack_count
+) {
+    for (int i = 0;
+         i < rack_count;
+         i++) {
+
+        add_server_rack(
+            dc,
+            room_id,
+            100.0,
+            50.0
+        );
+    }
+}
+
+A huge fictional facility could therefore contain thousands of simulated racks without having to model every physical component in detail.
+
+Power simulation
+void update_power(
+    DataCentre *dc,
+    double seconds
+) {
+    double load = 0.0;
+
+    for (int i = 0;
+         i < dc->rack_count;
+         i++) {
+
+        ServerRack *rack =
+            &dc->racks[i];
+
+        if (!rack->operational)
+            continue;
+
+        load +=
+            rack->power_consumption *
+            (rack->current_compute /
+             rack->compute_capacity);
+    }
+
+    dc->power.load = load;
+
+    if (dc->power.grid_online &&
+        load <= dc->power.grid_capacity) {
+
+        dc->power.generators_online =
+            false;
+
+        return;
+    }
+
+    /*
+     * Automatic backup power.
+     */
+
+    if (dc->power.generators_online &&
+        load <=
+        dc->power.generator_capacity) {
+
+        return;
+    }
+
+    /*
+     * Battery support.
+     */
+
+    if (dc->power.current_battery > 0.0) {
+
+        dc->power.current_battery -=
+            load * seconds / 3600.0;
+
+        if (dc->power.current_battery < 0.0)
+            dc->power.current_battery = 0.0;
+
+        return;
+    }
+
+    /*
+     * Power shortage:
+     * reduce available compute.
+     */
+
+    dc->current_compute *= 0.90;
+}
+Cooling
+
+Every rack generates abstract heat, and the cooling system has to remove it.
+
+void update_cooling(
+    DataCentre *dc
+) {
+    double heat = 0.0;
+
+    for (int i = 0;
+         i < dc->rack_count;
+         i++) {
+
+        ServerRack *rack =
+            &dc->racks[i];
+
+        if (!rack->operational)
+            continue;
+
+        heat +=
+            rack->heat_output *
+            (rack->current_compute /
+             rack->compute_capacity);
+    }
+
+    dc->cooling.current_load =
+        heat;
+
+    if (heat >
+        dc->cooling.total_capacity) {
+
+        /*
+         * Thermal throttling.
+         */
+
+        double ratio =
+            dc->cooling.total_capacity /
+            heat;
+
+        if (ratio < 0.25)
+            ratio = 0.25;
+
+        dc->current_compute *= ratio;
+    }
+}
+Network function
+
+The facility becomes a node in your larger open-world network.
+
+void update_network(
+    DataCentre *dc,
+    double seconds
+) {
+    if (!dc->network.internet_connected)
+        return;
+
+    double utilisation =
+        dc->current_network /
+        dc->network.backbone_capacity;
+
+    if (utilisation > 1.0) {
+
+        dc->current_network =
+            dc->network.backbone_capacity;
+
+        printf(
+            "%s: NETWORK SATURATION\n",
+            dc->name
+        );
+    }
+}
+Facility-wide simulation tick
+void update_datacentre(
+    DataCentre *dc,
+    double seconds
+) {
+    if (!dc->operational)
+        return;
+
+    update_power(
+        dc,
+        seconds
+    );
+
+    update_cooling(
+        dc
+    );
+
+    update_network(
+        dc,
+        seconds
+    );
+
+    /*
+     * Recalculate aggregate capacity.
+     */
+
+    dc->current_compute = 0.0;
+    dc->current_network = 0.0;
+
+    for (int i = 0;
+         i < dc->rack_count;
+         i++) {
+
+        ServerRack *rack =
+            &dc->racks[i];
+
+        if (!rack->operational)
+            continue;
+
+        dc->current_compute +=
+            rack->current_compute;
+
+        dc->current_network +=
+            rack->current_network;
+    }
+}
+Make data centres economically meaningful
+
+I'd then connect this directly to your earlier economy:
+
+                DATA CENTRE
+                     │
+       ┌─────────────┼─────────────┐
+       ↓             ↓             ↓
+    COMPUTE       ELECTRICITY    COOLING
+       │             │             │
+       ↓             ↓             ↓
+   DIGITAL        ENERGY         WATER/
+  SERVICES        MARKET        UTILITIES
+       │
+       ↓
+   CORPORATE
+    REVENUE
+       │
+       ↓
+  INVESTMENT
+       │
+       ↓
+ MORE DATA CENTRES
+
+A facility therefore consumes actual simulated resources:
+
+typedef struct {
+
+    double electricity_mwh;
+    double water_m3;
+    double hydrogen_kg;
+
+    double network_bandwidth;
+    double compute_hours;
+
+    double operating_cost;
+    double revenue;
+
+} DataCentreEconomy;
+
+Then the open-world economy can determine whether the facility is profitable.
+
+For example, a hyperscale centre might have:
+
+╔══════════════════════════════════════════╗
+║        HELIOS DATA CAMPUS                ║
+╠══════════════════════════════════════════╣
+║ Racks                    3,840           ║
+║ Compute                  384,000         ║
+║ Network                  192,000         ║
+║ Utilisation               73%            ║
+║                                          ║
+║ POWER                                  ║
+║ Grid                    210 MW           ║
+║ Backup                   80 MW           ║
+║ Battery                  40 MWh          ║
+║                                          ║
+║ COOLING                                 ║
+║ Capacity                250 MW           ║
+║ Load                    182 MW           ║
+║                                          ║
+║ SECURITY                                 ║
+║ Physical                  94%            ║
+║ Cyber                     97%            ║
+║                                          ║
+║ DAILY ECONOMICS                          ║
+║ Electricity            £1.8M             ║
+║ Cooling                £0.4M             ║
+║ Operations             £0.7M             ║
+║ Revenue                £4.6M             ║
+║ Net                     £1.7M             ║
+╚══════════════════════════════════════════╝
+
+The key design decision I'd make for your engine is simulation level of detail (LOD): when the player is 5 km away, the entire data centre can be simulated as a handful of aggregate variables; when they enter the campus, the engine can instantiate individual rooms, racks, doors, NPC employees, cooling equipment and security systems. That lets you have enormous corporate facilities in the open world without trying to simulate thousands of objects at full detail constantly.
+
+
+
+
+
+
+
+
+
+
 
 
 
