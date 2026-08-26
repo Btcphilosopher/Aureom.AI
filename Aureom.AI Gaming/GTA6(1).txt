@@ -4411,6 +4411,3539 @@ The airport baggage system, international airline network, Japanese destination 
 
 
 
+Absolutely. For a Miami-style open-world street-circuit racing system, I'd structure the C around a proper motorsport simulation: circuit infrastructure, race control, drivers, cars, qualifying, grid formation, lap timing, pit strategy, incidents, sponsors, championship points and live standings.
+
+Below is a standalone foundation that can later connect to your wider open-world engine.
+
+/*
+ * ================================================================
+ * MIAMI STREET CIRCUIT — OPEN WORLD RACING SYSTEM
+ * ================================================================
+ *
+ * Original fictional motorsport system for an open-world game.
+ *
+ * Features:
+ *   - Street circuit
+ *   - Race calendar
+ *   - Drivers
+ *   - Teams
+ *   - Vehicles
+ *   - Sponsors
+ *   - Qualifying
+ *   - Grid formation
+ *   - Lap timing
+ *   - Sector timing
+ *   - Pit stops
+ *   - Mechanical failures
+ *   - Race incidents
+ *   - Championship points
+ *   - Live standings
+ *   - Prize money
+ *   - Sponsor revenue
+ *   - AI racers
+ *
+ * No real-world racing assets are required.
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_DRIVERS       32
+#define MAX_TEAMS         16
+#define MAX_SPONSORS      32
+#define MAX_CIRCUITS      16
+#define MAX_LAPS          100
+#define MAX_SECTORS       3
+#define MAX_RACE_EVENTS   64
+
+#define MAX_NAME          64
+Core enums
+typedef enum {
+    WEATHER_CLEAR,
+    WEATHER_CLOUDY,
+    WEATHER_RAIN,
+    WEATHER_STORM
+} Weather;
+
+typedef enum {
+    DRIVER_ROOKIE,
+    DRIVER_PRO,
+    DRIVER_ELITE,
+    DRIVER_CHAMPION
+} DriverSkill;
+
+typedef enum {
+    CAR_GT,
+    CAR_SUPER_GT,
+    CAR_HYPER,
+    CAR_OPEN_WHEEL
+} CarClass;
+
+typedef enum {
+    INCIDENT_NONE,
+    INCIDENT_SPIN,
+    INCIDENT_COLLISION,
+    INCIDENT_PUNCTURE,
+    INCIDENT_ENGINE_FAILURE,
+    INCIDENT_CRASH
+} IncidentType;
+Sponsor system
+
+Sponsors should be part of the economy rather than simply logos on cars.
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    double signing_bonus;
+    double race_bonus;
+    double championship_bonus;
+
+    double prestige;
+
+} Sponsor;
+
+Example fictional sponsors:
+
+Sponsor sponsors[MAX_SPONSORS] = {
+
+    {
+        1,
+        "Atlantic Dynamics",
+        500000.0,
+        75000.0,
+        2000000.0,
+        0.90
+    },
+
+    {
+        2,
+        "Suncoast Motors",
+        250000.0,
+        45000.0,
+        1000000.0,
+        0.65
+    },
+
+    {
+        3,
+        "Oceanic Technologies",
+        800000.0,
+        90000.0,
+        3000000.0,
+        0.95
+    }
+
+};
+Racing team
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    int sponsor_id;
+
+    double budget;
+
+    double reputation;
+
+    int constructors_points;
+
+} RacingTeam;
+Racing vehicle
+typedef struct {
+
+    int id;
+
+    char model[MAX_NAME];
+
+    CarClass class;
+
+    double horsepower;
+
+    double weight;
+
+    double acceleration;
+
+    double top_speed;
+
+    double braking;
+
+    double cornering;
+
+    double reliability;
+
+    double fuel;
+
+    double tyre_health;
+
+    double engine_health;
+
+    double aero_damage;
+
+} RaceCar;
+Driver
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    int team_id;
+
+    DriverSkill skill;
+
+    double aggression;
+
+    double consistency;
+
+    double wet_weather_skill;
+
+    double qualifying_skill;
+
+    double racecraft;
+
+    double championship_points;
+
+    int wins;
+
+    int podiums;
+
+    int starts;
+
+} Driver;
+
+Example field:
+
+Driver drivers[MAX_DRIVERS];
+int driver_count = 0;
+Street circuit
+
+A circuit is represented as a collection of sectors and track segments.
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    double length_km;
+
+    int laps;
+
+    int sectors;
+
+    double sector_length[MAX_SECTORS];
+
+    double pit_lane_length;
+
+    double average_speed;
+
+    double top_speed;
+
+    double difficulty;
+
+    bool night_race;
+
+    bool street_circuit;
+
+} Circuit;
+
+Create the fictional Miami circuit:
+
+Circuit miami_circuit = {
+
+    .id = 1,
+
+    .name = "Miami Grand Street Circuit",
+
+    .length_km = 5.84,
+
+    .laps = 48,
+
+    .sectors = 3,
+
+    .sector_length = {
+        1.92,
+        1.87,
+        2.05
+    },
+
+    .pit_lane_length = 0.42,
+
+    .average_speed = 178.0,
+
+    .top_speed = 325.0,
+
+    .difficulty = 0.82,
+
+    .night_race = true,
+
+    .street_circuit = true
+};
+Track sectors
+
+Each sector gets different characteristics.
+
+typedef struct {
+
+    char name[MAX_NAME];
+
+    double length;
+
+    double corner_density;
+
+    double braking_difficulty;
+
+    double overtaking_probability;
+
+    double accident_probability;
+
+} TrackSector;
+
+Example:
+
+TrackSector miami_sectors[3] = {
+
+    {
+        "Ocean Boulevard",
+        1.92,
+        0.30,
+        0.45,
+        0.70,
+        0.08
+    },
+
+    {
+        "Downtown Express",
+        1.87,
+        0.20,
+        0.30,
+        0.85,
+        0.05
+    },
+
+    {
+        "Harbour Technical",
+        2.05,
+        0.78,
+        0.88,
+        0.35,
+        0.14
+    }
+
+};
+
+This makes different parts of the circuit strategically different.
+
+Race entry
+typedef struct {
+
+    int driver_id;
+
+    int car_id;
+
+    int qualifying_position;
+
+    int grid_position;
+
+    int current_position;
+
+    int laps_completed;
+
+    double lap_time;
+
+    double best_lap;
+
+    double sector_time[MAX_SECTORS];
+
+    double total_race_time;
+
+    bool in_pit;
+
+    bool finished;
+
+    bool retired;
+
+} RaceEntry;
+Race state
+typedef enum {
+
+    RACE_FORMATION,
+    RACE_STARTING,
+    RACE_RUNNING,
+    RACE_SAFETY_PHASE,
+    RACE_FINISH,
+    RACE_COMPLETE
+
+} RaceState;
+typedef struct {
+
+    Circuit *circuit;
+
+    RaceEntry entries[MAX_DRIVERS];
+
+    int entry_count;
+
+    RaceState state;
+
+    int current_lap;
+
+    Weather weather;
+
+    double race_time;
+
+    int safety_periods;
+
+} Race;
+Qualifying
+
+Qualifying uses driver + car performance.
+
+double calculate_qualifying_time(
+    Driver *driver,
+    RaceCar *car,
+    Circuit *circuit
+) {
+    double base =
+        circuit->length_km /
+        car->top_speed * 3600.0;
+
+    double skill_bonus =
+        driver->qualifying_skill * 8.0;
+
+    double corner_bonus =
+        car->cornering * 5.0;
+
+    double randomness =
+        ((double)rand() / RAND_MAX) * 2.0;
+
+    return
+        base -
+        skill_bonus -
+        corner_bonus +
+        randomness;
+}
+
+Sort drivers by qualifying time:
+
+void run_qualifying(
+    Race *race,
+    Driver drivers[],
+    RaceCar cars[]
+) {
+    printf("\nQUALIFYING SESSION\n");
+
+    for (int i = 0;
+         i < race->entry_count;
+         i++) {
+
+        Driver *driver =
+            &drivers[race->entries[i].driver_id];
+
+        RaceCar *car =
+            &cars[race->entries[i].car_id];
+
+        race->entries[i].lap_time =
+            calculate_qualifying_time(
+                driver,
+                car,
+                race->circuit
+            );
+    }
+}
+Grid formation
+void form_grid(Race *race)
+{
+    for (int i = 0;
+         i < race->entry_count;
+         i++) {
+
+        race->entries[i].grid_position =
+            i + 1;
+
+        race->entries[i].current_position =
+            i + 1;
+    }
+
+    printf(
+        "\nGRID FORMED: %d CARS\n",
+        race->entry_count
+    );
+}
+Race start
+void start_race(Race *race)
+{
+    race->state = RACE_STARTING;
+
+    printf("\n");
+    printf("====================================\n");
+    printf(" MIAMI GRAND STREET CIRCUIT\n");
+    printf("====================================\n");
+
+    printf("LIGHTS OUT!\n");
+
+    race->state = RACE_RUNNING;
+}
+Lap simulation
+double calculate_lap_time(
+    Driver *driver,
+    RaceCar *car,
+    Circuit *circuit,
+    Weather weather
+) {
+    double performance =
+        car->top_speed * 0.35 +
+        car->cornering * 100.0 +
+        driver->racecraft * 10.0;
+
+    double weather_penalty = 0.0;
+
+    if (weather == WEATHER_RAIN)
+        weather_penalty =
+            8.0 - driver->wet_weather_skill * 5.0;
+
+    if (weather == WEATHER_STORM)
+        weather_penalty =
+            18.0 - driver->wet_weather_skill * 10.0;
+
+    double base_time =
+        (circuit->length_km * 3600.0) /
+        circuit->average_speed;
+
+    double performance_effect =
+        performance * 0.015;
+
+    double randomness =
+        ((double)rand() / RAND_MAX) * 1.5;
+
+    return
+        base_time
+        - performance_effect
+        + weather_penalty
+        + randomness;
+}
+AI racecraft
+
+The AI should decide whether to attack or conserve tyres.
+
+typedef enum {
+
+    RACE_MODE_PUSH,
+    RACE_MODE_NORMAL,
+    RACE_MODE_DEFEND,
+    RACE_MODE_CONSERVE
+
+} RaceMode;
+RaceMode choose_race_mode(
+    Driver *driver,
+    int position,
+    int target_position,
+    double tyre_health
+) {
+    if (tyre_health < 25.0)
+        return RACE_MODE_CONSERVE;
+
+    if (
+        target_position < position &&
+        driver->aggression > 0.70
+    )
+        return RACE_MODE_PUSH;
+
+    if (
+        target_position > position &&
+        driver->aggression > 0.65
+    )
+        return RACE_MODE_DEFEND;
+
+    return RACE_MODE_NORMAL;
+}
+Overtaking
+bool attempt_overtake(
+    Driver *attacker,
+    RaceCar *attacker_car,
+    Driver *defender,
+    RaceCar *defender_car,
+    TrackSector *sector
+) {
+    double probability =
+        sector->overtaking_probability;
+
+    probability +=
+        attacker->racecraft * 0.20;
+
+    probability +=
+        attacker_car->top_speed /
+        1000.0;
+
+    probability -=
+        defender->racecraft * 0.10;
+
+    double roll =
+        (double)rand() / RAND_MAX;
+
+    return roll < probability;
+}
+Race incidents
+IncidentType generate_incident(
+    Driver *driver,
+    RaceCar *car,
+    TrackSector *sector,
+    Weather weather
+) {
+    double probability =
+        sector->accident_probability;
+
+    probability +=
+        driver->aggression * 0.04;
+
+    probability +=
+        (1.0 - car->reliability) * 0.05;
+
+    if (weather == WEATHER_RAIN)
+        probability *= 1.8;
+
+    double roll =
+        (double)rand() / RAND_MAX;
+
+    if (roll < probability * 0.10)
+        return INCIDENT_ENGINE_FAILURE;
+
+    if (roll < probability * 0.30)
+        return INCIDENT_PUNCTURE;
+
+    if (roll < probability * 0.65)
+        return INCIDENT_SPIN;
+
+    if (roll < probability)
+        return INCIDENT_COLLISION;
+
+    return INCIDENT_NONE;
+}
+Safety phase
+
+A major incident can trigger a temporary safety period.
+
+void trigger_safety_phase(
+    Race *race,
+    IncidentType incident
+) {
+    if (
+        incident == INCIDENT_COLLISION ||
+        incident == INCIDENT_CRASH
+    ) {
+
+        race->state =
+            RACE_SAFETY_PHASE;
+
+        race->safety_periods++;
+
+        printf(
+            "\nSAFETY PERIOD DEPLOYED\n"
+        );
+    }
+}
+Pit stops
+typedef struct {
+
+    double pit_time;
+
+    bool tyres_changed;
+
+    bool repairs;
+
+    double fuel_added;
+
+} PitStop;
+double calculate_pit_stop(
+    RaceCar *car,
+    bool tyres,
+    bool repair
+) {
+    double time = 20.0;
+
+    if (tyres)
+        time += 2.5;
+
+    if (repair)
+        time +=
+            (100.0 - car->aero_damage) * 0.05;
+
+    return time;
+}
+Championship points
+int championship_points(int finishing_position)
+{
+    switch (finishing_position) {
+
+        case 1:  return 25;
+        case 2:  return 18;
+        case 3:  return 15;
+        case 4:  return 12;
+        case 5:  return 10;
+        case 6:  return 8;
+        case 7:  return 6;
+        case 8:  return 4;
+        case 9:  return 2;
+        case 10: return 1;
+
+        default:
+            return 0;
+    }
+}
+
+Add fastest lap:
+
+int fastest_lap_bonus(
+    int position,
+    bool fastest
+) {
+    if (
+        fastest &&
+        position <= 10
+    )
+        return 1;
+
+    return 0;
+}
+Sponsor revenue
+
+Sponsors respond to performance.
+
+double calculate_sponsor_payment(
+    Sponsor *sponsor,
+    int finishing_position,
+    bool fastest_lap,
+    double audience
+) {
+    double payment =
+        sponsor->race_bonus;
+
+    payment +=
+        audience * sponsor->prestige * 1000.0;
+
+    if (finishing_position == 1)
+        payment *= 2.0;
+
+    if (fastest_lap)
+        payment *= 1.15;
+
+    return payment;
+}
+
+This means the race becomes part of the wider game economy.
+
+Crowd / audience simulation
+typedef struct {
+
+    int spectators;
+
+    double television_audience;
+
+    double social_media_attention;
+
+    double event_prestige;
+
+} RaceAudience;
+RaceAudience calculate_audience(
+    Circuit *circuit,
+    double championship_importance,
+    Weather weather
+) {
+    RaceAudience audience;
+
+    audience.spectators = 85000;
+
+    audience.television_audience =
+        4.2e6 *
+        championship_importance;
+
+    audience.social_media_attention =
+        0.50;
+
+    audience.event_prestige =
+        0.80;
+
+    if (weather == WEATHER_RAIN)
+        audience.spectators *= 0.85;
+
+    if (circuit->night_race)
+        audience.event_prestige += 0.10;
+
+    return audience;
+}
+Live standings
+void print_standings(
+    Race *race,
+    Driver drivers[]
+) {
+    printf("\n");
+    printf("========= LIVE STANDINGS =========\n");
+
+    for (
+        int position = 1;
+        position <= race->entry_count;
+        position++
+    ) {
+
+        for (
+            int i = 0;
+            i < race->entry_count;
+            i++
+        ) {
+
+            if (
+                race->entries[i].current_position
+                == position
+            ) {
+
+                Driver *driver =
+                    &drivers[
+                        race->entries[i].driver_id
+                    ];
+
+                printf(
+                    "%2d  %-20s  %6.2f sec\n",
+                    position,
+                    driver->name,
+                    race->entries[i].total_race_time
+                );
+            }
+        }
+    }
+}
+Race progression
+void simulate_lap(
+    Race *race,
+    Driver drivers[],
+    RaceCar cars[],
+    TrackSector sectors[]
+) {
+    for (
+        int i = 0;
+        i < race->entry_count;
+        i++
+    ) {
+
+        RaceEntry *entry =
+            &race->entries[i];
+
+        if (
+            entry->retired ||
+            entry->finished
+        )
+            continue;
+
+        Driver *driver =
+            &drivers[entry->driver_id];
+
+        RaceCar *car =
+            &cars[entry->car_id];
+
+        double lap =
+            calculate_lap_time(
+                driver,
+                car,
+                race->circuit,
+                race->weather
+            );
+
+        entry->lap_time = lap;
+
+        if (
+            lap < entry->best_lap ||
+            entry->best_lap == 0
+        )
+            entry->best_lap = lap;
+
+        entry->total_race_time += lap;
+
+        entry->laps_completed++;
+
+        car->tyre_health -= 2.0;
+
+        car->fuel -=
+            3.0;
+
+        if (car->tyre_health < 0)
+            car->tyre_health = 0;
+
+        if (car->fuel < 0)
+            car->fuel = 0;
+    }
+}
+Complete race simulation
+void run_race(
+    Race *race,
+    Driver drivers[],
+    RaceCar cars[],
+    TrackSector sectors[]
+) {
+    start_race(race);
+
+    for (
+        race->current_lap = 1;
+        race->current_lap <= race->circuit->laps;
+        race->current_lap++
+    ) {
+
+        printf(
+            "\nLAP %d / %d\n",
+            race->current_lap,
+            race->circuit->laps
+        );
+
+        simulate_lap(
+            race,
+            drivers,
+            cars,
+            sectors
+        );
+
+        print_standings(
+            race,
+            drivers
+        );
+
+        if (
+            race->state ==
+            RACE_SAFETY_PHASE
+        ) {
+
+            printf(
+                "Safety period active.\n"
+            );
+
+            race->state =
+                RACE_RUNNING;
+        }
+    }
+
+    race->state =
+        RACE_FINISH;
+
+    printf(
+        "\n============================\n"
+    );
+
+    printf(
+        "CHECKERED FLAG\n"
+    );
+
+    printf(
+        "MIAMI GRAND STREET CIRCUIT\n"
+    );
+
+    printf(
+        "============================\n"
+    );
+
+    race->state =
+        RACE_COMPLETE;
+}
+Championship
+
+For the larger open-world racing calendar, create:
+
+typedef struct {
+
+    char name[MAX_NAME];
+
+    Circuit circuits[MAX_CIRCUITS];
+
+    int circuit_count;
+
+    int rounds;
+
+} Championship;
+
+Example calendar:
+
+MIAMI
+  ↓
+ATLANTIC COAST
+  ↓
+DESERT NIGHT CIRCUIT
+  ↓
+MOUNTAIN GRAND PRIX
+  ↓
+EUROPEAN STREET CIRCUIT
+  ↓
+TOKYO NIGHT CIRCUIT
+  ↓
+FINAL
+
+Each race modifies the championship standings.
+
+void award_points(
+    Driver *driver,
+    int finishing_position
+) {
+    int points =
+        championship_points(
+            finishing_position
+        );
+
+    driver->championship_points +=
+        points;
+
+    if (finishing_position == 1)
+        driver->wins++;
+
+    if (finishing_position <= 3)
+        driver->podiums++;
+}
+The really interesting GTA-style layer
+
+I'd put a persistent street-racing ecosystem above the race engine:
+
+                    OPEN WORLD
+                        │
+             ┌──────────┴──────────┐
+             ▼                     ▼
+       LEGAL RACING            ILLEGAL RACING
+             │                     │
+             ▼                     ▼
+       STREET CIRCUITS          NIGHT RACES
+             │                     │
+             ▼                     ▼
+       SPONSORS                 BETTING
+             │                     │
+             ▼                     ▼
+       CHAMPIONSHIP             HEAT
+             │                     │
+             ▼                     ▼
+       PRIZE MONEY              POLICE
+             │
+             ▼
+       CAR DEVELOPMENT
+             │
+       ┌─────┼─────┐
+       ▼     ▼     ▼
+    ENGINE  TYRES  AERO
+
+That gives you a system where the Miami street circuit isn't just a race minigame. It becomes an actual open-world institution: teams recruit drivers, sponsors pay based on exposure, cars improve, championship standings persist, spectators affect revenue, weather changes races, and the player's performance changes their reputation and access to increasingly prestigious events.
+
+For the eventual 3D version, the same C-style simulation architecture can sit underneath a much more sophisticated rendering/physics layer.
+
+
+
+Here is a C foundation for the 18-hole course.
+
+/*
+ * ================================================================
+ * PEbBLE ISLAND GOLF CLUB
+ * ================================================================
+ *
+ * Fictional Floridian coastal golf course for an open-world game.
+ *
+ * Setting:
+ *     Private island off the Florida coast
+ *
+ * Style:
+ *     Floridian coastal + links-inspired
+ *
+ * Features:
+ *     18 holes
+ *     wind
+ *     ocean
+ *     dunes
+ *     mangroves
+ *     bunkers
+ *     lagoons
+ *     elevation
+ *     greens
+ *     tee positions
+ *     hazards
+ *     NPC golfers
+ *     scoring
+ *     weather
+ *     dynamic conditions
+ *
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+#define HOLES 18
+#define MAX_PLAYERS 16
+#define MAX_CLUBS 14
+#define MAX_SHOTS 20
+Course structure
+typedef enum {
+
+    TERRAIN_FAIRWAY,
+    TERRAIN_ROUGH,
+    TERRAIN_DUNE,
+    TERRAIN_BUNKER,
+    TERRAIN_GREEN,
+    TERRAIN_WATER,
+    TERRAIN_MANGROVE,
+    TERRAIN_WASTE
+
+} TerrainType;
+typedef struct {
+
+    double x;
+    double y;
+    double elevation;
+
+} Point;
+
+Each hole:
+
+typedef struct {
+
+    int number;
+
+    char name[64];
+
+    int par;
+
+    double length_yards;
+
+    int stroke_index;
+
+    Point tee;
+    Point green;
+
+    int bunker_count;
+    int water_hazards;
+    bool ocean_hazard;
+    bool island_green;
+
+    double fairway_width;
+    double green_size;
+
+    double difficulty;
+
+} GolfHole;
+Course
+typedef struct {
+
+    char name[128];
+
+    char location[128];
+
+    GolfHole holes[HOLES];
+
+    double total_yardage;
+
+    int par;
+
+    double wind_speed;
+
+    double wind_direction;
+
+    double tide_level;
+
+    double humidity;
+
+    bool coastal;
+
+} GolfCourse;
+Pebble Island
+GolfCourse pebble_island;
+
+Initialise it:
+
+void initialise_course(GolfCourse *course)
+{
+    strcpy(
+        course->name,
+        "Pebble Island Golf Club"
+    );
+
+    strcpy(
+        course->location,
+        "Private Island, Florida"
+    );
+
+    course->par = 72;
+
+    course->total_yardage = 7184.0;
+
+    course->wind_speed = 12.0;
+
+    course->wind_direction = 45.0;
+
+    course->tide_level = 0.50;
+
+    course->humidity = 0.78;
+
+    course->coastal = true;
+}
+The 18 holes
+
+The course should have its own identity rather than simply being eighteen generic holes.
+
+void create_holes(GolfCourse *course)
+{
+    course->holes[0] = (GolfHole) {
+        1,
+        "Atlantic Gate",
+        4,
+        436,
+        7,
+        {0, 0, 4},
+        {390, 80, 2},
+        4,
+        0,
+        true,
+        false,
+        34,
+        28,
+        0.62
+    };
+
+    course->holes[1] = (GolfHole) {
+        2,
+        "Pelican Run",
+        5,
+        562,
+        3,
+        {500, 100, 3},
+        {1000, 180, 5},
+        5,
+        1,
+        false,
+        false,
+        42,
+        31,
+        0.68
+    };
+
+    course->holes[2] = (GolfHole) {
+        3,
+        "Mangrove Edge",
+        3,
+        187,
+        15,
+        {1100, 200, 5},
+        {1280, 270, 4},
+        3,
+        1,
+        false,
+        false,
+        28,
+        25,
+        0.57
+    };
+
+    course->holes[3] = (GolfHole) {
+        4,
+        "The Causeway",
+        4,
+        421,
+        9,
+        {1300, 300, 4},
+        {1660, 360, 6},
+        5,
+        1,
+        true,
+        false,
+        31,
+        29,
+        0.72
+    };
+
+    course->holes[4] = (GolfHole) {
+        5,
+        "Blue Heron",
+        4,
+        398,
+        11,
+        {1700, 400, 5},
+        {2010, 450, 4},
+        6,
+        0,
+        true,
+        false,
+        35,
+        32,
+        0.64
+    };
+
+    course->holes[5] = (GolfHole) {
+        6,
+        "Dune Passage",
+        5,
+        548,
+        1,
+        {2050, 480, 4},
+        {2550, 570, 8},
+        7,
+        1,
+        false,
+        false,
+        38,
+        34,
+        0.83
+    };
+
+    course->holes[6] = (GolfHole) {
+        7,
+        "Palm Shadow",
+        3,
+        201,
+        13,
+        {2600, 600, 8},
+        {2780, 690, 7},
+        3,
+        1,
+        false,
+        false,
+        30,
+        29,
+        0.66
+    };
+
+    course->holes[7] = (GolfHole) {
+        8,
+        "Island Wind",
+        4,
+        445,
+        5,
+        {2850, 700, 7},
+        {3260, 780, 3},
+        5,
+        1,
+        true,
+        false,
+        30,
+        27,
+        0.79
+    };
+
+    course->holes[8] = (GolfHole) {
+        9,
+        "Halfway House",
+        4,
+        392,
+        17,
+        {3300, 800, 3},
+        {3650, 860, 4},
+        4,
+        0,
+        true,
+        false,
+        36,
+        31,
+        0.60
+    };
+
+    /*
+     * BACK NINE
+     */
+
+    course->holes[9] = (GolfHole) {
+        10,
+        "Return to the Sea",
+        4,
+        430,
+        8,
+        {3700, 900, 4},
+        {4100, 980, 2},
+        5,
+        1,
+        true,
+        false,
+        33,
+        30,
+        0.70
+    };
+
+    course->holes[10] = (GolfHole) {
+        11,
+        "Pelican Bay",
+        5,
+        575,
+        2,
+        {4150, 1000, 2},
+        {4700, 1110, 6},
+        7,
+        2,
+        true,
+        false,
+        37,
+        32,
+        0.87
+    };
+
+    course->holes[11] = (GolfHole) {
+        12,
+        "The Mangrove",
+        4,
+        410,
+        10,
+        {4750, 1150, 6},
+        {5100, 1210, 5},
+        6,
+        1,
+        false,
+        false,
+        29,
+        27,
+        0.76
+    };
+
+    course->holes[12] = (GolfHole) {
+        13,
+        "Stormwatch",
+        3,
+        214,
+        14,
+        {5150, 1250, 5},
+        {5330, 1310, 7},
+        4,
+        1,
+        true,
+        true,
+        25,
+        23,
+        0.91
+    };
+
+    course->holes[13] = (GolfHole) {
+        14,
+        "Longwater",
+        5,
+        590,
+        4,
+        {5400, 1350, 7},
+        {5900, 1440, 5},
+        8,
+        2,
+        false,
+        false,
+        41,
+        35,
+        0.84
+    };
+
+    course->holes[14] = (GolfHole) {
+        15,
+        "The Lighthouse",
+        4,
+        451,
+        6,
+        {6000, 1500, 5},
+        {6410, 1580, 3},
+        6,
+        1,
+        true,
+        false,
+        32,
+        29,
+        0.81
+    };
+
+    course->holes[15] = (GolfHole) {
+        16,
+        "Shipwreck",
+        4,
+        402,
+        12,
+        {6500, 1600, 3},
+        {6840, 1690, 4},
+        5,
+        1,
+        true,
+        false,
+        34,
+        30,
+        0.74
+    };
+
+    course->holes[16] = (GolfHole) {
+        17,
+        "Ocean Green",
+        3,
+        178,
+        16,
+        {6900, 1700, 4},
+        {7050, 1810, 3},
+        3,
+        1,
+        true,
+        true,
+        24,
+        22,
+        0.94
+    };
+
+    course->holes[17] = (GolfHole) {
+        18,
+        "Pebble Island",
+        4,
+        482,
+        18,
+        {7100, 1850, 3},
+        {7480, 1940, 6},
+        7,
+        1,
+        true,
+        false,
+        35,
+        31,
+        0.89
+    };
+}
+
+This gives the course a 7,184-yard par 72 layout, with the most dangerous holes concentrated around the coast and island greens.
+
+Player
+typedef struct {
+
+    char name[64];
+
+    double driving;
+    double iron_play;
+    double short_game;
+    double putting;
+
+    double consistency;
+    double power;
+
+    int handicap;
+
+    int score;
+
+    int shots;
+
+} Golfer;
+Golf clubs
+typedef enum {
+
+    DRIVER,
+    THREE_WOOD,
+    HYBRID,
+    LONG_IRON,
+    MID_IRON,
+    SHORT_IRON,
+    WEDGE,
+    SAND_WEDGE,
+    PUTTER
+
+} ClubType;
+typedef struct {
+
+    ClubType type;
+
+    char name[32];
+
+    double maximum_distance;
+    double accuracy;
+
+} GolfClub;
+
+Example:
+
+GolfClub driver = {
+    DRIVER,
+    "Driver",
+    285.0,
+    0.82
+};
+
+GolfClub seven_iron = {
+    MID_IRON,
+    "7 Iron",
+    165.0,
+    0.91
+};
+
+GolfClub putter = {
+    PUTTER,
+    "Putter",
+    60.0,
+    0.98
+};
+Wind simulation
+
+This is particularly important on a small Florida island.
+
+typedef struct {
+
+    double speed;
+
+    double direction;
+
+    double gust_probability;
+
+    double gust_strength;
+
+} Wind;
+double calculate_wind_effect(
+    Wind *wind,
+    double shot_direction
+) {
+    double difference =
+        fabs(
+            wind->direction -
+            shot_direction
+        );
+
+    if (difference > 180.0)
+        difference =
+            360.0 - difference;
+
+    return
+        cos(
+            difference *
+            M_PI / 180.0
+        ) *
+        wind->speed;
+}
+Shot simulation
+typedef struct {
+
+    Point start;
+
+    Point landing;
+
+    double distance;
+
+    double accuracy;
+
+    bool hazard;
+
+} GolfShot;
+GolfShot hit_shot(
+    Golfer *golfer,
+    GolfClub *club,
+    GolfHole *hole,
+    Wind *wind,
+    double direction
+) {
+    GolfShot shot;
+
+    shot.start = hole->tee;
+
+    double wind_effect =
+        calculate_wind_effect(
+            wind,
+            direction
+        );
+
+    double power_variation =
+        ((double)rand() / RAND_MAX)
+        * 0.10;
+
+    double distance =
+        club->maximum_distance *
+        golfer->power;
+
+    distance *=
+        1.0 +
+        power_variation;
+
+    distance +=
+        wind_effect * 2.0;
+
+    shot.distance =
+        distance;
+
+    shot.accuracy =
+        club->accuracy *
+        golfer->consistency;
+
+    shot.hazard = false;
+
+    return shot;
+}
+Dynamic island conditions
+
+The course changes as the game progresses.
+
+void update_course_conditions(
+    GolfCourse *course,
+    double time_of_day
+) {
+    /*
+     * Afternoon sea breeze.
+     */
+
+    if (
+        time_of_day > 12.0 &&
+        time_of_day < 18.0
+    ) {
+        course->wind_speed =
+            16.0;
+    }
+
+    /*
+     * Morning conditions.
+     */
+
+    else if (
+        time_of_day < 12.0
+    ) {
+        course->wind_speed =
+            8.0;
+    }
+
+    /*
+     * Evening calm.
+     */
+
+    else {
+
+        course->wind_speed =
+            10.0;
+    }
+
+    /*
+     * Tide cycle.
+     */
+
+    course->tide_level =
+        0.5 +
+        0.4 *
+        sin(
+            time_of_day *
+            M_PI /
+            12.0
+        );
+}
+Hole scoring
+int calculate_score(
+    int strokes,
+    int par
+) {
+    return strokes - par;
+}
+
+Display golf terminology:
+
+void print_score(
+    int strokes,
+    int par
+) {
+    int difference =
+        strokes - par;
+
+    if (difference == -3)
+        printf("ALBATROSS");
+
+    else if (difference == -2)
+        printf("EAGLE");
+
+    else if (difference == -1)
+        printf("BIRDIE");
+
+    else if (difference == 0)
+        printf("PAR");
+
+    else if (difference == 1)
+        printf("BOGEY");
+
+    else if (difference == 2)
+        printf("DOUBLE BOGEY");
+
+    else
+        printf("+%d", difference);
+}
+NPC golfers
+
+Give the island its own golfing community.
+
+typedef struct {
+
+    Golfer golfer;
+
+    double patience;
+    double risk_tolerance;
+    double course_knowledge;
+
+} NPCGolfer;
+
+Different NPC archetypes:
+
+typedef enum {
+
+    TOUR_PRO,
+    WEALTHY_AMATEUR,
+    LOCAL_MEMBER,
+    BEGINNER,
+    CELEBRITY,
+    CORPORATE_GOLFER
+
+} GolferType;
+
+A Tour Pro might attack the difficult par 5s, while a wealthy amateur may play conservatively around the island greens.
+
+Tournament
+typedef struct {
+
+    char name[128];
+
+    GolfCourse *course;
+
+    Golfer players[MAX_PLAYERS];
+
+    int player_count;
+
+    double prize_pool;
+
+    int round;
+
+    bool tournament_active;
+
+} GolfTournament;
+
+Example:
+
+GolfTournament pebble_open = {
+
+    "Pebble Island Invitational",
+
+    &pebble_island,
+
+    {0},
+
+    0,
+
+    5000000.0,
+
+    1,
+
+    true
+
+};
+Tournament standings
+void print_golf_standings(
+    GolfTournament *tournament
+) {
+    printf(
+        "\n================================\n"
+    );
+
+    printf(
+        "PEBBLE ISLAND INVITATIONAL\n"
+    );
+
+    printf(
+        "================================\n"
+    );
+
+    for (
+        int i = 0;
+        i < tournament->player_count;
+        i++
+    ) {
+
+        Golfer *g =
+            &tournament->players[i];
+
+        printf(
+            "%-20s %4d shots\n",
+            g->name,
+            g->shots
+        );
+    }
+}
+The 18-hole experience
+
+The course could therefore be represented in-game as:
+
+                 PEBBLE ISLAND
+                     GOLF CLUB
+
+                         🌊
+              ┌──────────────────┐
+              │  1 ATLANTIC GATE │
+              └────────┬─────────┘
+                       │
+              2 PELICAN RUN
+                       │
+              3 MANGROVE EDGE
+                       │
+              4 THE CAUSEWAY
+                       │
+              5 BLUE HERON
+                       │
+              6 DUNE PASSAGE
+                       │
+              7 PALM SHADOW
+                       │
+              8 ISLAND WIND
+                       │
+              9 HALFWAY HOUSE
+                       │
+                    CLUBHOUSE
+                       │
+              10 RETURN TO SEA
+                       │
+              11 PELICAN BAY
+                       │
+              12 THE MANGROVE
+                       │
+              13 STORMWATCH
+                       │
+              14 LONGWATER
+                       │
+              15 LIGHTHOUSE
+                       │
+              16 SHIPWRECK
+                       │
+              17 OCEAN GREEN
+                       │
+              18 PEBBLE ISLAND
+                       │
+                     FINISH
+
+The particularly interesting part for an open-world game is that the course shouldn't just be a static golf minigame. Make the island a persistent location with a clubhouse, marina, luxury hotel, driving range, caddies, NPC members, tournaments and changing conditions.
+
+For example, Hole 17 — Ocean Green could be the signature hole: a tiny island green separated from the mainland by the Atlantic, with the difficulty dynamically changing according to wind and tide. That gives the player a genuinely memorable final stretch rather than simply another conventional golf course.
+
+
+
+
+THE MIAMI OPEN
+PEBBLE ISLAND GOLF CLUB
+
+Florida's Premier Coastal Championship
+
+The tournament takes place annually at the fictional Pebble Island Golf Club, a prestigious Floridian island golf resort featuring an 18-hole, par-72, 7,184-yard coastal links-style course.
+
+The Miami Open should feel like a major event within a living open-world game.
+
+It should have:
+
+professional golfers
+qualifying
+tournament rounds
+leaderboard
+cut
+spectators
+sponsors
+television audience
+prize money
+player rankings
+caddies
+weather
+wind
+tides
+course conditions
+NPC behaviour
+hospitality
+VIPs
+press
+merchandising
+player reputation
+championship history
+annual recurrence
+dynamic tournament events
+
+The simulation should be systemic rather than scripted.
+
+1. CORE ARCHITECTURE
+
+Create a modular C project:
+
+miami_open/
+│
+├── main.c
+├── config.h
+│
+├── engine/
+│   ├── tournament.c
+│   ├── tournament.h
+│   ├── calendar.c
+│   ├── calendar.h
+│   ├── scoring.c
+│   └── scoring.h
+│
+├── golf/
+│   ├── course.c
+│   ├── course.h
+│   ├── hole.c
+│   ├── hole.h
+│   ├── shot.c
+│   ├── shot.h
+│   ├── weather.c
+│   └── weather.h
+│
+├── players/
+│   ├── player.c
+│   ├── player.h
+│   ├── ai_golfer.c
+│   └── ai_golfer.h
+│
+├── economy/
+│   ├── sponsors.c
+│   ├── sponsors.h
+│   ├── prize_money.c
+│   ├── prize_money.h
+│   ├── spectators.c
+│   └── spectators.h
+│
+├── world/
+│   ├── spectators.c
+│   ├── hospitality.c
+│   ├── media.c
+│   └── events.c
+│
+└── tests/
+    ├── test_scoring.c
+    ├── test_weather.c
+    ├── test_tournament.c
+    └── test_economy.c
+
+Keep simulation logic independent from rendering.
+
+2. ANNUAL CALENDAR
+
+The Miami Open occurs once every in-game year.
+
+Implement:
+
+typedef struct {
+    int year;
+    int month;
+    int day;
+} GameDate;
+
+Tournament:
+
+typedef struct {
+
+    char name[64];
+
+    GameDate start_date;
+    GameDate end_date;
+
+    int edition;
+
+    double prize_pool;
+
+    bool active;
+
+} AnnualTournament;
+
+Example:
+
+2026 MIAMI OPEN
+2027 MIAMI OPEN
+2028 MIAMI OPEN
+2029 MIAMI OPEN
+...
+
+The tournament should persist between years.
+
+Maintain:
+
+Miami Open
+    ↓
+annual edition
+    ↓
+winner
+    ↓
+records
+    ↓
+ranking changes
+    ↓
+player reputation
+    ↓
+sponsor changes
+    ↓
+next year's field
+3. TOURNAMENT FORMAT
+
+Use a four-round championship:
+
+THURSDAY
+Round 1 — 18 holes
+
+FRIDAY
+Round 2 — 18 holes
+
+CUT
+
+SATURDAY
+Round 3 — 18 holes
+
+SUNDAY
+Final Round — 18 holes
+
+CHAMPION
+
+Total:
+
+72 holes
+
+Players failing to make the cut do not play rounds 3 and 4.
+
+4. FIELD
+
+Support up to:
+
+#define MAX_FIELD 156
+
+Each player:
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double driving;
+    double iron_play;
+    double short_game;
+    double putting;
+
+    double consistency;
+    double mental_strength;
+
+    double aggression;
+    double risk_tolerance;
+
+    double wind_skill;
+    double wet_weather_skill;
+
+    int world_ranking;
+
+    double ranking_points;
+
+    double career_earnings;
+
+    int wins;
+
+    int major_wins;
+
+    int miami_open_wins;
+
+} Golfer;
+
+Generate a field containing:
+
+elite professionals
+established professionals
+rookies
+local professionals
+invited amateurs
+fictional celebrities
+qualifier entrants
+5. GOLFER PERSONALITIES
+
+Give each AI golfer a personality.
+
+typedef enum {
+
+    GOLFER_AGGRESSIVE,
+    GOLFER_CONSERVATIVE,
+    GOLFER_PRECISION,
+    GOLFER_POWER,
+    GOLFER_RISK_TAKER,
+    GOLFER_WEATHER_SPECIALIST,
+    GOLFER_CLOSER
+
+} GolferStyle;
+
+The AI must use these characteristics to make decisions.
+
+For example:
+
+POWER PLAYER
+long drives
+high eagle probability
+greater hazard risk
+PRECISION PLAYER
+shorter drives
+excellent approach shots
+low bogey frequency
+RISK TAKER
+aggressive lines
+high variance
+possible spectacular rounds
+possible disasters
+6. PEBBLE ISLAND COURSE
+
+Load the previously defined:
+
+Pebble Island Golf Club
+
+18 holes:
+
+1  Atlantic Gate
+2  Pelican Run
+3  Mangrove Edge
+4  The Causeway
+5  Blue Heron
+6  Dune Passage
+7  Palm Shadow
+8  Island Wind
+9  Halfway House
+
+10 Return to the Sea
+11 Pelican Bay
+12 The Mangrove
+13 Stormwatch
+14 Longwater
+15 The Lighthouse
+16 Shipwreck
+17 Ocean Green
+18 Pebble Island
+
+Maintain individual:
+
+par
+yardage
+stroke index
+fairway width
+green size
+bunker count
+water hazards
+ocean exposure
+difficulty
+7. WEATHER
+
+Weather must dynamically affect tournament performance.
+
+Implement:
+
+typedef enum {
+
+    WEATHER_SUNNY,
+    WEATHER_CLOUDY,
+    WEATHER_WINDY,
+    WEATHER_RAIN,
+    WEATHER_STORM
+
+} WeatherType;
+
+Conditions:
+
+temperature
+humidity
+wind speed
+wind direction
+gusts
+rainfall
+visibility
+tide
+
+The weather changes between rounds.
+
+8. FLORIDA WIND
+
+Wind is one of the defining characteristics of the tournament.
+
+Implement:
+
+double calculate_wind_effect(
+    double wind_speed,
+    double wind_direction,
+    double shot_direction
+);
+
+Strong crosswinds should affect:
+
+ball trajectory
+landing position
+roll
+club selection
+risk
+
+Players with high:
+
+wind_skill
+
+should suffer less performance degradation.
+
+9. TIDE
+
+Because Pebble Island is surrounded by water, tide affects the course.
+
+Implement:
+
+typedef struct {
+
+    double level;
+
+    double rising_speed;
+
+    double falling_speed;
+
+} Tide;
+
+High tide can:
+
+reduce beach areas
+increase water hazards
+alter recovery options
+change visual conditions
+
+Low tide can expose additional coastal areas.
+
+10. ROUND ENGINE
+
+Implement:
+
+void simulate_round(
+    Tournament *tournament
+);
+
+For every golfer:
+
+TEE SHOT
+ ↓
+APPROACH
+ ↓
+SHORT GAME
+ ↓
+PUTTING
+ ↓
+HOLE SCORE
+ ↓
+ROUND SCORE
+ ↓
+LEADERBOARD
+
+Do not simply generate random scores.
+
+Scores must emerge from:
+
+player ability
++
+course difficulty
++
+weather
++
+wind
++
+hole characteristics
++
+player personality
++
+current tournament position
++
+fatigue
++
+pressure
+11. SHOT MODEL
+
+Every shot should have:
+
+typedef struct {
+
+    double distance;
+
+    double accuracy;
+
+    double trajectory;
+
+    double spin;
+
+    double wind_effect;
+
+    double landing_x;
+
+    double landing_y;
+
+    bool hazard;
+
+} Shot;
+
+The simulation should determine whether the player lands:
+
+fairway
+rough
+bunker
+green
+water
+mangrove
+waste area
+12. PRESSURE SYSTEM
+
+Players behave differently depending on tournament position.
+
+Create:
+
+double tournament_pressure;
+
+Pressure increases when:
+
+player is leading
+player is near the cut
+player is chasing the leader
+final holes
+final round
+Miami Open victory is possible
+
+A nervous player should become less consistent.
+
+A mentally strong player should become more consistent.
+
+13. THE CUT
+
+After Round 2:
+
+sort leaderboard
+↓
+determine cut line
+↓
+retain qualifying players
+↓
+eliminate remaining players
+
+Display:
+
+CUT LINE: +2
+PLAYERS REMAINING: 72
+
+Make the cut configurable.
+
+14. LEADERBOARD
+
+Implement a live leaderboard.
+
+Display:
+
+MIAMI OPEN
+ROUND 3
+
+POS  PLAYER              TODAY   TOTAL
+1    Alexander Vale      -4      -13
+2    Marcus Reed         -3      -11
+3    Daniel Carter       -5      -10
+4    Thomas Blake        -1       -9
+...
+
+Update after every completed hole.
+
+15. FINAL HOLE DRAMA
+
+Hole 18 should be capable of producing dynamic championship endings.
+
+Examples:
+
+PLAYER A LEADS BY 1
+PLAYER B BIRDIES 18
+PLAYER A MUST PAR TO WIN
+
+or:
+
+TIED AFTER 72 HOLES
+        ↓
+PLAYOFF
+        ↓
+HOLE 18
+        ↓
+WINNER
+
+Implement sudden-death playoff logic.
+
+16. SPONSOR ECONOMY
+
+Sponsors should form an economic system.
+
+Each sponsor:
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double sponsorship_value;
+
+    double prestige;
+
+    double race_bonus;
+
+    double audience_multiplier;
+
+} Sponsor;
+
+Sponsor value should depend on:
+
+television audience
+attendance
+player reputation
+tournament prestige
+social media attention
+championship drama
+
+A close final should generate more commercial value.
+
+17. PRIZE MONEY
+
+Create a prize distribution system.
+
+Example:
+
+Winner       20%
+2nd           12%
+3rd            8%
+4th            6%
+5th            5%
+...
+
+Ensure the total allocation equals 100%.
+
+Prize money affects:
+
+player wealth
+career earnings
+sponsor attractiveness
+world ranking
+future invitations
+18. SPECTATOR ECONOMY
+
+Simulate attendance.
+
+typedef struct {
+
+    int spectators;
+
+    double ticket_revenue;
+
+    double hospitality_revenue;
+
+    double merchandise_revenue;
+
+    double food_revenue;
+
+} EventEconomy;
+
+Attendance should change according to:
+
+weather
+player popularity
+championship importance
+local interest
+final-round drama
+previous year's attendance
+19. HOSPITALITY
+
+Create premium zones:
+
+CLUBHOUSE
+VIP LOUNGE
+CORPORATE VILLAGE
+PLAYER LOUNGE
+CHAMPIONSHIP CLUB
+OCEAN TERRACE
+17TH HOLE HOSPITALITY
+18TH HOLE FINAL GREEN
+
+Different ticket classes:
+
+GENERAL
+PREMIUM
+VIP
+CORPORATE
+CHAMPIONSHIP CLUB
+20. MEDIA SYSTEM
+
+Simulate:
+
+television
+radio
+newspapers
+sports websites
+social media
+press conferences
+interviews
+
+Track:
+
+double media_attention;
+
+Media attention should increase with:
+
+close leaderboard
+famous player
+unexpected rookie
+major upset
+weather event
+playoff
+record score
+21. TOURNAMENT RECORDS
+
+Maintain persistent records:
+
+lowest 18-hole score
+lowest 72-hole score
+largest winning margin
+closest final
+youngest winner
+oldest winner
+most Miami Open wins
+most birdies
+most eagles
+most consecutive cuts
+attendance record
+
+Records persist across annual editions.
+
+22. PLAYER RANKINGS
+
+After the Miami Open:
+
+performance
+    ↓
+ranking points
+    ↓
+world ranking
+    ↓
+sponsor attractiveness
+    ↓
+future tournament invitations
+
+Winning the Miami Open should be highly valuable.
+
+23. DYNAMIC TOURNAMENT EVENTS
+
+Generate events such as:
+
+ROOKIE BREAKTHROUGH
+VETERAN COMEBACK
+WEATHER DELAY
+FINAL-ROUND CHARGE
+HOLE-IN-ONE
+COURSE RECORD
+CHAMPIONSHIP COLLAPSE
+UNDERDOG LEAD
+TIED FINAL
+PLAYOFF
+RECORD ATTENDANCE
+SPONSOR ACTIVATION
+CELEBRITY APPEARANCE
+
+Events should emerge from simulation conditions rather than being
+randomly scripted.
+
+24. PLAYER HISTORY
+
+Every golfer should retain career history.
+
+typedef struct {
+
+    int miami_starts;
+    int miami_cuts;
+    int miami_wins;
+
+    double best_finish;
+
+    double career_earnings;
+
+    int total_birdies;
+    int total_eagles;
+
+} PlayerTournamentHistory;
+
+Thus the game can display:
+
+MIAMI OPEN HISTORY
+
+2031  Winner
+2032  Tied 4th
+2033  Missed Cut
+2034  Winner
+2035  Runner-up
+25. ANNUAL EVOLUTION
+
+The tournament should evolve over time.
+
+Each year:
+
+attendance changes
+sponsors change
+player field changes
+course reputation changes
+records change
+weather changes
+young players emerge
+veterans retire
+
+The player should be able to return to Pebble Island years later and see a tournament with genuine history.
+
+26. OPEN-WORLD INTEGRATION
+
+The Miami Open exists physically inside the open-world game.
+
+Outside tournament week:
+
+Pebble Island
+    ↓
+golf resort
+    ↓
+practice facilities
+    ↓
+clubhouse
+    ↓
+hotel
+    ↓
+marina
+    ↓
+restaurants
+
+During tournament week:
+
+ROADS BUSY
+HOTELS FULL
+MARINA BUSY
+SPECTATORS ARRIVE
+MEDIA COMPOUND ACTIVE
+SECURITY INCREASES
+VIP VEHICLES ARRIVE
+
+The world should visibly respond to the tournament.
+
+27. PLAYER PARTICIPATION
+
+If the game's protagonist is a golfer, allow them to enter:
+
+QUALIFIER
+INVITATION
+SPONSOR EXEMPTION
+PROFESSIONAL FIELD
+
+The protagonist can build:
+
+golf reputation
+ranking
+earnings
+sponsors
+tournament history
+28. COMMENTARY ENGINE
+
+Generate contextual commentary from simulation state.
+
+Examples:
+
+"Vale has taken the outright lead."
+
+"An extraordinary approach on seventeen."
+
+"He's now one shot away from the Miami Open."
+
+"The wind has completely changed this afternoon."
+
+"An astonishing collapse on the final nine."
+
+"We're heading to a playoff."
+
+Do not use the same commentary repeatedly.
+
+29. DEBUG DASHBOARD
+
+Create a developer console:
+
+========================================
+          MIAMI OPEN SIMULATION
+========================================
+
+YEAR:                 2032
+ROUND:                4
+HOLE:                 17
+
+LEADER:               Alexander Vale
+SCORE:                -17
+
+WIND:                 21 MPH
+DIRECTION:            143°
+TIDE:                 HIGH
+
+SPECTATORS:           91,402
+TV AUDIENCE:          8.4M
+
+PRIZE POOL:           $12.5M
+
+MEDIA ATTENTION:      87%
+
+CHAMPIONSHIP DRAMA:   94%
+
+CUT:                  +2
+PLAYERS REMAINING:    72
+========================================
+30. PERFORMANCE
+
+The simulation should support large fields without excessive CPU usage.
+
+Use:
+
+efficient structures
+deterministic random seeds
+cached course data
+event-driven updates
+
+The graphical renderer should not be required to run the tournament simulation.
+
+The entire tournament should be capable of running as a headless simulation.
+
+31. TESTING
+
+Write tests for:
+
+18-hole scoring
+72-hole scoring
+cut calculation
+leaderboard sorting
+playoffs
+wind effects
+weather effects
+tide effects
+prize allocation
+sponsor revenue
+spectator revenue
+ranking changes
+record detection
+annual tournament progression
+32. SIMULATION LOOP
+
+The central loop should resemble:
+
+ANNUAL CALENDAR
+       ↓
+MIAMI OPEN OPENS
+       ↓
+PLAYER REGISTRATION
+       ↓
+QUALIFYING
+       ↓
+ROUND 1
+       ↓
+ROUND 2
+       ↓
+CUT
+       ↓
+ROUND 3
+       ↓
+FINAL ROUND
+       ↓
+PLAYOFF IF NECESSARY
+       ↓
+CHAMPION
+       ↓
+PRIZE MONEY
+       ↓
+RANKING UPDATE
+       ↓
+SPONSOR UPDATE
+       ↓
+RECORDS
+       ↓
+HISTORICAL ARCHIVE
+       ↓
+NEXT YEAR
+33. MOST IMPORTANT DESIGN PRINCIPLE
+
+Do not make the Miami Open a scripted sequence.
+
+The championship should be a genuine simulation.
+
+A rookie should theoretically be able to win.
+
+A favourite should theoretically miss the cut.
+
+A storm should be able to completely change the leaderboard.
+
+A player several shots behind should be able to mount a final-round comeback.
+
+A playoff should occur naturally.
+
+The player should never know the winner before the tournament is simulated.
+
+The objective is:
+
+Create the feeling that the Miami Open is a real annual sporting institution existing inside the open world.
+
+34. FINAL EXPERIENCE
+
+The game should ultimately present:
+
+                 MIAMI OPEN
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+       GOLFERS               ECONOMY
+          │                     │
+          ▼                     ▼
+      QUALIFYING             SPONSORS
+          │                     │
+          ▼                     ▼
+       72 HOLES              AUDIENCE
+          │                     │
+          ├──────────┬──────────┤
+          ▼          ▼          ▼
+       WEATHER     MEDIA      CROWD
+          │          │          │
+          └──────────┼──────────┘
+                     ▼
+                 LEADERBOARD
+                     │
+                     ▼
+                 FINAL HOLE
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+            WIN           PLAYOFF
+              │             │
+              └──────┬──────┘
+                     ▼
+               MIAMI OPEN
+                 CHAMPION
+                     │
+                     ▼
+              HISTORY / RANKING
+                     │
+                     ▼
+                NEXT YEAR
+Title presentation
+╔══════════════════════════════════════════════╗
+
+                 THE MIAMI OPEN
+
+             PEBBLE ISLAND, FLORIDA
+
+                    2032
+
+          FLORIDA'S COASTAL CHAMPIONSHIP
+
+╚══════════════════════════════════════════════╝
+
+Build the headless C tournament simulator first, then add the graphical/open-world layer around it. The same simulation should be capable of powering both a full playable tournament and background NPC tournaments occurring elsewhere in the game world.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+typedef struct {
+    char name[64];
+
+    float ball_speed_multiplier;
+    float bounce_height;
+    float bounce_consistency;
+    float friction;
+    float player_traction;
+    float slide_factor;
+    float topspin_effect;
+    float slice_effect;
+    float fatigue_multiplier;
+    float maintenance_cost;
+    float weather_sensitivity;
+    float prestige;
+} TennisSurface;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Yes — White Sand Clay would make a distinctive flagship Center Court: pale, almost ivory clay with a subtle granular texture, surrounded by lush Florida landscaping and a modern Miami grandstand.
+
+Below is a C implementation focused on the gameplay/simulation side of the court: surface physics, ball bounce, player traction, sliding, weather effects, line markings, lighting and spectator capacity.
+
+/*
+ * ================================================================
+ * MIAMI INTERNATIONAL TENNIS CLUB
+ * CENTER COURT
+ *
+ * Surface: WHITE SAND CLAY
+ *
+ * Fictional open-world tennis venue
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+
+#define COURT_LENGTH_M 23.77
+#define COURT_WIDTH_SINGLES_M 8.23
+#define COURT_WIDTH_DOUBLES_M 10.97
+
+#define NET_HEIGHT_CENTER_M 0.914
+#define NET_HEIGHT_POST_M 1.07
+
+#define MAX_SPECTATORS 15000
+1. White Sand Clay surface
+typedef struct {
+
+    char name[64];
+
+    double ball_speed_multiplier;
+    double bounce_height;
+    double bounce_consistency;
+
+    double surface_friction;
+    double player_traction;
+    double slide_factor;
+
+    double topspin_effect;
+    double slice_effect;
+
+    double fatigue_multiplier;
+
+    double rain_sensitivity;
+    double wind_sensitivity;
+
+    double maintenance_cost;
+    double prestige;
+
+} TennisSurface;
+
+Create the White Sand Clay:
+
+TennisSurface WHITE_SAND_CLAY = {
+
+    "White Sand Clay",
+
+    0.84,       /* ball speed */
+    1.05,       /* bounce */
+    0.94,       /* consistency */
+
+    0.72,       /* surface friction */
+    0.76,       /* player traction */
+    0.88,       /* sliding */
+
+    1.12,       /* topspin */
+    1.05,       /* slice */
+
+    1.08,       /* fatigue */
+
+    1.25,       /* rain sensitivity */
+    0.92,       /* wind sensitivity */
+
+    1.30,       /* maintenance */
+    0.98        /* prestige */
+};
+
+The important distinction is that this isn't ordinary red clay.
+
+The court should visually feel almost like white beach sand transformed into a perfectly maintained professional clay surface.
+
+2. Court geometry
+typedef struct {
+
+    double x;
+    double y;
+
+} Vector2;
+typedef struct {
+
+    Vector2 centre;
+
+    double length;
+    double singles_width;
+    double doubles_width;
+
+    double baseline_distance;
+    double service_line_distance;
+
+    double net_height_center;
+    double net_height_post;
+
+} TennisCourtGeometry;
+
+Initialize Center Court:
+
+TennisCourtGeometry CENTER_COURT = {
+
+    {0.0, 0.0},
+
+    COURT_LENGTH_M,
+    COURT_WIDTH_SINGLES_M,
+    COURT_WIDTH_DOUBLES_M,
+
+    5.485,
+    6.40,
+
+    NET_HEIGHT_CENTER_M,
+    NET_HEIGHT_POST_M
+};
+3. Center Court
+typedef struct {
+
+    char name[128];
+
+    TennisCourtGeometry geometry;
+
+    TennisSurface surface;
+
+    int spectator_capacity;
+
+    int current_spectators;
+
+    double court_condition;
+
+    double temperature;
+
+    double humidity;
+
+    double wind_speed;
+
+    double wind_direction;
+
+    double rainfall;
+
+    bool lights_on;
+    bool roof_closed;
+    bool match_active;
+
+} CenterCourt;
+
+Initialize it:
+
+CenterCourt center_court = {
+
+    "Miami International Tennis Club - Center Court",
+
+    {
+        {0.0, 0.0},
+        COURT_LENGTH_M,
+        COURT_WIDTH_SINGLES_M,
+        COURT_WIDTH_DOUBLES_M,
+        5.485,
+        6.40,
+        NET_HEIGHT_CENTER_M,
+        NET_HEIGHT_POST_M
+    },
+
+    {
+        "White Sand Clay",
+        0.84,
+        1.05,
+        0.94,
+        0.72,
+        0.76,
+        0.88,
+        1.12,
+        1.05,
+        1.08,
+        1.25,
+        0.92,
+        1.30,
+        0.98
+    },
+
+    15000,
+    0,
+
+    1.0,
+
+    28.0,
+    0.78,
+
+    12.0,
+    145.0,
+
+    0.0,
+
+    true,
+    false,
+    false
+};
+4. Court markings
+typedef struct {
+
+    double width;
+    double colour_r;
+    double colour_g;
+    double colour_b;
+
+} CourtLines;
+
+For the game renderer:
+
+CourtLines center_lines = {
+
+    0.05,
+
+    0.95,
+    0.95,
+    0.95
+
+};
+
+The lines should be bright white against the ivory court, giving Center Court its signature appearance.
+
+5. Ball physics
+typedef struct {
+
+    Vector2 position;
+    Vector2 velocity;
+
+    double height;
+
+    double spin;
+
+    double speed;
+
+    bool airborne;
+
+} TennisBall;
+
+Surface interaction:
+
+double calculate_ball_speed(
+    double incoming_speed,
+    TennisSurface *surface
+) {
+    return
+        incoming_speed *
+        surface->ball_speed_multiplier;
+}
+
+Bounce:
+
+double calculate_bounce(
+    double incoming_velocity,
+    double spin,
+    TennisSurface *surface
+) {
+    double bounce =
+        incoming_velocity *
+        surface->bounce_height;
+
+    /*
+     * Topspin produces additional
+     * forward acceleration after bounce.
+     */
+
+    bounce +=
+        fabs(spin) *
+        surface->topspin_effect *
+        0.05;
+
+    return bounce;
+}
+6. White-clay sliding
+
+This is one of the defining mechanics.
+
+double calculate_slide_distance(
+    double player_speed,
+    TennisSurface *surface
+) {
+    return
+        player_speed *
+        surface->slide_factor *
+        0.18;
+}
+
+A player sprinting toward the corner can therefore:
+
+SPRINT
+   ↓
+BRAKE
+   ↓
+SLIDE
+   ↓
+HIT
+   ↓
+RECOVER
+
+rather than simply stopping instantly.
+
+7. Player
+typedef struct {
+
+    char name[64];
+
+    double speed;
+    double acceleration;
+
+    double reaction_time;
+
+    double serve;
+    double forehand;
+    double backhand;
+
+    double volley;
+    double return_game;
+
+    double topspin;
+    double slice;
+
+    double stamina;
+
+    double clay_skill;
+
+    double sliding_skill;
+
+} TennisPlayer;
+
+Surface-adjusted movement:
+
+double calculate_player_traction(
+    TennisPlayer *player,
+    TennisSurface *surface
+) {
+    double skill_bonus =
+        player->clay_skill * 0.20;
+
+    return
+        surface->player_traction +
+        skill_bonus;
+}
+8. Weather
+
+Florida weather should matter enormously.
+
+void update_weather(
+    CenterCourt *court,
+    double delta_time
+) {
+    /*
+     * Simple environmental evolution.
+     */
+
+    court->temperature +=
+        sin(delta_time * 0.001) *
+        0.01;
+
+    court->humidity +=
+        sin(delta_time * 0.0007) *
+        0.001;
+
+    if (court->rainfall > 0.0) {
+
+        court->court_condition -=
+            court->rainfall *
+            0.001;
+    }
+
+    if (court->court_condition < 0.0)
+        court->court_condition = 0.0;
+
+    if (court->court_condition > 1.0)
+        court->court_condition = 1.0;
+}
+9. Rain changes the court
+double calculate_wet_surface_friction(
+    CenterCourt *court
+) {
+    double friction =
+        court->surface.surface_friction;
+
+    friction -=
+        court->rainfall *
+        0.04;
+
+    if (friction < 0.25)
+        friction = 0.25;
+
+    return friction;
+}
+
+So a tropical rainstorm can transform Center Court:
+
+DRY WHITE SAND CLAY
+        ↓
+LIGHT RAIN
+        ↓
+HEAVIER BALL
+        ↓
+LOWER TRACTION
+        ↓
+LONGER SLIDES
+        ↓
+MATCH INTERRUPTION
+10. Wind
+double calculate_wind_vector(
+    double wind_speed,
+    double wind_direction,
+    double shot_direction
+) {
+    double difference =
+        wind_direction -
+        shot_direction;
+
+    return
+        wind_speed *
+        cos(difference *
+            M_PI / 180.0);
+}
+
+Wind should affect:
+
+lobs
+serves
+high forehands
+drop shots
+defensive shots
+
+while groundstrokes remain comparatively stable.
+
+11. Court condition
+
+White Sand Clay needs active maintenance.
+
+void maintain_court(
+    CenterCourt *court,
+    double maintenance_quality
+) {
+    court->court_condition +=
+        maintenance_quality *
+        0.10;
+
+    if (court->court_condition > 1.0)
+        court->court_condition = 1.0;
+}
+
+Poor maintenance can produce:
+
+uneven bounce
+loose surface
+reduced traction
+irregular sliding
+
+Excellent maintenance produces extremely consistent tournament conditions.
+
+12. Grounds crew
+typedef struct {
+
+    int staff;
+
+    double skill;
+
+    double maintenance_budget;
+
+    double preparation_quality;
+
+} GroundsCrew;
+GroundsCrew center_crew = {
+
+    24,
+    0.94,
+    750000.0,
+    0.97
+
+};
+
+This lets the game simulate a prestigious professional facility rather than treating the court as an inert object.
+
+13. Spectators
+void update_attendance(
+    CenterCourt *court,
+    double match_importance,
+    double player_popularity
+) {
+    double attendance =
+        court->spectator_capacity *
+        (
+            0.30 +
+            match_importance * 0.40 +
+            player_popularity * 0.30
+        );
+
+    if (attendance >
+        court->spectator_capacity)
+        attendance =
+            court->spectator_capacity;
+
+    court->current_spectators =
+        (int)attendance;
+}
+14. Match atmosphere
+
+Center Court should become dramatically busier during major matches.
+
+QUALIFYING
+~3,000 spectators
+
+EARLY TOURNAMENT
+~7,000
+
+QUARTER-FINAL
+~10,000
+
+SEMI-FINAL
+~13,000
+
+MIAMI OPEN FINAL
+15,000+
+15. Final Center Court configuration
+
+The completed venue becomes:
+
+              MIAMI INTERNATIONAL
+                 TENNIS CLUB
+
+                    CENTER COURT
+
+          ┌───────────────────────────┐
+          │                           │
+          │       WHITE SAND CLAY     │
+          │                           │
+          │       ─────────────       │
+          │            NET            │
+          │       ─────────────       │
+          │                           │
+          │                           │
+          └───────────────────────────┘
+
+       ╭─────────────────────────────────╮
+       │       15,000 SEAT STADIUM       │
+       │                                 │
+       │   PALMS       VIP       PALMS   │
+       │                                 │
+       │   MEDIA / BROADCAST / BOXES     │
+       ╰─────────────────────────────────╯
+
+                  🌴 FLORIDA 🌴
+                       │
+                    MARINA
+                       │
+                    OCEAN
+
+The key gameplay identity is:
+
+White Sand Clay = slower than hard court + substantial topspin + controlled sliding + Florida wind + humidity + tropical rain.
+
+That makes Center Court mechanically different from the other tennis venues in the open world rather than merely giving it a different visual texture.
 
 
 
