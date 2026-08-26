@@ -9629,3 +9629,3306 @@ That also makes him much more interesting as a GTA-style antagonist: the player 
 
 
 
+
+
+
+
+
+
+
+Yes — for the game engine, I'd model it as a closed-loop underground metro, inspired by the operational simplicity of the Glasgow Subway: two tracks running around a circular route, paired stations, depots, junction-free running, and frequent trains. Then layer Miami-specific architecture, hidden service spaces and discoverable underground areas on top.
+
+The hidden areas can be fictional game spaces—maintenance rooms, abandoned platforms, sealed corridors, old tunnels, etc.—rather than real-world access guidance.
+
+C: Central Miami Subway
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_STATIONS       32
+#define MAX_TRAINS         64
+#define MAX_ENTRANCES      128
+#define MAX_HIDDEN_AREAS   64
+#define MAX_TUNNEL_SEGMENTS 128
+
+#define PI 3.14159265358979323846
+
+
+/* =========================================================
+   BASIC GEOMETRY
+   ========================================================= */
+
+typedef struct {
+    double x;
+    double y;
+} Vector2;
+
+
+double distance_2d(
+    Vector2 a,
+    Vector2 b
+) {
+    double dx = a.x - b.x;
+    double dy = a.y - b.y;
+
+    return sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+
+
+/* =========================================================
+   STATION
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    Vector2 position;
+
+    double depth;
+
+    double platform_length;
+
+    int passenger_capacity;
+
+    double passenger_count;
+
+    double dwell_time;
+
+    bool operational;
+
+} SubwayStation;
+
+
+/* =========================================================
+   ENTRANCE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    int station_id;
+
+    Vector2 surface_position;
+
+    double walking_distance;
+
+    bool public;
+
+    bool open;
+
+} SubwayEntrance;
+
+
+/* =========================================================
+   TUNNEL
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    int from_station;
+    int to_station;
+
+    double length;
+
+    double speed_limit;
+
+    double curvature;
+
+    bool electrified;
+
+    bool operational;
+
+} SubwayTunnel;
+
+
+/* =========================================================
+   TRAIN
+   ========================================================= */
+
+typedef enum {
+
+    TRAIN_IDLE,
+    TRAIN_BOARDING,
+    TRAIN_RUNNING,
+    TRAIN_DWELLING,
+    TRAIN_OUT_OF_SERVICE
+
+} TrainState;
+
+
+typedef struct {
+
+    int id;
+
+    int current_station;
+
+    int target_station;
+
+    double progress;
+
+    double speed;
+
+    double maximum_speed;
+
+    int passenger_count;
+
+    int capacity;
+
+    double timetable_position;
+
+    TrainState state;
+
+    bool direction_clockwise;
+    bool operational;
+
+} SubwayTrain;
+
+
+/* =========================================================
+   HIDDEN SUBWAY AREAS
+   ========================================================= */
+
+typedef enum {
+
+    HIDDEN_SERVICE_ROOM,
+    HIDDEN_ABANDONED_PLATFORM,
+    HIDDEN_OLD_TUNNEL,
+    HIDDEN_UTILITY_CHAMBER,
+    HIDDEN_SECRET_ROOM,
+    HIDDEN_MAINTENANCE_AREA
+
+} HiddenAreaType;
+
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    HiddenAreaType type;
+
+    Vector2 position;
+
+    int connected_station;
+
+    double discovery_difficulty;
+
+    bool discovered;
+
+    bool accessible;
+
+} HiddenSubwayArea;
+
+
+/* =========================================================
+   COMPLETE METRO SYSTEM
+   ========================================================= */
+
+typedef struct {
+
+    char name[64];
+
+    SubwayStation stations[MAX_STATIONS];
+    int station_count;
+
+    SubwayEntrance entrances[MAX_ENTRANCES];
+    int entrance_count;
+
+    SubwayTunnel tunnels[MAX_TUNNEL_SEGMENTS];
+    int tunnel_count;
+
+    SubwayTrain trains[MAX_TRAINS];
+    int train_count;
+
+    HiddenSubwayArea hidden[MAX_HIDDEN_AREAS];
+    int hidden_count;
+
+    double loop_length;
+
+    double system_time;
+
+    bool operational;
+
+} MiamiSubway;
+Build the circular railway
+
+The key feature is that station N connects back to station 0.
+
+void add_loop_tunnel(
+    MiamiSubway *metro,
+    int from,
+    int to,
+    double length
+) {
+    if (metro->tunnel_count >=
+        MAX_TUNNEL_SEGMENTS)
+        return;
+
+    SubwayTunnel *tunnel =
+        &metro->tunnels[
+            metro->tunnel_count
+        ];
+
+    tunnel->id =
+        metro->tunnel_count;
+
+    tunnel->from_station = from;
+    tunnel->to_station = to;
+
+    tunnel->length = length;
+
+    tunnel->speed_limit =
+        22.0;
+
+    tunnel->curvature =
+        1.0;
+
+    tunnel->electrified =
+        true;
+
+    tunnel->operational =
+        true;
+
+    metro->tunnel_count++;
+}
+
+Then generate the circle:
+
+void build_circular_line(
+    MiamiSubway *metro
+) {
+    double radius = 5000.0;
+
+    int stations = 16;
+
+    for (int i = 0;
+         i < stations;
+         i++) {
+
+        double angle =
+            (2.0 * PI * i) /
+            stations;
+
+        SubwayStation *station =
+            &metro->stations[
+                metro->station_count
+            ];
+
+        station->id =
+            metro->station_count;
+
+        snprintf(
+            station->name,
+            sizeof(station->name),
+            "Central Miami %02d",
+            i + 1
+        );
+
+        station->position.x =
+            cos(angle) * radius;
+
+        station->position.y =
+            sin(angle) * radius;
+
+        station->depth =
+            20.0 + (i % 4) * 4.0;
+
+        station->platform_length =
+            100.0;
+
+        station->passenger_capacity =
+            1200;
+
+        station->dwell_time =
+            25.0;
+
+        station->operational =
+            true;
+
+        metro->station_count++;
+    }
+
+    /*
+     * Connect each station to the next.
+     */
+
+    for (int i = 0;
+         i < stations;
+         i++) {
+
+        int next =
+            (i + 1) % stations;
+
+        Vector2 a =
+            metro->stations[i].position;
+
+        Vector2 b =
+            metro->stations[next].position;
+
+        double length =
+            distance_2d(a, b);
+
+        add_loop_tunnel(
+            metro,
+            i,
+            next,
+            length
+        );
+    }
+
+    metro->loop_length = 0.0;
+
+    for (int i = 0;
+         i < metro->tunnel_count;
+         i++) {
+
+        metro->loop_length +=
+            metro->tunnels[i].length;
+    }
+}
+
+That gives:
+
+                 ┌──── STATION 01 ────┐
+              ／                       ＼
+          16                         02
+         ／                             ＼
+       15                               03
+       │                                 │
+      14                                 04
+       │                                 │
+      13                                 05
+       │                                 │
+      12                                 06
+       │                                 │
+      11                               07
+         ＼                           ／
+          10────── 09 ──── 08 ─────┘
+
+The same physical loop can have trains circulating clockwise and anticlockwise.
+
+Entrances
+
+Each station can have multiple surface entrances.
+
+void add_entrance(
+    MiamiSubway *metro,
+    int station_id,
+    double x,
+    double y,
+    bool public
+) {
+    if (metro->entrance_count >=
+        MAX_ENTRANCES)
+        return;
+
+    SubwayEntrance *entry =
+        &metro->entrances[
+            metro->entrance_count
+        ];
+
+    entry->id =
+        metro->entrance_count;
+
+    entry->station_id =
+        station_id;
+
+    entry->surface_position.x = x;
+    entry->surface_position.y = y;
+
+    entry->public = public;
+    entry->open = true;
+
+    metro->entrance_count++;
+}
+
+You can then put entrances around Miami:
+
+SURFACE
+────────────────────────────────────
+
+     [ENTRANCE]       [ENTRANCE]
+          │                │
+          │                │
+══════════╪════════════════╪═══════
+          │                │
+          └──────┬─────────┘
+                 │
+              STATION
+                 │
+             PLATFORM
+                 │
+═════════════════╪══════════════════
+                 │
+              TUNNEL
+Trains
+void create_train(
+    MiamiSubway *metro,
+    int station_id
+) {
+    if (metro->train_count >=
+        MAX_TRAINS)
+        return;
+
+    SubwayTrain *train =
+        &metro->trains[
+            metro->train_count
+        ];
+
+    train->id =
+        metro->train_count;
+
+    train->current_station =
+        station_id;
+
+    train->target_station =
+        (station_id + 1) %
+        metro->station_count;
+
+    train->progress = 0.0;
+
+    train->speed = 0.0;
+
+    train->maximum_speed =
+        22.0;
+
+    train->passenger_count = 0;
+
+    train->capacity = 600;
+
+    train->state =
+        TRAIN_BOARDING;
+
+    train->direction_clockwise =
+        true;
+
+    train->operational =
+        true;
+
+    metro->train_count++;
+}
+Train movement
+void update_train(
+    MiamiSubway *metro,
+    SubwayTrain *train,
+    double delta_time
+) {
+    if (!train->operational)
+        return;
+
+    if (train->state ==
+        TRAIN_BOARDING) {
+
+        train->state =
+            TRAIN_RUNNING;
+
+        return;
+    }
+
+    if (train->state ==
+        TRAIN_RUNNING) {
+
+        train->speed =
+            train->maximum_speed;
+
+        SubwayTunnel *tunnel =
+            NULL;
+
+        for (int i = 0;
+             i < metro->tunnel_count;
+             i++) {
+
+            if (
+                metro->tunnels[i]
+                    .from_station ==
+                train->current_station
+            ) {
+
+                if (
+                    metro->tunnels[i]
+                        .to_station ==
+                    train->target_station
+                ) {
+
+                    tunnel =
+                        &metro->tunnels[i];
+
+                    break;
+                }
+            }
+        }
+
+        if (!tunnel)
+            return;
+
+        train->progress +=
+            train->speed *
+            delta_time;
+
+        if (train->progress >=
+            tunnel->length) {
+
+            train->progress = 0.0;
+
+            train->current_station =
+                train->target_station;
+
+            train->target_station =
+                (train->current_station + 1)
+                % metro->station_count;
+
+            train->state =
+                TRAIN_DWELLING;
+        }
+    }
+
+    else if (
+        train->state ==
+        TRAIN_DWELLING
+    ) {
+
+        train->state =
+            TRAIN_RUNNING;
+    }
+}
+Hidden subway world
+
+This is where you can make the underground feel much larger than the public railway.
+
+void add_hidden_area(
+    MiamiSubway *metro,
+    const char *name,
+    HiddenAreaType type,
+    double x,
+    double y,
+    int station
+) {
+    if (metro->hidden_count >=
+        MAX_HIDDEN_AREAS)
+        return;
+
+    HiddenSubwayArea *area =
+        &metro->hidden[
+            metro->hidden_count
+        ];
+
+    area->id =
+        metro->hidden_count;
+
+    snprintf(
+        area->name,
+        sizeof(area->name),
+        "%s",
+        name
+    );
+
+    area->type = type;
+
+    area->position.x = x;
+    area->position.y = y;
+
+    area->connected_station =
+        station;
+
+    area->discovery_difficulty =
+        50.0;
+
+    area->discovered =
+        false;
+
+    area->accessible =
+        true;
+
+    metro->hidden_count++;
+}
+
+Populate the world:
+
+void create_hidden_subway(
+    MiamiSubway *metro
+) {
+    add_hidden_area(
+        metro,
+        "Old Service Platform",
+        HIDDEN_ABANDONED_PLATFORM,
+        -4300,
+        1200,
+        4
+    );
+
+    add_hidden_area(
+        metro,
+        "Flooded Utility Chamber",
+        HIDDEN_UTILITY_CHAMBER,
+        -2100,
+        -3200,
+        7
+    );
+
+    add_hidden_area(
+        metro,
+        "Disused Tunnel",
+        HIDDEN_OLD_TUNNEL,
+        1200,
+        -4600,
+        9
+    );
+
+    add_hidden_area(
+        metro,
+        "Maintenance Control Room",
+        HIDDEN_MAINTENANCE_AREA,
+        3100,
+        2700,
+        13
+    );
+
+    add_hidden_area(
+        metro,
+        "Sealed Lower Platform",
+        HIDDEN_SECRET_ROOM,
+        400,
+        4900,
+        1
+    );
+}
+
+So underneath the public network:
+
+                    SURFACE MIAMI
+                          │
+                   PUBLIC ENTRANCE
+                          │
+                    ┌─────┴─────┐
+                    │  STATION  │
+                    └─────┬─────┘
+                          │
+              ════════════╪════════════
+                          │
+                       MAIN LOOP
+                    ╔═════╧═════╗
+                    ║           ║
+              OLD TUNNEL     SERVICE
+                    ║           ║
+                    ║      MAINTENANCE
+                    ║        ROOMS
+                    ║           ║
+                    ╚═════╤═════╝
+                          │
+                   HIDDEN AREAS
+Discovery system
+
+Rather than exposing every underground location on the map:
+
+bool discover_subway_area(
+    HiddenSubwayArea *area,
+    double player_distance,
+    double exploration_skill
+) {
+    if (area->discovered)
+        return true;
+
+    if (player_distance > 25.0)
+        return false;
+
+    double chance =
+        exploration_skill -
+        area->discovery_difficulty;
+
+    if (chance > 0.0) {
+
+        area->discovered = true;
+
+        printf(
+            "DISCOVERED: %s\n",
+            area->name
+        );
+
+        return true;
+    }
+
+    return false;
+}
+
+That gives you the public Glasgow-style loop + hidden Miami underground layer:
+
+                 CENTRAL MIAMI
+                       │
+        ┌──────────────┼──────────────┐
+        ↓              ↓              ↓
+    STATIONS        ENTRANCES       TRAINS
+        │
+        ↓
+    CIRCULAR LOOP
+        │
+        ├─────────── PUBLIC NETWORK
+        │
+        └─────────── HIDDEN NETWORK
+                       │
+             ┌─────────┼─────────┐
+             ↓         ↓         ↓
+          OLD TUNNELS  SERVICE   SEALED
+                      ROOMS     PLATFORMS
+
+For the full GTA-style engine, I'd make the subway one continuous simulation shared with the rest of the city: passenger demand affects train crowding, delays propagate around the loop, electricity prices affect operating costs, flooding can close underground sections, hurricanes can disrupt entrances, and NPCs dynamically choose the subway based on traffic and fares. That turns it from scenery into an actual functioning piece of Miami's economy and transport system.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+For the game version, we can make it substantially bigger: Brightline/intercity + regional rail + your circular underground metro + buses + taxis + pedestrian concourse + underground hidden infrastructure.
+
+C: MiamiCentral multimodal station
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_PLATFORMS       24
+#define MAX_TRACKS          32
+#define MAX_CONCOURSES      16
+#define MAX_ENTRANCES       32
+#define MAX_TRAINS          128
+#define MAX_HIDDEN_ZONES    32
+#define MAX_PASSENGERS      20000
+
+
+/* =========================================================
+   ENUMERATIONS
+   ========================================================= */
+
+typedef enum {
+
+    SERVICE_INTERCITY,
+    SERVICE_REGIONAL,
+    SERVICE_METRO,
+    SERVICE_FREIGHT,
+    SERVICE_SHUTTLE
+
+} RailService;
+
+
+typedef enum {
+
+    PLATFORM_LOW,
+    PLATFORM_HIGH,
+    PLATFORM_ISLAND,
+    PLATFORM_SIDE
+
+} PlatformType;
+
+
+typedef enum {
+
+    TRAIN_ARRIVING,
+    TRAIN_BOARDING,
+    TRAIN_DEPARTING,
+    TRAIN_RUNNING,
+    TRAIN_IDLE,
+    TRAIN_DELAYED
+
+} TrainState;
+
+
+/* =========================================================
+   TRACK
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[32];
+
+    RailService service;
+
+    double length;
+
+    double maximum_speed;
+
+    bool electrified;
+    bool operational;
+
+} StationTrack;
+
+
+/* =========================================================
+   PLATFORM
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    PlatformType type;
+
+    int track_a;
+    int track_b;
+
+    double length;
+
+    double passenger_capacity;
+
+    double passenger_load;
+
+    bool operational;
+
+} StationPlatform;
+
+
+/* =========================================================
+   CONCOURSE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double area;
+
+    double passenger_capacity;
+
+    double passenger_load;
+
+    int elevators;
+    int escalators;
+
+    bool operational;
+
+} StationConcourse;
+
+
+/* =========================================================
+   ENTRANCE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    int concourse_id;
+
+    bool public_access;
+
+    bool open;
+
+} StationEntrance;
+
+
+/* =========================================================
+   TRAIN
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    RailService service;
+
+    int current_track;
+
+    int platform;
+
+    int passengers;
+
+    int capacity;
+
+    double delay_minutes;
+
+    double dwell_time;
+
+    double schedule_time;
+
+    TrainState state;
+
+    bool operational;
+
+} StationTrain;
+
+
+/* =========================================================
+   HIDDEN UNDERGROUND AREAS
+   ========================================================= */
+
+typedef enum {
+
+    HIDDEN_OLD_TUNNEL,
+    HIDDEN_SERVICE_LEVEL,
+    HIDDEN_MAINTENANCE_ROOM,
+    HIDDEN_ABANDONED_PLATFORM,
+    HIDDEN_UTILITY_CHAMBER,
+    HIDDEN_SECRET_CONCOURSE
+
+} HiddenZoneType;
+
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    HiddenZoneType type;
+
+    double depth;
+
+    double discovery_difficulty;
+
+    bool discovered;
+    bool accessible;
+
+} HiddenZone;
+
+
+/* =========================================================
+   MIAMI CENTRAL
+   ========================================================= */
+
+typedef struct {
+
+    char name[64];
+
+    StationTrack tracks[MAX_TRACKS];
+    int track_count;
+
+    StationPlatform platforms[MAX_PLATFORMS];
+    int platform_count;
+
+    StationConcourse concourses[MAX_CONCOURSES];
+    int concourse_count;
+
+    StationEntrance entrances[MAX_ENTRANCES];
+    int entrance_count;
+
+    StationTrain trains[MAX_TRAINS];
+    int train_count;
+
+    HiddenZone hidden[MAX_HIDDEN_ZONES];
+    int hidden_count;
+
+    double total_passengers;
+
+    double daily_entries;
+    double daily_exits;
+
+    double commercial_revenue;
+
+    bool operational;
+
+} MiamiCentral;
+Build the station
+void add_track(
+    MiamiCentral *station,
+    const char *name,
+    RailService service,
+    double length,
+    double speed
+) {
+    if (station->track_count >= MAX_TRACKS)
+        return;
+
+    StationTrack *track =
+        &station->tracks[
+            station->track_count
+        ];
+
+    track->id =
+        station->track_count;
+
+    snprintf(
+        track->name,
+        sizeof(track->name),
+        "%s",
+        name
+    );
+
+    track->service = service;
+    track->length = length;
+    track->maximum_speed = speed;
+
+    track->electrified = true;
+    track->operational = true;
+
+    station->track_count++;
+}
+
+Then create the game station's major rail infrastructure:
+
+void build_miamicentral_tracks(
+    MiamiCentral *station
+) {
+    add_track(
+        station,
+        "Intercity Track 1",
+        SERVICE_INTERCITY,
+        1200,
+        45
+    );
+
+    add_track(
+        station,
+        "Intercity Track 2",
+        SERVICE_INTERCITY,
+        1200,
+        45
+    );
+
+    add_track(
+        station,
+        "Regional Track 1",
+        SERVICE_REGIONAL,
+        1000,
+        35
+    );
+
+    add_track(
+        station,
+        "Regional Track 2",
+        SERVICE_REGIONAL,
+        1000,
+        35
+    );
+
+    add_track(
+        station,
+        "Metro Loop A",
+        SERVICE_METRO,
+        800,
+        25
+    );
+
+    add_track(
+        station,
+        "Metro Loop B",
+        SERVICE_METRO,
+        800,
+        25
+    );
+}
+Platforms
+void add_platform(
+    MiamiCentral *station,
+    const char *name,
+    PlatformType type,
+    int track_a,
+    int track_b,
+    double length
+) {
+    if (station->platform_count >=
+        MAX_PLATFORMS)
+        return;
+
+    StationPlatform *platform =
+        &station->platforms[
+            station->platform_count
+        ];
+
+    platform->id =
+        station->platform_count;
+
+    snprintf(
+        platform->name,
+        sizeof(platform->name),
+        "%s",
+        name
+    );
+
+    platform->type = type;
+
+    platform->track_a = track_a;
+    platform->track_b = track_b;
+
+    platform->length = length;
+
+    platform->passenger_capacity =
+        length * 8.0;
+
+    platform->passenger_load = 0.0;
+
+    platform->operational = true;
+
+    station->platform_count++;
+}
+
+And construct:
+
+void build_platforms(
+    MiamiCentral *station
+) {
+    add_platform(
+        station,
+        "Intercity Platform A",
+        PLATFORM_ISLAND,
+        0,
+        1,
+        250
+    );
+
+    add_platform(
+        station,
+        "Regional Platform B",
+        PLATFORM_ISLAND,
+        2,
+        3,
+        220
+    );
+
+    add_platform(
+        station,
+        "Central Subway",
+        PLATFORM_ISLAND,
+        4,
+        5,
+        150
+    );
+}
+
+So the game station becomes:
+
+                 MIAMI CENTRAL
+        ╔════════════════════════════╗
+        ║       GRAND CONCOURSE      ║
+        ║                            ║
+        ║  TICKETS   RETAIL   FOOD  ║
+        ╚══════════════╤═════════════╝
+                       │
+              ┌────────┴────────┐
+              │                 │
+        INTERCITY             REGIONAL
+        PLATFORM              PLATFORM
+        ═════════             ═════════
+        TRACK 1               TRACK 3
+        TRACK 2               TRACK 4
+              │                 │
+              └────────┬────────┘
+                       │
+                 UNDERGROUND
+                 CENTRAL METRO
+                  ═══════════
+                   LOOP A/B
+Underground metro connection
+
+This connects directly to the circular subway you asked for previously.
+
+void connect_central_metro(
+    MiamiCentral *station
+) {
+    add_track(
+        station,
+        "Central Subway Loop A",
+        SERVICE_METRO,
+        800,
+        25
+    );
+
+    add_track(
+        station,
+        "Central Subway Loop B",
+        SERVICE_METRO,
+        800,
+        25
+    );
+}
+
+The station is therefore a vertical transport stack:
+
+                    CITY
+──────────────────────────────────
+             STREET LEVEL
+        BUS / TAXI / PEDESTRIAN
+──────────────────────────────────
+             CONCOURSE
+        TICKETS / RETAIL / FOOD
+──────────────────────────────────
+        INTERCITY RAIL
+        ═══════════════
+        ═══════════════
+──────────────────────────────────
+        REGIONAL RAIL
+        ═══════════════
+        ═══════════════
+──────────────────────────────────
+        CENTRAL SUBWAY
+        ═══════════════
+        ═══════════════
+──────────────────────────────────
+        SERVICE LEVEL
+──────────────────────────────────
+        HIDDEN LEVEL
+Passenger simulation
+
+The station should actually generate economic activity.
+
+void station_passenger_flow(
+    MiamiCentral *station,
+    double delta_time
+) {
+    double arrivals =
+        station->daily_entries /
+        86400.0 *
+        delta_time;
+
+    double departures =
+        station->daily_exits /
+        86400.0 *
+        delta_time;
+
+    station->total_passengers +=
+        arrivals;
+
+    station->total_passengers -=
+        departures;
+
+    if (station->total_passengers < 0)
+        station->total_passengers = 0;
+}
+
+Crowding then affects the player's world:
+
+double station_crowding(
+    MiamiCentral *station
+) {
+    double capacity = 0.0;
+
+    for (int i = 0;
+         i < station->concourse_count;
+         i++) {
+
+        capacity +=
+            station->concourses[i]
+                .passenger_capacity;
+    }
+
+    if (capacity <= 0)
+        return 0.0;
+
+    return
+        station->total_passengers /
+        capacity;
+}
+Trains generate revenue
+double train_ticket_revenue(
+    StationTrain *train,
+    double ticket_price
+) {
+    return
+        train->passengers *
+        ticket_price;
+}
+
+And the station itself can earn:
+
+void update_station_economy(
+    MiamiCentral *station,
+    double hours
+) {
+    double passengers =
+        station->total_passengers;
+
+    double retail =
+        passengers * 0.80;
+
+    double advertising =
+        passengers * 0.15;
+
+    double commercial =
+        retail +
+        advertising;
+
+    station->commercial_revenue +=
+        commercial * hours;
+}
+
+That makes MiamiCentral economically important rather than decorative.
+
+Hidden MiamiCentral
+
+For your open-world game, I'd put a fictional subterranean layer beneath the public station:
+
+void create_hidden_central(
+    MiamiCentral *station
+) {
+    HiddenZone *z;
+
+    z = &station->hidden[
+        station->hidden_count++
+    ];
+
+    z->id = 0;
+
+    snprintf(
+        z->name,
+        sizeof(z->name),
+        "Old Central Service Tunnel"
+    );
+
+    z->type =
+        HIDDEN_OLD_TUNNEL;
+
+    z->depth = 35.0;
+
+    z->discovery_difficulty =
+        70.0;
+
+    z->discovered = false;
+    z->accessible = true;
+
+
+    z = &station->hidden[
+        station->hidden_count++
+    ];
+
+    z->id = 1;
+
+    snprintf(
+        z->name,
+        sizeof(z->name),
+        "Abandoned Lower Platform"
+    );
+
+    z->type =
+        HIDDEN_ABANDONED_PLATFORM;
+
+    z->depth = 48.0;
+
+    z->discovery_difficulty =
+        85.0;
+
+    z->discovered = false;
+    z->accessible = true;
+
+
+    z = &station->hidden[
+        station->hidden_count++
+    ];
+
+    z->id = 2;
+
+    snprintf(
+        z->name,
+        sizeof(z->name),
+        "Forgotten Utility Concourse"
+    );
+
+    z->type =
+        HIDDEN_SECRET_CONCOURSE;
+
+    z->depth = 60.0;
+
+    z->discovery_difficulty =
+        95.0;
+
+    z->discovered = false;
+    z->accessible = true;
+}
+
+So the station has a hidden history:
+
+                    MIAMI CENTRAL
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+          PUBLIC CITY           RAIL SYSTEM
+                                    │
+                          ┌─────────┴─────────┐
+                          │                   │
+                     INTERCITY             METRO
+                          │                   │
+                          └─────────┬─────────┘
+                                    │
+                              SERVICE LEVEL
+                                    │
+                              OLD TUNNELS
+                                    │
+                         ABANDONED PLATFORM
+                                    │
+                         SECRET CONCOURSE
+
+This also fits the real station's role as a multimodal downtown hub: Brightline describes MiamiCentral as connected with local transit, while Tri-Rail currently identifies the station at 600 NW 1st Ave and lists connections to Miami-Dade Transit, Brightline and other local transport.
+
+For the game, I'd make MiamiCentral the central node of the entire transport simulation: your circular subway, intercity trains, regional trains, buses, taxis and pedestrian economy all converge there. That gives the player a genuinely huge, living railway hub rather than just a station model.
+
+
+
+
+
+
+
+
+
+
+C — Everglades Terrain Engine
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define MAP_WIDTH   512
+#define MAP_HEIGHT  512
+
+#define CELL_SIZE   20.0
+
+#define MAX_HAMMOCKS 256
+#define MAX_CHANNELS 256
+
+
+/* =========================================================
+   TERRAIN TYPES
+   ========================================================= */
+
+typedef enum {
+
+    TERRAIN_DEEP_WATER,
+    TERRAIN_SHALLOW_WATER,
+    TERRAIN_SAWGRASS,
+    TERRAIN_MARSH,
+    TERRAIN_MUD,
+    TERRAIN_PEAT,
+    TERRAIN_HAMMOCK,
+    TERRAIN_DRY_GROUND,
+    TERRAIN_ROCK
+
+} TerrainType;
+
+
+/* =========================================================
+   TERRAIN CELL
+   ========================================================= */
+
+typedef struct {
+
+    TerrainType type;
+
+    double elevation;
+
+    double water_depth;
+
+    double soil_moisture;
+
+    double peat_depth;
+
+    double vegetation;
+
+    double temperature;
+
+    double salinity;
+
+    double pollution;
+
+    bool flooded;
+
+} TerrainCell;
+
+
+/* =========================================================
+   WATER CHANNEL
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    double width;
+
+    double depth;
+
+    double flow_rate;
+
+    double direction;
+
+    bool tidal;
+
+} WaterChannel;
+
+
+/* =========================================================
+   HAMMOCK / ISLAND
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    double radius;
+
+    double elevation;
+
+    double vegetation;
+
+    bool inhabited;
+
+} Hammock;
+
+
+/* =========================================================
+   EVERGLADES WORLD
+   ========================================================= */
+
+typedef struct {
+
+    TerrainCell map[
+        MAP_WIDTH
+    ][
+        MAP_HEIGHT
+    ];
+
+    WaterChannel channels[
+        MAX_CHANNELS
+    ];
+
+    Hammock hammocks[
+        MAX_HAMMOCKS
+    ];
+
+    int channel_count;
+    int hammock_count;
+
+    double rainfall;
+
+    double evaporation;
+
+    double water_table;
+
+    double sea_level;
+
+    double season;
+
+    double temperature;
+
+} EvergladesWorld;
+Generate the wetland
+
+The key is very low relief.
+
+Unlike mountainous terrain, the Everglades should have extremely small elevation differences.
+
+double terrain_noise(
+    int x,
+    int y
+) {
+    unsigned int seed =
+        (unsigned int)(
+            x * 374761393 +
+            y * 668265263
+        );
+
+    seed =
+        (seed ^
+        (seed >> 13)) *
+        1274126177;
+
+    seed ^=
+        seed >> 16;
+
+    return
+        (seed % 10000) /
+        10000.0;
+}
+
+Generate elevation:
+
+void generate_elevation(
+    EvergladesWorld *world
+) {
+    for (int x = 0;
+         x < MAP_WIDTH;
+         x++) {
+
+        for (int y = 0;
+             y < MAP_HEIGHT;
+             y++) {
+
+            double large_scale =
+                terrain_noise(
+                    x / 16,
+                    y / 16
+                );
+
+            double medium_scale =
+                terrain_noise(
+                    x / 4,
+                    y / 4
+                );
+
+            double fine_scale =
+                terrain_noise(
+                    x,
+                    y
+                );
+
+            /*
+             * Extremely low-relief landscape.
+             */
+
+            double elevation =
+                large_scale * 0.8 +
+                medium_scale * 0.15 +
+                fine_scale * 0.05;
+
+            /*
+             * Convert to metres.
+             */
+
+            world->map[x][y]
+                .elevation =
+                elevation * 3.5;
+        }
+    }
+}
+
+This creates a landscape where elevation differences are only a few metres.
+
+Water table
+
+Now make the landscape wet.
+
+void calculate_water(
+    EvergladesWorld *world
+) {
+    for (int x = 0;
+         x < MAP_WIDTH;
+         x++) {
+
+        for (int y = 0;
+             y < MAP_HEIGHT;
+             y++) {
+
+            TerrainCell *cell =
+                &world->map[x][y];
+
+            double water_level =
+                world->water_table;
+
+            cell->water_depth =
+                water_level -
+                cell->elevation;
+
+            if (cell->water_depth < 0)
+                cell->water_depth = 0;
+
+            cell->flooded =
+                cell->water_depth > 0.05;
+        }
+    }
+}
+Classify the terrain
+void classify_terrain(
+    EvergladesWorld *world
+) {
+    for (int x = 0;
+         x < MAP_WIDTH;
+         x++) {
+
+        for (int y = 0;
+             y < MAP_HEIGHT;
+             y++) {
+
+            TerrainCell *cell =
+                &world->map[x][y];
+
+            double water =
+                cell->water_depth;
+
+            if (water > 1.5) {
+
+                cell->type =
+                    TERRAIN_DEEP_WATER;
+
+            }
+
+            else if (water > 0.25) {
+
+                cell->type =
+                    TERRAIN_SHALLOW_WATER;
+
+            }
+
+            else if (water > 0.05) {
+
+                cell->type =
+                    TERRAIN_MARSH;
+
+            }
+
+            else if (
+                cell->soil_moisture > 0.70
+            ) {
+
+                cell->type =
+                    TERRAIN_PEAT;
+
+            }
+
+            else if (
+                cell->vegetation > 0.80
+            ) {
+
+                cell->type =
+                    TERRAIN_SAWGRASS;
+
+            }
+
+            else {
+
+                cell->type =
+                    TERRAIN_DRY_GROUND;
+            }
+        }
+    }
+}
+Sawgrass
+
+Instead of treating vegetation as decoration, make it simulation data.
+
+void grow_sawgrass(
+    EvergladesWorld *world,
+    double delta_time
+) {
+    for (int x = 0;
+         x < MAP_WIDTH;
+         x++) {
+
+        for (int y = 0;
+             y < MAP_HEIGHT;
+             y++) {
+
+            TerrainCell *cell =
+                &world->map[x][y];
+
+            /*
+             * Sawgrass prefers wet,
+             * shallow terrain.
+             */
+
+            if (
+                cell->water_depth > 0.02 &&
+                cell->water_depth < 0.50
+            ) {
+
+                cell->vegetation +=
+                    0.02 * delta_time;
+            }
+
+            /*
+             * Too much water kills/reduces
+             * terrestrial vegetation.
+             */
+
+            if (cell->water_depth > 1.0) {
+
+                cell->vegetation -=
+                    0.01 * delta_time;
+            }
+
+            if (cell->vegetation > 1.0)
+                cell->vegetation = 1.0;
+
+            if (cell->vegetation < 0.0)
+                cell->vegetation = 0.0;
+        }
+    }
+}
+Seasonal flooding
+
+This is what makes the map interesting.
+
+void update_season(
+    EvergladesWorld *world,
+    double day
+) {
+    /*
+     * Annual rainfall cycle.
+     */
+
+    world->season =
+        sin(
+            day *
+            2.0 *
+            M_PI /
+            365.0
+        );
+
+    /*
+     * Wet season raises water table.
+     */
+
+    world->water_table =
+        1.0 +
+        world->season * 0.45;
+
+    if (world->water_table < 0.2)
+        world->water_table = 0.2;
+}
+
+Now:
+
+DRY SEASON
+    ↓
+LOW WATER
+    ↓
+MUD FLATS
+    ↓
+ANIMALS CONCENTRATE
+    ↓
+WATER HOLES BECOME IMPORTANT
+
+
+WET SEASON
+    ↓
+HIGH WATER TABLE
+    ↓
+MARSH EXPANDS
+    ↓
+CHANNELS BECOME NAVIGABLE
+    ↓
+ISLANDS SHRINK
+Water channels
+
+Create the characteristic waterways running through the wetland.
+
+void create_channel(
+    EvergladesWorld *world,
+    int id,
+    double x,
+    double y,
+    double width,
+    double depth
+) {
+    if (
+        world->channel_count >=
+        MAX_CHANNELS
+    )
+        return;
+
+    WaterChannel *channel =
+        &world->channels[
+            world->channel_count
+        ];
+
+    channel->id = id;
+
+    channel->x = x;
+    channel->y = y;
+
+    channel->width = width;
+    channel->depth = depth;
+
+    channel->flow_rate = 1.0;
+
+    channel->direction = 0.0;
+
+    channel->tidal = false;
+
+    world->channel_count++;
+}
+
+You could create:
+
+void generate_channels(
+    EvergladesWorld *world
+) {
+    create_channel(
+        world,
+        0,
+        1500,
+        3000,
+        80,
+        2.5
+    );
+
+    create_channel(
+        world,
+        1,
+        3200,
+        1800,
+        120,
+        3.0
+    );
+
+    create_channel(
+        world,
+        2,
+        4100,
+        900,
+        60,
+        1.8
+    );
+}
+Hammocks / islands
+
+These are elevated islands surrounded by wetland.
+
+void create_hammock(
+    EvergladesWorld *world,
+    double x,
+    double y,
+    double radius,
+    double elevation
+) {
+    if (
+        world->hammock_count >=
+        MAX_HAMMOCKS
+    )
+        return;
+
+    Hammock *h =
+        &world->hammocks[
+            world->hammock_count
+        ];
+
+    h->id =
+        world->hammock_count;
+
+    h->x = x;
+    h->y = y;
+
+    h->radius = radius;
+
+    h->elevation =
+        elevation;
+
+    h->vegetation =
+        1.0;
+
+    h->inhabited =
+        false;
+
+    world->hammock_count++;
+}
+
+Then:
+
+void generate_hammocks(
+    EvergladesWorld *world
+) {
+    create_hammock(
+        world,
+        1800,
+        2400,
+        180,
+        3.0
+    );
+
+    create_hammock(
+        world,
+        2700,
+        3300,
+        250,
+        3.5
+    );
+
+    create_hammock(
+        world,
+        3900,
+        2700,
+        120,
+        2.8
+    );
+}
+Make the terrain affect vehicles
+
+This is particularly useful for your open-world game.
+
+double terrain_vehicle_speed(
+    TerrainCell *cell,
+    bool vehicle_is_boat
+) {
+    if (vehicle_is_boat) {
+
+        switch (cell->type) {
+
+            case TERRAIN_DEEP_WATER:
+                return 1.0;
+
+            case TERRAIN_SHALLOW_WATER:
+                return 0.65;
+
+            case TERRAIN_MARSH:
+                return 0.25;
+
+            default:
+                return 0.0;
+        }
+    }
+
+    switch (cell->type) {
+
+        case TERRAIN_DRY_GROUND:
+            return 1.0;
+
+        case TERRAIN_HAMMOCK:
+            return 0.85;
+
+        case TERRAIN_MUD:
+            return 0.30;
+
+        case TERRAIN_MARSH:
+            return 0.10;
+
+        case TERRAIN_SAWGRASS:
+            return 0.15;
+
+        default:
+            return 0.0;
+    }
+}
+
+So a player can have:
+
+              ROAD
+               │
+               ↓
+        ┌──────────────┐
+        │   MIAMI      │
+        └──────┬───────┘
+               │
+          SUBURBAN EDGE
+               │
+               ↓
+       ┌─────────────────┐
+       │   WETLAND       │
+       │                 │
+       │ ~~~~~~~~        │
+       │ ~ SAWGRASS ~    │
+       │    ● HAMMOCK    │
+       │ ~~~~~~~~   ───  │
+       │       CHANNEL   │
+       └─────────────────┘
+               │
+               ↓
+           EVERGLADES
+
+And crucially, the terrain itself becomes an ecosystem:
+
+RAIN
+ │
+ ↓
+WATER TABLE
+ │
+ ├───────────────┐
+ ↓               ↓
+MARSH         CHANNELS
+ │               │
+ ↓               ↓
+SAWGRASS       FISH
+ │               │
+ └──────┬────────┘
+        ↓
+     WILDLIFE
+        │
+ ┌──────┼─────────┐
+ ↓      ↓         ↓
+GATORS TIGERS*   BIRDS
+
+* Your fictional escaped/introduced tiger system could interact with the wetland as an unusual apex predator.
+
+For a GTA-scale implementation, the next step would be to replace the simple grid with streaming terrain tiles + procedural hydrology + LOD vegetation, so the Everglades can cover a huge portion of the map without keeping every cell at full simulation fidelity.
+
+
+
+
+
+
+C — Everglades Rave Simulation
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_RAVES       64
+#define MAX_CROWDS      32
+#define MAX_DJS         16
+#define MAX_SOUND_ZONES 64
+
+
+/* =========================================================
+   RAVE STATES
+   ========================================================= */
+
+typedef enum {
+    RAVE_PLANNING,
+    RAVE_BUILDING,
+    RAVE_ACTIVE,
+    RAVE_PEAK,
+    RAVE_WINDING_DOWN,
+    RAVE_ABANDONED,
+    RAVE_FINISHED
+} RaveState;
+
+
+/* =========================================================
+   MUSIC
+   ========================================================= */
+
+typedef enum {
+    MUSIC_TECHNO,
+    MUSIC_DRUM_AND_BASS,
+    MUSIC_HOUSE,
+    MUSIC_ELECTRO,
+    MUSIC_BREAKBEAT,
+    MUSIC_AMBIENT
+} MusicStyle;
+
+
+typedef struct {
+
+    char name[64];
+
+    MusicStyle style;
+
+    double popularity;
+
+    double energy;
+
+    double bpm;
+
+} DJ;
+
+
+/* =========================================================
+   CROWD
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    double x;
+    double y;
+
+    double size;
+
+    double energy;
+    double happiness;
+
+    double spending_power;
+
+    bool dancing;
+    bool leaving;
+
+} RaveCrowd;
+
+
+/* =========================================================
+   SOUND PROPAGATION
+   ========================================================= */
+
+typedef struct {
+
+    double x;
+    double y;
+
+    double radius;
+
+    double volume;
+
+    double bass_intensity;
+
+} SoundZone;
+
+
+/* =========================================================
+   RAVE
+   ========================================================= */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double x;
+    double y;
+
+    double start_time;
+    double duration;
+
+    double attendance;
+    double maximum_capacity;
+
+    double ticket_price;
+
+    double revenue;
+    double operating_cost;
+
+    double sound_level;
+    double lighting_level;
+
+    double popularity;
+
+    double police_attention;
+    double environmental_pressure;
+
+    double temperature;
+    double water_level;
+
+    DJ *dj;
+
+    RaveState state;
+
+    bool hidden;
+    bool discovered;
+
+} Rave;
+
+
+/* =========================================================
+   CREATE RAVE
+   ========================================================= */
+
+Rave create_rave(
+    int id,
+    const char *name,
+    double x,
+    double y,
+    DJ *dj
+) {
+    Rave rave = {0};
+
+    rave.id = id;
+
+    snprintf(
+        rave.name,
+        sizeof(rave.name),
+        "%s",
+        name
+    );
+
+    rave.x = x;
+    rave.y = y;
+
+    rave.start_time = 22.0;
+    rave.duration = 8.0;
+
+    rave.attendance = 0.0;
+    rave.maximum_capacity = 3000.0;
+
+    rave.ticket_price = 25.0;
+
+    rave.revenue = 0.0;
+    rave.operating_cost = 0.0;
+
+    rave.sound_level = 0.0;
+    rave.lighting_level = 0.0;
+
+    rave.popularity = 0.0;
+
+    rave.police_attention = 0.0;
+    rave.environmental_pressure = 0.0;
+
+    rave.temperature = 27.0;
+    rave.water_level = 0.5;
+
+    rave.dj = dj;
+
+    rave.state =
+        RAVE_PLANNING;
+
+    rave.hidden = true;
+    rave.discovered = false;
+
+    return rave;
+}
+Procedural rave generation
+
+The game can generate different kinds of events:
+
+Rave generate_everglades_rave(
+    int id,
+    double x,
+    double y,
+    DJ *dj
+) {
+    Rave rave =
+        create_rave(
+            id,
+            "EVERGLADES NIGHT SESSION",
+            x,
+            y,
+            dj
+        );
+
+    /*
+     * Remote events are naturally
+     * smaller and harder to find.
+     */
+
+    rave.maximum_capacity =
+        500.0 +
+        (rand() % 2500);
+
+    rave.ticket_price =
+        15.0 +
+        (rand() % 50);
+
+    rave.popularity =
+        20.0 +
+        (rand() % 80);
+
+    return rave;
+}
+Crowd dynamics
+
+Attendance should respond to the DJ, reputation and accessibility.
+
+double calculate_attendance(
+    Rave *rave
+) {
+    if (!rave->dj)
+        return 0.0;
+
+    double attraction =
+        rave->popularity *
+        rave->dj->popularity;
+
+    double attendance =
+        attraction * 0.25;
+
+    if (attendance >
+        rave->maximum_capacity) {
+
+        attendance =
+            rave->maximum_capacity;
+    }
+
+    return attendance;
+}
+
+Then update it through the night:
+
+void update_rave_crowd(
+    Rave *rave,
+    double hour,
+    double delta_time
+) {
+    if (rave->state != RAVE_ACTIVE &&
+        rave->state != RAVE_PEAK)
+        return;
+
+    /*
+     * Crowd grows toward midnight.
+     */
+
+    if (hour >= 22.0 &&
+        hour < 24.0) {
+
+        rave->attendance +=
+            300.0 * delta_time;
+    }
+
+    /*
+     * Peak period.
+     */
+
+    if (hour >= 0.0 &&
+        hour < 3.0) {
+
+        rave->state =
+            RAVE_PEAK;
+
+        rave->attendance +=
+            150.0 * delta_time;
+    }
+
+    /*
+     * Morning dispersal.
+     */
+
+    if (hour >= 5.0) {
+
+        rave->attendance -=
+            300.0 * delta_time;
+    }
+
+    if (rave->attendance < 0)
+        rave->attendance = 0;
+
+    if (rave->attendance >
+        rave->maximum_capacity)
+
+        rave->attendance =
+            rave->maximum_capacity;
+}
+Music affects the whole environment
+
+For the open world, the rave's music becomes a simulated sound field.
+
+SoundZone generate_sound_zone(
+    Rave *rave
+) {
+    SoundZone zone;
+
+    zone.x = rave->x;
+    zone.y = rave->y;
+
+    zone.radius =
+        300.0 +
+        rave->sound_level * 10.0;
+
+    zone.volume =
+        rave->sound_level;
+
+    zone.bass_intensity =
+        rave->sound_level *
+        0.8;
+
+    return zone;
+}
+
+So the player might be driving through the Everglades and see:
+
+                 NIGHT SKY
+                     ★
+                     │
+              faint bass pulse
+                     ↓
+        ~~~~~~~~~~~~~~~~~~~~~~~~~
+        ~      EVERGLADES        ~
+        ~                        ~
+        ~        ▲               ~
+        ~        │               ~
+        ~    SOUND FIELD         ~
+        ~   ((((((((((((         ~
+        ~       ● RAVE           ~
+        ~~~~~~~~~~~~~~~~~~~~~~~~~
+Weather affects the rave
+void update_rave_weather(
+    Rave *rave,
+    double rain,
+    double wind,
+    double temperature
+) {
+    rave->temperature =
+        temperature;
+
+    /*
+     * Heavy rain damages an
+     * outdoor event.
+     */
+
+    if (rain > 80.0) {
+
+        rave->attendance *= 0.70;
+
+        rave->environmental_pressure
+            += 2.0;
+    }
+
+    /*
+     * Strong wind affects
+     * temporary structures and
+     * lighting.
+     */
+
+    if (wind > 60.0) {
+
+        rave->lighting_level *=
+            0.60;
+    }
+}
+Wildlife reacts
+
+This is where it connects directly to your Everglades engine.
+
+typedef struct {
+
+    double x;
+    double y;
+
+    double disturbance;
+
+    double wildlife_density;
+
+} WildlifeZone;
+
+
+void rave_affects_wildlife(
+    Rave *rave,
+    WildlifeZone *zone
+) {
+    double dx =
+        zone->x - rave->x;
+
+    double dy =
+        zone->y - rave->y;
+
+    double distance =
+        sqrt(
+            dx * dx +
+            dy * dy
+        );
+
+    if (distance > 1000.0)
+        return;
+
+    double disturbance =
+        rave->sound_level /
+        (distance + 1.0);
+
+    zone->disturbance +=
+        disturbance;
+
+    if (zone->disturbance > 50.0) {
+
+        zone->wildlife_density *=
+            0.95;
+    }
+}
+
+That means an event can temporarily alter the local wildlife simulation.
+
+Your alligator AI could subsequently decide:
+
+RAVE STARTS
+     ↓
+LOUD SOUND
+     ↓
+WILDLIFE DISTURBANCE
+     ↓
+GATORS MOVE AWAY
+     ↓
+BIRDS LEAVE
+     ↓
+TIGERS CHANGE PATROL ROUTES
+Rave economy
+
+You can also plug it into your existing economic simulation.
+
+void update_rave_economy(
+    Rave *rave,
+    double delta_time
+) {
+    if (rave->state != RAVE_ACTIVE &&
+        rave->state != RAVE_PEAK)
+        return;
+
+    double ticket_income =
+        rave->attendance *
+        rave->ticket_price;
+
+    double bar_income =
+        rave->attendance *
+        12.0;
+
+    double merchandise =
+        rave->attendance *
+        3.0;
+
+    double operating_cost =
+        1000.0 *
+        delta_time;
+
+    rave->revenue +=
+        ticket_income +
+        bar_income +
+        merchandise;
+
+    rave->operating_cost +=
+        operating_cost;
+}
+
+And calculate profitability:
+
+double rave_profit(
+    Rave *rave
+) {
+    return
+        rave->revenue -
+        rave->operating_cost;
+}
+
+So you can have:
+
+                 EVERGLADES RAVE
+                       │
+        ┌──────────────┼──────────────┐
+        ↓              ↓              ↓
+     TICKETS         MUSIC          CROWD
+        │              │              │
+        ↓              ↓              ↓
+     REVENUE       SOUND FIELD     SPENDING
+                       │
+              ┌────────┴─────────┐
+              ↓                  ↓
+          WILDLIFE            NPCs
+          RESPONSE          DISCOVERY
+The really interesting part
+
+Make raves emergent events rather than fixed missions.
+
+A particular night could develop into:
+
+22:00     80 people
+23:00     400
+00:00     1,200
+01:30     2,800
+02:00     PEAK
+03:00     WEATHER CHANGE
+03:30     CROWD FALLS
+04:30     400
+06:00     EVENT ENDS
+
+The player can discover different events through the world's social network, radio, NPC conversations and exploration. A famous DJ increases attendance; heavy rain suppresses it; a beautiful dry night produces a huge turnout; an exceptionally remote location produces a much smaller but more exclusive event.
+
+For your Miami world, that gives you a nice contrast between Miami's hyper-urban nightlife and the enormous, dark wetland beyond the city—with the rave system becoming another living economic and environmental layer of the open world.
+
+
+
+
+
+
+
+Yes. For the game economy, I’d make the rave market a fictional contraband market rather than modelling real-world quantities, sourcing or consumption instructions. Ketamine, MDMA and nitrous oxide can exist as abstract game commodities with prices driven by scarcity, risk and demand. That also gives you a much richer simulation.
+
+In reality, ketamine is a controlled drug in the UK and has documented acute and long-term harms; nitrous oxide also carries neurological and other risks.
+
+The really interesting addition is song stems: rare exclusive stems become an intellectual-property asset that can make a DJ's event dramatically more valuable.
+
+C — Rave Commodity + Music Economy
+#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+
+#define MAX_COMMODITIES 32
+#define MAX_STEMS       256
+#define MAX_RAVES       64
+#define MAX_DJS         128
+
+
+/* =========================================================
+   COMMODITIES
+   ========================================================= */
+
+typedef enum {
+
+    COMMODITY_STANDARD,
+    COMMODITY_CONTRABAND,
+    COMMODITY_MUSIC
+
+} CommodityType;
+
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    CommodityType type;
+
+    /*
+     * Economic variables.
+     */
+
+    double base_price;
+    double market_price;
+
+    double supply;
+    double demand;
+
+    double scarcity;
+
+    double volatility;
+
+    /*
+     * Reputation / quality.
+     */
+
+    double quality;
+
+    bool available;
+
+} RaveCommodity;
+
+Create the fictional rave-market commodities:
+
+void create_rave_market(
+    RaveCommodity market[]
+) {
+    market[0] = (RaveCommodity) {
+        0,
+        "KET",
+        COMMODITY_CONTRABAND,
+        100.0,
+        100.0,
+        1000.0,
+        500.0,
+        0.0,
+        0.40,
+        0.70,
+        true
+    };
+
+    market[1] = (RaveCommodity) {
+        1,
+        "MDMA",
+        COMMODITY_CONTRABAND,
+        120.0,
+        120.0,
+        800.0,
+        600.0,
+        0.0,
+        0.50,
+        0.75,
+        true
+    };
+
+    market[2] = (RaveCommodity) {
+        2,
+        "N2O BALLOONS",
+        COMMODITY_CONTRABAND,
+        30.0,
+        30.0,
+        1500.0,
+        800.0,
+        0.0,
+        0.30,
+        0.65,
+        true
+    };
+}
+
+These are deliberately abstract units, so you're simulating an economy rather than giving players a real-world purchasing/supply recipe.
+
+Supply and demand
+
+The fundamental market equation can be:
+
+price = base_price
+      * demand_factor
+      * scarcity_factor
+      * risk_factor;
+double calculate_market_price(
+    RaveCommodity *commodity,
+    double risk
+) {
+    double demand_factor =
+        1.0 +
+        (commodity->demand /
+         (commodity->supply + 1.0));
+
+    double scarcity_factor =
+        1.0 +
+        commodity->scarcity;
+
+    double risk_factor =
+        1.0 + risk;
+
+    double price =
+        commodity->base_price *
+        demand_factor *
+        scarcity_factor *
+        risk_factor;
+
+    return price;
+}
+
+And update scarcity:
+
+void update_scarcity(
+    RaveCommodity *commodity
+) {
+    if (commodity->supply <= 0.0) {
+
+        commodity->scarcity = 5.0;
+
+        return;
+    }
+
+    double ratio =
+        commodity->demand /
+        commodity->supply;
+
+    commodity->scarcity =
+        fmax(
+            0.0,
+            ratio - 0.5
+        );
+}
+
+So:
+
+HIGH SUPPLY
+     ↓
+LOW SCARCITY
+     ↓
+LOW PRICE
+     ↓
+MORE EVENTS BUY IT
+     ↓
+SUPPLY FALLS
+     ↓
+PRICE RISES
+Rave demand
+
+Attendance should drive demand.
+
+double calculate_rave_demand(
+    double attendance,
+    double popularity,
+    double music_quality
+) {
+    return
+        attendance *
+        (0.5 + popularity) *
+        (0.5 + music_quality);
+}
+
+Then:
+
+void update_rave_demand(
+    RaveCommodity market[],
+    double attendance,
+    double rave_popularity,
+    double music_quality
+) {
+    double demand =
+        calculate_rave_demand(
+            attendance,
+            rave_popularity,
+            music_quality
+        );
+
+    /*
+     * Abstract market demand.
+     */
+
+    market[0].demand =
+        demand * 0.10;
+
+    market[1].demand =
+        demand * 0.08;
+
+    market[2].demand =
+        demand * 0.15;
+}
+
+A huge rave therefore creates a demand shock.
+
+Rare song stems
+
+This is where I'd make the music economy really interesting.
+
+typedef enum {
+
+    STEM_COMMON,
+    STEM_UNCOMMON,
+    STEM_RARE,
+    STEM_EPIC,
+    STEM_LEGENDARY
+
+} StemRarity;
+
+
+typedef struct {
+
+    int id;
+
+    char name[128];
+
+    char artist[128];
+
+    StemRarity rarity;
+
+    double base_value;
+    double market_value;
+
+    double popularity;
+
+    double exclusivity;
+
+    double demand;
+
+    double supply;
+
+    int times_played;
+
+    bool licensed;
+    bool exclusive;
+
+} SongStem;
+
+Example catalogue:
+
+void create_stems(
+    SongStem stems[]
+) {
+    stems[0] = (SongStem) {
+        0,
+        "Miami Warehouse Kick",
+        "DJ Vektor",
+        STEM_COMMON,
+        500.0,
+        500.0,
+        0.30,
+        0.10,
+        10.0,
+        100.0,
+        0,
+        true,
+        false
+    };
+
+
+    stems[1] = (SongStem) {
+        1,
+        "Neon Biscayne Bass",
+        "DJ Vektor",
+        STEM_RARE,
+        5000.0,
+        5000.0,
+        0.70,
+        0.60,
+        20.0,
+        20.0,
+        0,
+        true,
+        true
+    };
+
+
+    stems[2] = (SongStem) {
+        2,
+        "Everglades Midnight",
+        "Khan",
+        STEM_LEGENDARY,
+        50000.0,
+        50000.0,
+        0.99,
+        1.00,
+        100.0,
+        1.0,
+        0,
+        true,
+        true
+    };
+}
+
+The third one could be a one-of-one legendary stem.
+
+Only one DJ in the world owns it.
+
+Music scarcity
+double calculate_stem_price(
+    SongStem *stem
+) {
+    double scarcity =
+        stem->demand /
+        (stem->supply + 1.0);
+
+    double value =
+        stem->base_value;
+
+    value *=
+        1.0 + scarcity;
+
+    value *=
+        1.0 + stem->exclusivity;
+
+    value *=
+        1.0 + stem->popularity;
+
+    return value;
+}
+
+This means a rare track can become economically absurd:
+
+COMMON STEM
+$500
+   ↓
+UNCOMMON
+$1,500
+   ↓
+RARE
+$5,000
+   ↓
+EPIC
+$15,000
+   ↓
+LEGENDARY
+$50,000+
+But the important part: rare music creates crowds
+
+A DJ who possesses a legendary stem gets a demand multiplier.
+
+double music_attraction(
+    SongStem *stem
+) {
+    double attraction =
+        stem->popularity;
+
+    attraction +=
+        stem->exclusivity;
+
+    switch (stem->rarity) {
+
+        case STEM_COMMON:
+            attraction += 0.10;
+            break;
+
+        case STEM_UNCOMMON:
+            attraction += 0.25;
+            break;
+
+        case STEM_RARE:
+            attraction += 0.50;
+            break;
+
+        case STEM_EPIC:
+            attraction += 0.80;
+            break;
+
+        case STEM_LEGENDARY:
+            attraction += 1.50;
+            break;
+    }
+
+    return attraction;
+}
+
+Then:
+
+double calculate_event_attendance(
+    double base_attendance,
+    SongStem *stem,
+    double dj_reputation
+) {
+    double attraction =
+        music_attraction(stem);
+
+    return
+        base_attendance *
+        (1.0 + attraction) *
+        (1.0 + dj_reputation);
+}
+
+Now you've created a proper music scarcity economy:
+
+              RARE STEM
+                  │
+                  ↓
+            DJ REPUTATION
+                  │
+                  ↓
+          EVENT ATTRACTIVENESS
+                  │
+                  ↓
+             ATTENDANCE
+                  │
+          ┌───────┴───────┐
+          ↓               ↓
+      TICKET SALES     MARKET DEMAND
+          │               │
+          ↓               ↓
+        MONEY          PRICES RISE
+DJ competition
+
+Multiple DJs can compete for exclusive music.
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double reputation;
+
+    double wealth;
+
+    double audience;
+
+    SongStem *exclusive_stem;
+
+} DJ;
+
+A legendary stem could therefore create a bidding war.
+
+double bid_for_stem(
+    DJ *dj,
+    SongStem *stem
+) {
+    double willingness =
+        dj->wealth *
+        0.25;
+
+    willingness *=
+        stem->popularity +
+        stem->exclusivity;
+
+    return willingness;
+}
+
+So your game could have:
+
+DJ A
+ │
+ ├── $20k
+ │
+ └── wants legendary stem
+          │
+          ↓
+       AUCTION
+          ↑
+          │
+DJ B ────┘
+ │
+ └── $75k
+Rave financial system
+typedef struct {
+
+    double ticket_revenue;
+
+    double merchandise;
+
+    double venue_cost;
+
+    double artist_fee;
+
+    double security_cost;
+
+    double lighting_cost;
+
+    double sound_cost;
+
+    double music_license_cost;
+
+    double total_profit;
+
+} RaveFinancials;
+
+Calculate:
+
+void calculate_rave_finances(
+    RaveFinancials *finance,
+    double attendance,
+    double ticket_price,
+    double music_cost
+) {
+    finance->ticket_revenue =
+        attendance *
+        ticket_price;
+
+    finance->merchandise =
+        attendance *
+        8.0;
+
+    finance->venue_cost =
+        attendance *
+        3.0;
+
+    finance->artist_fee =
+        5000.0;
+
+    finance->security_cost =
+        attendance *
+        2.0;
+
+    finance->lighting_cost =
+        3000.0;
+
+    finance->sound_cost =
+        5000.0;
+
+    finance->music_license_cost =
+        music_cost;
+
+    double revenue =
+        finance->ticket_revenue +
+        finance->merchandise;
+
+    double costs =
+        finance->venue_cost +
+        finance->artist_fee +
+        finance->security_cost +
+        finance->lighting_cost +
+        finance->sound_cost +
+        finance->music_license_cost;
+
+    finance->total_profit =
+        revenue - costs;
+}
+Resulting game economy
+
+You now have three interacting markets:
+
+             ┌─────────────────┐
+             │   RAVE MARKET   │
+             └────────┬────────┘
+                      │
+       ┌──────────────┼──────────────┐
+       ↓              ↓              ↓
+   ATTENDANCE       MUSIC        COMMODITIES
+       │              │              │
+       ↓              ↓              ↓
+    TICKETS      STEM SCARCITY    SUPPLY/DEMAND
+       │              │              │
+       └──────┬───────┴───────┬──────┘
+              ↓               ↓
+             DJ             EVENT
+           WEALTH          PROFIT
+
+And the really powerful mechanic is:
+
+rare music → bigger crowd → greater commodity demand → scarcity → higher prices → higher event costs → higher ticket prices → changing attendance.
+
+That means the rave economy can actually develop boom-and-bust cycles instead of having fixed prices.
+
+For example, a legendary exclusive track might cause a 500-person underground event to become a 5,000-person phenomenon, after which its value skyrockets and other DJs desperately try to acquire it. The event then becomes less exclusive, competitors appear, and its economic premium eventually collapses.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
