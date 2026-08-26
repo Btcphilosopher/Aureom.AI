@@ -7953,6 +7953,10454 @@ That makes Center Court mechanically different from the other tennis venues in t
 
 
 
+CLAUDE / C GAME DEVELOPMENT PROMPT
+PEBBLE ISLAND GOLF CLUB — PRIVATE MEMBERS' CLUB
+
+You are a senior C game-engine architect, simulation programmer, NPC AI designer, hospitality systems designer and open-world systems engineer.
+
+Build a modular C simulation for a fictional ultra-premium private members' club located inside the clubhouse of:
+
+PEBBLE ISLAND GOLF CLUB
+
+Location: Private island, Florida
+Club: Pebble Island Golf Club
+Facility: Grand Golf Clubhouse
+Membership: Invitation / sponsorship based
+Character: Extremely prestigious coastal sporting club
+
+The clubhouse should function as a persistent social and economic location inside an open-world game.
+
+It is not merely a decorative interior.
+
+Players should be able to enter, interact with members, dine, play golf, attend events, meet NPCs, access restricted rooms, conduct business, observe social dynamics and build reputation.
+
+1. PROJECT STRUCTURE
+
+Create:
+
+pebble_island_club/
+│
+├── main.c
+├── config.h
+│
+├── club/
+│   ├── club.c
+│   ├── club.h
+│   ├── membership.c
+│   ├── membership.h
+│   ├── reputation.c
+│   └── reputation.h
+│
+├── building/
+│   ├── clubhouse.c
+│   ├── clubhouse.h
+│   ├── rooms.c
+│   ├── rooms.h
+│   ├── access.c
+│   └── access.h
+│
+├── people/
+│   ├── member.c
+│   ├── member.h
+│   ├── staff.c
+│   ├── staff.h
+│   └── npc.c
+│
+├── hospitality/
+│   ├── restaurant.c
+│   ├── bar.c
+│   ├── kitchen.c
+│   ├── cellar.c
+│   └── service.c
+│
+├── golf/
+│   ├── locker_room.c
+│   ├── pro_shop.c
+│   ├── caddies.c
+│   └── tee_booking.c
+│
+├── events/
+│   ├── events.c
+│   ├── tournaments.c
+│   ├── dinners.c
+│   └── parties.c
+│
+├── economy/
+│   ├── finances.c
+│   ├── dues.c
+│   ├── spending.c
+│   └── sponsorship.c
+│
+└── tests/
+    ├── test_membership.c
+    ├── test_access.c
+    ├── test_finances.c
+    └── test_events.c
+
+Keep the simulation independent from rendering.
+
+2. CLUBHOUSE ARCHITECTURE
+
+Create a multi-level clubhouse.
+
+PEBBLE ISLAND GOLF CLUB
+│
+├── GRAND ENTRANCE
+│
+├── RECEPTION
+│
+├── MAIN LOUNGE
+│
+├── MEMBERS' LOUNGE
+│
+├── OCEAN TERRACE
+│
+├── DINING ROOM
+│
+├── PRIVATE DINING ROOMS
+│
+├── BAR
+│
+├── WINE CELLAR
+│
+├── LIBRARY
+│
+├── CARD ROOM
+│
+├── BILLIARDS ROOM
+│
+├── BUSINESS LOUNGE
+│
+├── BOARDROOM
+│
+├── LOCKER ROOMS
+│
+├── PRO SHOP
+│
+├── CADDY ROOM
+│
+├── SPA
+│
+├── GYM
+│
+├── STAFF AREAS
+│
+├── KITCHEN
+│
+├── SERVICE CORRIDORS
+│
+└── PRIVATE MEMBERS' WING
+
+Some areas should require higher membership privileges.
+
+3. CLUBHOUSE DATA MODEL
+typedef struct {
+
+    char name[64];
+
+    double x;
+    double y;
+    double z;
+
+    int capacity;
+
+    double prestige;
+
+    bool public_access;
+    bool member_access;
+    bool vip_access;
+
+} ClubRoom;
+
+Create:
+
+#define MAX_ROOMS 32
+
+ClubRoom rooms[MAX_ROOMS];
+4. MEMBERSHIP
+
+Create membership tiers.
+
+typedef enum {
+
+    GUEST,
+    SOCIAL_MEMBER,
+    GOLF_MEMBER,
+    FULL_MEMBER,
+    SENIOR_MEMBER,
+    FOUNDING_MEMBER,
+    HONORARY_MEMBER
+
+} MembershipType;
+
+Member:
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    MembershipType membership;
+
+    double wealth;
+    double prestige;
+    double reputation;
+
+    int years_member;
+
+    bool voting_rights;
+    bool clubhouse_access;
+    bool golf_access;
+    bool guest_privileges;
+
+    double annual_spending;
+
+} ClubMember;
+5. INVITATION SYSTEM
+
+Membership should be difficult to obtain.
+
+Create:
+
+bool evaluate_membership_application(
+    ClubMember *candidate
+);
+
+Consider:
+
+existing reputation
+financial capacity
+golf participation
+existing member endorsements
+club reputation
+behaviour
+social connections
+
+Do not make membership purely dependent on wealth.
+
+6. SPONSORSHIP / MEMBER RECOMMENDATION
+
+Members can nominate guests.
+
+typedef struct {
+
+    int sponsor_id;
+    int candidate_id;
+
+    bool approved;
+
+    double sponsor_reputation;
+
+} MembershipNomination;
+
+The club should maintain a network of relationships.
+
+7. ACCESS CONTROL
+
+Implement room access.
+
+bool can_enter_room(
+    ClubMember *member,
+    ClubRoom *room
+);
+
+For example:
+
+PUBLIC
+    ↓
+RECEPTION
+
+MEMBER
+    ↓
+LOUNGE
+DINING
+LOCKER ROOM
+
+FULL MEMBER
+    ↓
+PRIVATE DINING
+BUSINESS LOUNGE
+
+FOUNDING MEMBER
+    ↓
+BOARDROOM
+PRIVATE WING
+
+Staff should have separate permissions.
+
+8. GUEST SYSTEM
+
+Members can bring guests.
+
+typedef struct {
+
+    int guest_id;
+    int host_member_id;
+
+    double arrival_time;
+    double departure_time;
+
+    bool restricted;
+
+} ClubGuest;
+
+Guests should inherit limited access from their host.
+
+9. MEMBER REPUTATION
+
+Create a persistent reputation system.
+
+Track:
+
+courtesy
+attendance
+golf performance
+club spending
+event participation
+rule compliance
+guest behaviour
+relationships
+
+A member with high reputation should receive:
+
+better reservations
+private event invitations
+VIP treatment
+board access
+exclusive tournaments
+10. STAFF
+
+Create:
+
+typedef enum {
+
+    GENERAL_MANAGER,
+    CLUB_SECRETARY,
+    HEAD_PRO,
+    CADDY_MASTER,
+    HEAD_CHEF,
+    SOMMELIER,
+    BARTENDER,
+    WAITER,
+    CONCIERGE,
+    SECURITY,
+    GROUNDSKEEPER
+
+} StaffRole;
+
+Staff:
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    StaffRole role;
+
+    double skill;
+    double professionalism;
+
+    double salary;
+
+    double satisfaction;
+
+} StaffMember;
+11. RESTAURANT
+
+The clubhouse restaurant should be a complete simulation.
+
+typedef struct {
+
+    char name[64];
+
+    double capacity;
+
+    double average_spend;
+
+    double food_quality;
+
+    double service_quality;
+
+    double prestige;
+
+} ClubRestaurant;
+
+Track:
+
+breakfast
+lunch
+afternoon tea
+dinner
+championship dinners
+private dining
+12. PRIVATE DINING
+
+Members can reserve private rooms.
+
+typedef struct {
+
+    int room_id;
+    int member_id;
+
+    int guests;
+
+    double booking_time;
+    double duration;
+
+    double estimated_bill;
+
+} DiningReservation;
+
+Reservations should be scarce during major tournaments.
+
+13. WINE CELLAR
+
+Create a fictional wine cellar system.
+
+typedef struct {
+
+    char name[64];
+
+    int vintage;
+
+    double quality;
+
+    double rarity;
+
+    double value;
+
+    int bottles;
+
+} Wine;
+
+Do not use real-world alcohol purchasing functionality; this is an abstract game economy.
+
+14. MEMBER ECONOMY
+
+The club should have a persistent financial model.
+
+Revenue:
+
+membership dues
+golf fees
+restaurant
+events
+private dining
+pro shop
+hospitality
+tournaments
+
+Expenses:
+
+staff
+groundskeeping
+maintenance
+food
+utilities
+security
+events
+course maintenance
+
+Create:
+
+typedef struct {
+
+    double membership_revenue;
+    double restaurant_revenue;
+    double golf_revenue;
+    double event_revenue;
+
+    double staff_cost;
+    double maintenance_cost;
+    double operating_cost;
+
+    double balance;
+
+} ClubFinances;
+15. GOLF INTEGRATION
+
+The clubhouse should connect directly to the previously created Pebble Island course.
+
+Members can:
+
+reserve tee time
+hire caddy
+enter tournament
+visit pro shop
+access locker
+practice
+enter clubhouse
+
+Create:
+
+typedef struct {
+
+    int member_id;
+
+    int hole_start;
+
+    double tee_time;
+
+    int group_size;
+
+} TeeReservation;
+16. LOCKER ROOM
+
+Create persistent lockers.
+
+typedef struct {
+
+    int locker_id;
+
+    int member_id;
+
+    bool occupied;
+
+    char nameplate[64];
+
+} Locker;
+
+Premium members receive larger/private lockers.
+
+17. SOCIAL SIMULATION
+
+This is one of the most important systems.
+
+Members should have relationships.
+
+typedef struct {
+
+    int member_a;
+    int member_b;
+
+    double friendship;
+    double business_relationship;
+    double rivalry;
+    double trust;
+
+} MemberRelationship;
+
+Members should naturally form:
+
+friendships
+business partnerships
+rivalries
+golf groups
+social circles
+18. NPC DAILY ROUTINES
+
+Members should have schedules.
+
+Example:
+
+07:30
+Breakfast
+
+09:00
+Golf
+
+12:30
+Lunch
+
+14:00
+Business meeting
+
+16:00
+Clubhouse lounge
+
+18:30
+Dinner
+
+21:00
+Private event
+
+Different NPCs should have different routines.
+
+19. CLUB EVENTS
+
+Generate recurring events:
+
+MEMBERS' CUP
+CHARITY TOURNAMENT
+FOUNDERS' DINNER
+SUMMER BALL
+GOLF CLINIC
+CHAMPIONSHIP DINNER
+BUSINESS LUNCHEON
+JUNIOR DAY
+MEMBERS' PARTY
+MIAMI OPEN GALA
+
+Events should influence:
+
+attendance
+reputation
+club revenue
+member relationships
+prestige
+20. MIAMI OPEN INTEGRATION
+
+During Miami Open week:
+
+NORMAL CLUB
+       ↓
+CHAMPIONSHIP MODE
+
+Activate:
+
+media
+professional golfers
+VIP guests
+sponsors
+security
+broadcast crews
+hospitality
+press conferences
+special dinners
+
+The clubhouse becomes the social centre of the tournament.
+
+21. PLAYER INTERACTION
+
+The protagonist should be able to:
+
+enter clubhouse
+talk to members
+play golf
+attend dinner
+meet sponsors
+join conversations
+make introductions
+receive invitations
+reserve rooms
+attend events
+build reputation
+
+NPC dialogue should depend on:
+
+player reputation
+membership status
+relationships
+current tournament
+time
+location
+recent events
+22. DYNAMIC SOCIAL EVENTS
+
+Generate emergent events:
+
+MEMBER INTRODUCES PLAYER
+BUSINESS DEAL
+GOLF BET
+CLUB ARGUMENT
+NEW MEMBER ARRIVES
+VIP VISIT
+TOURNAMENT CELEBRATION
+BOARD MEETING
+CHARITY AUCTION
+CHAMPIONSHIP DINNER
+
+Events should alter relationships and reputation.
+
+23. CLUB GOVERNANCE
+
+The club should have a board.
+
+typedef struct {
+
+    int president_id;
+    int secretary_id;
+
+    double annual_budget;
+
+    double membership_limit;
+
+    double club_prestige;
+
+} ClubBoard;
+
+The board can vote on:
+
+membership
+renovations
+events
+fees
+course changes
+clubhouse investment
+
+This gives the clubhouse a genuine institutional structure.
+
+24. CLUBHOUSE PHYSICAL SIMULATION
+
+The building should contain:
+
+walls
+doors
+stairs
+elevators
+balconies
+service corridors
+kitchens
+storage
+entrances
+emergency exits
+
+Use spatial coordinates:
+
+typedef struct {
+
+    double x;
+    double y;
+    double z;
+
+    double width;
+    double length;
+    double height;
+
+} BuildingVolume;
+
+The eventual renderer should be able to map every room to the physical clubhouse.
+
+25. DAY/NIGHT SYSTEM
+
+The clubhouse changes throughout the day.
+
+Morning:
+
+quiet
+golfers arriving
+breakfast
+grounds crew
+
+Afternoon:
+
+busy
+golf
+restaurant
+members' lounge
+
+Evening:
+
+dining
+bar
+private events
+ocean terrace
+
+Night:
+
+restricted access
+security
+staff operations
+private events
+26. WEATHER INTEGRATION
+
+Florida weather should affect clubhouse activity.
+
+Heavy rain:
+
+golf participation ↓
+restaurant ↑
+lounge occupancy ↑
+bar occupancy ↑
+
+Perfect weather:
+
+golf ↑
+terrace ↑
+outdoor dining ↑
+
+Storm:
+
+course closed
+clubhouse lockdown
+members shelter
+emergency operations
+27. OPEN-WORLD PERSISTENCE
+
+The clubhouse must remain alive even when the player isn't there.
+
+Run background simulation:
+
+NPC schedules
+membership changes
+events
+finances
+golf bookings
+restaurant occupancy
+relationships
+weather
+club reputation
+
+When the player returns, the clubhouse should reflect what happened while they were away.
+
+28. DEBUG DASHBOARD
+
+Create:
+
+=========================================
+       PEBBLE ISLAND GOLF CLUB
+=========================================
+
+MEMBERS:              842
+GUESTS:               147
+CLUB PRESTIGE:        96.4
+
+CLUBHOUSE OCCUPANCY:  71%
+
+RESTAURANT:           84%
+LOUNGE:               63%
+TERRACE:              91%
+
+TODAY'S REVENUE:      $184,200
+
+MEMBERSHIP WAITLIST:  217
+
+MIAMI OPEN:
+DAYS AWAY:            43
+
+SECURITY LEVEL:       NORMAL
+=========================================
+29. TESTING
+
+Create automated tests for:
+
+membership approval
+room access
+guest permissions
+reservation system
+NPC schedules
+club finances
+reputation
+relationship changes
+event generation
+weather response
+tournament integration
+annual membership renewal
+30. DESIGN PHILOSOPHY
+
+The clubhouse should feel like a living institution.
+
+Do not make it:
+
+room
++
+NPCs
++
+menu
+
+Instead build:
+
+PEOPLE
+  ↓
+RELATIONSHIPS
+  ↓
+MEMBERSHIP
+  ↓
+SOCIAL STATUS
+  ↓
+EVENTS
+  ↓
+ECONOMY
+  ↓
+REPUTATION
+  ↓
+ACCESS
+  ↓
+NEW RELATIONSHIPS
+
+The player should gradually discover that the golf course is only one part of Pebble Island.
+
+The clubhouse is the social and institutional heart of the island.
+
+31. FINAL ATMOSPHERE
+
+The finished location should feel like:
+
+A spectacular Floridian private sporting club built around an immaculate white-sand-clay golf course, combining old-world members' club traditions with a highly modern coastal clubhouse.
+
+Visual language:
+
+Florida palms
+white stone
+pale limestone
+white-sand clay
+dark timber
+brass
+glass
+large verandas
+ocean views
+high ceilings
+quiet luxury
+modernist architecture
+
+Avoid generic luxury-resort design.
+
+The clubhouse should feel exclusive, institutional and established, as though it has existed for generations and has gradually evolved into one of the most prestigious sporting institutions in the fictional game world.
+
+Core simulation loop
+PLAYER ARRIVES
+      ↓
+ACCESS CHECK
+      ↓
+CLUBHOUSE
+      ↓
+MEET MEMBERS
+      ↓
+SOCIAL INTERACTION
+      ↓
+GOLF / DINING / BUSINESS / EVENT
+      ↓
+REPUTATION CHANGE
+      ↓
+RELATIONSHIP CHANGE
+      ↓
+NEW ACCESS / INVITATION
+      ↓
+CLUB LIFE CONTINUES
+
+Build the headless C simulation first, then expose the clubhouse rooms, NPCs and interactions to the open-world renderer.
+
+
+
+
+
+
+Below is a C foundation designed to plug into the clubhouse system.
+
+/*
+ * ================================================================
+ * PEBBLE ISLAND GOLF CLUB
+ * LUXURY ANTIQUES AUCTION ENGINE
+ * ================================================================
+ *
+ * Fictional in-game auction system.
+ *
+ * Features:
+ *   - Auction catalogues
+ *   - Antique lots
+ *   - Provenance
+ *   - Estimated values
+ *   - Reserve prices
+ *   - AI bidders
+ *   - Bidding competition
+ *   - Hammer prices
+ *   - Buyer premiums
+ *   - Seller commissions
+ *   - Auction-house reputation
+ *   - Rarity and prestige
+ *   - Dynamic luxury market
+ *
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+#define MAX_LOTS 100
+#define MAX_BIDDERS 64
+#define MAX_HISTORY 1000
+1. Antique categories
+typedef enum {
+
+    PAINTING,
+    SCULPTURE,
+    FURNITURE,
+    CLOCK,
+    JEWELLERY,
+    CERAMIC,
+    SILVER,
+    BOOK,
+    MAP,
+    SCIENTIFIC_INSTRUMENT,
+    AUTOMATON,
+    HISTORICAL_OBJECT
+
+} AntiqueCategory;
+2. Antique lot
+typedef struct {
+
+    int id;
+
+    char title[128];
+    char artist[128];
+
+    AntiqueCategory category;
+
+    int year;
+
+    double estimated_low;
+    double estimated_high;
+
+    double reserve_price;
+
+    double rarity;
+    double condition;
+    double provenance;
+    double historical_importance;
+
+    double current_bid;
+
+    int current_bidder;
+
+    bool reserve_met;
+    bool sold;
+
+} AntiqueLot;
+
+The key concept is that value isn't simply a fixed number.
+
+A rare object with exceptional provenance can become dramatically more valuable when several wealthy NPCs compete for it.
+
+3. Provenance
+typedef struct {
+
+    char description[512];
+
+    int documented_years;
+
+    bool royal_connection;
+    bool museum_exhibited;
+    bool famous_collection;
+
+    double authenticity_confidence;
+
+} Provenance;
+
+A lot might therefore have:
+
+PROVENANCE
+──────────────────────────────
+Documented ownership: 1874–2026
+
+Previously held in:
+Private European Collection
+
+Museum exhibited: YES
+Famous collection: YES
+
+Authenticity confidence: 99.2%
+4. Bidders
+
+Create different personalities rather than simply generating random bids.
+
+typedef enum {
+
+    CONSERVATIVE_COLLECTOR,
+    IMPULSIVE_COLLECTOR,
+    MUSEUM_BUYER,
+    DEALER,
+    SOCIALITE,
+    CORPORATE_COLLECTOR,
+    HISTORY_SPECIALIST,
+    MYSTERY_BIDDER
+
+} BidderType;
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    BidderType type;
+
+    double wealth;
+    double spending_limit;
+
+    double collection_interest;
+    double rarity_preference;
+    double provenance_preference;
+
+    double competitiveness;
+
+    double prestige_seeking;
+
+    bool anonymous;
+
+} Bidder;
+5. Bidder valuation
+
+Each bidder independently calculates what an object is worth to them.
+
+double calculate_bidder_value(
+    Bidder *bidder,
+    AntiqueLot *lot
+) {
+    double value;
+
+    value =
+        (lot->estimated_low +
+         lot->estimated_high) / 2.0;
+
+    value *=
+        1.0 +
+        bidder->rarity_preference *
+        lot->rarity *
+        0.35;
+
+    value *=
+        1.0 +
+        bidder->provenance_preference *
+        lot->provenance *
+        0.25;
+
+    value *=
+        1.0 +
+        bidder->prestige_seeking *
+        lot->historical_importance *
+        0.20;
+
+    return value;
+}
+
+Thus two NPCs can rationally value the same antique differently.
+
+6. Auction
+typedef struct {
+
+    char name[128];
+
+    AntiqueLot lots[MAX_LOTS];
+
+    Bidder bidders[MAX_BIDDERS];
+
+    int lot_count;
+    int bidder_count;
+
+    double buyer_premium;
+    double seller_commission;
+
+    double total_sales;
+
+    double auction_reputation;
+
+    bool active;
+
+} AntiqueAuction;
+
+Example:
+
+AntiqueAuction pebble_auction = {
+
+    "Pebble Island Winter Antiquities Auction",
+
+    {0},
+    {0},
+
+    0,
+    0,
+
+    0.20,
+    0.12,
+
+    0.0,
+
+    0.94,
+
+    false
+
+};
+7. Creating a lot
+void add_lot(
+    AntiqueAuction *auction,
+    const char *title,
+    const char *artist,
+    AntiqueCategory category,
+    int year,
+    double low,
+    double high,
+    double reserve
+) {
+
+    if (auction->lot_count >= MAX_LOTS)
+        return;
+
+    AntiqueLot *lot =
+        &auction->lots[
+            auction->lot_count
+        ];
+
+    lot->id =
+        auction->lot_count + 1;
+
+    strncpy(
+        lot->title,
+        title,
+        sizeof(lot->title) - 1
+    );
+
+    strncpy(
+        lot->artist,
+        artist,
+        sizeof(lot->artist) - 1
+    );
+
+    lot->category = category;
+
+    lot->year = year;
+
+    lot->estimated_low = low;
+    lot->estimated_high = high;
+
+    lot->reserve_price = reserve;
+
+    lot->rarity = 0.5;
+    lot->condition = 0.9;
+    lot->provenance = 0.8;
+
+    lot->historical_importance = 0.5;
+
+    lot->current_bid = 0.0;
+
+    lot->current_bidder = -1;
+
+    lot->reserve_met = false;
+    lot->sold = false;
+
+    auction->lot_count++;
+}
+8. Example catalogue
+
+Populate the auction with fictional objects.
+
+void create_catalogue(
+    AntiqueAuction *auction
+) {
+
+    add_lot(
+        auction,
+        "Georgian Maritime Chronometer",
+        "Thomas Mercer Workshop",
+        CLOCK,
+        1798,
+        180000,
+        260000,
+        160000
+    );
+
+    add_lot(
+        auction,
+        "Florentine Grand Tour Cabinet",
+        "Anonymous",
+        FURNITURE,
+        1762,
+        320000,
+        480000,
+        280000
+    );
+
+    add_lot(
+        auction,
+        "Silver Naval Presentation Service",
+        "London Silversmith",
+        SILVER,
+        1814,
+        220000,
+        350000,
+        190000
+    );
+
+    add_lot(
+        auction,
+        "Victorian Astronomical Instrument",
+        "Dolland",
+        SCIENTIFIC_INSTRUMENT,
+        1871,
+        90000,
+        150000,
+        75000
+    );
+
+    add_lot(
+        auction,
+        "Art Deco Bronze Figure",
+        "Fictional European Artist",
+        SCULPTURE,
+        1928,
+        150000,
+        240000,
+        120000
+    );
+
+    add_lot(
+        auction,
+        "Rare Atlantic Navigation Chart",
+        "Anonymous Cartographer",
+        MAP,
+        1684,
+        400000,
+        650000,
+        350000
+    );
+}
+9. Bidding increments
+double calculate_bid_increment(
+    double current_bid
+) {
+
+    if (current_bid < 10000)
+        return 500;
+
+    if (current_bid < 50000)
+        return 2500;
+
+    if (current_bid < 250000)
+        return 10000;
+
+    if (current_bid < 1000000)
+        return 25000;
+
+    return 50000;
+}
+
+This creates the familiar:
+
+£100,000
+£110,000
+£120,000
+£145,000
+£170,000
+£200,000
+£225,000
+...
+10. AI bidding
+bool bidder_wants_to_bid(
+    Bidder *bidder,
+    AntiqueLot *lot
+) {
+
+    double personal_value =
+        calculate_bidder_value(
+            bidder,
+            lot
+        );
+
+    double next_bid =
+        lot->current_bid +
+        calculate_bid_increment(
+            lot->current_bid
+        );
+
+    if (next_bid > personal_value)
+        return false;
+
+    double probability =
+        0.35 +
+        bidder->competitiveness * 0.40;
+
+    double roll =
+        (double)rand() /
+        (double)RAND_MAX;
+
+    return roll < probability;
+}
+11. Competitive escalation
+
+The auctioneer should create an actual bidding contest.
+
+void run_lot(
+    AntiqueAuction *auction,
+    AntiqueLot *lot
+) {
+
+    printf(
+        "\n====================================\n"
+    );
+
+    printf(
+        "LOT %d\n%s\n",
+        lot->id,
+        lot->title
+    );
+
+    printf(
+        "Estimate: $%.0f - $%.0f\n",
+        lot->estimated_low,
+        lot->estimated_high
+    );
+
+    printf(
+        "Reserve: $%.0f\n",
+        lot->reserve_price
+    );
+
+    bool bidding = true;
+
+    int rounds = 0;
+
+    while (
+        bidding &&
+        rounds < 100
+    ) {
+
+        bidding = false;
+
+        for (
+            int i = 0;
+            i < auction->bidder_count;
+            i++
+        ) {
+
+            Bidder *bidder =
+                &auction->bidders[i];
+
+            if (
+                bidder_wants_to_bid(
+                    bidder,
+                    lot
+                )
+            ) {
+
+                double increment =
+                    calculate_bid_increment(
+                        lot->current_bid
+                    );
+
+                lot->current_bid +=
+                    increment;
+
+                lot->current_bidder =
+                    bidder->id;
+
+                bidding = true;
+
+                printf(
+                    "%s bids $%.0f\n",
+                    bidder->name,
+                    lot->current_bid
+                );
+            }
+        }
+
+        rounds++;
+    }
+}
+12. Reserve
+void close_lot(
+    AntiqueAuction *auction,
+    AntiqueLot *lot
+) {
+
+    if (
+        lot->current_bid >=
+        lot->reserve_price
+    ) {
+
+        lot->reserve_met = true;
+        lot->sold = true;
+
+        auction->total_sales +=
+            lot->current_bid;
+
+        printf(
+            "SOLD — $%.0f\n",
+            lot->current_bid
+        );
+
+    } else {
+
+        printf(
+            "PASS — reserve not met\n"
+        );
+    }
+}
+13. Buyer's premium
+
+The buyer pays more than the hammer price.
+
+double calculate_buyer_total(
+    AntiqueAuction *auction,
+    AntiqueLot *lot
+) {
+
+    return
+        lot->current_bid *
+        (
+            1.0 +
+            auction->buyer_premium
+        );
+}
+
+For example:
+
+HAMMER PRICE
+$500,000
+
+BUYER PREMIUM
+20%
+
+TOTAL
+$600,000
+14. Auction prestige
+
+A spectacular sale increases the club's reputation.
+
+void update_auction_reputation(
+    AntiqueAuction *auction,
+    AntiqueLot *lot
+) {
+
+    if (!lot->sold)
+        return;
+
+    double sale_ratio =
+        lot->current_bid /
+        lot->estimated_high;
+
+    auction->auction_reputation +=
+        sale_ratio * 0.01;
+
+    if (
+        auction->auction_reputation >
+        1.0
+    )
+        auction->auction_reputation = 1.0;
+}
+15. Headline sales
+
+Create a system for exceptional results.
+
+void announce_sale(
+    AntiqueLot *lot
+) {
+
+    double ratio =
+        lot->current_bid /
+        lot->estimated_high;
+
+    if (ratio > 2.0) {
+
+        printf(
+            "\n*** AUCTION RECORD ***\n"
+        );
+
+        printf(
+            "%s sells for %.1fx "
+            "high estimate!\n",
+            lot->title,
+            ratio
+        );
+    }
+}
+
+This can generate world events:
+
+BREAKING
+
+RARE ATLANTIC NAVIGATION CHART
+SELLS FOR $1.42 MILLION
+
+Pebble Island Auction
+sets new island auction record.
+16. Auction economics
+
+Track the entire event.
+
+typedef struct {
+
+    double hammer_sales;
+
+    double buyer_premiums;
+
+    double seller_commissions;
+
+    double catering;
+
+    double hospitality;
+
+    double security;
+
+    double marketing;
+
+    double venue_cost;
+
+    double net_profit;
+
+} AuctionEconomy;
+
+Calculate:
+
+void calculate_auction_economy(
+    AntiqueAuction *auction,
+    AuctionEconomy *economy
+) {
+
+    economy->hammer_sales =
+        auction->total_sales;
+
+    economy->buyer_premiums =
+        auction->total_sales *
+        auction->buyer_premium;
+
+    economy->seller_commissions =
+        auction->total_sales *
+        auction->seller_commission;
+
+    economy->catering = 35000;
+
+    economy->hospitality = 75000;
+
+    economy->security = 45000;
+
+    economy->marketing = 60000;
+
+    economy->venue_cost = 25000;
+
+    economy->net_profit =
+        economy->buyer_premiums +
+        economy->seller_commissions +
+        economy->hospitality +
+        economy->catering
+        -
+        economy->security -
+        economy->marketing -
+        economy->venue_cost;
+}
+17. Clubhouse transformation
+
+When auction night begins, the clubhouse changes state:
+
+NORMAL DAY
+    ↓
+AUCTION PREPARATION
+    ↓
+CATALOGUE DISPLAY
+    ↓
+PRIVATE VIEWING
+    ↓
+CHAMPAGNE RECEPTION
+    ↓
+AUCTION
+    ↓
+POST-AUCTION DINNER
+    ↓
+PRIVATE NEGOTIATIONS
+    ↓
+CLUB RETURNS TO NORMAL
+
+Represent it:
+
+typedef enum {
+
+    NORMAL,
+    PREPARATION,
+    PRIVATE_VIEWING,
+    RECEPTION,
+    AUCTION_ACTIVE,
+    POST_AUCTION
+
+} AuctionState;
+18. Private viewing
+
+Before the auction, members can inspect the objects.
+
+typedef struct {
+
+    int member_id;
+    int lot_id;
+
+    double viewing_time;
+
+    bool interested;
+
+} ViewingRecord;
+
+Interest should feed into the AI bidding model.
+
+19. Rare-object system
+
+Some objects should be extraordinarily scarce.
+
+typedef enum {
+
+    COMMON,
+    UNCOMMON,
+    RARE,
+    VERY_RARE,
+    UNIQUE
+
+} Rarity;
+
+A UNIQUE object can have:
+
+rarity = 1.0
+
+and should potentially appear only once in the game's economic history.
+
+This is particularly useful for creating legendary collectibles.
+
+20. Persistent auction history
+
+Store major sales:
+
+typedef struct {
+
+    int year;
+
+    char lot_name[128];
+
+    double hammer_price;
+
+    char buyer[64];
+
+} AuctionRecord;
+
+Then the clubhouse can display:
+
+PEBBLE ISLAND AUCTION RECORDS
+
+2028
+Georgian Chronometer
+$410,000
+
+2030
+Florentine Cabinet
+$720,000
+
+2032
+Atlantic Navigation Chart
+$1,420,000
+
+2035
+UNKNOWN MASTERWORK
+$3,800,000
+21. Open-world integration
+
+The auction should affect the surrounding world.
+
+During auction week:
+
+PRIVATE JETS ARRIVE
+        ↓
+MARINA ACTIVITY ↑
+        ↓
+HOTELS BUSY
+        ↓
+LUXURY VEHICLES ↑
+        ↓
+CLUBHOUSE SECURITY ↑
+        ↓
+MEDIA ACTIVITY ↑
+        ↓
+RESTAURANT REVENUE ↑
+        ↓
+CLUB PRESTIGE ↑
+
+The auction therefore becomes a major social/economic event, not simply an interface screen.
+
+22. DEBUG CONSOLE
+
+Implement:
+
+==================================================
+       PEBBLE ISLAND ANTIQUES AUCTION
+==================================================
+
+LOTS:                 42
+REGISTERED BIDDERS:   37
+
+LOTS SOLD:            31
+
+HAMMER SALES:         $8,420,000
+BUYER PREMIUMS:       $1,684,000
+
+AVERAGE LOT:          $271,613
+
+TOP LOT:
+Atlantic Navigation Chart
+
+HAMMER:
+$1,420,000
+
+BIDDER:
+Anonymous #17
+
+AUCTION PRESTIGE:
+98.7
+
+CLUBHOUSE OCCUPANCY:
+94%
+
+VIP ATTENDANCE:
+183
+==================================================
+Core simulation loop
+                 PEBBLE ISLAND
+                      │
+                      ▼
+              PRIVATE VIEWING
+                      │
+                      ▼
+                   LOTS
+                      │
+             ┌────────┴────────┐
+             ▼                 ▼
+          RARITY           PROVENANCE
+             │                 │
+             └────────┬────────┘
+                      ▼
+                  BIDDERS
+                      │
+                      ▼
+                PERSONAL VALUE
+                      │
+                      ▼
+                BIDDING WAR
+                      │
+                      ▼
+                 HAMMER PRICE
+                      │
+             ┌────────┴────────┐
+             ▼                 ▼
+          BUYER             SELLER
+         PREMIUM          COMMISSION
+             │                 │
+             └────────┬────────┘
+                      ▼
+               AUCTION ECONOMY
+                      │
+                      ▼
+              CLUB PRESTIGE
+                      │
+                      ▼
+               NEXT AUCTION
+
+The most interesting extension would be to connect this directly to the Pebble Island membership system: members could become collectors, develop individual collections displayed in their homes, compete for unique objects, and eventually lend pieces to the clubhouse. That would turn the auction into a persistent collectibles economy and social-status system
+
+
+
+
+
+
+Yes — here is the actual C implementation, rather than a prompt. This is a standalone foundation you can drop into the Pebble Island clubhouse simulation and later connect to your GTA-style open-world engine.
+
+It uses fictional in-game credits/chips only.
+
+/*
+ * ================================================================
+ * PEBBLE ISLAND GOLF CLUB
+ * HIGH TABLE — POKER NIGHT
+ *
+ * Standalone C prototype
+ *
+ * Texas Hold'em
+ * 9-player table
+ * AI personalities
+ * Betting
+ * Hand evaluation
+ * Bluffing
+ * Player memory
+ * Club reputation
+ * Event statistics
+ *
+ * Build:
+ *     cc -std=c11 -O2 -Wall -Wextra poker_night.c -o poker_night
+ *
+ * Run:
+ *     ./poker_night
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+#include <stdint.h>
+
+#define MAX_PLAYERS 9
+#define DECK_SIZE 52
+#define COMMUNITY_CARDS 5
+#define MAX_NAME 64
+
+#define STARTING_STACK 25000.0
+#define SMALL_BLIND 250.0
+#define BIG_BLIND 500.0
+
+/* ================================================================
+ * CARDS
+ * ================================================================ */
+
+typedef enum {
+    HEARTS,
+    DIAMONDS,
+    CLUBS,
+    SPADES
+} Suit;
+
+typedef enum {
+    TWO = 2,
+    THREE,
+    FOUR,
+    FIVE,
+    SIX,
+    SEVEN,
+    EIGHT,
+    NINE,
+    TEN,
+    JACK,
+    QUEEN,
+    KING,
+    ACE
+} Rank;
+
+typedef struct {
+    Suit suit;
+    Rank rank;
+} Card;
+
+/* ================================================================
+ * HAND RANK
+ * ================================================================ */
+
+typedef enum {
+    HIGH_CARD,
+    PAIR,
+    TWO_PAIR,
+    THREE_OF_KIND,
+    STRAIGHT,
+    FLUSH,
+    FULL_HOUSE,
+    FOUR_OF_KIND,
+    STRAIGHT_FLUSH
+} HandRank;
+
+typedef struct {
+    HandRank rank;
+    int values[5];
+} EvaluatedHand;
+
+/* ================================================================
+ * PLAYER PERSONALITY
+ * ================================================================ */
+
+typedef enum {
+    SHARK,
+    BLUFFER,
+    CALCULATOR,
+    SOCIALITE,
+    ROCK,
+    HIGH_ROLLER,
+    BEGINNER,
+    RIVAL,
+    MYSTERY_PLAYER
+} PokerPersonality;
+
+typedef struct {
+
+    int id;
+
+    char name[MAX_NAME];
+
+    PokerPersonality personality;
+
+    Card hole_cards[2];
+
+    double stack;
+
+    double starting_stack;
+
+    double aggression;
+    double patience;
+    double bluff_skill;
+    double risk_tolerance;
+    double poker_skill;
+    double emotional_control;
+
+    double reputation;
+
+    bool folded;
+    bool all_in;
+    bool active;
+
+} PokerPlayer;
+
+/* ================================================================
+ * TABLE
+ * ================================================================ */
+
+typedef enum {
+    PRE_FLOP,
+    FLOP,
+    TURN,
+    RIVER
+} BettingRound;
+
+typedef struct {
+
+    PokerPlayer players[MAX_PLAYERS];
+
+    int player_count;
+
+    Card deck[DECK_SIZE];
+    int deck_position;
+
+    Card community[COMMUNITY_CARDS];
+    int community_count;
+
+    double pot;
+
+    double current_bet;
+
+    int dealer_position;
+    int small_blind_position;
+    int big_blind_position;
+
+    BettingRound round;
+
+} PokerTable;
+
+/* ================================================================
+ * UTILITY
+ * ================================================================ */
+
+static double random_double(void)
+{
+    return (double)rand() / (double)RAND_MAX;
+}
+
+static int random_int(int min, int max)
+{
+    return min + rand() % (max - min + 1);
+}
+
+static const char *rank_name(Rank rank)
+{
+    static const char *names[] = {
+        "", "",
+        "2", "3", "4", "5", "6", "7",
+        "8", "9", "10",
+        "J", "Q", "K", "A"
+    };
+
+    return names[rank];
+}
+
+static const char *suit_name(Suit suit)
+{
+    switch (suit) {
+        case HEARTS:   return "H";
+        case DIAMONDS: return "D";
+        case CLUBS:    return "C";
+        case SPADES:   return "S";
+    }
+
+    return "?";
+}
+
+static const char *hand_rank_name(HandRank rank)
+{
+    switch (rank) {
+        case HIGH_CARD:      return "High Card";
+        case PAIR:           return "Pair";
+        case TWO_PAIR:       return "Two Pair";
+        case THREE_OF_KIND:  return "Three of a Kind";
+        case STRAIGHT:       return "Straight";
+        case FLUSH:          return "Flush";
+        case FULL_HOUSE:     return "Full House";
+        case FOUR_OF_KIND:   return "Four of a Kind";
+        case STRAIGHT_FLUSH: return "Straight Flush";
+    }
+
+    return "Unknown";
+}
+
+static void print_card(Card c)
+{
+    printf("%s%s", rank_name(c.rank), suit_name(c.suit));
+}
+
+/* ================================================================
+ * DECK
+ * ================================================================ */
+
+static void initialize_deck(PokerTable *table)
+{
+    int index = 0;
+
+    for (int suit = HEARTS; suit <= SPADES; suit++) {
+        for (int rank = TWO; rank <= ACE; rank++) {
+
+            table->deck[index].suit = (Suit)suit;
+            table->deck[index].rank = (Rank)rank;
+
+            index++;
+        }
+    }
+
+    table->deck_position = 0;
+}
+
+static void shuffle_deck(PokerTable *table)
+{
+    for (int i = DECK_SIZE - 1; i > 0; i--) {
+
+        int j = random_int(0, i);
+
+        Card temp = table->deck[i];
+        table->deck[i] = table->deck[j];
+        table->deck[j] = temp;
+    }
+}
+
+static Card draw_card(PokerTable *table)
+{
+    if (table->deck_position >= DECK_SIZE) {
+        Card invalid = { HEARTS, TWO };
+        return invalid;
+    }
+
+    return table->deck[table->deck_position++];
+}
+
+/* ================================================================
+ * HAND EVALUATION
+ * ================================================================ */
+
+static void sort_descending(int *values, int count)
+{
+    for (int i = 0; i < count; i++) {
+
+        for (int j = i + 1; j < count; j++) {
+
+            if (values[j] > values[i]) {
+
+                int temp = values[i];
+                values[i] = values[j];
+                values[j] = temp;
+            }
+        }
+    }
+}
+
+static bool detect_flush(Card *cards, int count, int *flush_suit)
+{
+    int counts[4] = {0};
+
+    for (int i = 0; i < count; i++)
+        counts[cards[i].suit]++;
+
+    for (int suit = 0; suit < 4; suit++) {
+
+        if (counts[suit] >= 5) {
+
+            *flush_suit = suit;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static int detect_straight(int *values, int count)
+{
+    bool present[15] = {false};
+
+    for (int i = 0; i < count; i++)
+        present[values[i]] = true;
+
+    /* Ace can also act as one */
+    present[1] = present[ACE];
+
+    for (int high = ACE; high >= FIVE; high--) {
+
+        bool straight = true;
+
+        for (int offset = 0; offset < 5; offset++) {
+
+            if (!present[high - offset]) {
+                straight = false;
+                break;
+            }
+        }
+
+        if (straight)
+            return high;
+    }
+
+    return 0;
+}
+
+static EvaluatedHand evaluate_hand(Card *cards, int count)
+{
+    EvaluatedHand result = { HIGH_CARD, {0} };
+
+    int rank_counts[15] = {0};
+
+    int values[7];
+    int value_count = 0;
+
+    for (int i = 0; i < count; i++) {
+
+        int rank = cards[i].rank;
+
+        rank_counts[rank]++;
+        values[value_count++] = rank;
+    }
+
+    sort_descending(values, value_count);
+
+    int flush_suit = -1;
+
+    bool flush =
+        detect_flush(cards, count, &flush_suit);
+
+    /*
+     * Straight flush
+     */
+
+    if (flush) {
+
+        int flush_values[7];
+        int n = 0;
+
+        for (int i = 0; i < count; i++) {
+
+            if (cards[i].suit == flush_suit)
+                flush_values[n++] = cards[i].rank;
+        }
+
+        int straight_high =
+            detect_straight(
+                flush_values,
+                n
+            );
+
+        if (straight_high) {
+
+            result.rank = STRAIGHT_FLUSH;
+            result.values[0] = straight_high;
+
+            return result;
+        }
+    }
+
+    /*
+     * Four of a kind
+     */
+
+    int four = 0;
+
+    for (int rank = ACE; rank >= TWO; rank--) {
+
+        if (rank_counts[rank] == 4) {
+            four = rank;
+            break;
+        }
+    }
+
+    if (four) {
+
+        result.rank = FOUR_OF_KIND;
+        result.values[0] = four;
+
+        for (int rank = ACE; rank >= TWO; rank--) {
+
+            if (rank != four &&
+                rank_counts[rank] > 0) {
+
+                result.values[1] = rank;
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /*
+     * Full house
+     */
+
+    int triple = 0;
+    int pair = 0;
+
+    for (int rank = ACE; rank >= TWO; rank--) {
+
+        if (rank_counts[rank] >= 3) {
+
+            if (!triple)
+                triple = rank;
+            else if (!pair)
+                pair = rank;
+        }
+    }
+
+    for (int rank = ACE; rank >= TWO; rank--) {
+
+        if (rank != triple &&
+            rank_counts[rank] >= 2) {
+
+            if (!pair)
+                pair = rank;
+
+            break;
+        }
+    }
+
+    if (triple && pair) {
+
+        result.rank = FULL_HOUSE;
+        result.values[0] = triple;
+        result.values[1] = pair;
+
+        return result;
+    }
+
+    /*
+     * Flush
+     */
+
+    if (flush) {
+
+        result.rank = FLUSH;
+
+        int n = 0;
+
+        for (int i = 0; i < count; i++) {
+
+            if (cards[i].suit == flush_suit &&
+                n < 5) {
+
+                result.values[n++] =
+                    cards[i].rank;
+            }
+        }
+
+        sort_descending(result.values, 5);
+
+        return result;
+    }
+
+    /*
+     * Straight
+     */
+
+    int straight_high =
+        detect_straight(
+            values,
+            value_count
+        );
+
+    if (straight_high) {
+
+        result.rank = STRAIGHT;
+        result.values[0] = straight_high;
+
+        return result;
+    }
+
+    /*
+     * Three of a kind
+     */
+
+    if (triple) {
+
+        result.rank = THREE_OF_KIND;
+        result.values[0] = triple;
+
+        int n = 1;
+
+        for (int i = 0; i < value_count && n < 3; i++) {
+
+            if (values[i] != triple)
+                result.values[n++] = values[i];
+        }
+
+        return result;
+    }
+
+    /*
+     * Two pair
+     */
+
+    int pairs[2] = {0};
+    int pair_count = 0;
+
+    for (int rank = ACE;
+         rank >= TWO && pair_count < 2;
+         rank--) {
+
+        if (rank_counts[rank] >= 2)
+            pairs[pair_count++] = rank;
+    }
+
+    if (pair_count == 2) {
+
+        result.rank = TWO_PAIR;
+
+        result.values[0] = pairs[0];
+        result.values[1] = pairs[1];
+
+        for (int rank = ACE; rank >= TWO; rank--) {
+
+            if (rank != pairs[0] &&
+                rank != pairs[1] &&
+                rank_counts[rank] > 0) {
+
+                result.values[2] = rank;
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /*
+     * One pair
+     */
+
+    if (pair_count == 1) {
+
+        result.rank = PAIR;
+        result.values[0] = pairs[0];
+
+        int n = 1;
+
+        for (int i = 0;
+             i < value_count && n < 5;
+             i++) {
+
+            if (values[i] != pairs[0])
+                result.values[n++] = values[i];
+        }
+
+        return result;
+    }
+
+    /*
+     * High card
+     */
+
+    result.rank = HIGH_CARD;
+
+    for (int i = 0; i < 5 && i < value_count; i++)
+        result.values[i] = values[i];
+
+    return result;
+}
+
+/* ================================================================
+ * HAND COMPARISON
+ * ================================================================ */
+
+static int compare_hands(
+    EvaluatedHand *a,
+    EvaluatedHand *b
+)
+{
+    if (a->rank != b->rank)
+        return a->rank > b->rank ? 1 : -1;
+
+    for (int i = 0; i < 5; i++) {
+
+        if (a->values[i] != b->values[i]) {
+
+            return
+                a->values[i] >
+                b->values[i]
+                ? 1
+                : -1;
+        }
+    }
+
+    return 0;
+}
+
+/* ================================================================
+ * PLAYER HAND
+ * ================================================================ */
+
+static EvaluatedHand evaluate_player(
+    PokerTable *table,
+    PokerPlayer *player
+)
+{
+    Card cards[7];
+
+    cards[0] = player->hole_cards[0];
+    cards[1] = player->hole_cards[1];
+
+    for (int i = 0;
+         i < table->community_count;
+         i++) {
+
+        cards[i + 2] =
+            table->community[i];
+    }
+
+    return evaluate_hand(
+        cards,
+        table->community_count + 2
+    );
+}
+
+/* ================================================================
+ * POT ODDS
+ * ================================================================ */
+
+static double estimate_hand_strength(
+    PokerTable *table,
+    PokerPlayer *player
+)
+{
+    EvaluatedHand hand =
+        evaluate_player(
+            table,
+            player
+        );
+
+    double strength = 0.10;
+
+    switch (hand.rank) {
+
+        case HIGH_CARD:
+            strength = 0.20;
+            break;
+
+        case PAIR:
+            strength = 0.35;
+            break;
+
+        case TWO_PAIR:
+            strength = 0.50;
+            break;
+
+        case THREE_OF_KIND:
+            strength = 0.65;
+            break;
+
+        case STRAIGHT:
+            strength = 0.75;
+            break;
+
+        case FLUSH:
+            strength = 0.82;
+            break;
+
+        case FULL_HOUSE:
+            strength = 0.90;
+            break;
+
+        case FOUR_OF_KIND:
+            strength = 0.97;
+            break;
+
+        case STRAIGHT_FLUSH:
+            strength = 1.00;
+            break;
+    }
+
+    /*
+     * Skill slightly modifies confidence.
+     */
+
+    strength +=
+        (player->poker_skill - 0.5) * 0.08;
+
+    if (strength < 0.0)
+        strength = 0.0;
+
+    if (strength > 1.0)
+        strength = 1.0;
+
+    return strength;
+}
+
+/* ================================================================
+ * BLUFFING
+ * ================================================================ */
+
+static double calculate_bluff_probability(
+    PokerTable *table,
+    PokerPlayer *player
+)
+{
+    double probability =
+        player->bluff_skill * 0.45;
+
+    probability +=
+        player->aggression * 0.20;
+
+    probability +=
+        player->risk_tolerance * 0.15;
+
+    /*
+     * More willingness to bluff
+     * when the hand is weak.
+     */
+
+    double strength =
+        estimate_hand_strength(
+            table,
+            player
+        );
+
+    probability +=
+        (1.0 - strength) * 0.20;
+
+    if (probability > 0.90)
+        probability = 0.90;
+
+    return probability;
+}
+
+/* ================================================================
+ * BETTING ACTION
+ * ================================================================ */
+
+typedef enum {
+    FOLD,
+    CHECK,
+    CALL,
+    BET,
+    RAISE,
+    ALL_IN
+} PokerAction;
+
+static const char *action_name(PokerAction action)
+{
+    switch (action) {
+
+        case FOLD:   return "FOLD";
+        case CHECK:  return "CHECK";
+        case CALL:   return "CALL";
+        case BET:    return "BET";
+        case RAISE:  return "RAISE";
+        case ALL_IN: return "ALL-IN";
+    }
+
+    return "?";
+}
+
+/* ================================================================
+ * AI DECISION
+ * ================================================================ */
+
+static PokerAction choose_action(
+    PokerTable *table,
+    PokerPlayer *player
+)
+{
+    double strength =
+        estimate_hand_strength(
+            table,
+            player
+        );
+
+    double bluff =
+        calculate_bluff_probability(
+            table,
+            player
+        );
+
+    double roll =
+        random_double();
+
+    /*
+     * Weak hand.
+     */
+
+    if (strength < 0.25) {
+
+        if (roll < bluff)
+            return RAISE;
+
+        return
+            table->current_bet > 0
+            ? FOLD
+            : CHECK;
+    }
+
+    /*
+     * Medium hand.
+     */
+
+    if (strength < 0.55) {
+
+        if (roll <
+            player->aggression * 0.35)
+            return RAISE;
+
+        return
+            table->current_bet > 0
+            ? CALL
+            : CHECK;
+    }
+
+    /*
+     * Strong hand.
+     */
+
+    if (strength < 0.80) {
+
+        if (roll <
+            player->aggression * 0.60)
+            return RAISE;
+
+        return CALL;
+    }
+
+    /*
+     * Very strong hand.
+     */
+
+    if (strength >= 0.95 &&
+        roll < player->risk_tolerance)
+        return ALL_IN;
+
+    return RAISE;
+}
+
+/* ================================================================
+ * BETTING
+ * ================================================================ */
+
+static double minimum_raise(
+    PokerTable *table
+)
+{
+    if (table->current_bet < BIG_BLIND)
+        return BIG_BLIND;
+
+    return table->current_bet;
+}
+
+static void apply_bet(
+    PokerTable *table,
+    PokerPlayer *player,
+    double amount
+)
+{
+    if (amount > player->stack)
+        amount = player->stack;
+
+    player->stack -= amount;
+
+    table->pot += amount;
+
+    if (player->stack <= 0.0) {
+
+        player->stack = 0.0;
+        player->all_in = true;
+    }
+}
+
+static void perform_action(
+    PokerTable *table,
+    PokerPlayer *player,
+    PokerAction action
+)
+{
+    printf(
+        "%-18s %-8s ",
+        player->name,
+        action_name(action)
+    );
+
+    switch (action) {
+
+        case FOLD:
+
+            player->folded = true;
+
+            printf("\n");
+            break;
+
+        case CHECK:
+
+            printf("\n");
+            break;
+
+        case CALL:
+        {
+            double amount =
+                table->current_bet;
+
+            if (amount > player->stack)
+                amount = player->stack;
+
+            apply_bet(
+                table,
+                player,
+                amount
+            );
+
+            printf(
+                "$%.0f\n",
+                amount
+            );
+
+            break;
+        }
+
+        case BET:
+        case RAISE:
+        {
+            double raise =
+                minimum_raise(table);
+
+            double amount =
+                table->current_bet +
+                raise;
+
+            if (amount > player->stack)
+                amount = player->stack;
+
+            table->current_bet = amount;
+
+            apply_bet(
+                table,
+                player,
+                amount
+            );
+
+            printf(
+                "$%.0f\n",
+                amount
+            );
+
+            break;
+        }
+
+        case ALL_IN:
+
+            apply_bet(
+                table,
+                player,
+                player->stack
+            );
+
+            table->current_bet =
+                player->stack;
+
+            printf("ALL CHIPS\n");
+            break;
+    }
+}
+
+/* ================================================================
+ * PLAYER SETUP
+ * ================================================================ */
+
+static void create_player(
+    PokerPlayer *player,
+    int id,
+    const char *name,
+    PokerPersonality personality
+)
+{
+    memset(
+        player,
+        0,
+        sizeof(PokerPlayer)
+    );
+
+    player->id = id;
+
+    strncpy(
+        player->name,
+        name,
+        MAX_NAME - 1
+    );
+
+    player->personality =
+        personality;
+
+    player->stack =
+        STARTING_STACK;
+
+    player->starting_stack =
+        STARTING_STACK;
+
+    player->reputation =
+        0.50;
+
+    player->active = true;
+
+    switch (personality) {
+
+        case SHARK:
+
+            player->aggression = 0.80;
+            player->patience = 0.80;
+            player->bluff_skill = 0.75;
+            player->risk_tolerance = 0.70;
+            player->poker_skill = 0.95;
+            player->emotional_control = 0.95;
+            break;
+
+        case BLUFFER:
+
+            player->aggression = 0.85;
+            player->patience = 0.35;
+            player->bluff_skill = 0.95;
+            player->risk_tolerance = 0.80;
+            player->poker_skill = 0.70;
+            player->emotional_control = 0.65;
+            break;
+
+        case CALCULATOR:
+
+            player->aggression = 0.55;
+            player->patience = 0.95;
+            player->bluff_skill = 0.65;
+            player->risk_tolerance = 0.50;
+            player->poker_skill = 0.90;
+            player->emotional_control = 0.98;
+            break;
+
+        case SOCIALITE:
+
+            player->aggression = 0.50;
+            player->patience = 0.50;
+            player->bluff_skill = 0.60;
+            player->risk_tolerance = 0.65;
+            player->poker_skill = 0.55;
+            player->emotional_control = 0.70;
+            break;
+
+        case ROCK:
+
+            player->aggression = 0.20;
+            player->patience = 0.95;
+            player->bluff_skill = 0.30;
+            player->risk_tolerance = 0.20;
+            player->poker_skill = 0.75;
+            player->emotional_control = 0.95;
+            break;
+
+        case HIGH_ROLLER:
+
+            player->aggression = 0.95;
+            player->patience = 0.25;
+            player->bluff_skill = 0.70;
+            player->risk_tolerance = 0.98;
+            player->poker_skill = 0.70;
+            player->emotional_control = 0.60;
+            break;
+
+        case BEGINNER:
+
+            player->aggression = 0.40;
+            player->patience = 0.45;
+            player->bluff_skill = 0.20;
+            player->risk_tolerance = 0.55;
+            player->poker_skill = 0.30;
+            player->emotional_control = 0.50;
+            break;
+
+        case RIVAL:
+
+            player->aggression = 0.90;
+            player->patience = 0.40;
+            player->bluff_skill = 0.80;
+            player->risk_tolerance = 0.85;
+            player->poker_skill = 0.85;
+            player->emotional_control = 0.70;
+            break;
+
+        case MYSTERY_PLAYER:
+
+            player->aggression = 0.70;
+            player->patience = 0.70;
+            player->bluff_skill = 0.85;
+            player->risk_tolerance = 0.75;
+            player->poker_skill = 0.90;
+            player->emotional_control = 0.90;
+            break;
+    }
+}
+
+/* ================================================================
+ * DEAL HAND
+ * ================================================================ */
+
+static void reset_hand(PokerTable *table)
+{
+    table->pot = 0.0;
+    table->current_bet = BIG_BLIND;
+    table->community_count = 0;
+
+    initialize_deck(table);
+    shuffle_deck(table);
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        player->folded = false;
+        player->all_in = false;
+        player->active =
+            player->stack > 0.0;
+    }
+}
+
+static void deal_hole_cards(
+    PokerTable *table
+)
+{
+    for (int round = 0;
+         round < 2;
+         round++) {
+
+        for (int i = 0;
+             i < table->player_count;
+             i++) {
+
+            PokerPlayer *player =
+                &table->players[i];
+
+            if (player->active) {
+
+                player->hole_cards[round] =
+                    draw_card(table);
+            }
+        }
+    }
+}
+
+static void deal_flop(
+    PokerTable *table
+)
+{
+    draw_card(table);
+
+    for (int i = 0; i < 3; i++) {
+
+        table->community[
+            table->community_count++
+        ] = draw_card(table);
+    }
+}
+
+static void deal_turn(
+    PokerTable *table
+)
+{
+    draw_card(table);
+
+    table->community[
+        table->community_count++
+    ] = draw_card(table);
+}
+
+static void deal_river(
+    PokerTable *table
+)
+{
+    draw_card(table);
+
+    table->community[
+        table->community_count++
+    ] = draw_card(table);
+}
+
+/* ================================================================
+ * DISPLAY
+ * ================================================================ */
+
+static void display_board(
+    PokerTable *table
+)
+{
+    printf("\nBOARD: ");
+
+    for (int i = 0;
+         i < table->community_count;
+         i++) {
+
+        print_card(
+            table->community[i]
+        );
+
+        printf(" ");
+    }
+
+    printf("\n");
+}
+
+static void display_player_cards(
+    PokerPlayer *player
+)
+{
+    printf(
+        "%s: ",
+        player->name
+    );
+
+    print_card(
+        player->hole_cards[0]
+    );
+
+    printf(" ");
+
+    print_card(
+        player->hole_cards[1]
+    );
+
+    printf("\n");
+}
+
+/* ================================================================
+ * WINNER
+ * ================================================================ */
+
+static int determine_winner(
+    PokerTable *table
+)
+{
+    int winner = -1;
+
+    EvaluatedHand best;
+
+    bool have_best = false;
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded)
+            continue;
+
+        EvaluatedHand hand =
+            evaluate_player(
+                table,
+                player
+            );
+
+        if (!have_best ||
+            compare_hands(
+                &hand,
+                &best
+            ) > 0) {
+
+            best = hand;
+            winner = i;
+            have_best = true;
+        }
+    }
+
+    return winner;
+}
+
+/* ================================================================
+ * CLUB REPUTATION
+ * ================================================================ */
+
+static double club_prestige = 0.95;
+
+static void update_club_reputation(
+    PokerPlayer *winner,
+    double pot
+)
+{
+    double effect =
+        pot / 1000000.0;
+
+    club_prestige +=
+        effect * 0.01;
+
+    if (club_prestige > 1.0)
+        club_prestige = 1.0;
+
+    winner->reputation +=
+        effect * 0.05;
+
+    if (winner->reputation > 1.0)
+        winner->reputation = 1.0;
+}
+
+/* ================================================================
+ * PLAY ONE HAND
+ * ================================================================ */
+
+static void play_hand(
+    PokerTable *table
+)
+{
+    reset_hand(table);
+
+    deal_hole_cards(table);
+
+    /*
+     * Blinds
+     */
+
+    PokerPlayer *sb =
+        &table->players[
+            table->small_blind_position
+        ];
+
+    PokerPlayer *bb =
+        &table->players[
+            table->big_blind_position
+        ];
+
+    apply_bet(
+        table,
+        sb,
+        SMALL_BLIND
+    );
+
+    apply_bet(
+        table,
+        bb,
+        BIG_BLIND
+    );
+
+    printf(
+        "\n================================================\n"
+    );
+
+    printf(
+        "NEW HAND\n"
+    );
+
+    printf(
+        "Pot: $%.0f\n",
+        table->pot
+    );
+
+    printf(
+        "================================================\n"
+    );
+
+    /*
+     * Pre-flop
+     */
+
+    table->round = PRE_FLOP;
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded)
+            continue;
+
+        PokerAction action =
+            choose_action(
+                table,
+                player
+            );
+
+        perform_action(
+            table,
+            player,
+            action
+        );
+    }
+
+    /*
+     * FLOP
+     */
+
+    deal_flop(table);
+
+    display_board(table);
+
+    table->round = FLOP;
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded ||
+            player->all_in)
+            continue;
+
+        PokerAction action =
+            choose_action(
+                table,
+                player
+            );
+
+        perform_action(
+            table,
+            player,
+            action
+        );
+    }
+
+    /*
+     * TURN
+     */
+
+    deal_turn(table);
+
+    display_board(table);
+
+    table->round = TURN;
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded ||
+            player->all_in)
+            continue;
+
+        PokerAction action =
+            choose_action(
+                table,
+                player
+            );
+
+        perform_action(
+            table,
+            player,
+            action
+        );
+    }
+
+    /*
+     * RIVER
+     */
+
+    deal_river(table);
+
+    display_board(table);
+
+    table->round = RIVER;
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded ||
+            player->all_in)
+            continue;
+
+        PokerAction action =
+            choose_action(
+                table,
+                player
+            );
+
+        perform_action(
+            table,
+            player,
+            action
+        );
+    }
+
+    /*
+     * SHOWDOWN
+     */
+
+    printf(
+        "\n================ SHOWDOWN ================\n"
+    );
+
+    for (int i = 0;
+         i < table->player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table->players[i];
+
+        if (!player->active ||
+            player->folded)
+            continue;
+
+        display_player_cards(player);
+
+        EvaluatedHand hand =
+            evaluate_player(
+                table,
+                player
+            );
+
+        printf(
+            "  %s\n",
+            hand_rank_name(hand.rank)
+        );
+    }
+
+    int winner =
+        determine_winner(table);
+
+    if (winner >= 0) {
+
+        PokerPlayer *player =
+            &table->players[winner];
+
+        player->stack += table->pot;
+
+        printf(
+            "\n*** %s WINS THE POT ***\n",
+            player->name
+        );
+
+        printf(
+            "Pot: $%.0f\n",
+            table->pot
+        );
+
+        update_club_reputation(
+            player,
+            table->pot
+        );
+    }
+
+    printf(
+        "===========================================\n"
+    );
+}
+
+/* ================================================================
+ * TABLE SETUP
+ * ================================================================ */
+
+static void initialize_table(
+    PokerTable *table
+)
+{
+    memset(
+        table,
+        0,
+        sizeof(PokerTable)
+    );
+
+    table->player_count =
+        MAX_PLAYERS;
+
+    create_player(
+        &table->players[0],
+        0,
+        "Victor Vale",
+        SHARK
+    );
+
+    create_player(
+        &table->players[1],
+        1,
+        "Elena Marlowe",
+        CALCULATOR
+    );
+
+    create_player(
+        &table->players[2],
+        2,
+        "James Sterling",
+        HIGH_ROLLER
+    );
+
+    create_player(
+        &table->players[3],
+        3,
+        "Charlotte Reed",
+        SOCIALITE
+    );
+
+    create_player(
+        &table->players[4],
+        4,
+        "Arthur Black",
+        ROCK
+    );
+
+    create_player(
+        &table->players[5],
+        5,
+        "Daniel Cross",
+        BLUFFER
+    );
+
+    create_player(
+        &table->players[6],
+        6,
+        "Henry Fox",
+        BEGINNER
+    );
+
+    create_player(
+        &table->players[7],
+        7,
+        "Richard Kane",
+        RIVAL
+    );
+
+    create_player(
+        &table->players[8],
+        8,
+        "THE UNKNOWN",
+        MYSTERY_PLAYER
+    );
+
+    table->dealer_position = 0;
+
+    table->small_blind_position = 1;
+
+    table->big_blind_position = 2;
+}
+
+/* ================================================================
+ * CLUBHOUSE DASHBOARD
+ * ================================================================ */
+
+static void display_club_dashboard(
+    PokerTable *table
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "             PEBBLE ISLAND GOLF CLUB\n"
+        "                 THE HIGH TABLE\n"
+        "====================================================\n"
+    );
+
+    printf(
+        "Club Prestige: %.1f%%\n",
+        club_prestige * 100.0
+    );
+
+    printf(
+        "Players: %d\n",
+        table->player_count
+    );
+
+    printf(
+        "Buy-in: $%.0f\n",
+        STARTING_STACK
+    );
+
+    printf(
+        "Blinds: $%.0f / $%.0f\n",
+        SMALL_BLIND,
+        BIG_BLIND
+    );
+
+    printf(
+        "Location: Upper Clubhouse / Sky Lounge\n"
+    );
+
+    printf(
+        "Status: PRIVATE MEMBERS' EVENT\n"
+    );
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    PokerTable table;
+
+    initialize_table(
+        &table
+    );
+
+    display_club_dashboard(
+        &table
+    );
+
+    /*
+     * Run several hands.
+     */
+
+    for (int hand = 1;
+         hand <= 5;
+         hand++) {
+
+        printf(
+            "\n\n"
+            "############ HAND %d ############\n",
+            hand
+        );
+
+        play_hand(
+            &table
+        );
+    }
+
+    /*
+     * Final table report.
+     */
+
+    printf(
+        "\n\n"
+        "====================================================\n"
+        "                 NIGHT SUMMARY\n"
+        "====================================================\n"
+    );
+
+    for (int i = 0;
+         i < table.player_count;
+         i++) {
+
+        PokerPlayer *player =
+            &table.players[i];
+
+        double profit =
+            player->stack -
+            player->starting_stack;
+
+        printf(
+            "%-20s "
+            "Stack: $%10.0f "
+            "P/L: $%10.0f\n",
+            player->name,
+            player->stack,
+            profit
+        );
+    }
+
+    printf(
+        "\nClub Prestige: %.2f%%\n",
+        club_prestige * 100.0
+    );
+
+    printf(
+        "====================================================\n"
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN-WORLD ENGINE
+ * LUXURY HIGH-RISE APARTMENT BUILDING
+ *
+ * "THE AURELIA TOWER"
+ *
+ * Standalone C simulation
+ *
+ * Features:
+ *   - 60-storey luxury tower
+ *   - Apartments + penthouses
+ *   - Residents
+ *   - Property ownership
+ *   - Rent / sale prices
+ *   - Elevators
+ *   - Lobby
+ *   - Concierge
+ *   - Security
+ *   - Parking
+ *   - Rooftop
+ *   - Swimming pool
+ *   - Gym
+ *   - Restaurant
+ *   - Power / water systems
+ *   - Maintenance
+ *   - Building reputation
+ *   - Dynamic occupancy
+ *   - NPC activity
+ *
+ * Compile:
+ *   cc -std=c11 -O2 -Wall -Wextra aurelia_tower.c -o aurelia_tower
+ *
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+
+#define MAX_FLOORS          60
+#define APARTMENTS_PER_FLOOR 8
+#define MAX_APARTMENTS      (MAX_FLOORS * APARTMENTS_PER_FLOOR)
+#define MAX_RESIDENTS       450
+#define MAX_ELEVATORS       8
+#define MAX_STAFF           80
+#define MAX_PARKING_SPACES  500
+#define MAX_NPCS            100
+
+#define BUILDING_NAME "AURELIA TOWER"
+
+#define PI 3.14159265358979323846
+
+/* ================================================================
+ * BUILDING TYPES
+ * ================================================================ */
+
+typedef enum {
+
+    FLOOR_STANDARD,
+    FLOOR_EXECUTIVE,
+    FLOOR_PENTHOUSE,
+    FLOOR_ROOFTOP
+
+} FloorType;
+
+typedef enum {
+
+    STUDIO,
+    ONE_BED,
+    TWO_BED,
+    THREE_BED,
+    FOUR_BED,
+    PENTHOUSE
+
+} ApartmentType;
+
+typedef enum {
+
+    VACANT,
+    OCCUPIED,
+    MAINTENANCE,
+    RESERVED
+
+} ApartmentStatus;
+
+typedef enum {
+
+    OWNER,
+    TENANT
+
+} OccupancyType;
+
+/* ================================================================
+ * APARTMENT
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    int floor;
+
+    int unit;
+
+    ApartmentType type;
+
+    ApartmentStatus status;
+
+    OccupancyType occupancy;
+
+    double area_m2;
+
+    double purchase_price;
+
+    double monthly_rent;
+
+    double service_charge;
+
+    double market_value;
+
+    int resident_id;
+
+    bool ocean_view;
+
+    bool balcony;
+
+    bool smart_home;
+
+    bool private_lift;
+
+    bool furnished;
+
+} Apartment;
+
+/* ================================================================
+ * RESIDENT
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double wealth;
+
+    double monthly_income;
+
+    int apartment_id;
+
+    bool owns_property;
+
+    bool vip;
+
+    double reputation;
+
+} Resident;
+
+/* ================================================================
+ * ELEVATOR
+ * ================================================================ */
+
+typedef enum {
+
+    ELEVATOR_IDLE,
+    ELEVATOR_MOVING,
+    ELEVATOR_DOOR_OPEN,
+    ELEVATOR_MAINTENANCE
+
+} ElevatorState;
+
+typedef struct {
+
+    int id;
+
+    int current_floor;
+
+    int target_floor;
+
+    ElevatorState state;
+
+    double speed;
+
+    int capacity;
+
+    bool express;
+
+    bool service_elevator;
+
+    double energy_usage;
+
+} Elevator;
+
+/* ================================================================
+ * STAFF
+ * ================================================================ */
+
+typedef enum {
+
+    CONCIERGE,
+    SECURITY,
+    ENGINEER,
+    HOUSEKEEPER,
+    VALET,
+    MANAGER,
+    CHEF,
+    LIFEGUARD
+
+} StaffRole;
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    StaffRole role;
+
+    double salary;
+
+    bool on_shift;
+
+} Staff;
+
+/* ================================================================
+ * PARKING
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    int floor;
+
+    bool occupied;
+
+    int resident_id;
+
+    bool ev_charger;
+
+    bool vip_space;
+
+} ParkingSpace;
+
+/* ================================================================
+ * BUILDING SYSTEMS
+ * ================================================================ */
+
+typedef struct {
+
+    double electricity_load_mw;
+
+    double water_consumption_litres;
+
+    double cooling_load_mw;
+
+    double solar_generation_mw;
+
+    double battery_charge_mwh;
+
+    double battery_capacity_mwh;
+
+    double maintenance_budget;
+
+    double security_level;
+
+    double cleanliness;
+
+    double building_reputation;
+
+    double occupancy_rate;
+
+    double monthly_revenue;
+
+    double monthly_operating_cost;
+
+    bool grid_connected;
+
+    bool backup_generator;
+
+    bool flood_protection;
+
+} BuildingSystems;
+
+/* ================================================================
+ * AMENITIES
+ * ================================================================ */
+
+typedef struct {
+
+    bool lobby;
+
+    bool concierge;
+
+    bool rooftop_pool;
+
+    bool rooftop_bar;
+
+    bool restaurant;
+
+    bool gym;
+
+    bool spa;
+
+    bool cinema;
+
+    bool residents_lounge;
+
+    bool business_centre;
+
+    bool private_dining;
+
+    bool marina_access;
+
+    bool valet;
+
+    bool underground_parking;
+
+} Amenities;
+
+/* ================================================================
+ * NPC
+ * ================================================================ */
+
+typedef enum {
+
+    NPC_HOME,
+    NPC_LOBBY,
+    NPC_GYM,
+    NPC_POOL,
+    NPC_RESTAURANT,
+    NPC_ROOFTOP,
+    NPC_PARKING,
+    NPC_TRAVELLING
+
+} NPCActivity;
+
+typedef struct {
+
+    int id;
+
+    int resident_id;
+
+    int floor;
+
+    NPCActivity activity;
+
+    double x;
+
+    double y;
+
+    double z;
+
+    bool active;
+
+} NPC;
+
+/* ================================================================
+ * BUILDING
+ * ================================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    int floors;
+
+    double height_m;
+
+    double latitude;
+
+    double longitude;
+
+    Apartment apartments[MAX_APARTMENTS];
+
+    Resident residents[MAX_RESIDENTS];
+
+    Elevator elevators[MAX_ELEVATORS];
+
+    Staff staff[MAX_STAFF];
+
+    ParkingSpace parking[MAX_PARKING_SPACES];
+
+    NPC npcs[MAX_NPCS];
+
+    BuildingSystems systems;
+
+    Amenities amenities;
+
+    int apartment_count;
+
+    int resident_count;
+
+    int staff_count;
+
+    int elevator_count;
+
+    int parking_count;
+
+    int npc_count;
+
+    double construction_cost;
+
+    double land_value;
+
+    double total_asset_value;
+
+} LuxuryTower;
+
+/* ================================================================
+ * RANDOM HELPERS
+ * ================================================================ */
+
+static double random_double(void)
+{
+    return (double)rand() / (double)RAND_MAX;
+}
+
+static int random_int(int min, int max)
+{
+    return min + rand() % (max - min + 1);
+}
+
+/* ================================================================
+ * APARTMENT NAMES
+ * ================================================================ */
+
+static const char *apartment_type_name(
+    ApartmentType type
+)
+{
+    switch (type) {
+
+        case STUDIO:
+            return "Studio";
+
+        case ONE_BED:
+            return "One Bedroom";
+
+        case TWO_BED:
+            return "Two Bedroom";
+
+        case THREE_BED:
+            return "Three Bedroom";
+
+        case FOUR_BED:
+            return "Four Bedroom";
+
+        case PENTHOUSE:
+            return "Penthouse";
+    }
+
+    return "Unknown";
+}
+
+/* ================================================================
+ * APARTMENT GENERATION
+ * ================================================================ */
+
+static ApartmentType generate_apartment_type(
+    int floor
+)
+{
+    if (floor >= 56)
+        return PENTHOUSE;
+
+    if (floor >= 45)
+        return FOUR_BED;
+
+    if (floor >= 30)
+        return THREE_BED;
+
+    if (floor >= 15)
+        return TWO_BED;
+
+    if (random_double() < 0.55)
+        return ONE_BED;
+
+    return STUDIO;
+}
+
+/* ================================================================
+ * APARTMENT ECONOMICS
+ * ================================================================ */
+
+static double base_price_per_m2(int floor)
+{
+    double price = 18000.0;
+
+    /*
+     * Higher floors command increasingly
+     * valuable views.
+     */
+
+    price += floor * 750.0;
+
+    if (floor >= 40)
+        price += 15000.0;
+
+    if (floor >= 55)
+        price += 30000.0;
+
+    return price;
+}
+
+static void configure_apartment(
+    Apartment *a,
+    int id,
+    int floor,
+    int unit
+)
+{
+    memset(a, 0, sizeof(Apartment));
+
+    a->id = id;
+    a->floor = floor;
+    a->unit = unit;
+
+    a->type =
+        generate_apartment_type(floor);
+
+    a->status = VACANT;
+
+    a->occupancy = TENANT;
+
+    switch (a->type) {
+
+        case STUDIO:
+            a->area_m2 = 55.0;
+            break;
+
+        case ONE_BED:
+            a->area_m2 = 85.0;
+            break;
+
+        case TWO_BED:
+            a->area_m2 = 130.0;
+            break;
+
+        case THREE_BED:
+            a->area_m2 = 190.0;
+            break;
+
+        case FOUR_BED:
+            a->area_m2 = 280.0;
+            break;
+
+        case PENTHOUSE:
+            a->area_m2 =
+                450.0 +
+                random_int(0, 400);
+            break;
+    }
+
+    a->ocean_view =
+        floor >= 10;
+
+    a->balcony = true;
+
+    a->smart_home = true;
+
+    a->furnished =
+        random_double() > 0.35;
+
+    a->private_lift =
+        floor >= 50;
+
+    double price_m2 =
+        base_price_per_m2(floor);
+
+    a->purchase_price =
+        a->area_m2 * price_m2;
+
+    a->market_value =
+        a->purchase_price;
+
+    /*
+     * Luxury rental yield.
+     */
+
+    double annual_yield =
+        floor >= 50 ? 0.045 : 0.055;
+
+    a->monthly_rent =
+        a->purchase_price *
+        annual_yield /
+        12.0;
+
+    a->service_charge =
+        a->area_m2 * 14.0;
+}
+
+/* ================================================================
+ * BUILDING GENERATION
+ * ================================================================ */
+
+static void generate_apartments(
+    LuxuryTower *tower
+)
+{
+    int id = 0;
+
+    for (int floor = 1;
+         floor <= tower->floors;
+         floor++) {
+
+        for (int unit = 1;
+             unit <= APARTMENTS_PER_FLOOR;
+             unit++) {
+
+            configure_apartment(
+                &tower->apartments[id],
+                id,
+                floor,
+                unit
+            );
+
+            id++;
+        }
+    }
+
+    tower->apartment_count = id;
+}
+
+/* ================================================================
+ * ELEVATORS
+ * ================================================================ */
+
+static void initialize_elevators(
+    LuxuryTower *tower
+)
+{
+    tower->elevator_count = MAX_ELEVATORS;
+
+    for (int i = 0;
+         i < MAX_ELEVATORS;
+         i++) {
+
+        Elevator *e =
+            &tower->elevators[i];
+
+        memset(
+            e,
+            0,
+            sizeof(Elevator)
+        );
+
+        e->id = i;
+
+        e->current_floor = 1;
+
+        e->target_floor = 1;
+
+        e->state =
+            ELEVATOR_IDLE;
+
+        e->speed =
+            6.0 +
+            random_double() * 4.0;
+
+        e->capacity =
+            i < 4 ? 15 : 25;
+
+        e->express =
+            i < 4;
+
+        e->service_elevator =
+            i >= 6;
+
+        e->energy_usage =
+            0.05;
+    }
+}
+
+/* ================================================================
+ * STAFF
+ * ================================================================ */
+
+static void add_staff(
+    LuxuryTower *tower,
+    const char *name,
+    StaffRole role,
+    double salary
+)
+{
+    if (tower->staff_count >= MAX_STAFF)
+        return;
+
+    Staff *s =
+        &tower->staff[
+            tower->staff_count++
+        ];
+
+    memset(s, 0, sizeof(Staff));
+
+    s->id =
+        tower->staff_count;
+
+    strncpy(
+        s->name,
+        name,
+        sizeof(s->name) - 1
+    );
+
+    s->role = role;
+
+    s->salary = salary;
+
+    s->on_shift = true;
+}
+
+static void initialize_staff(
+    LuxuryTower *tower
+)
+{
+    add_staff(
+        tower,
+        "Isabella Moreau",
+        MANAGER,
+        18000.0
+    );
+
+    add_staff(
+        tower,
+        "Marcus Reed",
+        CONCIERGE,
+        9000.0
+    );
+
+    add_staff(
+        tower,
+        "Sofia Bennett",
+        CONCIERGE,
+        8500.0
+    );
+
+    add_staff(
+        tower,
+        "Security Alpha",
+        SECURITY,
+        7500.0
+    );
+
+    add_staff(
+        tower,
+        "Security Bravo",
+        SECURITY,
+        7500.0
+    );
+
+    add_staff(
+        tower,
+        "Chief Engineer",
+        ENGINEER,
+        12000.0
+    );
+
+    add_staff(
+        tower,
+        "Valet One",
+        VALET,
+        6000.0
+    );
+
+    add_staff(
+        tower,
+        "Valet Two",
+        VALET,
+        6000.0
+    );
+
+    add_staff(
+        tower,
+        "Executive Chef",
+        CHEF,
+        14000.0
+    );
+}
+
+/* ================================================================
+ * PARKING
+ * ================================================================ */
+
+static void initialize_parking(
+    LuxuryTower *tower
+)
+{
+    tower->parking_count =
+        MAX_PARKING_SPACES;
+
+    for (int i = 0;
+         i < MAX_PARKING_SPACES;
+         i++) {
+
+        ParkingSpace *space =
+            &tower->parking[i];
+
+        space->id = i;
+
+        space->floor =
+            -1 - (i / 100);
+
+        space->occupied = false;
+
+        space->resident_id = -1;
+
+        space->ev_charger =
+            random_double() < 0.45;
+
+        space->vip_space =
+            i < 50;
+    }
+}
+
+/* ================================================================
+ * RESIDENT GENERATION
+ * ================================================================ */
+
+static const char *first_names[] = {
+
+    "Alexander",
+    "Victoria",
+    "Sebastian",
+    "Olivia",
+    "James",
+    "Charlotte",
+    "Edward",
+    "Amelia",
+    "Henry",
+    "Sophia",
+    "William",
+    "Eleanor",
+    "Arthur",
+    "Isla"
+
+};
+
+static const char *last_names[] = {
+
+    "Sterling",
+    "Harrington",
+    "Blackwell",
+    "Sinclair",
+    "Montgomery",
+    "Wellington",
+    "Ashford",
+    "Cavendish",
+    "Whitmore",
+    "Beaumont"
+
+};
+
+static void generate_resident(
+    LuxuryTower *tower,
+    int resident_id,
+    Apartment *apartment
+)
+{
+    if (resident_id >= MAX_RESIDENTS)
+        return;
+
+    Resident *r =
+        &tower->residents[
+            resident_id
+        ];
+
+    memset(r, 0, sizeof(Resident));
+
+    r->id =
+        resident_id;
+
+    snprintf(
+        r->name,
+        sizeof(r->name),
+        "%s %s",
+        first_names[
+            random_int(
+                0,
+                (int)(sizeof(first_names) /
+                sizeof(first_names[0])) - 1
+            )
+        ],
+        last_names[
+            random_int(
+                0,
+                (int)(sizeof(last_names) /
+                sizeof(last_names[0])) - 1
+            )
+        ]
+    );
+
+    /*
+     * Wealth scales with apartment value.
+     */
+
+    r->wealth =
+        apartment->purchase_price *
+        (2.0 + random_double() * 8.0);
+
+    r->monthly_income =
+        r->wealth *
+        (0.03 / 12.0);
+
+    r->apartment_id =
+        apartment->id;
+
+    r->owns_property =
+        random_double() < 0.45;
+
+    r->vip =
+        apartment->floor >= 45;
+
+    r->reputation =
+        0.4 +
+        random_double() * 0.6;
+
+    apartment->status =
+        OCCUPIED;
+
+    apartment->resident_id =
+        r->id;
+
+    apartment->occupancy =
+        r->owns_property
+        ? OWNER
+        : TENANT;
+}
+
+/* ================================================================
+ * OCCUPANCY
+ * ================================================================ */
+
+static void populate_residents(
+    LuxuryTower *tower
+)
+{
+    tower->resident_count = 0;
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        Apartment *a =
+            &tower->apartments[i];
+
+        double occupancy_probability;
+
+        if (a->type == PENTHOUSE)
+            occupancy_probability = 0.75;
+        else
+            occupancy_probability = 0.88;
+
+        if (random_double() <
+            occupancy_probability) {
+
+            generate_resident(
+                tower,
+                tower->resident_count,
+                a
+            );
+
+            tower->resident_count++;
+        }
+    }
+}
+
+/* ================================================================
+ * BUILDING VALUE
+ * ================================================================ */
+
+static void calculate_asset_value(
+    LuxuryTower *tower
+)
+{
+    double apartments_value = 0.0;
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        apartments_value +=
+            tower->apartments[i]
+                .market_value;
+    }
+
+    tower->total_asset_value =
+        tower->land_value +
+        tower->construction_cost +
+        apartments_value;
+}
+
+/* ================================================================
+ * BUILDING SYSTEMS
+ * ================================================================ */
+
+static void initialize_systems(
+    LuxuryTower *tower
+)
+{
+    BuildingSystems *s =
+        &tower->systems;
+
+    memset(
+        s,
+        0,
+        sizeof(BuildingSystems)
+    );
+
+    s->battery_capacity_mwh =
+        25.0;
+
+    s->battery_charge_mwh =
+        18.0;
+
+    s->maintenance_budget =
+        500000.0;
+
+    s->security_level =
+        0.92;
+
+    s->cleanliness =
+        0.97;
+
+    s->building_reputation =
+        0.96;
+
+    s->grid_connected = true;
+
+    s->backup_generator = true;
+
+    s->flood_protection = true;
+}
+
+/* ================================================================
+ * AMENITIES
+ * ================================================================ */
+
+static void initialize_amenities(
+    LuxuryTower *tower
+)
+{
+    tower->amenities.lobby = true;
+    tower->amenities.concierge = true;
+    tower->amenities.rooftop_pool = true;
+    tower->amenities.rooftop_bar = true;
+    tower->amenities.restaurant = true;
+    tower->amenities.gym = true;
+    tower->amenities.spa = true;
+    tower->amenities.cinema = true;
+    tower->amenities.residents_lounge = true;
+    tower->amenities.business_centre = true;
+    tower->amenities.private_dining = true;
+    tower->amenities.marina_access = true;
+    tower->amenities.valet = true;
+    tower->amenities.underground_parking = true;
+}
+
+/* ================================================================
+ * FINANCIAL MODEL
+ * ================================================================ */
+
+static void calculate_building_economics(
+    LuxuryTower *tower
+)
+{
+    double revenue = 0.0;
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        Apartment *a =
+            &tower->apartments[i];
+
+        if (a->status == OCCUPIED) {
+
+            revenue +=
+                a->monthly_rent;
+
+            revenue +=
+                a->service_charge;
+        }
+    }
+
+    /*
+     * Amenities generate additional revenue.
+     */
+
+    revenue +=
+        tower->resident_count *
+        850.0;
+
+    double staff_cost = 0.0;
+
+    for (int i = 0;
+         i < tower->staff_count;
+         i++) {
+
+        staff_cost +=
+            tower->staff[i].salary;
+    }
+
+    double utilities =
+        250000.0 +
+        tower->resident_count * 400.0;
+
+    double maintenance =
+        tower->systems.maintenance_budget
+        / 12.0;
+
+    tower->systems.monthly_revenue =
+        revenue;
+
+    tower->systems.monthly_operating_cost =
+        staff_cost +
+        utilities +
+        maintenance;
+}
+
+/* ================================================================
+ * OCCUPANCY RATE
+ * ================================================================ */
+
+static void update_occupancy(
+    LuxuryTower *tower
+)
+{
+    int occupied = 0;
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        if (tower->apartments[i].status ==
+            OCCUPIED) {
+
+            occupied++;
+        }
+    }
+
+    tower->systems.occupancy_rate =
+        (double)occupied /
+        (double)tower->apartment_count;
+}
+
+/* ================================================================
+ * ELEVATOR SIMULATION
+ * ================================================================ */
+
+static void request_elevator(
+    LuxuryTower *tower,
+    int elevator_id,
+    int destination
+)
+{
+    if (elevator_id < 0 ||
+        elevator_id >= tower->elevator_count)
+        return;
+
+    Elevator *e =
+        &tower->elevators[
+            elevator_id
+        ];
+
+    if (destination < 1)
+        destination = 1;
+
+    if (destination >
+        tower->floors)
+        destination = tower->floors;
+
+    e->target_floor =
+        destination;
+
+    e->state =
+        ELEVATOR_MOVING;
+
+    printf(
+        "Elevator %d travelling "
+        "from floor %d -> %d\n",
+        e->id,
+        e->current_floor,
+        e->target_floor
+    );
+}
+
+static void update_elevators(
+    LuxuryTower *tower,
+    double dt
+)
+{
+    for (int i = 0;
+         i < tower->elevator_count;
+         i++) {
+
+        Elevator *e =
+            &tower->elevators[i];
+
+        if (e->state !=
+            ELEVATOR_MOVING)
+            continue;
+
+        double direction =
+            e->target_floor >
+            e->current_floor
+            ? 1.0
+            : -1.0;
+
+        e->current_floor +=
+            (int)(
+                direction *
+                e->speed *
+                dt
+            );
+
+        if (
+            (direction > 0 &&
+             e->current_floor >=
+             e->target_floor)
+            ||
+            (direction < 0 &&
+             e->current_floor <=
+             e->target_floor)
+        ) {
+
+            e->current_floor =
+                e->target_floor;
+
+            e->state =
+                ELEVATOR_DOOR_OPEN;
+
+            printf(
+                "Elevator %d arrived "
+                "at floor %d\n",
+                e->id,
+                e->current_floor
+            );
+        }
+    }
+}
+
+/* ================================================================
+ * POWER SIMULATION
+ * ================================================================ */
+
+static void update_energy(
+    LuxuryTower *tower,
+    double dt
+)
+{
+    BuildingSystems *s =
+        &tower->systems;
+
+    double occupancy =
+        s->occupancy_rate;
+
+    s->electricity_load_mw =
+        1.5 +
+        occupancy * 4.5;
+
+    s->cooling_load_mw =
+        0.5 +
+        occupancy * 2.0;
+
+    s->solar_generation_mw =
+        0.8 *
+        (0.5 +
+         random_double());
+
+    double generation =
+        s->solar_generation_mw;
+
+    double consumption =
+        s->electricity_load_mw *
+        dt;
+
+    if (generation >
+        s->electricity_load_mw) {
+
+        double surplus =
+            generation -
+            s->electricity_load_mw;
+
+        s->battery_charge_mwh +=
+            surplus * dt;
+
+        if (s->battery_charge_mwh >
+            s->battery_capacity_mwh) {
+
+            s->battery_charge_mwh =
+                s->battery_capacity_mwh;
+        }
+
+    } else {
+
+        double deficit =
+            s->electricity_load_mw -
+            generation;
+
+        s->battery_charge_mwh -=
+            deficit * dt;
+
+        if (s->battery_charge_mwh < 0.0)
+            s->battery_charge_mwh = 0.0;
+    }
+
+    (void)consumption;
+}
+
+/* ================================================================
+ * BUILDING MAINTENANCE
+ * ================================================================ */
+
+static void update_maintenance(
+    LuxuryTower *tower,
+    double dt
+)
+{
+    BuildingSystems *s =
+        &tower->systems;
+
+    double wear =
+        0.0005 * dt;
+
+    s->cleanliness -=
+        wear;
+
+    if (s->cleanliness < 0.0)
+        s->cleanliness = 0.0;
+
+    /*
+     * Automated luxury maintenance.
+     */
+
+    if (s->cleanliness < 0.90) {
+
+        s->cleanliness +=
+            0.005 * dt;
+    }
+
+    if (s->security_level < 0.85) {
+
+        s->security_level +=
+            0.002 * dt;
+    }
+}
+
+/* ================================================================
+ * NPC MOVEMENT
+ * ================================================================ */
+
+static NPCActivity random_activity(void)
+{
+    int value =
+        random_int(0, 7);
+
+    return (NPCActivity)value;
+}
+
+static void initialize_npcs(
+    LuxuryTower *tower
+)
+{
+    tower->npc_count = 0;
+
+    for (int i = 0;
+         i < MAX_NPCS;
+         i++) {
+
+        NPC *npc =
+            &tower->npcs[
+                tower->npc_count++
+            ];
+
+        npc->id = i;
+
+        npc->resident_id =
+            random_int(
+                0,
+                tower->resident_count - 1
+            );
+
+        npc->floor =
+            random_int(
+                1,
+                tower->floors
+            );
+
+        npc->activity =
+            random_activity();
+
+        npc->x =
+            random_double() * 100.0;
+
+        npc->y =
+            random_double() * 100.0;
+
+        npc->z =
+            npc->floor *
+            (tower->height_m /
+             tower->floors);
+
+        npc->active = true;
+    }
+}
+
+/* ================================================================
+ * ROOFTOP
+ * ================================================================ */
+
+static void rooftop_event(
+    LuxuryTower *tower
+)
+{
+    if (!tower->amenities.rooftop_bar)
+        return;
+
+    printf(
+        "\n"
+        "ROOFTOP EVENT\n"
+        "--------------\n"
+        "Aurelia Tower rooftop is active.\n"
+        "Pool: OPEN\n"
+        "Bar: OPEN\n"
+        "Ocean visibility: %.0f%%\n",
+        92.0
+    );
+}
+
+/* ================================================================
+ * PROPERTY PURCHASE
+ * ================================================================ */
+
+static bool purchase_apartment(
+    LuxuryTower *tower,
+    int apartment_id,
+    Resident *buyer
+)
+{
+    if (apartment_id < 0 ||
+        apartment_id >=
+        tower->apartment_count)
+        return false;
+
+    Apartment *a =
+        &tower->apartments[
+            apartment_id
+        ];
+
+    if (a->status == OCCUPIED)
+        return false;
+
+    if (buyer->wealth <
+        a->market_value)
+        return false;
+
+    buyer->wealth -=
+        a->market_value;
+
+    buyer->owns_property = true;
+
+    buyer->apartment_id =
+        apartment_id;
+
+    a->status =
+        OCCUPIED;
+
+    a->occupancy =
+        OWNER;
+
+    a->resident_id =
+        buyer->id;
+
+    tower->systems.building_reputation +=
+        0.001;
+
+    return true;
+}
+
+/* ================================================================
+ * MARKET UPDATE
+ * ================================================================ */
+
+static void update_property_market(
+    LuxuryTower *tower
+)
+{
+    double occupancy =
+        tower->systems.occupancy_rate;
+
+    /*
+     * Scarcity increases property values.
+     */
+
+    double scarcity =
+        1.0 +
+        (occupancy - 0.75) * 0.8;
+
+    /*
+     * Building prestige affects prices.
+     */
+
+    double prestige =
+        0.85 +
+        tower->systems.building_reputation *
+        0.30;
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        Apartment *a =
+            &tower->apartments[i];
+
+        a->market_value =
+            a->purchase_price *
+            scarcity *
+            prestige;
+    }
+}
+
+/* ================================================================
+ * SECURITY
+ * ================================================================ */
+
+static bool security_check(
+    LuxuryTower *tower,
+    int resident_id
+)
+{
+    if (resident_id < 0 ||
+        resident_id >=
+        tower->resident_count)
+        return false;
+
+    Resident *r =
+        &tower->residents[
+            resident_id
+        ];
+
+    /*
+     * VIP residents receive
+     * higher access priority.
+     */
+
+    if (r->vip)
+        return true;
+
+    return
+        random_double() <
+        tower->systems.security_level;
+}
+
+/* ================================================================
+ * BUILDING TICK
+ * ================================================================ */
+
+static void building_tick(
+    LuxuryTower *tower,
+    double dt
+)
+{
+    update_elevators(
+        tower,
+        dt
+    );
+
+    update_occupancy(
+        tower
+    );
+
+    update_energy(
+        tower,
+        dt
+    );
+
+    update_maintenance(
+        tower,
+        dt
+    );
+
+    update_property_market(
+        tower
+    );
+}
+
+/* ================================================================
+ * BUILDING STATUS
+ * ================================================================ */
+
+static void print_building_status(
+    LuxuryTower *tower
+)
+{
+    printf(
+        "\n"
+        "========================================================\n"
+        "                    %s\n"
+        "========================================================\n",
+        tower->name
+    );
+
+    printf(
+        "Floors:              %d\n",
+        tower->floors
+    );
+
+    printf(
+        "Height:              %.0f metres\n",
+        tower->height_m
+    );
+
+    printf(
+        "Apartments:          %d\n",
+        tower->apartment_count
+    );
+
+    printf(
+        "Residents:           %d\n",
+        tower->resident_count
+    );
+
+    printf(
+        "Occupancy:           %.1f%%\n",
+        tower->systems.occupancy_rate *
+        100.0
+    );
+
+    printf(
+        "Asset Value:         $%.2f M\n",
+        tower->total_asset_value /
+        1000000.0
+    );
+
+    printf(
+        "Monthly Revenue:     $%.0f\n",
+        tower->systems.monthly_revenue
+    );
+
+    printf(
+        "Monthly Costs:       $%.0f\n",
+        tower->systems.monthly_operating_cost
+    );
+
+    printf(
+        "Net Operating Income:$%.0f\n",
+        tower->systems.monthly_revenue -
+        tower->systems.monthly_operating_cost
+    );
+
+    printf(
+        "Security:            %.1f%%\n",
+        tower->systems.security_level *
+        100.0
+    );
+
+    printf(
+        "Cleanliness:         %.1f%%\n",
+        tower->systems.cleanliness *
+        100.0
+    );
+
+    printf(
+        "Battery:             %.1f / %.1f MWh\n",
+        tower->systems.battery_charge_mwh,
+        tower->systems.battery_capacity_mwh
+    );
+
+    printf(
+        "Building Reputation: %.1f%%\n",
+        tower->systems.building_reputation *
+        100.0
+    );
+
+    printf(
+        "========================================================\n"
+    );
+}
+
+/* ================================================================
+ * PENTHOUSE REPORT
+ * ================================================================ */
+
+static void print_penthouses(
+    LuxuryTower *tower
+)
+{
+    printf(
+        "\n"
+        "================ PENTHOUSES ================\n"
+    );
+
+    for (int i = 0;
+         i < tower->apartment_count;
+         i++) {
+
+        Apartment *a =
+            &tower->apartments[i];
+
+        if (a->type != PENTHOUSE)
+            continue;
+
+        printf(
+            "Unit %d%02d | %.0f m2 | "
+            "Value $%.2f M | "
+            "%s\n",
+
+            a->floor,
+            a->unit,
+
+            a->area_m2,
+
+            a->market_value /
+            1000000.0,
+
+            a->status == OCCUPIED
+                ? "OCCUPIED"
+                : "AVAILABLE"
+        );
+    }
+
+    printf(
+        "=============================================\n"
+    );
+}
+
+/* ================================================================
+ * INITIALISE TOWER
+ * ================================================================ */
+
+static void initialize_tower(
+    LuxuryTower *tower
+)
+{
+    memset(
+        tower,
+        0,
+        sizeof(LuxuryTower)
+    );
+
+    strncpy(
+        tower->name,
+        BUILDING_NAME,
+        sizeof(tower->name) - 1
+    );
+
+    tower->floors =
+        MAX_FLOORS;
+
+    tower->height_m =
+        245.0;
+
+    /*
+     * Fictional Miami coordinates.
+     */
+
+    tower->latitude =
+        25.7617;
+
+    tower->longitude =
+        -80.1918;
+
+    tower->construction_cost =
+        850000000.0;
+
+    tower->land_value =
+        600000000.0;
+
+    initialize_amenities(
+        tower
+    );
+
+    initialize_systems(
+        tower
+    );
+
+    generate_apartments(
+        tower
+    );
+
+    initialize_elevators(
+        tower
+    );
+
+    initialize_staff(
+        tower
+    );
+
+    initialize_parking(
+        tower
+    );
+
+    populate_residents(
+        tower
+    );
+
+    initialize_npcs(
+        tower
+    );
+
+    update_occupancy(
+        tower
+    );
+
+    calculate_building_economics(
+        tower
+    );
+
+    calculate_asset_value(
+        tower
+    );
+}
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    LuxuryTower tower;
+
+    initialize_tower(
+        &tower
+    );
+
+    print_building_status(
+        &tower
+    );
+
+    print_penthouses(
+        &tower
+    );
+
+    printf(
+        "\nSimulating tower operations...\n"
+    );
+
+    /*
+     * Simulate several hours.
+     */
+
+    for (int hour = 0;
+         hour < 12;
+         hour++) {
+
+        printf(
+            "\n--- Hour %d ---\n",
+            hour + 1
+        );
+
+        /*
+         * Random elevator demand.
+         */
+
+        int elevator =
+            random_int(
+                0,
+                tower.elevator_count - 1
+            );
+
+        int destination =
+            random_int(
+                1,
+                tower.floors
+            );
+
+        request_elevator(
+            &tower,
+            elevator,
+            destination
+        );
+
+        building_tick(
+            &tower,
+            1.0
+        );
+
+        if (hour == 5)
+            rooftop_event(
+                &tower
+            );
+    }
+
+    /*
+     * Security demonstration.
+     */
+
+    printf(
+        "\nSecurity checks:\n"
+    );
+
+    for (int i = 0; i < 5; i++) {
+
+        bool allowed =
+            security_check(
+                &tower,
+                random_int(
+                    0,
+                    tower.resident_count - 1
+                )
+            );
+
+        printf(
+            "Access request: %s\n",
+            allowed
+                ? "AUTHORISED"
+                : "DENIED"
+        );
+    }
+
+    print_building_status(
+        &tower
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN-WORLD ENGINE
+ * THE PALMETTO CROWN CASINO
+ *
+ * Fictional in-game casino
+ *
+ * Features:
+ *   - Casino building
+ *   - Gaming floors
+ *   - Tables
+ *   - Slot machines
+ *   - Poker room
+ *   - VIP room
+ *   - Hotel
+ *   - Restaurants
+ *   - Nightclub
+ *   - NPC gamblers
+ *   - Casino economy
+ *   - House edge
+ *   - Player bankrolls
+ *   - VIP status
+ *   - Dynamic casino reputation
+ *   - Security
+ *   - Revenue simulation
+ *
+ * This is an entertainment/game-economy simulation.
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+
+#define MAX_TABLES       80
+#define MAX_SLOTS        500
+#define MAX_PLAYERS      300
+#define MAX_STAFF        150
+#define MAX_NPCS         500
+#define MAX_EVENTS       32
+
+#define CASINO_NAME "PALMETTO CROWN CASINO"
+
+/* ================================================================
+ * ENUMERATIONS
+ * ================================================================ */
+
+typedef enum {
+
+    BLACKJACK,
+    ROULETTE,
+    BACCARAT,
+    CRAPS,
+    POKER,
+    SPORTS_BOOK
+
+} GameType;
+
+typedef enum {
+
+    LOW_ROLLER,
+    REGULAR,
+    HIGH_ROLLER,
+    VIP,
+    WHALE
+
+} PlayerClass;
+
+typedef enum {
+
+    SLOT_MACHINE,
+    TABLE_GAME,
+    POKER_ROOM,
+    VIP_ROOM,
+    RESTAURANT,
+    HOTEL,
+    NIGHTCLUB,
+    LOBBY
+
+} CasinoZone;
+
+typedef enum {
+
+    PLAYER_IDLE,
+    PLAYING,
+    DINING,
+    DRINKING,
+    SHOPPING,
+    SLEEPING,
+    LEAVING
+
+} PlayerActivity;
+
+/* ================================================================
+ * TABLE
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    GameType game;
+
+    int seats;
+
+    int players;
+
+    double minimum_bet;
+    double maximum_bet;
+
+    double house_edge;
+
+    bool active;
+    bool vip_only;
+
+    double hourly_handle;
+    double hourly_revenue;
+
+} GamingTable;
+
+/* ================================================================
+ * SLOT MACHINE
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    double minimum_bet;
+    double maximum_bet;
+
+    double payout_rate;
+
+    double jackpot;
+
+    double hourly_handle;
+    double hourly_revenue;
+
+    bool progressive;
+    bool active;
+
+} SlotMachine;
+
+/* ================================================================
+ * PLAYER
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    double bankroll;
+
+    double lifetime_wagered;
+    double lifetime_won;
+    double lifetime_lost;
+
+    PlayerClass class;
+
+    CasinoZone location;
+
+    PlayerActivity activity;
+
+    double vip_points;
+
+    bool banned;
+    bool vip_member;
+
+    int hotel_room;
+
+} CasinoPlayer;
+
+/* ================================================================
+ * STAFF
+ * ================================================================ */
+
+typedef enum {
+
+    DEALER,
+    SECURITY,
+    PIT_BOSS,
+    CASHIER,
+    MANAGER,
+    BARTENDER,
+    CHEF,
+    VALET,
+    HOTEL_STAFF
+
+} StaffRole;
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    StaffRole role;
+
+    double salary;
+
+    bool working;
+
+} CasinoStaff;
+
+/* ================================================================
+ * CASINO ECONOMY
+ * ================================================================ */
+
+typedef struct {
+
+    double cash_reserve;
+
+    double hourly_gaming_revenue;
+
+    double hourly_hotel_revenue;
+
+    double hourly_restaurant_revenue;
+
+    double hourly_nightclub_revenue;
+
+    double hourly_operating_cost;
+
+    double tax_reserve;
+
+    double jackpot_liability;
+
+    double total_revenue;
+
+    double total_payouts;
+
+    double reputation;
+
+    double security_level;
+
+    double occupancy;
+
+} CasinoEconomy;
+
+/* ================================================================
+ * CASINO
+ * ================================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    double land_value;
+    double building_value;
+
+    int floors;
+
+    GamingTable tables[MAX_TABLES];
+    SlotMachine slots[MAX_SLOTS];
+
+    CasinoPlayer players[MAX_PLAYERS];
+    CasinoStaff staff[MAX_STAFF];
+
+    CasinoEconomy economy;
+
+    int table_count;
+    int slot_count;
+    int player_count;
+    int staff_count;
+
+    bool hotel;
+    bool nightclub;
+    bool restaurant;
+    bool vip_lounge;
+    bool rooftop;
+    bool pool;
+    bool valet;
+    bool spa;
+
+} Casino;
+
+/* ================================================================
+ * RANDOM UTILITIES
+ * ================================================================ */
+
+static double random_double(void)
+{
+    return (double)rand() / RAND_MAX;
+}
+
+static int random_int(int min, int max)
+{
+    return min + rand() % (max - min + 1);
+}
+
+/* ================================================================
+ * GAME NAMES
+ * ================================================================ */
+
+static const char *game_name(GameType game)
+{
+    switch (game) {
+
+        case BLACKJACK:
+            return "Blackjack";
+
+        case ROULETTE:
+            return "Roulette";
+
+        case BACCARAT:
+            return "Baccarat";
+
+        case CRAPS:
+            return "Craps";
+
+        case POKER:
+            return "Poker";
+
+        case SPORTS_BOOK:
+            return "Sports Book";
+    }
+
+    return "Unknown";
+}
+
+/* ================================================================
+ * HOUSE EDGES
+ *
+ * Simplified fictional game-economy values.
+ * ================================================================ */
+
+static double default_house_edge(GameType game)
+{
+    switch (game) {
+
+        case BLACKJACK:
+            return 0.015;
+
+        case ROULETTE:
+            return 0.027;
+
+        case BACCARAT:
+            return 0.012;
+
+        case CRAPS:
+            return 0.014;
+
+        case POKER:
+            return 0.045;
+
+        case SPORTS_BOOK:
+            return 0.055;
+    }
+
+    return 0.03;
+}
+
+/* ================================================================
+ * CREATE GAMING TABLE
+ * ================================================================ */
+
+static void add_table(
+    Casino *casino,
+    GameType game,
+    double minimum,
+    double maximum,
+    bool vip
+)
+{
+    if (casino->table_count >= MAX_TABLES)
+        return;
+
+    GamingTable *table =
+        &casino->tables[
+            casino->table_count++
+        ];
+
+    memset(table, 0, sizeof(*table));
+
+    table->id =
+        casino->table_count;
+
+    table->game = game;
+
+    table->seats =
+        game == POKER ? 9 : 7;
+
+    table->minimum_bet = minimum;
+    table->maximum_bet = maximum;
+
+    table->house_edge =
+        default_house_edge(game);
+
+    table->vip_only = vip;
+
+    table->active = true;
+}
+
+/* ================================================================
+ * INITIALISE GAMING FLOOR
+ * ================================================================ */
+
+static void initialize_tables(
+    Casino *casino
+)
+{
+    /*
+     * Main floor
+     */
+
+    for (int i = 0; i < 12; i++)
+        add_table(
+            casino,
+            BLACKJACK,
+            25.0,
+            5000.0,
+            false
+        );
+
+    for (int i = 0; i < 10; i++)
+        add_table(
+            casino,
+            ROULETTE,
+            25.0,
+            10000.0,
+            false
+        );
+
+    for (int i = 0; i < 6; i++)
+        add_table(
+            casino,
+            BACCARAT,
+            100.0,
+            25000.0,
+            false
+        );
+
+    for (int i = 0; i < 4; i++)
+        add_table(
+            casino,
+            CRAPS,
+            25.0,
+            5000.0,
+            false
+        );
+
+    for (int i = 0; i < 4; i++)
+        add_table(
+            casino,
+            POKER,
+            25.0,
+            2500.0,
+            false
+        );
+
+    /*
+     * VIP floor
+     */
+
+    for (int i = 0; i < 8; i++)
+        add_table(
+            casino,
+            BACCARAT,
+            1000.0,
+            250000.0,
+            true
+        );
+
+    for (int i = 0; i < 6; i++)
+        add_table(
+            casino,
+            BLACKJACK,
+            1000.0,
+            100000.0,
+            true
+        );
+}
+
+/* ================================================================
+ * SLOT MACHINES
+ * ================================================================ */
+
+static void initialize_slots(
+    Casino *casino
+)
+{
+    casino->slot_count = 0;
+
+    for (int i = 0;
+         i < 400;
+         i++) {
+
+        SlotMachine *slot =
+            &casino->slots[
+                casino->slot_count++
+            ];
+
+        memset(
+            slot,
+            0,
+            sizeof(*slot)
+        );
+
+        slot->id = i;
+
+        slot->minimum_bet = 1.0;
+
+        slot->maximum_bet =
+            500.0;
+
+        /*
+         * Fictional payout rate.
+         */
+
+        slot->payout_rate =
+            0.90 +
+            random_double() * 0.05;
+
+        slot->progressive =
+            i < 25;
+
+        slot->jackpot =
+            slot->progressive
+            ? 100000.0
+            : 0.0;
+
+        slot->active = true;
+    }
+}
+
+/* ================================================================
+ * PLAYER CLASS
+ * ================================================================ */
+
+static PlayerClass determine_class(
+    double bankroll
+)
+{
+    if (bankroll >= 1000000.0)
+        return WHALE;
+
+    if (bankroll >= 250000.0)
+        return VIP;
+
+    if (bankroll >= 50000.0)
+        return HIGH_ROLLER;
+
+    if (bankroll >= 5000.0)
+        return REGULAR;
+
+    return LOW_ROLLER;
+}
+
+/* ================================================================
+ * PLAYER CREATION
+ * ================================================================ */
+
+static void create_player(
+    Casino *casino,
+    int id
+)
+{
+    if (casino->player_count >=
+        MAX_PLAYERS)
+        return;
+
+    CasinoPlayer *p =
+        &casino->players[
+            casino->player_count++
+        ];
+
+    memset(
+        p,
+        0,
+        sizeof(*p)
+    );
+
+    p->id = id;
+
+    snprintf(
+        p->name,
+        sizeof(p->name),
+        "Casino Guest %03d",
+        id
+    );
+
+    /*
+     * Highly variable player wealth.
+     */
+
+    double wealth =
+        pow(
+            random_double(),
+            2.5
+        ) * 1000000.0;
+
+    if (wealth < 100.0)
+        wealth = 100.0;
+
+    p->bankroll =
+        wealth;
+
+    p->class =
+        determine_class(
+            p->bankroll
+        );
+
+    p->location =
+        LOBBY;
+
+    p->activity =
+        PLAYER_IDLE;
+
+    p->vip_member =
+        p->class >= VIP;
+}
+
+/* ================================================================
+ * PLAYER GENERATION
+ * ================================================================ */
+
+static void initialize_players(
+    Casino *casino
+)
+{
+    casino->player_count = 0;
+
+    for (int i = 0;
+         i < 150;
+         i++) {
+
+        create_player(
+            casino,
+            i
+        );
+    }
+}
+
+/* ================================================================
+ * STAFF
+ * ================================================================ */
+
+static void add_staff(
+    Casino *casino,
+    int id,
+    StaffRole role,
+    double salary
+)
+{
+    if (casino->staff_count >=
+        MAX_STAFF)
+        return;
+
+    CasinoStaff *s =
+        &casino->staff[
+            casino->staff_count++
+        ];
+
+    memset(
+        s,
+        0,
+        sizeof(*s)
+    );
+
+    s->id = id;
+
+    snprintf(
+        s->name,
+        sizeof(s->name),
+        "Staff-%03d",
+        id
+    );
+
+    s->role = role;
+
+    s->salary = salary;
+
+    s->working = true;
+}
+
+static void initialize_staff(
+    Casino *casino
+)
+{
+    casino->staff_count = 0;
+
+    for (int i = 0; i < 70; i++)
+        add_staff(
+            casino,
+            i,
+            DEALER,
+            6500.0
+        );
+
+    for (int i = 0; i < 20; i++)
+        add_staff(
+            casino,
+            70 + i,
+            SECURITY,
+            7000.0
+        );
+
+    for (int i = 0; i < 8; i++)
+        add_staff(
+            casino,
+            90 + i,
+            PIT_BOSS,
+            11000.0
+        );
+
+    for (int i = 0; i < 4; i++)
+        add_staff(
+            casino,
+            100 + i,
+            MANAGER,
+            16000.0
+        );
+}
+
+/* ================================================================
+ * PLAYER WAGER
+ * ================================================================ */
+
+static double calculate_wager(
+    CasinoPlayer *player
+)
+{
+    double multiplier;
+
+    switch (player->class) {
+
+        case LOW_ROLLER:
+            multiplier = 0.01;
+            break;
+
+        case REGULAR:
+            multiplier = 0.03;
+            break;
+
+        case HIGH_ROLLER:
+            multiplier = 0.08;
+            break;
+
+        case VIP:
+            multiplier = 0.15;
+            break;
+
+        case WHALE:
+            multiplier = 0.30;
+            break;
+
+        default:
+            multiplier = 0.02;
+    }
+
+    double wager =
+        player->bankroll *
+        multiplier;
+
+    if (wager < 1.0)
+        wager = 1.0;
+
+    return wager;
+}
+
+/* ================================================================
+ * SIMULATE TABLE GAME
+ * ================================================================ */
+
+static void simulate_table(
+    Casino *casino,
+    GamingTable *table
+)
+{
+    if (!table->active)
+        return;
+
+    /*
+     * Number of players changes
+     * dynamically.
+     */
+
+    table->players =
+        random_int(
+            0,
+            table->seats
+        );
+
+    table->hourly_handle = 0.0;
+    table->hourly_revenue = 0.0;
+
+    for (int i = 0;
+         i < table->players;
+         i++) {
+
+        int player_id =
+            random_int(
+                0,
+                casino->player_count - 1
+            );
+
+        CasinoPlayer *p =
+            &casino->players[player_id];
+
+        if (p->banned)
+            continue;
+
+        if (table->vip_only &&
+            !p->vip_member)
+            continue;
+
+        double wager =
+            calculate_wager(p);
+
+        /*
+         * Limit wager to table maximum.
+         */
+
+        if (wager >
+            table->maximum_bet)
+            wager =
+                table->maximum_bet;
+
+        if (wager >
+            p->bankroll)
+            wager =
+                p->bankroll;
+
+        if (wager <= 0.0)
+            continue;
+
+        table->hourly_handle +=
+            wager;
+
+        p->lifetime_wagered +=
+            wager;
+
+        /*
+         * Simplified stochastic
+         * outcome using house edge.
+         */
+
+        double random_value =
+            random_double();
+
+        double win_probability =
+            0.50 -
+            table->house_edge;
+
+        if (random_value <
+            win_probability) {
+
+            double winnings =
+                wager *
+                (0.7 +
+                 random_double() *
+                 0.6);
+
+            if (winnings >
+                wager * 2.0)
+                winnings =
+                    wager * 2.0;
+
+            p->bankroll +=
+                winnings;
+
+            p->lifetime_won +=
+                winnings;
+
+            table->hourly_revenue +=
+                wager - winnings;
+
+        } else {
+
+            p->bankroll -=
+                wager;
+
+            p->lifetime_lost +=
+                wager;
+
+            table->hourly_revenue +=
+                wager;
+        }
+
+        p->vip_points +=
+            wager / 10.0;
+    }
+}
+
+/* ================================================================
+ * SLOT SIMULATION
+ * ================================================================ */
+
+static void simulate_slot(
+    Casino *casino,
+    SlotMachine *slot
+)
+{
+    if (!slot->active)
+        return;
+
+    int player_id =
+        random_int(
+            0,
+            casino->player_count - 1
+        );
+
+    CasinoPlayer *p =
+        &casino->players[
+            player_id
+        ];
+
+    if (p->banned)
+        return;
+
+    double wager =
+        1.0 +
+        random_double() * 25.0;
+
+    if (wager >
+        p->bankroll)
+        wager =
+            p->bankroll;
+
+    if (wager <= 0.0)
+        return;
+
+    slot->hourly_handle +=
+        wager;
+
+    p->lifetime_wagered +=
+        wager;
+
+    /*
+     * Payout model.
+     */
+
+    if (random_double() <
+        slot->payout_rate) {
+
+        double payout =
+            wager *
+            (0.4 +
+             random_double() * 1.4);
+
+        p->bankroll +=
+            payout;
+
+        p->lifetime_won +=
+            payout;
+
+        slot->hourly_revenue +=
+            wager - payout;
+
+    } else {
+
+        p->bankroll -=
+            wager;
+
+        p->lifetime_lost +=
+            wager;
+
+        slot->hourly_revenue +=
+            wager;
+    }
+
+    /*
+     * Progressive jackpot.
+     */
+
+    if (slot->progressive) {
+
+        slot->jackpot +=
+            wager * 0.02;
+
+        if (random_double() <
+            0.00001) {
+
+            p->bankroll +=
+                slot->jackpot;
+
+            casino->economy.total_payouts +=
+                slot->jackpot;
+
+            slot->jackpot =
+                100000.0;
+        }
+    }
+}
+
+/* ================================================================
+ * HOTEL ECONOMY
+ * ================================================================ */
+
+static void simulate_hotel(
+    Casino *casino
+)
+{
+    if (!casino->hotel)
+        return;
+
+    int hotel_guests =
+        random_int(20, 120);
+
+    casino->economy.hourly_hotel_revenue =
+        hotel_guests *
+        (175.0 +
+         random_double() * 250.0);
+}
+
+/* ================================================================
+ * RESTAURANT
+ * ================================================================ */
+
+static void simulate_restaurant(
+    Casino *casino
+)
+{
+    if (!casino->restaurant)
+        return;
+
+    int diners =
+        random_int(50, 300);
+
+    casino->economy
+        .hourly_restaurant_revenue =
+        diners *
+        (80.0 +
+         random_double() * 200.0);
+}
+
+/* ================================================================
+ * NIGHTCLUB
+ * ================================================================ */
+
+static void simulate_nightclub(
+    Casino *casino
+)
+{
+    if (!casino->nightclub)
+        return;
+
+    int guests =
+        random_int(100, 700);
+
+    casino->economy
+        .hourly_nightclub_revenue =
+        guests *
+        (35.0 +
+         random_double() * 150.0);
+}
+
+/* ================================================================
+ * SECURITY
+ * ================================================================ */
+
+static void security_tick(
+    Casino *casino
+)
+{
+    double incident_probability =
+        0.01 *
+        (1.0 -
+         casino->economy.security_level);
+
+    if (random_double() <
+        incident_probability) {
+
+        casino->economy.reputation -=
+            0.005;
+
+        if (casino->economy.reputation <
+            0.0)
+
+            casino->economy.reputation =
+                0.0;
+
+        printf(
+            "[SECURITY] Incident detected.\n"
+        );
+    }
+}
+
+/* ================================================================
+ * CASINO ECONOMIC TICK
+ * ================================================================ */
+
+static void casino_tick(
+    Casino *casino
+)
+{
+    casino->economy.hourly_gaming_revenue =
+        0.0;
+
+    casino->economy.hourly_hotel_revenue =
+        0.0;
+
+    casino->economy.hourly_restaurant_revenue =
+        0.0;
+
+    casino->economy.hourly_nightclub_revenue =
+        0.0;
+
+    /*
+     * Gaming floor.
+     */
+
+    for (int i = 0;
+         i < casino->table_count;
+         i++) {
+
+        simulate_table(
+            casino,
+            &casino->tables[i]
+        );
+
+        casino->economy
+            .hourly_gaming_revenue +=
+            casino->tables[i]
+                .hourly_revenue;
+    }
+
+    /*
+     * Slots.
+     */
+
+    for (int i = 0;
+         i < casino->slot_count;
+         i++) {
+
+        simulate_slot(
+            casino,
+            &casino->slots[i]
+        );
+
+        casino->economy
+            .hourly_gaming_revenue +=
+            casino->slots[i]
+                .hourly_revenue;
+    }
+
+    simulate_hotel(
+        casino
+    );
+
+    simulate_restaurant(
+        casino
+    );
+
+    simulate_nightclub(
+        casino
+    );
+
+    /*
+     * Operating expenses.
+     */
+
+    double staff_cost = 0.0;
+
+    for (int i = 0;
+         i < casino->staff_count;
+         i++) {
+
+        staff_cost +=
+            casino->staff[i].salary
+            / 24.0;
+    }
+
+    casino->economy.hourly_operating_cost =
+        staff_cost +
+        150000.0;
+
+    double revenue =
+        casino->economy
+            .hourly_gaming_revenue
+        +
+        casino->economy
+            .hourly_hotel_revenue
+        +
+        casino->economy
+            .hourly_restaurant_revenue
+        +
+        casino->economy
+            .hourly_nightclub_revenue;
+
+    casino->economy.total_revenue +=
+        revenue;
+
+    casino->economy.cash_reserve +=
+        revenue -
+        casino->economy
+            .hourly_operating_cost;
+
+    security_tick(
+        casino
+    );
+}
+
+/* ================================================================
+ * CASINO STATUS
+ * ================================================================ */
+
+static void print_status(
+    Casino *casino
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "              %s\n"
+        "====================================================\n",
+        casino->name
+    );
+
+    printf(
+        "Floors:                 %d\n",
+        casino->floors
+    );
+
+    printf(
+        "Gaming Tables:          %d\n",
+        casino->table_count
+    );
+
+    printf(
+        "Slot Machines:          %d\n",
+        casino->slot_count
+    );
+
+    printf(
+        "Players:                %d\n",
+        casino->player_count
+    );
+
+    printf(
+        "Staff:                  %d\n",
+        casino->staff_count
+    );
+
+    printf(
+        "Building Value:         $%.2f M\n",
+        casino->building_value /
+        1000000.0
+    );
+
+    printf(
+        "Land Value:             $%.2f M\n",
+        casino->land_value /
+        1000000.0
+    );
+
+    printf(
+        "Cash Reserve:           $%.2f M\n",
+        casino->economy.cash_reserve /
+        1000000.0
+    );
+
+    printf(
+        "Gaming Revenue/Hour:    $%.0f\n",
+        casino->economy
+            .hourly_gaming_revenue
+    );
+
+    printf(
+        "Hotel Revenue/Hour:     $%.0f\n",
+        casino->economy
+            .hourly_hotel_revenue
+    );
+
+    printf(
+        "Restaurant Revenue:     $%.0f\n",
+        casino->economy
+            .hourly_restaurant_revenue
+    );
+
+    printf(
+        "Nightclub Revenue:      $%.0f\n",
+        casino->economy
+            .hourly_nightclub_revenue
+    );
+
+    printf(
+        "Operating Cost/Hour:    $%.0f\n",
+        casino->economy
+            .hourly_operating_cost
+    );
+
+    printf(
+        "Security:               %.1f%%\n",
+        casino->economy
+            .security_level * 100.0
+    );
+
+    printf(
+        "Reputation:             %.1f%%\n",
+        casino->economy
+            .reputation * 100.0
+    );
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+/* ================================================================
+ * INITIALISE CASINO
+ * ================================================================ */
+
+static void initialize_casino(
+    Casino *casino
+)
+{
+    memset(
+        casino,
+        0,
+        sizeof(*casino)
+    );
+
+    strncpy(
+        casino->name,
+        CASINO_NAME,
+        sizeof(casino->name) - 1
+    );
+
+    casino->floors = 18;
+
+    casino->land_value =
+        750000000.0;
+
+    casino->building_value =
+        1100000000.0;
+
+    casino->hotel = true;
+    casino->nightclub = true;
+    casino->restaurant = true;
+    casino->vip_lounge = true;
+    casino->rooftop = true;
+    casino->pool = true;
+    casino->valet = true;
+    casino->spa = true;
+
+    casino->economy.cash_reserve =
+        250000000.0;
+
+    casino->economy.reputation =
+        0.95;
+
+    casino->economy.security_level =
+        0.96;
+
+    casino->economy.occupancy =
+        0.72;
+
+    initialize_tables(
+        casino
+    );
+
+    initialize_slots(
+        casino
+    );
+
+    initialize_players(
+        casino
+    );
+
+    initialize_staff(
+        casino
+    );
+}
+
+/* ================================================================
+ * MAIN SIMULATION
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    Casino casino;
+
+    initialize_casino(
+        &casino
+    );
+
+    print_status(
+        &casino
+    );
+
+    printf(
+        "\n"
+        "Beginning 24-hour casino simulation...\n"
+    );
+
+    for (int hour = 1;
+         hour <= 24;
+         hour++) {
+
+        printf(
+            "\n"
+            "---------------- HOUR %02d ----------------\n",
+            hour
+        );
+
+        casino_tick(
+            &casino
+        );
+
+        printf(
+            "Gaming:   $%.0f\n",
+            casino.economy
+                .hourly_gaming_revenue
+        );
+
+        printf(
+            "Hotel:    $%.0f\n",
+            casino.economy
+                .hourly_hotel_revenue
+        );
+
+        printf(
+            "Dining:   $%.0f\n",
+            casino.economy
+                .hourly_restaurant_revenue
+        );
+
+        printf(
+            "Nightclub:$%.0f\n",
+            casino.economy
+                .hourly_nightclub_revenue
+        );
+
+        printf(
+            "Cash:     $%.2f M\n",
+            casino.economy.cash_reserve /
+            1000000.0
+        );
+    }
+
+    print_status(
+        &casino
+    );
+
+    return 0;
+}
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN WORLD
+ * PALMETTO CROWN BREWING COMPANY
+ *
+ * INDUSTRIAL BREWERY SIMULATION
+ *
+ * Systems:
+ *   - Raw-material market
+ *   - Malt inventory
+ *   - Hop inventory
+ *   - Yeast inventory
+ *   - Water consumption
+ *   - Brewhouse
+ *   - Fermentation
+ *   - Conditioning
+ *   - Packaging
+ *   - Warehousing
+ *   - Distribution
+ *   - Beer brands
+ *   - Pricing
+ *   - Demand
+ *   - Reputation
+ *   - Production economics
+ *   - NPC consumption
+ *
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+
+#define MAX_TANKS       32
+#define MAX_PRODUCTS    16
+#define MAX_WAREHOUSE   100
+#define MAX_ROUTES      32
+#define MAX_CUSTOMERS   300
+
+/* ================================================================
+ * ENUMERATIONS
+ * ================================================================ */
+
+typedef enum {
+
+    LAGER,
+    PALE_ALE,
+    IPA,
+    STOUT,
+    PORTER,
+    PILSNER,
+    WHEAT_BEER,
+    SPECIALTY
+
+} BeerStyle;
+
+typedef enum {
+
+    EMPTY,
+    MASHING,
+    BOILING,
+    FERMENTING,
+    CONDITIONING,
+    READY
+
+} TankState;
+
+typedef enum {
+
+    CANS,
+    BOTTLES,
+    KEGS,
+    CASKS
+
+} PackagingType;
+
+typedef enum {
+
+    LOCAL_BAR,
+    RESTAURANT,
+    HOTEL,
+    SUPERMARKET,
+    NIGHTCLUB,
+    EXPORT
+
+} CustomerType;
+
+/* ================================================================
+ * RAW MATERIAL MARKET
+ * ================================================================ */
+
+typedef struct {
+
+    double malt_price;
+    double hop_price;
+    double yeast_price;
+    double water_price;
+
+    double malt_supply;
+    double hop_supply;
+    double yeast_supply;
+
+    double demand_multiplier;
+
+} IngredientMarket;
+
+/* ================================================================
+ * INVENTORY
+ * ================================================================ */
+
+typedef struct {
+
+    double malt_kg;
+    double hops_kg;
+    double yeast_kg;
+
+    double water_litres;
+
+    double packaging_units;
+
+} BreweryInventory;
+
+/* ================================================================
+ * BEER PRODUCT
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char name[64];
+
+    BeerStyle style;
+
+    double retail_price;
+    double wholesale_price;
+
+    double production_cost;
+
+    double demand;
+
+    double reputation;
+
+    double alcohol_content;
+
+    double litres_produced;
+    double litres_sold;
+
+    double inventory_litres;
+
+    bool premium;
+    bool seasonal;
+
+} BeerProduct;
+
+/* ================================================================
+ * FERMENTATION / CONDITIONING TANK
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    TankState state;
+
+    double capacity_litres;
+
+    double current_volume;
+
+    double temperature;
+
+    double target_temperature;
+
+    double fermentation_progress;
+
+    double conditioning_progress;
+
+    int product_id;
+
+    bool active;
+
+} BreweryTank;
+
+/* ================================================================
+ * PACKAGING LINE
+ * ================================================================ */
+
+typedef struct {
+
+    PackagingType type;
+
+    double units_per_hour;
+
+    double efficiency;
+
+    bool operating;
+
+    double hourly_output;
+
+} PackagingLine;
+
+/* ================================================================
+ * DISTRIBUTION
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char destination[64];
+
+    CustomerType customer;
+
+    double distance;
+
+    double demand;
+
+    double price_multiplier;
+
+    double stock;
+
+    bool active;
+
+} DistributionRoute;
+
+/* ================================================================
+ * BREWERY ECONOMY
+ * ================================================================ */
+
+typedef struct {
+
+    double cash;
+
+    double revenue;
+
+    double costs;
+
+    double profit;
+
+    double energy_cost;
+
+    double labour_cost;
+
+    double logistics_cost;
+
+    double maintenance_cost;
+
+    double reputation;
+
+    double production_efficiency;
+
+    double market_share;
+
+} BreweryEconomy;
+
+/* ================================================================
+ * BREWERY
+ * ================================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    BreweryInventory inventory;
+
+    IngredientMarket market;
+
+    BreweryTank tanks[MAX_TANKS];
+
+    BeerProduct products[MAX_PRODUCTS];
+
+    PackagingLine packaging[4];
+
+    DistributionRoute routes[MAX_ROUTES];
+
+    BreweryEconomy economy;
+
+    int tank_count;
+    int product_count;
+    int route_count;
+
+    double brewhouse_capacity;
+    double warehouse_capacity;
+
+    bool taproom;
+    bool restaurant;
+    bool brewery_tours;
+
+} Brewery;
+
+/* ================================================================
+ * RANDOM FUNCTIONS
+ * ================================================================ */
+
+static double rnd(void)
+{
+    return (double)rand() / RAND_MAX;
+}
+
+static double random_range(
+    double min,
+    double max
+)
+{
+    return min +
+           rnd() * (max - min);
+}
+
+/* ================================================================
+ * BEER STYLE
+ * ================================================================ */
+
+static const char *style_name(
+    BeerStyle style
+)
+{
+    switch(style) {
+
+        case LAGER:
+            return "Lager";
+
+        case PALE_ALE:
+            return "Pale Ale";
+
+        case IPA:
+            return "IPA";
+
+        case STOUT:
+            return "Stout";
+
+        case PORTER:
+            return "Porter";
+
+        case PILSNER:
+            return "Pilsner";
+
+        case WHEAT_BEER:
+            return "Wheat Beer";
+
+        case SPECIALTY:
+            return "Specialty";
+
+    }
+
+    return "Unknown";
+}
+
+/* ================================================================
+ * INITIALISE MARKET
+ * ================================================================ */
+
+static void initialize_market(
+    Brewery *b
+)
+{
+    b->market.malt_price =
+        0.85;
+
+    b->market.hop_price =
+        8.50;
+
+    b->market.yeast_price =
+        35.0;
+
+    b->market.water_price =
+        0.001;
+
+    b->market.malt_supply =
+        100000.0;
+
+    b->market.hop_supply =
+        10000.0;
+
+    b->market.yeast_supply =
+        5000.0;
+
+    b->market.demand_multiplier =
+        1.0;
+}
+
+/* ================================================================
+ * ADD BEER
+ * ================================================================ */
+
+static void add_beer(
+    Brewery *b,
+    const char *name,
+    BeerStyle style,
+    double wholesale,
+    double retail,
+    double abv,
+    bool premium
+)
+{
+    if (b->product_count >=
+        MAX_PRODUCTS)
+        return;
+
+    BeerProduct *p =
+        &b->products[
+            b->product_count
+        ];
+
+    memset(
+        p,
+        0,
+        sizeof(*p)
+    );
+
+    p->id =
+        b->product_count;
+
+    strncpy(
+        p->name,
+        name,
+        sizeof(p->name)-1
+    );
+
+    p->style = style;
+
+    p->wholesale_price =
+        wholesale;
+
+    p->retail_price =
+        retail;
+
+    p->alcohol_content =
+        abv;
+
+    p->premium =
+        premium;
+
+    p->demand =
+        1.0;
+
+    p->reputation =
+        premium ? 0.80 : 0.60;
+
+    b->product_count++;
+}
+
+/* ================================================================
+ * INITIALISE PRODUCTS
+ * ================================================================ */
+
+static void initialize_products(
+    Brewery *b
+)
+{
+    add_beer(
+        b,
+        "Palmetto Crown Lager",
+        LAGER,
+        2.10,
+        5.50,
+        4.5,
+        false
+    );
+
+    add_beer(
+        b,
+        "Miami Gold Pilsner",
+        PILSNER,
+        2.60,
+        6.50,
+        4.8,
+        false
+    );
+
+    add_beer(
+        b,
+        "Everglade IPA",
+        IPA,
+        3.20,
+        8.50,
+        6.2,
+        true
+    );
+
+    add_beer(
+        b,
+        "Atlantic Stout",
+        STOUT,
+        3.50,
+        9.00,
+        7.0,
+        true
+    );
+
+    add_beer(
+        b,
+        "Executive Reserve",
+        SPECIALTY,
+        8.00,
+        25.00,
+        9.0,
+        true
+    );
+}
+
+/* ================================================================
+ * TANK INITIALISATION
+ * ================================================================ */
+
+static void initialize_tanks(
+    Brewery *b
+)
+{
+    b->tank_count = 16;
+
+    for(int i = 0;
+        i < b->tank_count;
+        i++) {
+
+        BreweryTank *tank =
+            &b->tanks[i];
+
+        memset(
+            tank,
+            0,
+            sizeof(*tank)
+        );
+
+        tank->id = i;
+
+        tank->capacity_litres =
+            20000.0;
+
+        tank->state =
+            EMPTY;
+
+        tank->active =
+            true;
+    }
+}
+
+/* ================================================================
+ * PACKAGING
+ * ================================================================ */
+
+static void initialize_packaging(
+    Brewery *b
+)
+{
+    b->packaging[0].type =
+        CANS;
+
+    b->packaging[0].units_per_hour =
+        12000;
+
+    b->packaging[1].type =
+        BOTTLES;
+
+    b->packaging[1].units_per_hour =
+        8000;
+
+    b->packaging[2].type =
+        KEGS;
+
+    b->packaging[2].units_per_hour =
+        500;
+
+    b->packaging[3].type =
+        CASKS;
+
+    b->packaging[3].units_per_hour =
+        250;
+
+    for(int i = 0;
+        i < 4;
+        i++) {
+
+        b->packaging[i].efficiency =
+            0.92;
+
+        b->packaging[i].operating =
+            true;
+    }
+}
+
+/* ================================================================
+ * BREWING INPUT REQUIREMENTS
+ *
+ * Simplified game-economy model.
+ * ================================================================ */
+
+static void calculate_recipe(
+    BeerStyle style,
+    double litres,
+    double *malt,
+    double *hops,
+    double *yeast
+)
+{
+    /*
+     * Base ingredient requirements
+     */
+
+    *malt =
+        litres * 0.20;
+
+    *hops =
+        litres * 0.006;
+
+    *yeast =
+        litres * 0.001;
+
+    switch(style) {
+
+        case IPA:
+            *hops *= 2.5;
+            break;
+
+        case STOUT:
+            *malt *= 1.25;
+            break;
+
+        case SPECIALTY:
+            *hops *= 2.0;
+            *malt *= 1.20;
+            break;
+
+        case PILSNER:
+            *malt *= 1.05;
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* ================================================================
+ * START BREW
+ * ================================================================ */
+
+static bool start_brew(
+    Brewery *b,
+    int product_id,
+    double volume
+)
+{
+    if(product_id < 0 ||
+       product_id >= b->product_count)
+        return false;
+
+    double malt;
+    double hops;
+    double yeast;
+
+    calculate_recipe(
+        b->products[product_id].style,
+        volume,
+        &malt,
+        &hops,
+        &yeast
+    );
+
+    /*
+     * Check raw material availability.
+     */
+
+    if(b->inventory.malt_kg < malt)
+        return false;
+
+    if(b->inventory.hops_kg < hops)
+        return false;
+
+    if(b->inventory.yeast_kg < yeast)
+        return false;
+
+    /*
+     * Find empty tank.
+     */
+
+    for(int i = 0;
+        i < b->tank_count;
+        i++) {
+
+        BreweryTank *tank =
+            &b->tanks[i];
+
+        if(tank->state ==
+           EMPTY) {
+
+            tank->state =
+                FERMENTING;
+
+            tank->current_volume =
+                volume;
+
+            tank->product_id =
+                product_id;
+
+            tank->fermentation_progress =
+                0.0;
+
+            /*
+             * Ingredients consumed.
+             */
+
+            b->inventory.malt_kg -=
+                malt;
+
+            b->inventory.hops_kg -=
+                hops;
+
+            b->inventory.yeast_kg -=
+                yeast;
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* ================================================================
+ * FERMENTATION
+ * ================================================================ */
+
+static void fermentation_tick(
+    Brewery *b
+)
+{
+    for(int i = 0;
+        i < b->tank_count;
+        i++) {
+
+        BreweryTank *tank =
+            &b->tanks[i];
+
+        if(tank->state !=
+           FERMENTING)
+            continue;
+
+        /*
+         * Temperature gradually
+         * moves toward target.
+         */
+
+        tank->target_temperature =
+            18.0;
+
+        tank->temperature +=
+            (tank->target_temperature -
+             tank->temperature) *
+            0.10;
+
+        /*
+         * Fermentation rate.
+         */
+
+        double rate =
+            0.04;
+
+        if(fabs(
+            tank->temperature -
+            tank->target_temperature
+        ) > 5.0) {
+
+            rate *= 0.5;
+        }
+
+        tank->fermentation_progress +=
+            rate;
+
+        if(tank->fermentation_progress
+           >= 1.0) {
+
+            tank->fermentation_progress =
+                1.0;
+
+            tank->state =
+                CONDITIONING;
+
+            tank->conditioning_progress =
+                0.0;
+        }
+    }
+}
+
+/* ================================================================
+ * CONDITIONING
+ * ================================================================ */
+
+static void conditioning_tick(
+    Brewery *b
+)
+{
+    for(int i = 0;
+        i < b->tank_count;
+        i++) {
+
+        BreweryTank *tank =
+            &b->tanks[i];
+
+        if(tank->state !=
+           CONDITIONING)
+            continue;
+
+        tank->target_temperature =
+            4.0;
+
+        tank->temperature +=
+            (tank->target_temperature -
+             tank->temperature) *
+            0.08;
+
+        tank->conditioning_progress +=
+            0.025;
+
+        if(tank->conditioning_progress
+           >= 1.0) {
+
+            tank->conditioning_progress =
+                1.0;
+
+            tank->state =
+                READY;
+        }
+    }
+}
+
+/* ================================================================
+ * PACKAGE BEER
+ * ================================================================ */
+
+static void packaging_tick(
+    Brewery *b
+)
+{
+    for(int i = 0;
+        i < b->tank_count;
+        i++) {
+
+        BreweryTank *tank =
+            &b->tanks[i];
+
+        if(tank->state !=
+           READY)
+            continue;
+
+        int product_id =
+            tank->product_id;
+
+        double output =
+            tank->current_volume *
+            b->economy
+                .production_efficiency;
+
+        b->products[product_id]
+            .inventory_litres +=
+            output;
+
+        b->products[product_id]
+            .litres_produced +=
+            output;
+
+        tank->state =
+            EMPTY;
+
+        tank->current_volume =
+            0.0;
+    }
+}
+
+/* ================================================================
+ * DEMAND MODEL
+ * ================================================================ */
+
+static void update_demand(
+    Brewery *b
+)
+{
+    for(int i = 0;
+        i < b->product_count;
+        i++) {
+
+        BeerProduct *p =
+            &b->products[i];
+
+        /*
+         * Premium products respond
+         * strongly to reputation.
+         */
+
+        double reputation_factor =
+            0.5 +
+            p->reputation;
+
+        /*
+         * Seasonal variation.
+         */
+
+        double seasonal =
+            0.85 +
+            rnd() * 0.30;
+
+        /*
+         * Price sensitivity.
+         */
+
+        double price_factor =
+            8.0 /
+            (p->retail_price + 4.0);
+
+        p->demand =
+            reputation_factor *
+            seasonal *
+            price_factor;
+    }
+}
+
+/* ================================================================
+ * SALES
+ * ================================================================ */
+
+static void sell_beer(
+    Brewery *b
+)
+{
+    for(int i = 0;
+        i < b->product_count;
+        i++) {
+
+        BeerProduct *p =
+            &b->products[i];
+
+        double demand =
+            p->demand *
+            random_range(
+                1000.0,
+                5000.0
+            );
+
+        /*
+         * Cannot sell more than
+         * available stock.
+         */
+
+        if(demand >
+           p->inventory_litres)
+
+            demand =
+                p->inventory_litres;
+
+        if(demand <= 0)
+            continue;
+
+        double revenue =
+            demand *
+            p->wholesale_price;
+
+        p->inventory_litres -=
+            demand;
+
+        p->litres_sold +=
+            demand;
+
+        b->economy.revenue +=
+            revenue;
+
+        b->economy.cash +=
+            revenue;
+    }
+}
+
+/* ================================================================
+ * RAW MATERIAL MARKET
+ * ================================================================ */
+
+static void update_market(
+    Brewery *b
+)
+{
+    /*
+     * Supply shocks.
+     */
+
+    if(rnd() < 0.03) {
+
+        b->market.hop_price *=
+            random_range(
+                1.05,
+                1.25
+            );
+    }
+
+    if(rnd() < 0.02) {
+
+        b->market.malt_price *=
+            random_range(
+                0.90,
+                1.10
+            );
+    }
+
+    /*
+     * Market demand influences
+     * input prices.
+     */
+
+    b->market.hop_price *=
+        1.0 +
+        (b->market.demand_multiplier -
+         1.0) * 0.01;
+}
+
+/* ================================================================
+ * BUY INGREDIENTS
+ * ================================================================ */
+
+static void purchase_inputs(
+    Brewery *b
+)
+{
+    double malt_purchase =
+        5000.0;
+
+    double hop_purchase =
+        250.0;
+
+    double yeast_purchase =
+        50.0;
+
+    double cost =
+        malt_purchase *
+        b->market.malt_price
+
+        +
+
+        hop_purchase *
+        b->market.hop_price
+
+        +
+
+        yeast_purchase *
+        b->market.yeast_price;
+
+    if(cost >
+       b->economy.cash)
+        return;
+
+    b->economy.cash -=
+        cost;
+
+    b->economy.costs +=
+        cost;
+
+    b->inventory.malt_kg +=
+        malt_purchase;
+
+    b->inventory.hops_kg +=
+        hop_purchase;
+
+    b->inventory.yeast_kg +=
+        yeast_purchase;
+}
+
+/* ================================================================
+ * PRODUCTION COSTS
+ * ================================================================ */
+
+static void calculate_operating_cost(
+    Brewery *b
+)
+{
+    double energy =
+        b->brewhouse_capacity *
+        0.15;
+
+    double labour =
+        35000.0;
+
+    double maintenance =
+        12000.0;
+
+    double logistics =
+        b->economy.revenue *
+        0.08;
+
+    double total =
+        energy +
+        labour +
+        maintenance +
+        logistics;
+
+    b->economy.energy_cost =
+        energy;
+
+    b->economy.labour_cost =
+        labour;
+
+    b->economy.maintenance_cost =
+        maintenance;
+
+    b->economy.logistics_cost =
+        logistics;
+
+    b->economy.costs +=
+        total;
+
+    b->economy.cash -=
+        total;
+}
+
+/* ================================================================
+ * BREWERY TICK
+ * ================================================================ */
+
+static void brewery_tick(
+    Brewery *b
+)
+{
+    update_market(b);
+
+    purchase_inputs(b);
+
+    /*
+     * Automatically keep production
+     * moving when capacity permits.
+     */
+
+    if(b->inventory.malt_kg >
+       1000.0) {
+
+        int product =
+            rand() %
+            b->product_count;
+
+        start_brew(
+            b,
+            product,
+            15000.0
+        );
+    }
+
+    fermentation_tick(b);
+
+    conditioning_tick(b);
+
+    packaging_tick(b);
+
+    update_demand(b);
+
+    sell_beer(b);
+
+    calculate_operating_cost(b);
+
+    b->economy.profit =
+        b->economy.revenue -
+        b->economy.costs;
+}
+
+/* ================================================================
+ * STATUS DISPLAY
+ * ================================================================ */
+
+static void print_status(
+    Brewery *b
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "          %s\n"
+        "====================================================\n",
+        b->name
+    );
+
+    printf(
+        "Cash:                 $%.2f\n",
+        b->economy.cash
+    );
+
+    printf(
+        "Revenue:              $%.2f\n",
+        b->economy.revenue
+    );
+
+    printf(
+        "Costs:                $%.2f\n",
+        b->economy.costs
+    );
+
+    printf(
+        "Profit:               $%.2f\n",
+        b->economy.profit
+    );
+
+    printf(
+        "Malt:                 %.0f kg\n",
+        b->inventory.malt_kg
+    );
+
+    printf(
+        "Hops:                 %.0f kg\n",
+        b->inventory.hops_kg
+    );
+
+    printf(
+        "Yeast:                %.0f kg\n",
+        b->inventory.yeast_kg
+    );
+
+    printf(
+        "\nPRODUCTS\n"
+    );
+
+    for(int i = 0;
+        i < b->product_count;
+        i++) {
+
+        BeerProduct *p =
+            &b->products[i];
+
+        printf(
+            "%-22s | %-12s | "
+            "Stock %.0f L | "
+            "Demand %.2f\n",
+
+            p->name,
+            style_name(p->style),
+            p->inventory_litres,
+            p->demand
+        );
+    }
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+/* ================================================================
+ * INITIALISE BREWERY
+ * ================================================================ */
+
+static void initialize_brewery(
+    Brewery *b
+)
+{
+    memset(
+        b,
+        0,
+        sizeof(*b)
+    );
+
+    strncpy(
+        b->name,
+        "Palmetto Crown Brewing Company",
+        sizeof(b->name)-1
+    );
+
+    b->economy.cash =
+        25000000.0;
+
+    b->economy.reputation =
+        0.75;
+
+    b->economy.production_efficiency =
+        0.92;
+
+    b->economy.market_share =
+        0.08;
+
+    b->brewhouse_capacity =
+        100000.0;
+
+    b->warehouse_capacity =
+        1000000.0;
+
+    b->taproom =
+        true;
+
+    b->restaurant =
+        true;
+
+    b->brewery_tours =
+        true;
+
+    initialize_market(b);
+
+    initialize_products(b);
+
+    initialize_tanks(b);
+
+    initialize_packaging(b);
+}
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    Brewery brewery;
+
+    initialize_brewery(
+        &brewery
+    );
+
+    print_status(
+        &brewery
+    );
+
+    /*
+     * Simulate 30 production days.
+     */
+
+    for(int day = 1;
+        day <= 30;
+        day++) {
+
+        printf(
+            "\nDAY %02d\n",
+            day
+        );
+
+        /*
+         * Six production ticks per day.
+         */
+
+        for(int tick = 0;
+            tick < 6;
+            tick++) {
+
+            brewery_tick(
+                &brewery
+            );
+        }
+
+        if(day % 5 == 0)
+            print_status(
+                &brewery
+            );
+    }
+
+    printf(
+        "\n"
+        "FINAL BREWERY REPORT\n"
+    );
+
+    print_status(
+        &brewery
+    );
+
+    return 0;
+
+
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN WORLD
+ * SUNCOAST CANNABIS CLUB
+ *
+ * FICTIONAL IN-GAME DISPENSARY ECONOMY
+ *
+ * Products:
+ *   - Cannabis Flower
+ *   - High-Grade Hash
+ *   - Cannabis Brownies
+ *   - Pre-Rolls
+ *   - Edibles
+ *
+ * Systems:
+ *   - Inventory
+ *   - Supply / Demand
+ *   - Scarcity
+ *   - Pricing
+ *   - Customer demand
+ *   - Product reputation
+ *   - Daily sales
+ *   - Restocking
+ *   - Dynamic market conditions
+ *
+ * All products and economics are fictional game abstractions.
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX_PRODUCTS 16
+#define MAX_CUSTOMERS 100
+
+typedef enum {
+    FLOWER,
+    HASH,
+    BROWNIE,
+    PREROLL,
+    EDIBLE
+} ProductType;
+
+typedef struct {
+
+    int id;
+    char name[64];
+
+    ProductType type;
+
+    double base_price;
+    double current_price;
+
+    double inventory;
+    double max_inventory;
+
+    double demand;
+    double reputation;
+
+    double scarcity;
+
+    bool premium;
+    bool limited_release;
+
+} CannabisProduct;
+
+typedef struct {
+
+    double cash;
+
+    double revenue;
+    double expenses;
+    double profit;
+
+    double reputation;
+    double market_share;
+
+    double operating_cost;
+
+} DispensaryEconomy;
+
+typedef struct {
+
+    char name[64];
+
+    CannabisProduct products[MAX_PRODUCTS];
+
+    int product_count;
+
+    DispensaryEconomy economy;
+
+    double daily_customer_flow;
+
+    double tourism_factor;
+    double nightlife_factor;
+
+} Dispensary;
+
+
+/* ================================================================
+ * RANDOM UTILITIES
+ * ================================================================ */
+
+static double random_float(
+    double min,
+    double max
+)
+{
+    return min +
+           ((double)rand() / RAND_MAX)
+           * (max - min);
+}
+
+
+/* ================================================================
+ * PRODUCT TYPE
+ * ================================================================ */
+
+static const char *product_type_name(
+    ProductType type
+)
+{
+    switch(type) {
+
+        case FLOWER:
+            return "Flower";
+
+        case HASH:
+            return "High-Grade Hash";
+
+        case BROWNIE:
+            return "Cannabis Brownie";
+
+        case PREROLL:
+            return "Pre-Roll";
+
+        case EDIBLE:
+            return "Edible";
+    }
+
+    return "Unknown";
+}
+
+
+/* ================================================================
+ * ADD PRODUCT
+ * ================================================================ */
+
+static void add_product(
+    Dispensary *store,
+    const char *name,
+    ProductType type,
+    double price,
+    double inventory,
+    bool premium,
+    bool limited
+)
+{
+    if(store->product_count >= MAX_PRODUCTS)
+        return;
+
+    CannabisProduct *p =
+        &store->products[
+            store->product_count
+        ];
+
+    memset(
+        p,
+        0,
+        sizeof(*p)
+    );
+
+    p->id =
+        store->product_count;
+
+    strncpy(
+        p->name,
+        name,
+        sizeof(p->name) - 1
+    );
+
+    p->type = type;
+
+    p->base_price = price;
+
+    p->current_price = price;
+
+    p->inventory = inventory;
+
+    p->max_inventory =
+        inventory;
+
+    p->demand =
+        1.0;
+
+    p->reputation =
+        premium ? 0.95 : 0.70;
+
+    p->premium =
+        premium;
+
+    p->limited_release =
+        limited;
+
+    store->product_count++;
+}
+
+
+/* ================================================================
+ * INITIAL PRODUCT CATALOGUE
+ * ================================================================ */
+
+static void initialise_catalogue(
+    Dispensary *store
+)
+{
+    add_product(
+        store,
+        "Suncoast Reserve Flower",
+        FLOWER,
+        45.0,
+        500.0,
+        false,
+        false
+    );
+
+    add_product(
+        store,
+        "Everglade Gold Flower",
+        FLOWER,
+        70.0,
+        250.0,
+        true,
+        false
+    );
+
+    add_product(
+        store,
+        "Miami Reserve Hash",
+        HASH,
+        120.0,
+        100.0,
+        true,
+        true
+    );
+
+    add_product(
+        store,
+        "High-Grade Black Label Hash",
+        HASH,
+        180.0,
+        50.0,
+        true,
+        true
+    );
+
+    add_product(
+        store,
+        "Sunset Brownie",
+        BROWNIE,
+        25.0,
+        300.0,
+        false,
+        false
+    );
+
+    add_product(
+        store,
+        "Midnight Chocolate Brownie",
+        BROWNIE,
+        40.0,
+        150.0,
+        true,
+        true
+    );
+
+    add_product(
+        store,
+        "Miami Pre-Roll",
+        PREROLL,
+        18.0,
+        500.0,
+        false,
+        false
+    );
+
+    add_product(
+        store,
+        "Everglade Reserve Edible",
+        EDIBLE,
+        35.0,
+        200.0,
+        true,
+        true
+    );
+}
+
+
+/* ================================================================
+ * DEMAND MODEL
+ * ================================================================ */
+
+static void update_demand(
+    Dispensary *store
+)
+{
+    for(int i = 0;
+        i < store->product_count;
+        i++)
+    {
+        CannabisProduct *p =
+            &store->products[i];
+
+        double base =
+            random_float(
+                0.75,
+                1.25
+            );
+
+        /*
+         * Tourism increases demand.
+         */
+
+        double tourism =
+            store->tourism_factor;
+
+        /*
+         * Nightlife increases demand
+         * for portable products and
+         * premium products.
+         */
+
+        double nightlife =
+            store->nightlife_factor;
+
+        if(
+            p->type == PREROLL ||
+            p->type == BROWNIE
+        )
+        {
+            base *=
+                nightlife;
+        }
+
+        /*
+         * Premium reputation.
+         */
+
+        base *=
+            p->reputation;
+
+        /*
+         * Limited products attract
+         * collector / prestige demand.
+         */
+
+        if(p->limited_release)
+            base *= 1.35;
+
+        p->demand =
+            base *
+            tourism;
+    }
+}
+
+
+/* ================================================================
+ * SCARCITY MODEL
+ * ================================================================ */
+
+static void calculate_scarcity(
+    CannabisProduct *p
+)
+{
+    if(p->max_inventory <= 0)
+    {
+        p->scarcity = 1.0;
+        return;
+    }
+
+    double stock_ratio =
+        p->inventory /
+        p->max_inventory;
+
+    /*
+     * Scarcity rises as inventory
+     * approaches zero.
+     */
+
+    p->scarcity =
+        1.0 -
+        stock_ratio;
+
+    if(p->scarcity < 0)
+        p->scarcity = 0;
+
+    if(p->scarcity > 1)
+        p->scarcity = 1;
+}
+
+
+/* ================================================================
+ * DYNAMIC PRICING
+ * ================================================================ */
+
+static void update_prices(
+    Dispensary *store
+)
+{
+    for(int i = 0;
+        i < store->product_count;
+        i++)
+    {
+        CannabisProduct *p =
+            &store->products[i];
+
+        calculate_scarcity(p);
+
+        double demand_pressure =
+            p->demand;
+
+        double scarcity_pressure =
+            p->scarcity * 0.75;
+
+        p->current_price =
+            p->base_price *
+            (
+                1.0 +
+                demand_pressure * 0.20 +
+                scarcity_pressure
+            );
+
+        /*
+         * Premium products retain
+         * a larger prestige premium.
+         */
+
+        if(p->premium)
+            p->current_price *= 1.20;
+    }
+}
+
+
+/* ================================================================
+ * SALES SIMULATION
+ * ================================================================ */
+
+static void process_sales(
+    Dispensary *store
+)
+{
+    for(int i = 0;
+        i < store->product_count;
+        i++)
+    {
+        CannabisProduct *p =
+            &store->products[i];
+
+        /*
+         * Customer demand.
+         */
+
+        double customers =
+            random_float(
+                5.0,
+                30.0
+            );
+
+        double units_requested =
+            customers *
+            p->demand;
+
+        /*
+         * Limited supply.
+         */
+
+        double units_sold =
+            units_requested;
+
+        if(units_sold >
+           p->inventory)
+        {
+            units_sold =
+                p->inventory;
+        }
+
+        if(units_sold <= 0)
+            continue;
+
+        p->inventory -=
+            units_sold;
+
+        double revenue =
+            units_sold *
+            p->current_price;
+
+        store->economy.revenue +=
+            revenue;
+
+        store->economy.cash +=
+            revenue;
+    }
+}
+
+
+/* ================================================================
+ * RESTOCKING
+ * ================================================================ */
+
+static void restock(
+    Dispensary *store
+)
+{
+    for(int i = 0;
+        i < store->product_count;
+        i++)
+    {
+        CannabisProduct *p =
+            &store->products[i];
+
+        /*
+         * Premium limited products
+         * have unpredictable supply.
+         */
+
+        double supply_factor =
+            p->limited_release
+            ? random_float(0.20, 0.70)
+            : random_float(0.70, 1.20);
+
+        double restock_amount =
+            p->max_inventory *
+            0.15 *
+            supply_factor;
+
+        double cost =
+            restock_amount *
+            p->base_price *
+            0.45;
+
+        if(cost >
+           store->economy.cash)
+            continue;
+
+        store->economy.cash -=
+            cost;
+
+        store->economy.expenses +=
+            cost;
+
+        p->inventory +=
+            restock_amount;
+
+        if(p->inventory >
+           p->max_inventory)
+        {
+            p->inventory =
+                p->max_inventory;
+        }
+    }
+}
+
+
+/* ================================================================
+ * OPERATING COSTS
+ * ================================================================ */
+
+static void operating_costs(
+    Dispensary *store
+)
+{
+    double cost =
+        store->economy.operating_cost;
+
+    store->economy.cash -=
+        cost;
+
+    store->economy.expenses +=
+        cost;
+}
+
+
+/* ================================================================
+ * MARKET EVENT
+ * ================================================================ */
+
+static void market_event(
+    Dispensary *store
+)
+{
+    double event =
+        random_float(
+            0.0,
+            1.0
+        );
+
+    /*
+     * Tourist boom.
+     */
+
+    if(event < 0.10)
+    {
+        store->tourism_factor =
+            1.30;
+
+        printf(
+            "[MARKET] Miami tourism boom.\n"
+        );
+    }
+
+    /*
+     * Nightlife boom.
+     */
+
+    else if(event < 0.20)
+    {
+        store->nightlife_factor =
+            1.40;
+
+        printf(
+            "[MARKET] Miami nightlife surge.\n"
+        );
+    }
+
+    else
+    {
+        store->tourism_factor =
+            random_float(
+                0.90,
+                1.15
+            );
+
+        store->nightlife_factor =
+            random_float(
+                0.90,
+                1.20
+            );
+    }
+}
+
+
+/* ================================================================
+ * DAILY SIMULATION
+ * ================================================================ */
+
+static void dispensary_tick(
+    Dispensary *store
+)
+{
+    market_event(store);
+
+    update_demand(store);
+
+    update_prices(store);
+
+    process_sales(store);
+
+    restock(store);
+
+    operating_costs(store);
+
+    store->economy.profit =
+        store->economy.revenue -
+        store->economy.expenses;
+}
+
+
+/* ================================================================
+ * DISPLAY
+ * ================================================================ */
+
+static void display_store(
+    Dispensary *store
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "        %s\n"
+        "====================================================\n",
+        store->name
+    );
+
+    printf(
+        "Cash:       $%.2f\n",
+        store->economy.cash
+    );
+
+    printf(
+        "Revenue:    $%.2f\n",
+        store->economy.revenue
+    );
+
+    printf(
+        "Expenses:   $%.2f\n",
+        store->economy.expenses
+    );
+
+    printf(
+        "Profit:     $%.2f\n",
+        store->economy.profit
+    );
+
+    printf(
+        "\nCATALOGUE\n"
+    );
+
+    for(int i = 0;
+        i < store->product_count;
+        i++)
+    {
+        CannabisProduct *p =
+            &store->products[i];
+
+        printf(
+            "%-32s | "
+            "%-18s | "
+            "Stock: %7.1f | "
+            "Price: $%7.2f | "
+            "Scarcity: %.2f\n",
+
+            p->name,
+
+            product_type_name(
+                p->type
+            ),
+
+            p->inventory,
+
+            p->current_price,
+
+            p->scarcity
+        );
+    }
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+
+/* ================================================================
+ * INITIALISE STORE
+ * ================================================================ */
+
+static void initialise_store(
+    Dispensary *store
+)
+{
+    memset(
+        store,
+        0,
+        sizeof(*store)
+    );
+
+    strcpy(
+        store->name,
+        "Suncoast Cannabis Club"
+    );
+
+    store->economy.cash =
+        1000000.0;
+
+    store->economy.reputation =
+        0.85;
+
+    store->economy.market_share =
+        0.05;
+
+    store->economy.operating_cost =
+        25000.0;
+
+    store->tourism_factor =
+        1.0;
+
+    store->nightlife_factor =
+        1.0;
+
+    initialise_catalogue(
+        store
+    );
+}
+
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    Dispensary store;
+
+    initialise_store(
+        &store
+    );
+
+    printf(
+        "\n"
+        "SUNCOAST CANNABIS CLUB\n"
+        "FICTIONAL GAME ECONOMY\n"
+    );
+
+    /*
+     * Simulate 30 in-game days.
+     */
+
+    for(int day = 1;
+        day <= 30;
+        day++)
+    {
+        printf(
+            "\nDAY %d\n",
+            day
+        );
+
+        dispensary_tick(
+            &store
+        );
+
+        if(day % 5 == 0)
+        {
+            display_store(
+                &store
+            );
+        }
+    }
+
+    printf(
+        "\nFINAL REPORT\n"
+    );
+
+    display_store(
+        &store
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ================================================================
+ * MIAMI OPEN WORLD
+ * ISILDUR'S AIR
+ *
+ * FICTIONAL CANNABIS FARM ECONOMIC SIMULATION
+ *
+ * Supplies:
+ *   - Cannabis Flower
+ *   - Premium Flower
+ *   - Hash-grade material
+ *
+ * Systems:
+ *   - Land
+ *   - Crop cycles
+ *   - Abstract production
+ *   - Quality
+ *   - Weather
+ *   - Water / energy costs
+ *   - Labour
+ *   - Inventory
+ *   - Supply & demand
+ *   - Scarcity
+ *   - Contracts
+ *   - Farm reputation
+ *
+ * NOTE:
+ * This is an abstract game-economy model, not a real-world
+ * cannabis cultivation guide.
+ * ================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX_FIELDS 24
+#define MAX_PRODUCTS 8
+#define MAX_CONTRACTS 16
+
+
+/* ================================================================
+ * ENUMERATIONS
+ * ================================================================ */
+
+typedef enum {
+
+    FIELD_EMPTY,
+    FIELD_GROWING,
+    FIELD_READY,
+    FIELD_HARVESTED
+
+} FieldState;
+
+typedef enum {
+
+    STANDARD_FLOWER,
+    PREMIUM_FLOWER,
+    HASH_GRADE
+
+} CropType;
+
+
+/* ================================================================
+ * CROP
+ * ================================================================ */
+
+typedef struct {
+
+    CropType type;
+
+    char name[64];
+
+    double quality;
+
+    double market_value;
+
+    double inventory;
+
+} FarmProduct;
+
+
+/* ================================================================
+ * FIELD
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    FieldState state;
+
+    CropType crop_type;
+
+    double capacity;
+
+    double progress;
+
+    double yield;
+
+    double quality;
+
+    double water_requirement;
+
+    double energy_requirement;
+
+    bool irrigation_active;
+
+} FarmField;
+
+
+/* ================================================================
+ * MARKET
+ * ================================================================ */
+
+typedef struct {
+
+    double flower_price;
+    double premium_price;
+    double hash_grade_price;
+
+    double demand;
+
+    double scarcity;
+
+    double tourism_factor;
+    double nightlife_factor;
+
+} CannabisMarket;
+
+
+/* ================================================================
+ * CONTRACT
+ * ================================================================ */
+
+typedef struct {
+
+    int id;
+
+    char customer[64];
+
+    CropType product;
+
+    double quantity;
+
+    double price;
+
+    bool active;
+
+} SupplyContract;
+
+
+/* ================================================================
+ * FARM ECONOMY
+ * ================================================================ */
+
+typedef struct {
+
+    double cash;
+
+    double revenue;
+
+    double expenses;
+
+    double profit;
+
+    double labour_cost;
+
+    double energy_cost;
+
+    double water_cost;
+
+    double logistics_cost;
+
+    double land_value;
+
+    double reputation;
+
+} FarmEconomy;
+
+
+/* ================================================================
+ * FARM
+ * ================================================================ */
+
+typedef struct {
+
+    char name[64];
+
+    FarmField fields[MAX_FIELDS];
+
+    FarmProduct products[MAX_PRODUCTS];
+
+    SupplyContract contracts[MAX_CONTRACTS];
+
+    CannabisMarket market;
+
+    FarmEconomy economy;
+
+    int field_count;
+    int product_count;
+    int contract_count;
+
+    double land_area;
+
+    bool processing_facility;
+    bool warehouse;
+    bool security_system;
+
+} CannabisFarm;
+
+
+/* ================================================================
+ * RANDOM UTILITIES
+ * ================================================================ */
+
+static double random_float(
+    double min,
+    double max
+)
+{
+    return min +
+           ((double)rand() / RAND_MAX)
+           * (max - min);
+}
+
+
+/* ================================================================
+ * CROP NAMES
+ * ================================================================ */
+
+static const char *crop_name(
+    CropType type
+)
+{
+    switch(type) {
+
+        case STANDARD_FLOWER:
+            return "Standard Flower";
+
+        case PREMIUM_FLOWER:
+            return "Premium Flower";
+
+        case HASH_GRADE:
+            return "Hash-Grade Material";
+    }
+
+    return "Unknown";
+}
+
+
+/* ================================================================
+ * INITIALISE MARKET
+ * ================================================================ */
+
+static void initialise_market(
+    CannabisFarm *farm
+)
+{
+    farm->market.flower_price =
+        18.0;
+
+    farm->market.premium_price =
+        32.0;
+
+    farm->market.hash_grade_price =
+        45.0;
+
+    farm->market.demand =
+        1.0;
+
+    farm->market.scarcity =
+        0.20;
+
+    farm->market.tourism_factor =
+        1.0;
+
+    farm->market.nightlife_factor =
+        1.0;
+}
+
+
+/* ================================================================
+ * INITIALISE FIELDS
+ * ================================================================ */
+
+static void initialise_fields(
+    CannabisFarm *farm
+)
+{
+    farm->field_count =
+        16;
+
+    for(int i = 0;
+        i < farm->field_count;
+        i++)
+    {
+        FarmField *field =
+            &farm->fields[i];
+
+        memset(
+            field,
+            0,
+            sizeof(*field)
+        );
+
+        field->id =
+            i;
+
+        field->state =
+            FIELD_EMPTY;
+
+        field->capacity =
+            random_float(
+                500.0,
+                1500.0
+            );
+
+        field->water_requirement =
+            random_float(
+                0.8,
+                1.2
+            );
+
+        field->energy_requirement =
+            random_float(
+                0.6,
+                1.1
+            );
+    }
+}
+
+
+/* ================================================================
+ * INITIALISE PRODUCTS
+ * ================================================================ */
+
+static void initialise_products(
+    CannabisFarm *farm
+)
+{
+    farm->product_count = 3;
+
+    strcpy(
+        farm->products[0].name,
+        "Isildur's Air Standard"
+    );
+
+    farm->products[0].type =
+        STANDARD_FLOWER;
+
+    farm->products[0].quality =
+        0.70;
+
+    farm->products[0].market_value =
+        18.0;
+
+
+    strcpy(
+        farm->products[1].name,
+        "Isildur's Air Reserve"
+    );
+
+    farm->products[1].type =
+        PREMIUM_FLOWER;
+
+    farm->products[1].quality =
+        0.94;
+
+    farm->products[1].market_value =
+        32.0;
+
+
+    strcpy(
+        farm->products[2].name,
+        "Isildur's Black Reserve"
+    );
+
+    farm->products[2].type =
+        HASH_GRADE;
+
+    farm->products[2].quality =
+        0.98;
+
+    farm->products[2].market_value =
+        45.0;
+}
+
+
+/* ================================================================
+ * START CROP CYCLE
+ * ================================================================ */
+
+static bool plant_field(
+    CannabisFarm *farm,
+    int field_id,
+    CropType type
+)
+{
+    if(field_id < 0 ||
+       field_id >= farm->field_count)
+        return false;
+
+    FarmField *field =
+        &farm->fields[field_id];
+
+    if(field->state !=
+       FIELD_EMPTY)
+        return false;
+
+    field->state =
+        FIELD_GROWING;
+
+    field->crop_type =
+        type;
+
+    field->progress =
+        0.0;
+
+    /*
+     * Abstract game-only production
+     * characteristics.
+     */
+
+    switch(type) {
+
+        case STANDARD_FLOWER:
+
+            field->quality =
+                random_float(
+                    0.55,
+                    0.80
+                );
+
+            break;
+
+        case PREMIUM_FLOWER:
+
+            field->quality =
+                random_float(
+                    0.80,
+                    0.98
+                );
+
+            break;
+
+        case HASH_GRADE:
+
+            field->quality =
+                random_float(
+                    0.75,
+                    1.00
+                );
+
+            break;
+    }
+
+    return true;
+}
+
+
+/* ================================================================
+ * FIELD SIMULATION
+ * ================================================================ */
+
+static void update_fields(
+    CannabisFarm *farm
+)
+{
+    for(int i = 0;
+        i < farm->field_count;
+        i++)
+    {
+        FarmField *field =
+            &farm->fields[i];
+
+        if(field->state !=
+           FIELD_GROWING)
+            continue;
+
+        /*
+         * Abstract environmental
+         * simulation.
+         */
+
+        double weather =
+            random_float(
+                0.90,
+                1.10
+            );
+
+        double infrastructure =
+            field->irrigation_active
+            ? 1.05
+            : 0.90;
+
+        double growth_rate =
+            0.035 *
+            weather *
+            infrastructure;
+
+        field->progress +=
+            growth_rate;
+
+        if(field->progress >= 1.0)
+        {
+            field->progress =
+                1.0;
+
+            field->state =
+                FIELD_READY;
+
+            /*
+             * Production yield.
+             */
+
+            field->yield =
+                field->capacity *
+                random_float(
+                    0.85,
+                    1.15
+                );
+
+            /*
+             * Environmental variance.
+             */
+
+            field->yield *=
+                weather;
+        }
+    }
+}
+
+
+/* ================================================================
+ * HARVEST
+ * ================================================================ */
+
+static void harvest_field(
+    CannabisFarm *farm,
+    int field_id
+)
+{
+    if(field_id < 0 ||
+       field_id >= farm->field_count)
+        return;
+
+    FarmField *field =
+        &farm->fields[field_id];
+
+    if(field->state !=
+       FIELD_READY)
+        return;
+
+    CropType type =
+        field->crop_type;
+
+    int product_index = 0;
+
+    if(type ==
+       PREMIUM_FLOWER)
+    {
+        product_index = 1;
+    }
+    else if(type ==
+            HASH_GRADE)
+    {
+        product_index = 2;
+    }
+
+    FarmProduct *product =
+        &farm->products[
+            product_index
+        ];
+
+    /*
+     * Quality modifies final output.
+     */
+
+    double output =
+        field->yield *
+        field->quality;
+
+    product->inventory +=
+        output;
+
+    /*
+     * Premium crops increase
+     * farm reputation.
+     */
+
+    if(field->quality > 0.90)
+    {
+        farm->economy.reputation +=
+            0.005;
+    }
+
+    field->state =
+        FIELD_HARVESTED;
+}
+
+
+/* ================================================================
+ * WEATHER EVENT
+ * ================================================================ */
+
+static void weather_event(
+    CannabisFarm *farm
+)
+{
+    double event =
+        random_float(
+            0.0,
+            1.0
+        );
+
+    if(event < 0.05)
+    {
+        printf(
+            "[WEATHER] Severe storm "
+            "reduces farm output.\n"
+        );
+
+        for(int i = 0;
+            i < farm->field_count;
+            i++)
+        {
+            if(
+                farm->fields[i].state ==
+                FIELD_GROWING
+            )
+            {
+                farm->fields[i].progress
+                    *= 0.97;
+            }
+        }
+    }
+
+    else if(event < 0.10)
+    {
+        printf(
+            "[WEATHER] Exceptional "
+            "growing conditions.\n"
+        );
+
+        for(int i = 0;
+            i < farm->field_count;
+            i++)
+        {
+            if(
+                farm->fields[i].state ==
+                FIELD_GROWING
+            )
+            {
+                farm->fields[i].progress
+                    *= 1.04;
+            }
+        }
+    }
+}
+
+
+/* ================================================================
+ * MARKET
+ * ================================================================ */
+
+static void update_market(
+    CannabisFarm *farm
+)
+{
+    farm->market.tourism_factor =
+        random_float(
+            0.90,
+            1.30
+        );
+
+    farm->market.nightlife_factor =
+        random_float(
+            0.90,
+            1.40
+        );
+
+    farm->market.demand =
+        (
+            farm->market.tourism_factor +
+            farm->market.nightlife_factor
+        ) / 2.0;
+
+    /*
+     * Total farm inventory.
+     */
+
+    double inventory = 0.0;
+
+    for(int i = 0;
+        i < farm->product_count;
+        i++)
+    {
+        inventory +=
+            farm->products[i].inventory;
+    }
+
+    /*
+     * Lower supply = greater scarcity.
+     */
+
+    farm->market.scarcity =
+        inventory < 1000.0
+        ? 0.80
+        : 0.25;
+
+    /*
+     * Dynamic prices.
+     */
+
+    farm->market.flower_price =
+        18.0 *
+        farm->market.demand *
+        (1.0 +
+         farm->market.scarcity);
+
+    farm->market.premium_price =
+        32.0 *
+        farm->market.demand *
+        (1.0 +
+         farm->market.scarcity *
+         1.15);
+
+    farm->market.hash_grade_price =
+        45.0 *
+        farm->market.demand *
+        (1.0 +
+         farm->market.scarcity *
+         1.40);
+}
+
+
+/* ================================================================
+ * SELL TO MARKET
+ * ================================================================ */
+
+static void sell_products(
+    CannabisFarm *farm
+)
+{
+    for(int i = 0;
+        i < farm->product_count;
+        i++)
+    {
+        FarmProduct *p =
+            &farm->products[i];
+
+        double demand =
+            random_float(
+                200.0,
+                1000.0
+            ) *
+            farm->market.demand;
+
+        if(demand >
+           p->inventory)
+        {
+            demand =
+                p->inventory;
+        }
+
+        if(demand <= 0)
+            continue;
+
+        double price =
+            p->market_value;
+
+        if(p->type ==
+           STANDARD_FLOWER)
+        {
+            price =
+                farm->market.flower_price;
+        }
+        else if(
+            p->type ==
+            PREMIUM_FLOWER
+        )
+        {
+            price =
+                farm->market.premium_price;
+        }
+        else
+        {
+            price =
+                farm->market.hash_grade_price;
+        }
+
+        double revenue =
+            demand * price;
+
+        p->inventory -=
+            demand;
+
+        farm->economy.revenue +=
+            revenue;
+
+        farm->economy.cash +=
+            revenue;
+    }
+}
+
+
+/* ================================================================
+ * FARM OPERATING COSTS
+ * ================================================================ */
+
+static void operating_costs(
+    CannabisFarm *farm
+)
+{
+    farm->economy.labour_cost =
+        18000.0;
+
+    farm->economy.energy_cost =
+        9000.0;
+
+    farm->economy.water_cost =
+        3500.0;
+
+    farm->economy.logistics_cost =
+        farm->economy.revenue *
+        0.05;
+
+    double total =
+        farm->economy.labour_cost +
+        farm->economy.energy_cost +
+        farm->economy.water_cost +
+        farm->economy.logistics_cost;
+
+    farm->economy.expenses +=
+        total;
+
+    farm->economy.cash -=
+        total;
+}
+
+
+/* ================================================================
+ * AUTOMATIC FIELD MANAGEMENT
+ * ================================================================ */
+
+static void farm_management(
+    CannabisFarm *farm
+)
+{
+    for(int i = 0;
+        i < farm->field_count;
+        i++)
+    {
+        FarmField *field =
+            &farm->fields[i];
+
+        if(field->state ==
+           FIELD_HARVESTED)
+        {
+            /*
+             * Reset field for next
+             * game-economy cycle.
+             */
+
+            field->state =
+                FIELD_EMPTY;
+        }
+
+        if(field->state ==
+           FIELD_EMPTY)
+        {
+            double roll =
+                random_float(
+                    0.0,
+                    1.0
+                );
+
+            if(roll < 0.55)
+            {
+                plant_field(
+                    farm,
+                    i,
+                    STANDARD_FLOWER
+                );
+            }
+            else if(roll < 0.85)
+            {
+                plant_field(
+                    farm,
+                    i,
+                    PREMIUM_FLOWER
+                );
+            }
+            else
+            {
+                plant_field(
+                    farm,
+                    i,
+                    HASH_GRADE
+                );
+            }
+
+            field->irrigation_active =
+                true;
+        }
+    }
+}
+
+
+/* ================================================================
+ * FARM TICK
+ * ================================================================ */
+
+static void farm_tick(
+    CannabisFarm *farm
+)
+{
+    weather_event(farm);
+
+    farm_management(farm);
+
+    update_fields(farm);
+
+    /*
+     * Harvest ready fields.
+     */
+
+    for(int i = 0;
+        i < farm->field_count;
+        i++)
+    {
+        if(
+            farm->fields[i].state ==
+            FIELD_READY
+        )
+        {
+            harvest_field(
+                farm,
+                i
+            );
+        }
+    }
+
+    update_market(farm);
+
+    sell_products(farm);
+
+    operating_costs(farm);
+
+    farm->economy.profit =
+        farm->economy.revenue -
+        farm->economy.expenses;
+}
+
+
+/* ================================================================
+ * DISPLAY
+ * ================================================================ */
+
+static void display_farm(
+    CannabisFarm *farm
+)
+{
+    printf(
+        "\n"
+        "====================================================\n"
+        "                 %s\n"
+        "====================================================\n",
+        farm->name
+    );
+
+    printf(
+        "Land:          %.0f acres\n",
+        farm->land_area
+    );
+
+    printf(
+        "Cash:          $%.2f\n",
+        farm->economy.cash
+    );
+
+    printf(
+        "Revenue:       $%.2f\n",
+        farm->economy.revenue
+    );
+
+    printf(
+        "Expenses:      $%.2f\n",
+        farm->economy.expenses
+    );
+
+    printf(
+        "Profit:        $%.2f\n",
+        farm->economy.profit
+    );
+
+    printf(
+        "Reputation:    %.2f\n",
+        farm->economy.reputation
+    );
+
+    printf(
+        "Market demand: %.2f\n",
+        farm->market.demand
+    );
+
+    printf(
+        "Scarcity:      %.2f\n",
+        farm->market.scarcity
+    );
+
+    printf(
+        "\nINVENTORY\n"
+    );
+
+    for(int i = 0;
+        i < farm->product_count;
+        i++)
+    {
+        printf(
+            "%-28s "
+            "Inventory: %8.1f "
+            "Quality: %.2f\n",
+
+            farm->products[i].name,
+
+            farm->products[i].inventory,
+
+            farm->products[i].quality
+        );
+    }
+
+    printf(
+        "====================================================\n"
+    );
+}
+
+
+/* ================================================================
+ * INITIALISE FARM
+ * ================================================================ */
+
+static void initialise_farm(
+    CannabisFarm *farm
+)
+{
+    memset(
+        farm,
+        0,
+        sizeof(*farm)
+    );
+
+    strcpy(
+        farm->name,
+        "Isildur's Air"
+    );
+
+    farm->land_area =
+        420.0;
+
+    farm->economy.cash =
+        5000000.0;
+
+    farm->economy.reputation =
+        0.82;
+
+    farm->economy.land_value =
+        12000000.0;
+
+    farm->processing_facility =
+        true;
+
+    farm->warehouse =
+        true;
+
+    farm->security_system =
+        true;
+
+    initialise_market(farm);
+
+    initialise_fields(farm);
+
+    initialise_products(farm);
+}
+
+
+/* ================================================================
+ * MAIN
+ * ================================================================ */
+
+int main(void)
+{
+    srand(
+        (unsigned int)time(NULL)
+    );
+
+    CannabisFarm farm;
+
+    initialise_farm(
+        &farm
+    );
+
+    printf(
+        "\n"
+        "====================================================\n"
+        "             ISILDUR'S AIR\n"
+        "       FICTIONAL FARM SIMULATION\n"
+        "====================================================\n"
+    );
+
+    /*
+     * Simulate 120 in-game days.
+     */
+
+    for(int day = 1;
+        day <= 120;
+        day++)
+    {
+        printf(
+            "\nDAY %03d\n",
+            day
+        );
+
+        farm_tick(
+            &farm
+        );
+
+        if(day % 15 == 0)
+        {
+            display_farm(
+                &farm
+            );
+        }
+    }
+
+    printf(
+        "\nFINAL FARM REPORT\n"
+    );
+
+    display_farm(
+        &farm
+    );
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
 
 
 
