@@ -1,0 +1,26 @@
+# Core dependencies -- required to import and run the engine.
+numpy>=1.26
+pydantic>=2.0
+
+# Testing.
+pytest>=8.0
+
+# --- Optional acceleration / integration dependencies -------------------
+# The engine runs correctly without any of these; each subsystem detects
+# their absence and falls back to the pure-NumPy reference path documented
+# in its module docstring. Install them to unlock:
+#
+#   scipy           faster/alternate signal-processing kernels
+#   opencv-python   real optical-flow stabilisation, Haar-cascade face
+#                   detection, faster image warps
+#   torch           a real learned object-detection model
+#                   (ai.object_detection.load_torch_detector)
+#   openai-whisper  real speech-to-text
+#                   (ai.speech_to_text.load_whisper_transcriber)
+#   librosa         richer audio feature extraction for highlight detection
+#
+# scipy>=1.11
+# opencv-python>=4.9
+# torch>=2.2
+# openai-whisper>=20231117
+# librosa>=0.10
