@@ -1,0 +1,42 @@
+[project]
+name = "icecream-x"
+version = "0.1.0"
+description = "ICECREAM-X: a physics-informed ice cream manufacturing simulator and digital twin."
+readme = "icecream_x/README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "pandas>=2.2",
+    "pydantic>=2.6",
+    "matplotlib>=3.8",
+    "plotly>=5.20",
+    "pyarrow>=15.0",
+    "sqlalchemy>=2.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+icecream-x = "icecream_x.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["icecream_x*"]
+
+[tool.pytest.ini_options]
+testpaths = ["icecream_x/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
