@@ -1,0 +1,22 @@
+# Many small, cheap iterative cores: area-optimised end of the Pareto
+# frontier (section 43). Each core is minimum-area (1 round datapath,
+# 16-word sliding schedule window) but takes ~64+ cycles per block.
+name: small_iterative
+num_cores: 64
+pipeline:
+  architecture: ITERATIVE
+  pipeline_depth: 1
+  schedule_architecture: SLIDING_WINDOW
+nonce:
+  nonce_width: 32
+  nonce_start: 0
+  nonce_stride: 1
+telemetry:
+  enabled: true
+  counter_width: 32
+clock:
+  name: core_clk
+  target_frequency_mhz: 150.0
+  enable_clock_gating: true
+enable_assertions: true
+process_node: generic/unspecified

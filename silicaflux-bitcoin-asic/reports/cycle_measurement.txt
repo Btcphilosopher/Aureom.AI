@@ -1,0 +1,51 @@
+Cycle measurements (RTL SIMULATION, Icarus Verilog) -- section 35 "RTL
+SIMULATION" category. Each figure below is a direct measurement (start
+pulse to done pulse, counted in simulated clock edges) from a dedicated
+Icarus Verilog testbench against this project's actual RTL, not a
+formula or an estimate. clk period = 10ns (100 MHz) throughout; cycle
+counts are period-independent.
+
+sha256_compressor.sv (ITERATIVE core, one block compression):
+  start -> done : 64 cycles
+  (matches design: round_cnt 0..63, one round function application per
+  cycle; see rtl/sha256/sha256_compressor.sv)
+
+sha256_double_hash.sv, use_midstate=0 (cold start -- computes midstate
+internally from the raw header's first 64 bytes, then block2, then the
+digest pass; 3 block compressions total):
+  start -> done : 198 cycles
+  (3 * 64 = 192 theoretical + 6 cycles of FSM handoff overhead between
+  states, measured directly rather than assumed)
+
+sha256_double_hash.sv, use_midstate=1 (warm/per-nonce-trial path -- the
+ONE hash_core.sv actually drives for every trial after the first; only
+block2 + digest, 2 block compressions):
+  start -> done : 132 cycles
+  (2 * 64 = 128 theoretical + 4 cycles of FSM handoff overhead)
+
+This 132-cycle figure is MEASURED_CYCLES_PER_HASH_ITERATIVE in
+python/silicaflux_bitcoin/benchmarks/performance_model.py, and is the
+basis for every "cycles/hash" and derived hashrate figure this project
+reports for the ITERATIVE core architecture. It is NOT a theoretical
+formula result (the naive 2*64=128 figure is kept alongside it, labelled
+THEORETICAL_CYCLES_PER_HASH_NAIVE, purely for comparison).
+
+sha256_pipeline.sv (PIPELINED core, spatial/streaming architecture):
+  valid_in -> corresponding valid_out : PIPELINE_DEPTH + 1 cycles
+  (verified empirically at all 7 supported depths in
+  tb/integration/tb_sha256_pipeline.sv / reports/sha256_pipeline_
+  sweep.log: depth 64 -> 65 cycles latency, ... depth 1 -> 2 cycles
+  latency; steady-state throughput is 1 new block accepted per cycle
+  regardless of depth). This is a per-BLOCK-compression figure, not a
+  per-hash (double-SHA-256 search trial) figure -- see hash_core.sv's
+  documented architecture-integration scoping note for why no
+  "cycles per hash" number is reported for this engine.
+
+How these were measured: a small dedicated testbench (not part of the
+regular correctness-verification suite) drove `start`, recorded
+$time at the start pulse and at the `done` pulse, and divided by the
+10ns clock period. Reproducible via the same DUT files used throughout
+rtl/sha256/; see this project's git history for the exact throwaway
+testbench used (tb_cycle_measure.sv / tb_dh_cycle_measure.sv), which was
+not checked in as it duplicates the pipeline's own latency instrumentation
+already present in tb_sha256_pipeline.sv for that module.

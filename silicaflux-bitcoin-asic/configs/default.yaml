@@ -1,0 +1,22 @@
+# Default SilicaFlux architecture config: a small, safe configuration
+# meant for fast simulation turnaround (unit/integration tb runs use this
+# unless a testbench says otherwise). Not a performance target.
+name: default
+num_cores: 4
+pipeline:
+  architecture: ITERATIVE
+  pipeline_depth: 1          # ignored for ITERATIVE
+  schedule_architecture: SLIDING_WINDOW
+nonce:
+  nonce_width: 32
+  nonce_start: 0
+  nonce_stride: 1
+telemetry:
+  enabled: true
+  counter_width: 32
+clock:
+  name: core_clk
+  target_frequency_mhz: 100.0
+  enable_clock_gating: false
+enable_assertions: true
+process_node: generic/unspecified

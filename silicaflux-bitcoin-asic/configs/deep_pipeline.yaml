@@ -1,0 +1,23 @@
+# Fully-unrolled 64-stage pipeline, few cores: throughput/frequency-
+# optimised end of the Pareto frontier (section 43). One new block enters
+# per clock per core; area cost is 64 round instances + full pipeline
+# register set per core, so core count is kept modest.
+name: deep_pipeline
+num_cores: 4
+pipeline:
+  architecture: PIPELINED
+  pipeline_depth: 64
+  schedule_architecture: REGISTER_PIPELINED
+nonce:
+  nonce_width: 32
+  nonce_start: 0
+  nonce_stride: 1
+telemetry:
+  enabled: true
+  counter_width: 32
+clock:
+  name: core_clk
+  target_frequency_mhz: 300.0
+  enable_clock_gating: false
+enable_assertions: true
+process_node: generic/unspecified

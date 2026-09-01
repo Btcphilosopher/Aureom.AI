@@ -1,0 +1,22 @@
+# Balanced point: a 64-core array of moderately-pipelined (8-stage) cores.
+# Meant as the "throughput array" demonstration config for
+# hash_core_array.sv / miner_top.sv system-level testbenches.
+name: array_64core
+num_cores: 64
+pipeline:
+  architecture: PIPELINED
+  pipeline_depth: 8
+  schedule_architecture: REGISTER_PIPELINED
+nonce:
+  nonce_width: 32
+  nonce_start: 0
+  nonce_stride: 1
+telemetry:
+  enabled: true
+  counter_width: 32
+clock:
+  name: core_clk
+  target_frequency_mhz: 200.0
+  enable_clock_gating: true
+enable_assertions: true
+process_node: generic/unspecified

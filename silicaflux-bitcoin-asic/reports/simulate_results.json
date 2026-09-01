@@ -1,0 +1,152 @@
+[
+  {
+    "name": "tb_sha256_ch_maj",
+    "ok": true,
+    "seconds": 0.02,
+    "output": "[PASS] tb_sha256_ch_maj: 508 cases (1016 checks) all matched\ntb/unit/tb_sha256_ch_maj.sv:47: $finish called at 508000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_sigma",
+    "ok": true,
+    "seconds": 0.03,
+    "output": "[PASS] tb_sha256_sigma: 508 cases (2032 checks) all matched\ntb/unit/tb_sha256_sigma.sv:50: $finish called at 508000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_round",
+    "ok": true,
+    "seconds": 0.04,
+    "output": "[PASS] tb_sha256_round: 492 cases (3936 checks) all matched\ntb/unit/tb_sha256_round.sv:73: $finish called at 492000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_message_schedule",
+    "ok": true,
+    "seconds": 0.07,
+    "output": "[PASS] tb_sha256_message_schedule: 40 blocks, 2560 round-checks all matched\ntb/unit/tb_sha256_message_schedule.sv:66: $finish called at 26410000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_schedule_step",
+    "ok": false,
+    "seconds": 30.12,
+    "output": "TIMEOUT after 30s"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 1})",
+    "ok": true,
+    "seconds": 0.01,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=1): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 1 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 3})",
+    "ok": true,
+    "seconds": 0.01,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=3): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 3 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 4})",
+    "ok": true,
+    "seconds": 0.01,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=4): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 4 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 8})",
+    "ok": true,
+    "seconds": 0.02,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=8): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 8 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 16})",
+    "ok": true,
+    "seconds": 0.05,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=16): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 16 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_nonce_allocator({'NUM_CORES': 64})",
+    "ok": true,
+    "seconds": 0.52,
+    "output": "[PASS] tb_nonce_allocator(NUM_CORES=64): init/step/no-duplicate checks all passed (6 scenarios x 6 rounds x 64 cores)\ntb/unit/tb_nonce_allocator.sv:83: $finish called at 6000 (1ps)\n"
+  },
+  {
+    "name": "tb_target_compare",
+    "ok": true,
+    "seconds": 0.03,
+    "output": "[PASS] tb_target_compare: nbits_expand 157/157, target_compare 154/154 all matched\ntb/unit/tb_target_compare.sv:62: $finish called at 311000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_compressor",
+    "ok": true,
+    "seconds": 1.63,
+    "output": "[PASS] tb_sha256_compressor: 404 single-block compressions all matched\ntb/integration/tb_sha256_compressor.sv:62: $finish called at 266650000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_double_hash",
+    "ok": true,
+    "seconds": 3.01,
+    "output": "[PASS] tb_sha256_double_hash: 151 headers, both raw-header and midstate-reuse paths matched Python\ntb/integration/tb_sha256_double_hash.sv:116: $finish called at 504350000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 64, 'NUM_CASES': 404})",
+    "ok": true,
+    "seconds": 4.64,
+    "output": "[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=64): 404 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 4700000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 32, 'NUM_CASES': 404})",
+    "ok": true,
+    "seconds": 14.69,
+    "output": "[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=32): 404 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 4380000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 16, 'NUM_CASES': 404})",
+    "ok": true,
+    "seconds": 24.89,
+    "output": "[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=16): 404 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 4220000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 8, 'NUM_CASES': 404})",
+    "ok": true,
+    "seconds": 44.4,
+    "output": "[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=8): 404 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 4140000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 4, 'NUM_CASES': 8})",
+    "ok": true,
+    "seconds": 2.55,
+    "output": "WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].\n[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=4): 8 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 140000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 2, 'NUM_CASES': 8})",
+    "ok": true,
+    "seconds": 6.39,
+    "output": "WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].\n[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=2): 8 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 120000 (1ps)\n"
+  },
+  {
+    "name": "tb_sha256_pipeline({'PIPELINE_DEPTH': 1, 'NUM_CASES': 8})",
+    "ok": true,
+    "seconds": 56.29,
+    "output": "WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].\nWARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].\n[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=1): 8 streamed single-block compressions all matched, in order\ntb/integration/tb_sha256_pipeline.sv:97: $finish called at 110000 (1ps)\n"
+  },
+  {
+    "name": "tb_hash_core",
+    "ok": true,
+    "seconds": 1.15,
+    "output": "[INFO] nonce_exhausted case: correctly overflowed without a false match\n[PASS] tb_hash_core: 6 nonce-search scenarios + nonce_exhausted case all correct\ntb/integration/tb_hash_core.sv:128: $finish called at 186365000 (1ps)\n"
+  },
+  {
+    "name": "tb_hash_core_array",
+    "ok": true,
+    "seconds": 0.62,
+    "output": "[INFO] search_exhausted case: array correctly reported exhaustion, no false match\n[PASS] tb_hash_core_array(NUM_CORES=4): correct winning core/nonce/hash, correct total_hashes_completed=13, all cores stopped, search_exhausted correct\ntb/system/tb_hash_core_array.sv:106: $finish called at 25555000 (1ps)\n"
+  },
+  {
+    "name": "tb_miner_top",
+    "ok": true,
+    "seconds": 2.96,
+    "output": "[INFO] scenario1 (end-to-end found): PASS\n[INFO] scenario2 (invalid target -> ERROR): PASS, error_code=1\n[INFO] scenario2 recovery (ERROR -> valid header -> found): PASS\n[INFO] scenario3 (mid-search reset -> clean recovery): PASS\n[PASS] tb_miner_top: end-to-end found, ERROR handling + recovery, and mid-search reset all correct. telemetry: cycles=3964 lifetime_hashes=116 valid_hashes=1 error_count=0\ntb/system/tb_miner_top.sv:157: $finish called at 119250000 (1ps)\n"
+  },
+  {
+    "name": "tb_formal_checker_selftest",
+    "ok": true,
+    "seconds": 0.01,
+    "output": "[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: unclean state on first cycle out of reset (busy=1 found=0 error=0 header_ready=1) at t=0\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[ASSERT-FAIL] tb_formal_checker_selftest.u_checker: header_ready and busy both 1 at t=0 (would silently accept a header mid-job)\n[PASS] tb_formal_checker_selftest: stub drove 11 cycles of a real header_ready&&busy violation -- see [ASSERT-FAIL] lines above from miner_protocol_checker confirming it was caught (checker is not vacuous)\ntb/system/tb_formal_checker_selftest.sv:70: $finish called at 112000 (1ps)\n"
+  }
+]

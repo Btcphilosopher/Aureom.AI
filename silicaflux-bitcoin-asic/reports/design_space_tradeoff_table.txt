@@ -1,0 +1,13 @@
+Architecture                                   Cells   Hashrate(H/s)      H/cell        J/hash         H/W
+----------------------------------------------------------------------------------------------------------
+sha256_compressor (iterative, 1x)             11,607         757,576       65.27           n/a         n/a
+sha256_pipeline (depth=64)                   341,729     100,000,000      292.63           n/a         n/a
+sha256_pipeline (depth=32)                   308,929     100,000,000      323.70           n/a         n/a
+sha256_pipeline (depth=16)                   292,529     100,000,000      341.85           n/a         n/a
+sha256_pipeline (depth=8)                    284,329     100,000,000      351.71           n/a         n/a
+sha256_pipeline (depth=4)                    280,229     100,000,000      356.85           n/a         n/a
+miner_top (iterative array, 1 cores)          23,832         757,576       31.79           n/a         n/a
+miner_top (iterative array, 4 cores)          83,414       3,030,303       36.33           n/a         n/a
+
+Cells: SYNTHESIS ESTIMATE (yosys generic cell library, NOT mm^2 / not a real PDK -- section 23).
+J/hash, H/W: n/a unless an explicit power assumption was supplied (section 30).

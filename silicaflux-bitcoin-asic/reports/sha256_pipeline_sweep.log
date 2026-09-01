@@ -1,0 +1,31 @@
+=== PIPELINE_DEPTH=64 NUM_CASES=404 ===
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=64): 404 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 4700000 (1ps)
+=== PIPELINE_DEPTH=32 NUM_CASES=404 ===
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=32): 404 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 4380000 (1ps)
+=== PIPELINE_DEPTH=16 NUM_CASES=404 ===
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=16): 404 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 4220000 (1ps)
+=== PIPELINE_DEPTH=8 NUM_CASES=404 ===
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=8): 404 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 4140000 (1ps)
+=== PIPELINE_DEPTH=4 NUM_CASES=8 ===
+WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=4): 8 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 140000 (1ps)
+=== PIPELINE_DEPTH=2 NUM_CASES=8 ===
+WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=2): 8 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 120000 (1ps)
+=== PIPELINE_DEPTH=1 NUM_CASES=8 ===
+=== PIPELINE_DEPTH=1 NUM_CASES=8 ===
+WARNING: tb/integration/tb_sha256_pipeline.sv:63: $readmemh(tb/vectors/compressor_state_in.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:64: $readmemh(tb/vectors/compressor_block.hex): Too many words in the file for the requested range [0:7].
+WARNING: tb/integration/tb_sha256_pipeline.sv:65: $readmemh(tb/vectors/compressor_state_out.hex): Too many words in the file for the requested range [0:7].
+[PASS] tb_sha256_pipeline(PIPELINE_DEPTH=1): 8 streamed single-block compressions all matched, in order
+tb/integration/tb_sha256_pipeline.sv:97: $finish called at 110000 (1ps)

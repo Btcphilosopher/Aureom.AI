@@ -1,0 +1,55 @@
+SilicaFlux Bitcoin SHA-256 ASIC -- Verification Report
+========================================================
+Generated: 2026-09-01T18:48:55.855967+00:00Z
+
+Stage 1: Python-only golden-model-vs-hashlib self-consistency (PYTHON scale, not RTL)
+  10 vectors: 0 mismatches (0.005s)
+  100 vectors: 0 mismatches (0.045s)
+  1000 vectors: 0 mismatches (0.401s)
+  10000 vectors: 0 mismatches (4.429s)
+  100000 vectors: 0 mismatches (43.935s)
+
+Stage 2: test-vector generation (Python golden model) for RTL simulation
+  ch_maj: 5008 cases
+  sigma: 5008 cases
+  schedule_blocks: 40 cases
+  round: 5192 cases
+  compressor: 3953 cases
+  double_hash: 801 cases
+  nbits_expand: 157 cases
+  target_compare: 154 cases
+  hash_core: 6 cases
+
+Stage 3: SystemVerilog simulation (Icarus Verilog) -- RTL vs Python-derived vectors
+  [PASS] tb_sha256_ch_maj  (0.09s)
+  [PASS] tb_sha256_sigma  (0.18s)
+  [PASS] tb_sha256_round  (0.36s)
+  [PASS] tb_sha256_message_schedule  (0.08s)
+  [PASS] tb_sha256_schedule_step  (39.63s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 1})  (0.03s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 3})  (0.02s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 4})  (0.02s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 8})  (0.02s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 16})  (0.05s)
+  [PASS] tb_nonce_allocator({'NUM_CORES': 64})  (0.53s)
+  [PASS] tb_target_compare  (0.03s)
+  [PASS] tb_sha256_compressor  (16.17s)
+  [PASS] tb_sha256_double_hash  (15.92s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 64, 'NUM_CASES': 404})  (5.37s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 32, 'NUM_CASES': 404})  (16.76s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 16, 'NUM_CASES': 404})  (28.48s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 8, 'NUM_CASES': 404})  (46.77s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 4, 'NUM_CASES': 8})  (2.65s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 2, 'NUM_CASES': 8})  (6.64s)
+  [PASS] tb_sha256_pipeline({'PIPELINE_DEPTH': 1, 'NUM_CASES': 8})  (57.87s)
+  [PASS] tb_hash_core  (4.8s)
+  [PASS] tb_hash_core_array  (0.21s)
+  [PASS] tb_miner_top  (1.19s)
+  [PASS] tb_formal_checker_selftest  (0.01s)
+
+RESULT: Python-scale self-check PASS; RTL simulation 25/25 passed; overall PASS
+
+These figures are SIMULATION results (Icarus Verilog), not synthesis
+or silicon measurements -- see reports/benchmark_report.txt and
+docs/architecture.md for the THEORETICAL / SIMULATION / SYNTHESIS
+ESTIMATE category distinctions this project maintains throughout.

@@ -1,0 +1,9 @@
+architecture,num_cores,pipeline_depth,cells,synth_seconds,hashrate_hz,hashes_per_cell,note
+"sha256_compressor (iterative, 1x)",1,,11607,4.5,757575.7575757576,65.26886857721699,cells = one round + one 16-word schedule window; area building block for the array
+sha256_pipeline (depth=64),1,64,341729,45.1,100000000.0,292.6295397815228,"hashrate column here is BLOCK-compression throughput, not full-hash search throughput -- see docstring"
+sha256_pipeline (depth=32),1,32,308929,25.26,100000000.0,323.69897290315896,"hashrate column here is BLOCK-compression throughput, not full-hash search throughput -- see docstring"
+sha256_pipeline (depth=16),1,16,292529,18.91,100000000.0,341.8464494118532,"hashrate column here is BLOCK-compression throughput, not full-hash search throughput -- see docstring"
+sha256_pipeline (depth=8),1,8,284329,15.88,100000000.0,351.7052428700555,"hashrate column here is BLOCK-compression throughput, not full-hash search throughput -- see docstring"
+sha256_pipeline (depth=4),1,4,280229,14.65,100000000.0,356.8510040002998,"hashrate column here is BLOCK-compression throughput, not full-hash search throughput -- see docstring"
+"miner_top (iterative array, 1 cores)",1,,23832,11.8,757575.7575757576,31.788173782131487,
+"miner_top (iterative array, 4 cores)",4,,83414,13.07,3030303.0303030303,36.328470404285014,

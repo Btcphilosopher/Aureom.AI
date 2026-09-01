@@ -1,0 +1,40 @@
+SHA-256 ASIC DESIGN REPORT
+==========================
+
+Generated: 2026-09-01T18:53:55.609275+00:00Z
+Architecture config: default
+
+Architecture: ITERATIVE core array (hash_core_array.sv), section 7/8
+Pipeline:     iterative (1 round/cycle); sha256_pipeline.sv (spatially
+              unrolled, 7 depths 1/2/4/8/16/32/64) verified standalone --
+              see docs/architecture.md for the integration scoping note.
+Core Count:   4
+
+RTL: all 14 section-17 modules implemented (rtl/sha256, rtl/pipeline,
+     rtl/nonce, rtl/target, rtl/control, rtl/telemetry, rtl/top)
+Simulation Status: RESULT: Python-scale self-check PASS; RTL simulation 25/25 passed; overall PASS (from a run generated 2026-09-01T18:48:55.855967+00:00Z)
+
+Hash Throughput:
+  [THEORETICAL, built on RTL-SIMULATION-MEASURED cycles/hash] 3,030,303 H/s at 100 MHz assumed clock, 4 cores
+  [SYNTHETIC DEMO, section 42] mining_simulator run: found nonce 2423943351 after 184 total hashes (simulated HW time at 100 MHz: 0.243 ms, wall-clock Python time: 114.166 ms)
+
+Cycles / Hash:
+  [RTL SIMULATION, MEASURED] 132 cycles/hash (iterative core, midstate-reuse path -- see reports/cycle_measurement.txt)
+
+Estimated Area:
+  [SYNTHESIS ESTIMATE] see reports/design_space_sweep.csv (yosys cell counts, generic tech-independent proxy, NOT mm^2) if available; otherwise not run.
+
+Estimated Frequency: [THEORETICAL target, NOT a timing-closed Fmax claim] 100 MHz
+
+Estimated Power: [ILLUSTRATIVE ASSUMPTION ONLY -- no technology-specific power analysis was run] 0.500 W assumed
+Estimated Energy / Hash: [derived from the assumption above] 1.650e-07 J/hash (6,060,606 H/W)
+
+Verification:
+  RESULT: Python-scale self-check PASS; RTL simulation 25/25 passed; overall PASS (from a run generated 2026-09-01T18:48:55.855967+00:00Z)
+  (see reports/verification_report.txt for the full per-testbench breakdown,
+   including exact vector counts per module)
+
+IMPORTANT:
+These figures represent simulation/synthesis estimates unless
+explicitly identified as silicon measurements. No silicon measurements
+exist for this design -- it has not been fabricated.
