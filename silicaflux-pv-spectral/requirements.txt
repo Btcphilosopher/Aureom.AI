@@ -1,0 +1,10 @@
+# Core (required)
+numpy>=1.24
+scipy>=1.10
+
+# Optional extras
+pandas>=2.0        # not required by any code path; convenient for post-processing sweep tables
+matplotlib>=3.7     # graphs.py's render_graphs_matplotlib degrades gracefully without it
+
+# Testing
+pytest>=7.4

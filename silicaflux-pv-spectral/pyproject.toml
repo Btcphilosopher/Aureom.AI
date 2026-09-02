@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silicaflux-pv-spectral"
+version = "0.1.0"
+description = "SilicaFlux PV Spectral Optimisation Engine -- a UV/visible/NIR photovoltaic simulation, optimisation and digital-twin laboratory."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+data = ["pandas>=2.0"]
+viz = ["matplotlib>=3.7"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+silicaflux-pv-spectral = "silicaflux_pv_spectral.main:main"
+
+[tool.setuptools.packages.find]
+include = ["silicaflux_pv_spectral*"]
+
+[tool.pytest.ini_options]
+testpaths = ["silicaflux_pv_spectral/tests"]
