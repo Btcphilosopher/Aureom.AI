@@ -1,0 +1,24 @@
+[package]
+name = "web3emu-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+web3emu-types.workspace = true
+web3emu-crypto.workspace = true
+web3emu-account.workspace = true
+web3emu-state.workspace = true
+web3emu-tx.workspace = true
+web3emu-events.workspace = true
+web3emu-trace.workspace = true
+web3emu-mempool.workspace = true
+web3emu-block.workspace = true
+web3emu-contract.workspace = true
+web3emu-execution.workspace = true
+web3emu-wallet.workspace = true
+web3emu-network.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

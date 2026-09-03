@@ -1,0 +1,11 @@
+contract Counter
+state:
+    value: integer
+method:
+    increment()
+method:
+    decrement()
+method:
+    get()
+event:
+    CounterChanged(value)

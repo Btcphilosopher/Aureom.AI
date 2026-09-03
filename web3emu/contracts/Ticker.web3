@@ -1,0 +1,11 @@
+contract Ticker
+state:
+    count: integer
+method:
+    increment()
+method:
+    decrement()
+method:
+    get()
+event:
+    TickerChanged(count)

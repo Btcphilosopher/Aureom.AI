@@ -1,0 +1,16 @@
+[package]
+name = "web3emu-mempool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+web3emu-types.workspace = true
+web3emu-tx.workspace = true
+web3emu-state.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+web3emu-crypto.workspace = true

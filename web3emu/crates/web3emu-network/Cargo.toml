@@ -1,0 +1,12 @@
+[package]
+name = "web3emu-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+web3emu-types.workspace = true
+serde.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true

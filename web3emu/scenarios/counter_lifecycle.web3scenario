@@ -1,0 +1,19 @@
+# SCENARIO 04 - contract deployment and events
+#
+# Deploys the Counter DSL contract (contracts/Counter.web3) and calls it
+# a few times. The text DSL doesn't yet support asserting contract
+# storage directly (see docs/SCENARIOS.md) - use `web3emu state <addr>
+# --json` or the Rust API to check the resulting counter value.
+#
+# Run with:
+#   web3emu scenario scenarios/counter_lifecycle.web3scenario
+
+CREATE ACCOUNT Developer BALANCE 1000000
+CREATE ACCOUNT Alice BALANCE 1000000
+DEPLOY Counter FROM Developer
+CALL Counter.increment FROM Alice
+CALL Counter.increment FROM Alice
+CALL Counter.increment FROM Developer
+CALL Counter.decrement FROM Alice
+ASSERT BLOCK HEIGHT == 5
+ASSERT Alice NONCE == 3

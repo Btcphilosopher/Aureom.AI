@@ -1,0 +1,13 @@
+{
+  "_comment": "SIMULATED ACCOUNTS - NEVER USE IN PRODUCTION. Every address below is deterministically derived (see web3emu-crypto::Keypair::from_label) from the plain-text label via SHA-256, so anyone who knows the label can derive the private key. Regenerate with `web3emu accounts` in any fresh workspace - the values are always identical.",
+  "chain_id": 31337,
+  "accounts": [
+    { "label": "Alice", "address": "0xd72a2128660ae1030dbd7ae7146db83185332f46" },
+    { "label": "Bob", "address": "0xcb1896984826bf5eec252eac5fb9cd2475e6c022" },
+    { "label": "Treasury", "address": "0x9b9c4921e8f0d2f4f3f3cf177c88c502b421fa2e" },
+    { "label": "Developer", "address": "0xd7b3c2c609e15a23f821a510aab514897c409d92" },
+    { "label": "ContractOwner", "address": "0x82c85509588e48a7cd034c31a40c9b81b1615889" },
+    { "label": "TestUser01", "address": "0x68cfdde21f7c2f188d1e81556accb7c46133df93" },
+    { "label": "TestUser02", "address": "0xdfeadc1035669f11836c5fe16d0abb7682fa408c" }
+  ]
+}

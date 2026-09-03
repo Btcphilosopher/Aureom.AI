@@ -1,0 +1,17 @@
+[package]
+name = "web3emu-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+
+[dependencies]
+web3emu-types.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+serde.workspace = true

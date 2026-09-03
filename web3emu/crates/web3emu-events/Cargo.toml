@@ -1,0 +1,10 @@
+[package]
+name = "web3emu-events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+web3emu-types.workspace = true
+serde.workspace = true

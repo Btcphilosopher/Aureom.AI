@@ -1,0 +1,13 @@
+# SCENARIO 01 - basic transfer
+#
+# The exact walkthrough from the WEB3EMU spec (section 48): two funded
+# accounts, one transfer, one balance assertion.
+#
+# Run with:
+#   web3emu scenario scenarios/basic_transfer.web3scenario
+
+CREATE ACCOUNT Alice BALANCE 10000
+CREATE ACCOUNT Bob BALANCE 1000
+TRANSFER 100 FROM Alice TO Bob
+MINE 10 BLOCKS
+ASSERT Bob BALANCE == 1100

@@ -1,0 +1,19 @@
+# Several transfers across the standard dev accounts (section 14),
+# then padding the chain forward with empty blocks and checking the
+# resulting block height - a minimal stand-in for the "network activity
+# over many blocks" scenarios described in section 79 (10/11).
+#
+# Run with:
+#   web3emu scenario scenarios/multi_account_transfers.web3scenario
+
+CREATE ACCOUNT Alice BALANCE 50000
+CREATE ACCOUNT Bob BALANCE 50000
+CREATE ACCOUNT Treasury BALANCE 500000
+TRANSFER 5000 FROM Treasury TO Alice
+TRANSFER 5000 FROM Treasury TO Bob
+TRANSFER 1000 FROM Alice TO Bob
+TRANSFER 500 FROM Bob TO Alice
+MINE 20 BLOCKS
+ASSERT BLOCK HEIGHT == 24
+ASSERT Alice BALANCE >= 53000
+ASSERT Bob BALANCE >= 53000
