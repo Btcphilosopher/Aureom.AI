@@ -1,0 +1,23 @@
+# Core runtime
+numpy>=1.26
+scipy>=1.11
+pydantic>=2.6
+fastapi>=0.110
+uvicorn>=0.29
+websockets>=12.0
+cryptography>=42.0
+
+# Optional: computer vision / perception (install for real camera pipelines)
+# opencv-python-headless>=4.9
+# torch>=2.2
+
+# Optional: geometry / point-cloud / mesh tooling
+# open3d>=0.18
+
+# Optional: developer dashboard
+# rich>=13.7
+
+# Dev / test
+pytest>=8.0
+pytest-asyncio>=0.23
+httpx>=0.27
