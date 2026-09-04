@@ -1,0 +1,47 @@
+- unit_id: gondor_spearman
+  name: Citadel Spearman
+  category: SPEARMEN
+  health: 50
+  armour: 10
+  attack: 10
+  defence: 12
+  speed: 1.8
+  attack_range: 0
+  accuracy: 0.6
+  morale: 60
+  upkeep: {FOOD: 0.4, IRON: 0.1}
+  recruit_cost: {FOOD: 25, IRON: 15, GOLD: 8}
+  recruit_time_days: 4
+  is_cavalry: false
+
+- unit_id: gondor_archer
+  name: White City Archer
+  category: ARCHERS
+  health: 35
+  armour: 5
+  attack: 12
+  defence: 5
+  speed: 2.0
+  attack_range: 5
+  accuracy: 0.7
+  morale: 55
+  upkeep: {FOOD: 0.35, WOOD: 0.1}
+  recruit_cost: {FOOD: 20, WOOD: 20, GOLD: 8}
+  recruit_time_days: 4
+  is_cavalry: false
+
+- unit_id: gondor_knight
+  name: Knight of the Stewardship
+  category: CAVALRY
+  health: 70
+  armour: 14
+  attack: 15
+  defence: 14
+  speed: 3.8
+  attack_range: 0
+  accuracy: 0.6
+  morale: 75
+  upkeep: {FOOD: 0.9, IRON: 0.2, GOLD: 0.4}
+  recruit_cost: {FOOD: 70, IRON: 30, GOLD: 40}
+  recruit_time_days: 7
+  is_cavalry: true

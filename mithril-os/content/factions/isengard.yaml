@@ -1,0 +1,15 @@
+faction_id: isengard
+name: The Iron Circle of Isengard
+culture: uruk_industrial
+species: uruk
+government: dark_lordship
+economic_model: forced_industry_raiding
+resource_priority: [IRON, WOOD, STONE, GOLD, FOOD]
+unit_cost_modifiers:
+  ELITE_INFANTRY: 0.8
+  SIEGE: 0.75
+production_modifiers:
+  IRON: 1.3
+  forced_labour: 1.4
+starting_technologies: [pit_forging, war_industry_basics]
+ai_personality: raider

@@ -1,0 +1,83 @@
+# Spec ref: 14 (technology engine — effects must alter real simulation
+# variables, read by FactionAI / ProductionSystem / combat via
+# Faction.tech_modifiers).
+- tech_id: agriculture_terracing
+  name: Terraced Agriculture
+  category: AGRICULTURE
+  age: THIRD_AGE
+  cost: {GOLD: 80, WOOD: 40}
+  prerequisites: []
+  effects: {FOOD: 1.15}
+  research_time_days: 8
+
+- tech_id: horse_breeding_basics
+  name: Horse Breeding
+  category: HORSE_BREEDING
+  age: THIRD_AGE
+  cost: {GOLD: 100, FOOD: 60}
+  prerequisites: []
+  effects: {horse_breeding: 1.2, CAVALRY_speed: 1.1}
+  research_time_days: 10
+
+- tech_id: masonry_basics
+  name: Masonry
+  category: MASONRY
+  age: THIRD_AGE
+  cost: {GOLD: 90, STONE: 50}
+  prerequisites: []
+  effects: {STONE: 1.15, fortification: 1.1}
+  research_time_days: 9
+
+- tech_id: trade_charter
+  name: Trade Charter
+  category: TRADE
+  age: THIRD_AGE
+  cost: {GOLD: 70}
+  prerequisites: []
+  effects: {trade_income: 1.2}
+  research_time_days: 6
+
+- tech_id: pit_forging
+  name: Pit Forging
+  category: METALLURGY
+  age: THIRD_AGE
+  cost: {GOLD: 90, IRON: 40}
+  prerequisites: []
+  effects: {IRON: 1.2, armour_multiplier: 1.1}
+  research_time_days: 9
+
+- tech_id: war_industry_basics
+  name: War Industry
+  category: MILITARY
+  age: THIRD_AGE
+  cost: {GOLD: 110, IRON: 60}
+  prerequisites: [pit_forging]
+  effects: {unit_recruit_speed: 1.2, forced_labour: 1.15}
+  research_time_days: 12
+
+- tech_id: improved_metallurgy
+  name: Improved Metallurgy
+  category: METALLURGY
+  age: THIRD_AGE
+  cost: {GOLD: 150, IRON: 100}
+  prerequisites: [pit_forging]
+  effects: {armour_multiplier: 1.15}
+  research_time_days: 14
+
+- tech_id: fortification_engineering
+  name: Fortification Engineering
+  category: FORTIFICATION
+  age: THIRD_AGE
+  cost: {GOLD: 160, STONE: 120}
+  prerequisites: [masonry_basics]
+  effects: {wall_health_multiplier: 1.25, fortification: 1.2}
+  research_time_days: 15
+
+- tech_id: logistics_wagons
+  name: Wagon Logistics
+  category: LOGISTICS
+  age: THIRD_AGE
+  cost: {GOLD: 100, WOOD: 80}
+  prerequisites: []
+  effects: {supply_range_multiplier: 1.2}
+  research_time_days: 10

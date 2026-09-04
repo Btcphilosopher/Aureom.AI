@@ -1,0 +1,15 @@
+faction_id: gondor
+name: The Stewardship of the White City
+culture: numenorean_descendant
+species: men
+government: stewardship
+economic_model: fortification_trade
+resource_priority: [STONE, IRON, GOLD, FOOD, WOOD]
+unit_cost_modifiers:
+  SPEARMEN: 0.9
+  SIEGE: 0.9
+production_modifiers:
+  STONE: 1.2
+  fortification: 1.25
+starting_technologies: [masonry_basics, trade_charter]
+ai_personality: balanced

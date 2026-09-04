@@ -1,0 +1,63 @@
+- unit_id: isengard_uruk_warrior
+  name: Iron Circle Uruk-warrior
+  category: ELITE_INFANTRY
+  health: 65
+  armour: 12
+  attack: 14
+  defence: 11
+  speed: 2.2
+  attack_range: 0
+  accuracy: 0.65
+  morale: 65
+  upkeep: {FOOD: 0.5, IRON: 0.2}
+  recruit_cost: {FOOD: 25, IRON: 25, GOLD: 10}
+  recruit_time_days: 3
+  is_cavalry: false
+
+- unit_id: isengard_uruk_pikeman
+  name: Iron Circle Pikeman
+  category: SPEARMEN
+  health: 50
+  armour: 9
+  attack: 11
+  defence: 13
+  speed: 1.9
+  attack_range: 0
+  accuracy: 0.55
+  morale: 55
+  upkeep: {FOOD: 0.4, IRON: 0.15}
+  recruit_cost: {FOOD: 20, IRON: 18, GOLD: 6}
+  recruit_time_days: 3
+  is_cavalry: false
+
+- unit_id: isengard_siege_ram
+  name: Iron Ram
+  category: SIEGE
+  health: 120
+  armour: 15
+  attack: 30
+  defence: 4
+  speed: 1.0
+  attack_range: 0
+  accuracy: 0.9
+  morale: 40
+  upkeep: {WOOD: 0.5, IRON: 0.5}
+  recruit_cost: {WOOD: 80, IRON: 60, GOLD: 20}
+  recruit_time_days: 8
+  is_cavalry: false
+
+- unit_id: isengard_berserker
+  name: Wild Berserker
+  category: INFANTRY
+  health: 55
+  armour: 4
+  attack: 18
+  defence: 5
+  speed: 2.6
+  attack_range: 0
+  accuracy: 0.6
+  morale: 45
+  upkeep: {FOOD: 0.5}
+  recruit_cost: {FOOD: 30, GOLD: 12}
+  recruit_time_days: 3
+  is_cavalry: false

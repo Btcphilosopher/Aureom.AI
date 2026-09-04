@@ -1,0 +1,18 @@
+# MITHRIL.OS content — original game data inspired by Tolkien-esque
+# fantasy geography; no film assets, dialogue or copyrighted text.
+# Spec ref: 07 (faction engine), 48 (faction economic models).
+faction_id: rohan
+name: The Riders of the Mark
+culture: rohirric
+species: men
+government: horse_lords
+economic_model: horse_breeding_agriculture
+resource_priority: [FOOD, WOOD, GOLD, STONE, IRON]
+unit_cost_modifiers:
+  CAVALRY: 0.85
+  INFANTRY: 1.0
+production_modifiers:
+  FOOD: 1.15
+  horse_breeding: 1.3
+starting_technologies: [agriculture_terracing, horse_breeding_basics]
+ai_personality: defender

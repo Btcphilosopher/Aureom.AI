@@ -1,0 +1,48 @@
+# Spec ref: 15 (military engine).
+- unit_id: rohan_militia
+  name: Mark Militia
+  category: INFANTRY
+  health: 45
+  armour: 6
+  attack: 9
+  defence: 8
+  speed: 2.0
+  attack_range: 0
+  accuracy: 0.6
+  morale: 55
+  upkeep: {FOOD: 0.4, GOLD: 0.1}
+  recruit_cost: {FOOD: 30, WOOD: 10, GOLD: 5}
+  recruit_time_days: 3
+  is_cavalry: false
+
+- unit_id: rohirrim_rider
+  name: Rider of the Mark
+  category: CAVALRY
+  health: 60
+  armour: 8
+  attack: 16
+  defence: 10
+  speed: 4.5
+  attack_range: 0
+  accuracy: 0.65
+  morale: 70
+  upkeep: {FOOD: 0.8, GOLD: 0.3}
+  recruit_cost: {FOOD: 60, GOLD: 25}
+  recruit_time_days: 5
+  is_cavalry: true
+
+- unit_id: rohan_scout
+  name: Mark Scout
+  category: SCOUTS
+  health: 30
+  armour: 2
+  attack: 5
+  defence: 4
+  speed: 5.0
+  attack_range: 0
+  accuracy: 0.5
+  morale: 50
+  upkeep: {FOOD: 0.3}
+  recruit_cost: {FOOD: 15, GOLD: 5}
+  recruit_time_days: 2
+  is_cavalry: true

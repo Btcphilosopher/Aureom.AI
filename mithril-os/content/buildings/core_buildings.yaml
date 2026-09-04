@@ -1,0 +1,60 @@
+# Spec ref: 10 (building engine). Shared across all three vertical-slice
+# factions; faction-specific architecture/visual variants (section 41)
+# are a rendering-layer concern, not a simulation-stat concern.
+- building_id: town_center
+  name: Town Center
+  category: civic
+  cost: {WOOD: 150, STONE: 50}
+  construction_time_days: 10
+  garrison_capacity: 20
+  required_tier: village
+  upkeep: {}
+
+- building_id: farm
+  name: Farm
+  category: economy
+  cost: {WOOD: 40}
+  construction_time_days: 3
+  produces: FOOD
+  base_output: 0.8
+  required_tier: village
+  upkeep: {}
+
+- building_id: lumber_camp
+  name: Lumber Camp
+  category: economy
+  cost: {WOOD: 30}
+  construction_time_days: 3
+  produces: WOOD
+  base_output: 0.7
+  required_tier: village
+  upkeep: {}
+
+- building_id: mine
+  name: Mine
+  category: economy
+  cost: {WOOD: 60, STONE: 20}
+  construction_time_days: 5
+  produces: IRON
+  base_output: 0.5
+  required_tier: town
+  upkeep: {}
+
+- building_id: barracks
+  name: Barracks
+  category: military
+  cost: {WOOD: 80, STONE: 30}
+  construction_time_days: 6
+  garrison_capacity: 10
+  required_tier: village
+  upkeep: {GOLD: 0.2}
+
+- building_id: watchtower
+  name: Watchtower
+  category: defence
+  cost: {STONE: 60, WOOD: 20}
+  construction_time_days: 5
+  wall_bonus: 0.15
+  garrison_capacity: 5
+  required_tier: town
+  upkeep: {GOLD: 0.1}

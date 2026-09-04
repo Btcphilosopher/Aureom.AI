@@ -1,0 +1,4 @@
+# MITHRIL.OS simulation core — deliberately minimal.
+# See docs/ARCHITECTURE.md "Why Python-first" for why heavier deps
+# (numpy, pydantic, networkx) are intentionally not required yet.
+PyYAML>=6.0
