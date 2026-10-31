@@ -1,0 +1,722 @@
+// =============================================================================
+//  SilicaFlux Compute Architecture
+// -----------------------------------------------------------------------------
+//  File        : fetch_unit.sf
+//  Language    : Silica Flux-2017
+//  Description : Speculative superscalar instruction fetch unit.
+//
+//  Pipeline    :
+//    F0 PCGEN  : fetch PC register drives I-cache and predictor lookups
+//                directly from flops. Every issued block allocates an
+//                in-flight queue (IFQ) entry whose tag travels with the
+//                I-cache request.
+//    F1 PRED   : BTB / BHT / RAS responses are resolved into a block-level
+//                prediction, recorded in the IFQ entry together with the
+//                global-history / RAS snapshot. A predicted-taken CFI
+//                redirects F0 (one-bubble taken-branch penalty) and kills the
+//                sequential block allocated in the same cycle.
+//    F2 ALIGN  : registered I-cache response is joined with the oldest IFQ
+//                entry, predecoded, validated against the prediction,
+//                lane-compacted and written to the fetch buffer.
+//
+//  Redirect priority (highest first):
+//    backend redirect > F2 replay > F2 predecode redirect > F1 prediction
+//    > sequential advance
+//
+//  Flow control :
+//    Credit based. A block issues only when IFQ occupancy plus fetch buffer
+//    occupancy is below the fetch buffer depth, so I-cache responses are
+//    always sinkable and the response channel carries no ready.
+//
+//  Protocol assumptions :
+//    * I-cache returns exactly one response per accepted request, in order.
+//    * I-cache response latency is at least one cycle.
+//    * Request payload may change while valid is held without ready
+//      (non-sticky request semantics; I-cache samples on handshake only).
+//    * redirect_i.snap is valid for every redirect cause.
+// =============================================================================
+
+module fetch_unit
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned INFLIGHT_DEPTH        = FETCH_INFLIGHT,
+  parameter int unsigned FBUF_DEPTH            = FETCH_BUF_DEPTH,
+  parameter bit          PREDECODE_REDIRECT_EN = 1'b1
+) (
+  input  logic          clk_i,
+  input  logic          rst_ni,
+
+  // ---- Frontend control ------------------------------------------------------
+  input  vaddr_t        boot_addr_i,
+  input  logic          fe_enable_i,
+  input  logic          fe_halt_i,
+  input  asid_t         asid_i,
+  input  priv_e         priv_i,
+  output logic          fe_idle_o,
+
+  // ---- Backend control-flow recovery -----------------------------------------
+  input  fe_redirect_t  redirect_i,
+  input  bp_update_t    bp_train_i,
+
+  // ---- Instruction cache -----------------------------------------------------
+  output logic          icache_req_valid_o,
+  input  logic          icache_req_ready_i,
+  output icache_req_t   icache_req_o,
+  input  logic          icache_rsp_valid_i,
+  input  icache_rsp_t   icache_rsp_i,
+  output logic          icache_inv_o,
+
+  // ---- Branch prediction -----------------------------------------------------
+  output btb_req_t      btb_req_o,
+  input  btb_rsp_t      btb_rsp_i,
+  output bht_req_t      bht_req_o,
+  input  bht_rsp_t      bht_rsp_i,
+  input  ras_top_t      ras_top_i,
+  output ras_update_t   ras_update_o,
+  output bp_update_t    bp_update_o,
+
+  // ---- Decode ----------------------------------------------------------------
+  output logic          fetch_valid_o,
+  input  logic          fetch_ready_i,
+  output fetch_pkt_t    fetch_pkt_o,
+
+  // ---- Observability ---------------------------------------------------------
+  output fe_perf_t      perf_o
+);
+
+  // ===========================================================================
+  // Local Parameters and Types
+  // ===========================================================================
+
+  localparam int unsigned IFQ_PTR_W = $clog2(INFLIGHT_DEPTH);
+  localparam int unsigned IFQ_CNT_W = $clog2(INFLIGHT_DEPTH + 1);
+  localparam int unsigned FB_PTR_W  = $clog2(FBUF_DEPTH);
+  localparam int unsigned FB_CNT_W  = $clog2(FBUF_DEPTH + 1);
+  localparam int unsigned CRD_W     = $clog2(INFLIGHT_DEPTH + FBUF_DEPTH + 1);
+
+  localparam vaddr_t      FETCH_STRIDE = vaddr_t'(FETCH_BYTES);
+  localparam vaddr_t      INSTR_STRIDE = vaddr_t'(INSTR_BYTES);
+  localparam fetch_lane_t LAST_LANE    = fetch_lane_t'(FETCH_WIDTH - 1);
+
+  typedef logic [IFQ_PTR_W-1:0] ifq_ptr_t;
+  typedef logic [IFQ_CNT_W-1:0] ifq_cnt_t;
+  typedef logic [FB_PTR_W-1:0]  fb_ptr_t;
+  typedef logic [FB_CNT_W-1:0]  fb_cnt_t;
+  typedef logic [CRD_W-1:0]     crd_t;
+  typedef logic [FETCH_LANE_W:0] lane_ext_t;
+
+  typedef enum logic [1:0] {
+    FE_BOOT  = 2'd0,
+    FE_RUN   = 2'd1,
+    FE_HALT  = 2'd2,
+    FE_FAULT = 2'd3
+  } fe_state_e;
+
+  typedef struct packed {
+    vaddr_t      pc;
+    logic        killed;
+    logic        misaligned;
+    fetch_pred_t pred;
+  } ifq_entry_t;
+
+  localparam crd_t     CRD_LIMIT = crd_t'(FBUF_DEPTH);
+  localparam ifq_cnt_t IFQ_FULL  = ifq_cnt_t'(INFLIGHT_DEPTH);
+  localparam fb_cnt_t  FB_FULL   = fb_cnt_t'(FBUF_DEPTH);
+
+  // ===========================================================================
+  // Elaboration Guards
+  // ===========================================================================
+
+  if ((INFLIGHT_DEPTH < 2) || ((INFLIGHT_DEPTH & (INFLIGHT_DEPTH - 1)) != 0)) begin : g_chk_ifq_pow2
+    $error("fetch_unit: INFLIGHT_DEPTH must be a power of two >= 2");
+  end
+  if (INFLIGHT_DEPTH > (1 << FETCH_TAG_W)) begin : g_chk_ifq_tag
+    $error("fetch_unit: INFLIGHT_DEPTH exceeds I-cache tag space");
+  end
+  if ((FBUF_DEPTH < 2) || ((FBUF_DEPTH & (FBUF_DEPTH - 1)) != 0)) begin : g_chk_fb_pow2
+    $error("fetch_unit: FBUF_DEPTH must be a power of two >= 2");
+  end
+  if ((CL_BYTES % FETCH_BYTES) != 0) begin : g_chk_line_align
+    $error("fetch_unit: fetch block must not straddle a cache line");
+  end
+
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+
+  function automatic vaddr_t sext_off(input imm_t off);
+    return {{(VADDR_W-IMM_W){off[IMM_W-1]}}, off};
+  endfunction
+
+  function automatic fetch_pred_t pred_fallthrough(input vaddr_t pc);
+    fetch_pred_t p;
+    p          = '0;
+    p.cfi_type = CFI_NONE;
+    p.cfi_lane = LAST_LANE;
+    p.target   = sf_fetch_block(pc) + FETCH_STRIDE;
+    return p;
+  endfunction
+
+  // ===========================================================================
+  // State Declarations
+  // ===========================================================================
+
+  // ---- Frontend control ------------------------------------------------------
+  fe_state_e   state_q, state_d;
+  vaddr_t      pc_q, pc_d;
+  ghist_t      ghist_q, ghist_d;
+  fetch_seq_t  seq_q;
+
+  // ---- In-flight queue -------------------------------------------------------
+  ifq_entry_t  ifq_q [INFLIGHT_DEPTH];
+  ifq_ptr_t    ifq_head_q, ifq_tail_q;
+  ifq_cnt_t    ifq_cnt_q;
+
+  // ---- F1 tracking -----------------------------------------------------------
+  logic        s1_valid_q;
+  ifq_ptr_t    s1_idx_q;
+  vaddr_t      s1_pc_q;
+
+  // ---- F2 response register --------------------------------------------------
+  logic        s2_valid_q;
+  icache_rsp_t s2_rsp_q;
+
+  // ---- Fetch buffer ----------------------------------------------------------
+  fetch_pkt_t  fb_q [FBUF_DEPTH];
+  fb_ptr_t     fb_head_q, fb_tail_q;
+  fb_cnt_t     fb_cnt_q;
+
+  // ---- Retimed outputs -------------------------------------------------------
+  bp_update_t  bp_update_q;
+  fe_perf_t    perf_q, perf_d;
+
+  // ===========================================================================
+  // Redirect Sources (declared ahead of use)
+  // ===========================================================================
+
+  logic        be_redirect;
+  logic        f2_replay;
+  logic        f2_fault;
+  logic        f2_pd_redirect;
+  logic        s1_redirect;
+  logic        kill_inflight;
+  logic        kill_alloc;
+  logic        run_ok;
+
+  assign be_redirect   = redirect_i.valid && (state_q != FE_BOOT);
+  assign kill_inflight = be_redirect || f2_replay || f2_pd_redirect || f2_fault;
+  assign kill_alloc    = kill_inflight || s1_redirect;
+  assign run_ok        = fe_enable_i && !fe_halt_i;
+
+  // ===========================================================================
+  // F0 : PC Generation and Request Issue
+  // ===========================================================================
+
+  crd_t        s0_credits_used;
+  logic        s0_credit_ok;
+  logic        s0_req_valid;
+  logic        s0_fire;
+  logic        s0_misaligned;
+  vaddr_t      s0_block;
+
+  assign s0_credits_used = crd_t'(ifq_cnt_q) + crd_t'(fb_cnt_q);
+  assign s0_credit_ok    = (ifq_cnt_q != IFQ_FULL) && (s0_credits_used < CRD_LIMIT);
+  assign s0_req_valid    = (state_q == FE_RUN) && s0_credit_ok;
+  assign s0_fire         = s0_req_valid && icache_req_ready_i;
+  assign s0_misaligned   = |pc_q[INSTR_OFF_W-1:0];
+  assign s0_block        = sf_fetch_block(pc_q);
+
+  assign icache_req_valid_o = s0_req_valid;
+  assign icache_req_o       = '{pc   : s0_block,
+                                tag  : fetch_tag_t'(ifq_tail_q),
+                                asid : asid_i,
+                                priv : priv_i};
+
+  // Lookups are qualified by the handshake: no predictor activity for blocks
+  // that are not entering the pipe.
+  assign btb_req_o = '{valid : s0_fire,
+                       pc    : pc_q,
+                       asid  : asid_i};
+
+  assign bht_req_o = '{valid : s0_fire,
+                       pc    : pc_q,
+                       ghist : ghist_q};
+
+  // ===========================================================================
+  // F1 : Prediction Resolution
+  // ===========================================================================
+
+  fetch_lane_t s1_start_lane;
+  vaddr_t      s1_block;
+  logic        s1_live;
+  logic        s1_hit;
+  logic        s1_taken;
+  vaddr_t      s1_target;
+  bp_conf_t    s1_conf;
+  fetch_pred_t s1_pred;
+
+  assign s1_start_lane = sf_fetch_lane(s1_pc_q);
+  assign s1_block      = sf_fetch_block(s1_pc_q);
+  assign s1_live       = s1_valid_q && !ifq_q[s1_idx_q].killed && !kill_inflight;
+  assign s1_hit        = btb_rsp_i.hit && (btb_rsp_i.cfi_lane >= s1_start_lane);
+
+  always_comb begin
+    s1_taken  = 1'b0;
+    s1_target = btb_rsp_i.target;
+    s1_conf   = btb_rsp_i.conf;
+    if (s1_hit) begin
+      case (btb_rsp_i.cfi_type)
+        CFI_BRANCH: begin
+          s1_taken = bht_rsp_i.taken[btb_rsp_i.cfi_lane];
+          s1_conf  = bht_rsp_i.conf[btb_rsp_i.cfi_lane];
+        end
+        CFI_RET: begin
+          s1_taken  = 1'b1;
+          s1_target = ras_top_i.valid ? ras_top_i.addr : btb_rsp_i.target;
+        end
+        CFI_JUMP,
+        CFI_CALL,
+        CFI_INDIRECT,
+        CFI_INDIRECT_CALL: begin
+          s1_taken = 1'b1;
+        end
+        default: begin
+          s1_taken = 1'b0;
+        end
+      endcase
+    end
+  end
+
+  always_comb begin
+    s1_pred              = pred_fallthrough(s1_pc_q);
+    s1_pred.btb_hit      = s1_hit;
+    s1_pred.conf         = s1_conf;
+    s1_pred.snap.ghist   = ghist_q;
+    s1_pred.snap.ras_ptr = ras_top_i.ptr;
+    if (s1_hit) begin
+      s1_pred.cfi_lane = btb_rsp_i.cfi_lane;
+      s1_pred.cfi_type = btb_rsp_i.cfi_type;
+    end
+    if (s1_taken) begin
+      s1_pred.taken  = 1'b1;
+      s1_pred.target = s1_target;
+    end
+  end
+
+  assign s1_redirect = s1_live && s1_taken;
+
+  // ===========================================================================
+  // F2 : Response Alignment, Predecode and Validation
+  // ===========================================================================
+
+  ifq_entry_t                    f2_ent;
+  logic                          f2_live;
+  logic                          f2_good;
+  vaddr_t                        f2_block;
+  fetch_lane_t                   f2_start;
+  fetch_lane_t                   f2_pred_end;
+  fetch_lane_t                   f2_end;
+  instr_t     [FETCH_WIDTH-1:0]  f2_raw;
+  predecode_t [FETCH_WIDTH-1:0]  f2_pd;
+
+  logic                          pd_jal_found;
+  fetch_lane_t                   pd_jal_lane;
+  vaddr_t                        pd_target;
+  fetch_pred_t                   f2_final_pred;
+  fetch_pkt_t                    f2_pkt;
+  logic                          f2_push;
+
+  assign f2_ent      = ifq_q[ifq_head_q];
+  assign f2_live     = s2_valid_q && !f2_ent.killed && !be_redirect;
+  assign f2_replay   = f2_live && !f2_ent.misaligned && s2_rsp_q.replay;
+  assign f2_fault    = f2_live && (f2_ent.misaligned || (!s2_rsp_q.replay && s2_rsp_q.fault));
+  assign f2_good     = f2_live && !f2_replay && !f2_fault;
+  assign f2_block    = sf_fetch_block(f2_ent.pc);
+  assign f2_start    = sf_fetch_lane(f2_ent.pc);
+  assign f2_pred_end = f2_ent.pred.taken ? f2_ent.pred.cfi_lane : LAST_LANE;
+
+  for (genvar l = 0; l < FETCH_WIDTH; l++) begin : g_lane_pd
+    assign f2_raw[l] = s2_rsp_q.data[l*ILEN +: ILEN];
+    assign f2_pd[l]  = sf_predecode(f2_raw[l]);
+  end
+
+  // ---- Unpredicted direct jump search (oldest lane wins) ---------------------
+  always_comb begin
+    pd_jal_found = 1'b0;
+    pd_jal_lane  = '0;
+    for (int l = FETCH_WIDTH - 1; l >= 0; l--) begin
+      if ((fetch_lane_t'(l) >= f2_start) &&
+          (f2_ent.pred.taken ? (fetch_lane_t'(l) < f2_pred_end)
+                             : (fetch_lane_t'(l) <= f2_pred_end)) &&
+          f2_pd[l].is_direct && sf_cfi_is_uncond(f2_pd[l].cfi_type)) begin
+        pd_jal_found = 1'b1;
+        pd_jal_lane  = fetch_lane_t'(l);
+      end
+    end
+  end
+
+  // ---- Prediction validation -------------------------------------------------
+  always_comb begin
+    vaddr_t     lane_pc;
+    predecode_t end_pd;
+
+    f2_pd_redirect = 1'b0;
+    pd_target      = f2_ent.pred.target;
+    f2_final_pred  = f2_ent.pred;
+    f2_end         = f2_pred_end;
+    end_pd         = f2_pd[f2_pred_end];
+    lane_pc        = sf_lane_pc(f2_block, f2_pred_end);
+
+    if (PREDECODE_REDIRECT_EN && f2_good) begin
+      if (pd_jal_found) begin
+        lane_pc                = sf_lane_pc(f2_block, pd_jal_lane);
+        f2_pd_redirect         = 1'b1;
+        pd_target              = lane_pc + sext_off(f2_pd[pd_jal_lane].offset);
+        f2_end                 = pd_jal_lane;
+        f2_final_pred.taken    = 1'b1;
+        f2_final_pred.cfi_lane = pd_jal_lane;
+        f2_final_pred.cfi_type = f2_pd[pd_jal_lane].cfi_type;
+        f2_final_pred.target   = pd_target;
+        f2_final_pred.conf     = '0;
+      end else if (f2_ent.pred.taken && !end_pd.is_cfi) begin
+        f2_pd_redirect         = 1'b1;
+        pd_target              = lane_pc + INSTR_STRIDE;
+        f2_final_pred.taken    = 1'b0;
+        f2_final_pred.cfi_type = CFI_NONE;
+        f2_final_pred.target   = pd_target;
+        f2_final_pred.conf     = '0;
+      end else if (f2_ent.pred.taken && end_pd.is_direct &&
+                   ((lane_pc + sext_off(end_pd.offset)) != f2_ent.pred.target)) begin
+        f2_pd_redirect         = 1'b1;
+        pd_target              = lane_pc + sext_off(end_pd.offset);
+        f2_final_pred.cfi_type = end_pd.cfi_type;
+        f2_final_pred.target   = pd_target;
+        f2_final_pred.conf     = '0;
+      end
+    end
+  end
+
+  // ---- Lane compaction and packet assembly -----------------------------------
+  always_comb begin
+    lane_ext_t src;
+
+    f2_pkt                   = '0;
+    f2_pkt.pc                = f2_ent.pc;
+    f2_pkt.seq               = seq_q;
+    f2_pkt.exc.cause         = EXC_INSTR_ACCESS_FAULT;
+    f2_pkt.pred              = f2_final_pred;
+    f2_pkt.pred.cfi_lane     = f2_final_pred.cfi_lane - f2_start;
+    f2_pkt.next_pc           = f2_final_pred.target;
+
+    for (int unsigned i = 0; i < FETCH_WIDTH; i++) begin
+      src                  = lane_ext_t'(f2_start) + lane_ext_t'(i);
+      f2_pkt.lane_cfi[i]   = CFI_NONE;
+      if (src <= lane_ext_t'(f2_end)) begin
+        f2_pkt.lane_valid[i] = 1'b1;
+        f2_pkt.instr[i]      = f2_raw[src[FETCH_LANE_W-1:0]];
+        f2_pkt.lane_cfi[i]   = f2_pd[src[FETCH_LANE_W-1:0]].cfi_type;
+      end
+    end
+
+    if (f2_fault) begin
+      f2_pkt.lane_valid      = fetch_mask_t'(1);
+      f2_pkt.instr           = '0;
+      for (int unsigned i = 0; i < FETCH_WIDTH; i++) begin
+        f2_pkt.lane_cfi[i]   = CFI_NONE;
+      end
+      f2_pkt.pred.taken      = 1'b0;
+      f2_pkt.pred.cfi_type   = CFI_NONE;
+      f2_pkt.pred.cfi_lane   = '0;
+      f2_pkt.next_pc         = f2_ent.pc;
+      f2_pkt.exc.valid       = 1'b1;
+      f2_pkt.exc.cause       = f2_ent.misaligned ? EXC_INSTR_MISALIGNED : s2_rsp_q.fault_cause;
+      f2_pkt.exc.tval        = xlen_t'(f2_ent.pc);
+    end
+  end
+
+  assign f2_push = f2_good || f2_fault;
+
+  // ===========================================================================
+  // Next-State Selection : PC, Global History, Frontend FSM
+  // ===========================================================================
+
+  always_comb begin
+    pc_d = pc_q;
+    if (state_q == FE_BOOT) begin
+      pc_d = boot_addr_i;
+    end else if (be_redirect) begin
+      pc_d = redirect_i.target;
+    end else if (f2_replay) begin
+      pc_d = f2_ent.pc;
+    end else if (f2_pd_redirect) begin
+      pc_d = pd_target;
+    end else if (s1_redirect) begin
+      pc_d = s1_target;
+    end else if (s0_fire) begin
+      pc_d = s0_block + FETCH_STRIDE;
+    end
+  end
+
+  always_comb begin
+    ghist_d = ghist_q;
+    if (be_redirect) begin
+      ghist_d = redirect_i.has_cfi
+              ? sf_ghist_advance(redirect_i.snap.ghist, redirect_i.cfi_type, redirect_i.taken)
+              : redirect_i.snap.ghist;
+    end else if (f2_replay) begin
+      ghist_d = f2_ent.pred.snap.ghist;
+    end else if (f2_pd_redirect) begin
+      ghist_d = sf_ghist_advance(f2_ent.pred.snap.ghist, f2_final_pred.cfi_type, f2_final_pred.taken);
+    end else if (s1_live) begin
+      ghist_d = sf_ghist_advance(ghist_q, s1_pred.cfi_type, s1_pred.taken);
+    end
+  end
+
+  always_comb begin
+    state_d = state_q;
+    case (state_q)
+      FE_BOOT: begin
+        state_d = run_ok ? FE_RUN : FE_HALT;
+      end
+      default: begin
+        if (be_redirect || f2_replay || f2_pd_redirect) begin
+          state_d = run_ok ? FE_RUN : FE_HALT;
+        end else if (f2_fault || (s0_fire && s0_misaligned && !kill_alloc)) begin
+          state_d = FE_FAULT;
+        end else if ((state_q == FE_RUN) && !run_ok) begin
+          state_d = FE_HALT;
+        end else if ((state_q == FE_HALT) && run_ok) begin
+          state_d = FE_RUN;
+        end
+      end
+    endcase
+  end
+
+  // ===========================================================================
+  // Return Address Stack Maintenance
+  // ===========================================================================
+
+  always_comb begin
+    ras_update_o = '0;
+    if (be_redirect) begin
+      ras_update_o.restore     = 1'b1;
+      ras_update_o.restore_ptr = redirect_i.snap.ras_ptr;
+      if (redirect_i.has_cfi && redirect_i.taken) begin
+        ras_update_o.push      = sf_cfi_is_call(redirect_i.cfi_type);
+        ras_update_o.pop       = (redirect_i.cfi_type == CFI_RET);
+        ras_update_o.push_addr = redirect_i.cfi_pc + INSTR_STRIDE;
+      end
+    end else if (f2_replay) begin
+      ras_update_o.restore     = 1'b1;
+      ras_update_o.restore_ptr = f2_ent.pred.snap.ras_ptr;
+    end else if (f2_pd_redirect) begin
+      ras_update_o.restore     = 1'b1;
+      ras_update_o.restore_ptr = f2_ent.pred.snap.ras_ptr;
+      if (f2_final_pred.taken) begin
+        ras_update_o.push      = sf_cfi_is_call(f2_final_pred.cfi_type);
+        ras_update_o.pop       = (f2_final_pred.cfi_type == CFI_RET);
+        ras_update_o.push_addr = sf_lane_pc(f2_block, f2_final_pred.cfi_lane) + INSTR_STRIDE;
+      end
+    end else if (s1_live && s1_taken) begin
+      ras_update_o.push        = sf_cfi_is_call(s1_pred.cfi_type);
+      ras_update_o.pop         = (s1_pred.cfi_type == CFI_RET);
+      ras_update_o.push_addr   = sf_lane_pc(s1_block, s1_pred.cfi_lane) + INSTR_STRIDE;
+    end
+  end
+
+  // ===========================================================================
+  // Sequential State : Control
+  // ===========================================================================
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      state_q    <= FE_BOOT;
+      pc_q       <= '0;
+      ghist_q    <= '0;
+      seq_q      <= '0;
+      s1_valid_q <= 1'b0;
+      s1_idx_q   <= '0;
+      s1_pc_q    <= '0;
+      s2_valid_q <= 1'b0;
+    end else begin
+      state_q    <= state_d;
+      pc_q       <= pc_d;
+      ghist_q    <= ghist_d;
+      s1_valid_q <= s0_fire && !kill_alloc && !s0_misaligned;
+      s2_valid_q <= icache_rsp_valid_i;
+      if (s0_fire) begin
+        s1_idx_q <= ifq_tail_q;
+        s1_pc_q  <= pc_q;
+      end
+      if (f2_push) begin
+        seq_q <= seq_q + fetch_seq_t'(1);
+      end
+    end
+  end
+
+  // ---- I-cache response capture (payload, no reset) --------------------------
+  always_ff @(posedge clk_i) begin
+    if (icache_rsp_valid_i) begin
+      s2_rsp_q <= icache_rsp_i;
+    end
+  end
+
+  // ===========================================================================
+  // Sequential State : In-Flight Queue
+  // ===========================================================================
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      ifq_head_q <= '0;
+      ifq_tail_q <= '0;
+      ifq_cnt_q  <= '0;
+    end else begin
+      if (s0_fire) begin
+        ifq_tail_q <= ifq_tail_q + ifq_ptr_t'(1);
+      end
+      if (s2_valid_q) begin
+        ifq_head_q <= ifq_head_q + ifq_ptr_t'(1);
+      end
+      ifq_cnt_q <= ifq_cnt_q + ifq_cnt_t'(s0_fire) - ifq_cnt_t'(s2_valid_q);
+    end
+  end
+
+  // Entry payload: kill broadcast, F1 prediction write, F0 allocation.
+  // Allocation targets the free tail slot and therefore never aliases the
+  // F1 entry; it is applied last so that kill_alloc governs the new entry.
+  always_ff @(posedge clk_i) begin
+    for (int unsigned i = 0; i < INFLIGHT_DEPTH; i++) begin
+      if (kill_inflight) begin
+        ifq_q[i].killed <= 1'b1;
+      end
+      if (s1_live && (s1_idx_q == ifq_ptr_t'(i))) begin
+        ifq_q[i].pred <= s1_pred;
+      end
+      if (s0_fire && (ifq_tail_q == ifq_ptr_t'(i))) begin
+        ifq_q[i] <= '{pc         : pc_q,
+                      killed     : kill_alloc,
+                      misaligned : s0_misaligned,
+                      pred       : pred_fallthrough(pc_q)};
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Sequential State : Fetch Buffer
+  // ===========================================================================
+
+  logic fb_push;
+  logic fb_pop;
+
+  assign fb_push = f2_push;
+  assign fb_pop  = fetch_valid_o && fetch_ready_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      fb_head_q <= '0;
+      fb_tail_q <= '0;
+      fb_cnt_q  <= '0;
+    end else if (be_redirect) begin
+      fb_head_q <= '0;
+      fb_tail_q <= '0;
+      fb_cnt_q  <= '0;
+    end else begin
+      if (fb_push) begin
+        fb_tail_q <= fb_tail_q + fb_ptr_t'(1);
+      end
+      if (fb_pop) begin
+        fb_head_q <= fb_head_q + fb_ptr_t'(1);
+      end
+      fb_cnt_q <= fb_cnt_q + fb_cnt_t'(fb_push) - fb_cnt_t'(fb_pop);
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (fb_push) begin
+      fb_q[fb_tail_q] <= f2_pkt;
+    end
+  end
+
+  assign fetch_valid_o = (fb_cnt_q != '0);
+  assign fetch_pkt_o   = fb_q[fb_head_q];
+
+  // ===========================================================================
+  // Auxiliary Outputs
+  // ===========================================================================
+
+  assign icache_inv_o = be_redirect && (redirect_i.cause == RDR_FENCE_I);
+  assign fe_idle_o    = (state_q != FE_RUN) && (ifq_cnt_q == '0) && (fb_cnt_q == '0);
+
+  always_comb begin
+    perf_d               = '0;
+    perf_d.fetch_fire    = s0_fire;
+    perf_d.bubble        = fetch_ready_i && !fetch_valid_o;
+    perf_d.icache_stall  = s0_req_valid && !icache_req_ready_i;
+    perf_d.credit_stall  = (state_q == FE_RUN) && !s0_credit_ok;
+    perf_d.pred_taken    = s1_live && s1_hit;
+    perf_d.pred_redirect = s1_redirect;
+    perf_d.pd_redirect   = f2_pd_redirect;
+    perf_d.be_redirect   = be_redirect;
+    perf_d.replay        = f2_replay;
+    perf_d.fault_halt    = (state_q == FE_FAULT);
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      bp_update_q <= '0;
+      perf_q      <= '0;
+    end else begin
+      bp_update_q <= bp_train_i;
+      perf_q      <= perf_d;
+    end
+  end
+
+  assign bp_update_o = bp_update_q;
+  assign perf_o      = perf_q;
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+
+`ifndef SYNTHESIS
+
+  a_rsp_in_order : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    s2_valid_q |-> (s2_rsp_q.tag == fetch_tag_t'(ifq_head_q)))
+    else $error("fetch_unit: I-cache response out of order");
+
+  a_rsp_has_owner : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    icache_rsp_valid_i |-> (ifq_cnt_q > ifq_cnt_t'(s2_valid_q)))
+    else $error("fetch_unit: I-cache response without outstanding request");
+
+  a_ifq_no_overflow : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    s0_fire |-> (ifq_cnt_q < IFQ_FULL))
+    else $error("fetch_unit: IFQ overflow");
+
+  a_fb_no_overflow : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    fb_push |-> ((fb_cnt_q < FB_FULL) || fb_pop || be_redirect))
+    else $error("fetch_unit: fetch buffer overflow");
+
+  a_req_block_aligned : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    icache_req_valid_o |-> (icache_req_o.pc[FETCH_OFF_W-1:0] == '0))
+    else $error("fetch_unit: I-cache request not block aligned");
+
+  a_pkt_lanes_contiguous : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    fetch_valid_o |-> (fetch_pkt_o.lane_valid[0] &&
+                       ((fetch_pkt_o.lane_valid & (fetch_pkt_o.lane_valid + fetch_mask_t'(1))) == '0)))
+    else $error("fetch_unit: non-contiguous lane mask");
+
+  a_pkt_stable : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (fetch_valid_o && !fetch_ready_i && !be_redirect) |=> (fetch_valid_o && $stable(fetch_pkt_o)))
+    else $error("fetch_unit: fetch packet changed under backpressure");
+
+  a_ras_exclusive : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !(ras_update_o.push && ras_update_o.pop))
+    else $error("fetch_unit: simultaneous RAS push and pop");
+
+  a_ctrl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({icache_req_valid_o, fetch_valid_o, btb_req_o.valid, bht_req_o.valid, state_q}))
+    else $error("fetch_unit: X on frontend control");
+
+`endif
+
+endmodule : fetch_unit

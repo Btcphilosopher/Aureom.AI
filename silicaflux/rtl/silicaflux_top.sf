@@ -1,0 +1,1538 @@
+// =============================================================================
+//  SilicaFlux Compute Architecture
+// -----------------------------------------------------------------------------
+//  File        : silicaflux_top.sf
+//  Language    : Silica Flux-2017
+//  Description : Compute-cluster root integration.
+//
+//  Composition :
+//    * NUM_CORES superscalar core complexes (private L1/L2, vector, tensor)
+//    * Coherent cluster fabric : address-interleaved request crossbar,
+//      response return network, multicast snoop distribution, snoop
+//      response collection, per-requester transaction tracking
+//    * NUM_LLC_BANKS shared LLC slices with integrated snoop directory
+//    * NUM_MEM_PORTS AXI memory edges (clk_i -> mem_clk_i crossing inside)
+//    * IO-coherent DMA bridge (AXI slave, clk_i domain)
+//    * Interrupt controller, debug module, trace funnel, perf monitor
+//    * Reset sequencer, per-core power/clock/reset lifecycle, fault
+//      aggregation with core containment and snoop proxying
+//
+//  Clock domains :
+//    clk_i      : cluster fabric, LLC, cores (gated per core, same tree)
+//    mem_clk_i  : AXI memory interface   (crossed in sf_axi_mem_edge)
+//    dbg_clk_i  : debug transport (DMI)  (crossed in sf_debug_module)
+//    async      : sys_rst_ni, rtc_tick_i, ext_irq_i (synchronised here)
+//
+//  Fabric contract :
+//    * Every coherent request receives exactly one completion response.
+//    * The fabric stamps the requester node ID; requester-supplied src is
+//      ignored.
+//    * Snoops to cores outside the coherence domain, or held in reset, are
+//      answered by the fabric snoop proxy (no data, final state I).
+//      Removing an active core from the domain requires a prior software
+//      cache clean of that core.
+// =============================================================================
+
+module silicaflux_top
+  import silicaflux_pkg::*;
+#(
+  // ---- Cluster sizing --------------------------------------------------------
+  parameter int unsigned NUM_CORES          = 8,
+  parameter int unsigned NUM_LLC_BANKS      = 4,
+  parameter int unsigned NUM_MEM_PORTS      = 2,
+  parameter int unsigned NUM_EXT_IRQ        = 64,
+  parameter logic [7:0]  CLUSTER_ID         = 8'h00,
+  // ---- Feature selection -----------------------------------------------------
+  parameter bit          VEC_EN             = 1'b1,
+  parameter bit          TNS_EN             = 1'b1,
+  parameter bit          DMA_EN             = 1'b1,
+  parameter bit          TRACE_EN           = 1'b1,
+  // ---- Reset defaults --------------------------------------------------------
+  parameter vaddr_t      BOOT_ADDR_RST      = 48'h0000_0001_0000,
+  parameter core_mask_t  CORE_EN_RST        = '1,
+  parameter core_mask_t  COH_DOMAIN_RST     = '1,
+  // ---- Sequencing / containment timing ---------------------------------------
+  parameter int unsigned CORE_STAGGER_CYC   = 32,
+  parameter int unsigned CORE_WAKE_CYC      = 8,
+  parameter int unsigned FABRIC_TIMEOUT_CYC = 65536,
+  parameter int unsigned DRAIN_TIMEOUT_CYC  = 16384
+) (
+  // ---- Clocks, resets, DFT ---------------------------------------------------
+  input  logic                         clk_i,
+  input  logic                         por_rst_ni,
+  input  logic                         sys_rst_ni,
+  input  logic                         mem_clk_i,
+  input  logic                         mem_rst_ni,
+  input  logic                         dbg_clk_i,
+  input  logic                         dbg_rst_ni,
+  input  logic                         rtc_tick_i,
+  input  logic                         scan_mode_i,
+  input  logic                         cluster_en_strap_i,
+
+  // ---- AXI memory master (mem_clk_i) -----------------------------------------
+  output logic    [NUM_MEM_PORTS-1:0]  m_axi_aw_valid_o,
+  input  logic    [NUM_MEM_PORTS-1:0]  m_axi_aw_ready_i,
+  output axi_aw_t [NUM_MEM_PORTS-1:0]  m_axi_aw_o,
+  output logic    [NUM_MEM_PORTS-1:0]  m_axi_w_valid_o,
+  input  logic    [NUM_MEM_PORTS-1:0]  m_axi_w_ready_i,
+  output axi_w_t  [NUM_MEM_PORTS-1:0]  m_axi_w_o,
+  input  logic    [NUM_MEM_PORTS-1:0]  m_axi_b_valid_i,
+  output logic    [NUM_MEM_PORTS-1:0]  m_axi_b_ready_o,
+  input  axi_b_t  [NUM_MEM_PORTS-1:0]  m_axi_b_i,
+  output logic    [NUM_MEM_PORTS-1:0]  m_axi_ar_valid_o,
+  input  logic    [NUM_MEM_PORTS-1:0]  m_axi_ar_ready_i,
+  output axi_ar_t [NUM_MEM_PORTS-1:0]  m_axi_ar_o,
+  input  logic    [NUM_MEM_PORTS-1:0]  m_axi_r_valid_i,
+  output logic    [NUM_MEM_PORTS-1:0]  m_axi_r_ready_o,
+  input  axi_r_t  [NUM_MEM_PORTS-1:0]  m_axi_r_i,
+
+  // ---- AXI DMA slave (clk_i) -------------------------------------------------
+  input  logic                         s_dma_aw_valid_i,
+  output logic                         s_dma_aw_ready_o,
+  input  axi_aw_t                      s_dma_aw_i,
+  input  logic                         s_dma_w_valid_i,
+  output logic                         s_dma_w_ready_o,
+  input  axi_w_t                       s_dma_w_i,
+  output logic                         s_dma_b_valid_o,
+  input  logic                         s_dma_b_ready_i,
+  output axi_b_t                       s_dma_b_o,
+  input  logic                         s_dma_ar_valid_i,
+  output logic                         s_dma_ar_ready_o,
+  input  axi_ar_t                      s_dma_ar_i,
+  output logic                         s_dma_r_valid_o,
+  input  logic                         s_dma_r_ready_i,
+  output axi_r_t                       s_dma_r_o,
+
+  // ---- Host control (APB, clk_i) ---------------------------------------------
+  input  apb_req_t                     host_apb_req_i,
+  output apb_rsp_t                     host_apb_rsp_o,
+
+  // ---- Interrupts ------------------------------------------------------------
+  input  logic    [NUM_EXT_IRQ-1:0]    ext_irq_i,
+  output logic                         cluster_irq_o,
+  output logic                         cluster_fatal_o,
+
+  // ---- Debug transport (dbg_clk_i) -------------------------------------------
+  input  logic                         dmi_req_valid_i,
+  output logic                         dmi_req_ready_o,
+  input  dmi_req_t                     dmi_req_i,
+  output logic                         dmi_rsp_valid_o,
+  input  logic                         dmi_rsp_ready_i,
+  output dmi_rsp_t                     dmi_rsp_o,
+
+  // ---- Trace egress (clk_i) --------------------------------------------------
+  output logic                         trace_valid_o,
+  input  logic                         trace_ready_i,
+  output trace_pkt_t                   trace_o,
+
+  // ---- Cluster status --------------------------------------------------------
+  output logic                         cluster_ready_o,
+  output logic                         cluster_idle_o,
+  output core_mask_t                   core_active_o
+);
+
+  // ===========================================================================
+  // Local Parameters
+  // ===========================================================================
+
+  localparam int unsigned NUM_REQ        = NUM_CORES + 1;
+  localparam int unsigned REQ_DMA        = NUM_CORES;
+  localparam int unsigned BANKS_PER_PORT = NUM_LLC_BANKS / NUM_MEM_PORTS;
+  localparam int unsigned NUM_IRQ_SRC    = NUM_EXT_IRQ + 2;
+  localparam int unsigned IRQ_SRC_FAULT  = NUM_EXT_IRQ;
+  localparam int unsigned IRQ_SRC_PMU    = NUM_EXT_IRQ + 1;
+
+  localparam int unsigned OUTST_W        = TXN_ID_W + 1;
+  localparam int unsigned SNP_OUTST_W    = SNP_ID_W + BANK_ID_W + 1;
+  localparam int unsigned STAGGER_W      = $clog2(CORE_STAGGER_CYC + 1);
+  localparam int unsigned WAKE_W         = $clog2(CORE_WAKE_CYC + 1);
+  localparam int unsigned FAB_TO_W       = $clog2(FABRIC_TIMEOUT_CYC + 1);
+  localparam int unsigned DRAIN_TO_W     = $clog2(DRAIN_TIMEOUT_CYC + 1);
+
+  localparam int unsigned FLT_CORE_BASE  = 0;
+  localparam int unsigned FLT_LLC_BASE   = FLT_CORE_BASE + NUM_CORES;
+  localparam int unsigned FLT_MEM_BASE   = FLT_LLC_BASE + NUM_LLC_BANKS;
+  localparam int unsigned FLT_DMA_IDX    = FLT_MEM_BASE + NUM_MEM_PORTS;
+  localparam int unsigned FLT_WD_BASE    = FLT_DMA_IDX + 1;
+  localparam int unsigned FLT_DRAIN_BASE = FLT_WD_BASE + NUM_REQ;
+  localparam int unsigned NUM_FLT        = FLT_DRAIN_BASE + NUM_CORES;
+  localparam int unsigned FLT_CNT_W      = 32;
+
+  typedef logic [ARB_MAX_W-1:0]   arb_vec_t;
+  typedef logic [OUTST_W-1:0]     outst_t;
+  typedef logic [SNP_OUTST_W-1:0] snp_outst_t;
+  typedef logic [FAB_TO_W-1:0]    fab_to_t;
+  typedef logic [DRAIN_TO_W-1:0]  drain_to_t;
+  typedef logic [WAKE_W-1:0]      wake_cnt_t;
+  typedef logic [STAGGER_W-1:0]   stagger_t;
+  typedef logic [FLT_CNT_W-1:0]   flt_cnt_t;
+
+  typedef enum logic [1:0] {
+    SEQ_RESET       = 2'd0,
+    SEQ_FABRIC_INIT = 2'd1,
+    SEQ_RUN         = 2'd2,
+    SEQ_WARM_DRAIN  = 2'd3
+  } seq_state_e;
+
+  typedef enum logic [1:0] {
+    CORE_OFF   = 2'd0,
+    CORE_WAKE  = 2'd1,
+    CORE_ON    = 2'd2,
+    CORE_DRAIN = 2'd3
+  } core_state_e;
+
+  typedef struct packed {
+    logic fault_irq_en;
+    logic warm_reset;
+    logic contain_en;
+    logic cluster_en;
+  } cl_ctrl_t;
+
+  localparam core_mask_t CORE_PRESENT  = core_mask_t'((64'd1 << NUM_CORES) - 64'd1);
+  localparam fab_to_t   FAB_TO_LIMIT   = fab_to_t'(FABRIC_TIMEOUT_CYC);
+  localparam drain_to_t DRAIN_TO_LIMIT = drain_to_t'(DRAIN_TIMEOUT_CYC);
+  localparam wake_cnt_t WAKE_RELOAD    = wake_cnt_t'(CORE_WAKE_CYC);
+  localparam stagger_t  STAGGER_RELOAD = stagger_t'(CORE_STAGGER_CYC);
+
+  // ===========================================================================
+  // Elaboration Guards
+  // ===========================================================================
+
+  if ((NUM_CORES < 1) || (NUM_CORES > MAX_CORES)) begin : g_chk_cores
+    $error("silicaflux_top: NUM_CORES out of range");
+  end
+  if ((NUM_LLC_BANKS < 1) || (NUM_LLC_BANKS > MAX_LLC_BANKS) ||
+      ((NUM_LLC_BANKS & (NUM_LLC_BANKS - 1)) != 0)) begin : g_chk_banks
+    $error("silicaflux_top: NUM_LLC_BANKS must be a power of two <= MAX_LLC_BANKS");
+  end
+  if ((NUM_MEM_PORTS < 1) || (NUM_MEM_PORTS > MAX_MEM_PORTS) ||
+      ((NUM_LLC_BANKS % NUM_MEM_PORTS) != 0)) begin : g_chk_mem_ports
+    $error("silicaflux_top: NUM_MEM_PORTS must divide NUM_LLC_BANKS");
+  end
+  if (NUM_REQ > ARB_MAX_W) begin : g_chk_arb_width
+    $error("silicaflux_top: requester count exceeds arbiter width");
+  end
+  if ((NUM_EXT_IRQ < 1) || (NUM_FLT > (1 << FAULT_UNIT_W) * 4)) begin : g_chk_irq
+    $error("silicaflux_top: interrupt / fault source sizing invalid");
+  end
+
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+
+  function automatic logic node_is_req(input node_id_t n, input int unsigned r);
+    return (n < NODE_ID_IO_BASE) ? (int'(n) == int'(r)) : (r == REQ_DMA);
+  endfunction
+
+  // ===========================================================================
+  // Clock / Reset Infrastructure
+  // ===========================================================================
+
+  logic                    cl_rst_n;
+  logic                    sys_rst_n_sync;
+  logic                    rtc_tick_sync;
+  logic                    rtc_tick_q;
+  logic                    rtc_tick_pulse;
+  logic [NUM_EXT_IRQ-1:0]  ext_irq_sync;
+
+  sf_rst_sync u_rst_sync_por (
+    .clk_i       (clk_i),
+    .rst_ni      (por_rst_ni),
+    .scan_mode_i (scan_mode_i),
+    .rst_no      (cl_rst_n)
+  );
+
+  sf_sync #(.WIDTH(1), .RESET_VAL(1'b0)) u_sync_sys_rst (
+    .clk_i  (clk_i),
+    .rst_ni (cl_rst_n),
+    .d_i    (sys_rst_ni),
+    .q_o    (sys_rst_n_sync)
+  );
+
+  sf_sync #(.WIDTH(1), .RESET_VAL(1'b0)) u_sync_rtc (
+    .clk_i  (clk_i),
+    .rst_ni (cl_rst_n),
+    .d_i    (rtc_tick_i),
+    .q_o    (rtc_tick_sync)
+  );
+
+  sf_sync #(.WIDTH(NUM_EXT_IRQ), .RESET_VAL(1'b0)) u_sync_ext_irq (
+    .clk_i  (clk_i),
+    .rst_ni (cl_rst_n),
+    .d_i    (ext_irq_i),
+    .q_o    (ext_irq_sync)
+  );
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) rtc_tick_q <= 1'b0;
+    else           rtc_tick_q <= rtc_tick_sync;
+  end
+
+  assign rtc_tick_pulse = rtc_tick_sync && !rtc_tick_q;
+
+  // ===========================================================================
+  // Global Signal Fabric
+  // ===========================================================================
+
+  // ---- Sequencing / lifecycle -------------------------------------------------
+  seq_state_e                seq_q, seq_d;
+  logic                      seq_run;
+  logic                      warm_rst_req;
+  logic                      fabric_ready;
+  logic                      all_cores_off;
+  stagger_t                  stagger_q;
+  logic                      stagger_slot;
+
+  core_state_e               core_state_q [NUM_CORES];
+  logic [NUM_CORES-1:0]      core_clk_en_q;
+  logic [NUM_CORES-1:0]      core_rst_n_q;
+  logic [NUM_CORES-1:0]      core_clk;
+  logic [NUM_CORES-1:0]      core_rst_n;
+  logic [NUM_CORES-1:0]      core_fenced;
+  logic [NUM_CORES-1:0]      core_req_block;
+  logic [NUM_CORES-1:0]      core_quiesce_req;
+  logic [NUM_CORES-1:0]      core_wake_req;
+  arb_vec_t                  core_wake_gnt;
+  logic [NUM_CORES-1:0]      core_drain_hang;
+
+  // ---- Cluster control registers ----------------------------------------------
+  cl_ctrl_t                  ctrl_q;
+  core_mask_t                core_en_q;
+  core_mask_t                coh_domain_q;
+  core_mask_t                core_isolated_q;
+  vaddr_t                    boot_addr_q;
+  logic [APB_DATA_W-1:0]     scratch_q;
+
+  // ---- Core complex interfaces ------------------------------------------------
+  core_status_t              core_status        [NUM_CORES];
+  logic [NUM_CORES-1:0]      core_req_valid;
+  logic [NUM_CORES-1:0]      core_req_ready;
+  coh_req_t                  core_req           [NUM_CORES];
+  logic [NUM_CORES-1:0]      core_rsp_ready;
+  logic [NUM_CORES-1:0]      core_snp_valid;
+  logic [NUM_CORES-1:0]      core_snp_ready;
+  snp_req_t                  core_snp           [NUM_CORES];
+  logic [NUM_CORES-1:0]      core_snp_rsp_valid;
+  logic [NUM_CORES-1:0]      core_snp_rsp_ready;
+  snp_rsp_t                  core_snp_rsp       [NUM_CORES];
+  dbg_core_req_t             core_dbg_req       [NUM_CORES];
+  dbg_core_rsp_t             core_dbg_rsp       [NUM_CORES];
+  logic [NUM_CORES-1:0]      core_trace_valid;
+  logic [NUM_CORES-1:0]      core_trace_ready;
+  trace_pkt_t                core_trace         [NUM_CORES];
+  core_perf_t                core_perf          [NUM_CORES];
+  fault_rec_t                core_fault         [NUM_CORES];
+  core_irq_t                 core_irq           [NUM_CORES];
+  logic [TS_W-1:0]           mtime;
+
+  // ---- Requester side of the fabric (cores + DMA) -----------------------------
+  logic [NUM_REQ-1:0]        rq_valid;
+  logic [NUM_REQ-1:0]        rq_ready;
+  coh_req_t                  rq_req             [NUM_REQ];
+  bank_id_t                  rq_bank            [NUM_REQ];
+  logic [NUM_REQ-1:0]        rs_valid;
+  logic [NUM_REQ-1:0]        rs_ready;
+  coh_rsp_t                  rs_rsp             [NUM_REQ];
+  outst_t                    outst_q            [NUM_REQ];
+  fab_to_t                   wd_cnt_q           [NUM_REQ];
+  logic [NUM_REQ-1:0]        wd_timeout;
+
+  // ---- LLC bank interfaces ----------------------------------------------------
+  logic [NUM_LLC_BANKS-1:0]  llc_init_done;
+  logic [NUM_LLC_BANKS-1:0]  bk_in_valid;
+  logic [NUM_LLC_BANKS-1:0]  bk_in_ready;
+  coh_req_t                  bk_in_req          [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  llc_rsp_valid;
+  logic [NUM_LLC_BANKS-1:0]  llc_rsp_ready;
+  coh_rsp_t                  llc_rsp            [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  llc_snp_valid;
+  logic [NUM_LLC_BANKS-1:0]  llc_snp_ready;
+  snp_req_t                  llc_snp            [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  llc_srsp_valid;
+  logic [NUM_LLC_BANKS-1:0]  llc_srsp_ready;
+  snp_rsp_t                  llc_srsp           [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  llc_mreq_valid;
+  logic [NUM_LLC_BANKS-1:0]  llc_mreq_ready;
+  mem_req_t                  llc_mreq           [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  llc_mrsp_valid;
+  logic [NUM_LLC_BANKS-1:0]  llc_mrsp_ready;
+  mem_rsp_t                  llc_mrsp           [NUM_LLC_BANKS];
+  llc_perf_t                 llc_perf           [NUM_LLC_BANKS];
+  fault_rec_t                llc_fault          [NUM_LLC_BANKS];
+
+  // ---- Memory edge interfaces -------------------------------------------------
+  logic [NUM_MEM_PORTS-1:0]  edge_ready;
+  logic [NUM_MEM_PORTS-1:0]  edge_req_valid;
+  logic [NUM_MEM_PORTS-1:0]  edge_req_ready;
+  mem_req_t                  edge_req           [NUM_MEM_PORTS];
+  logic [NUM_MEM_PORTS-1:0]  edge_rsp_valid;
+  logic [NUM_MEM_PORTS-1:0]  edge_rsp_ready;
+  mem_rsp_t                  edge_rsp           [NUM_MEM_PORTS];
+  fault_rec_t                edge_fault         [NUM_MEM_PORTS];
+
+  // ---- DMA / interrupt / debug / perf -----------------------------------------
+  logic                      dma_req_valid;
+  logic                      dma_req_ready;
+  coh_req_t                  dma_req;
+  logic                      dma_rsp_ready;
+  logic                      dma_active;
+  fault_rec_t                dma_fault;
+  logic [NUM_IRQ_SRC-1:0]    irq_src;
+  logic                      pmu_ovf_irq;
+  logic                      dbg_ndmreset;
+  apb_req_t                  apb_irq_req;
+  apb_rsp_t                  apb_irq_rsp;
+  apb_req_t                  apb_pmu_req;
+  apb_rsp_t                  apb_pmu_rsp;
+  fabric_perf_t              fabric_perf_q;
+
+  // ---- Fault telemetry --------------------------------------------------------
+  fault_rec_t                flt_in             [NUM_FLT];
+  fault_rec_t                flt_in_q           [NUM_FLT];
+  logic                      flt_ovf_q;
+  fault_rec_t                flt_rec_q;
+  flt_cnt_t                  flt_cnt_q;
+  logic                      fatal_q;
+  logic                      fault_irq_q;
+
+  // ===========================================================================
+  // Reset Sequencer
+  // ---------------------------------------------------------------------------
+  //  RESET -> FABRIC_INIT (LLC tag/data init, memory edge link-up) -> RUN.
+  //  Warm reset (pin, debug ndmreset, CSR) drains every core to OFF while the
+  //  fabric and LLC remain live, then returns to RUN. Core release is
+  //  staggered by CORE_STAGGER_CYC to bound di/dt on power-up.
+  // ===========================================================================
+
+  assign warm_rst_req = !sys_rst_n_sync || dbg_ndmreset || ctrl_q.warm_reset;
+  assign fabric_ready = (&llc_init_done) && (&edge_ready);
+  assign seq_run      = (seq_q == SEQ_RUN);
+  assign stagger_slot = seq_run && (stagger_q == '0);
+
+  always_comb begin
+    seq_d = seq_q;
+    case (seq_q)
+      SEQ_RESET:       seq_d = SEQ_FABRIC_INIT;
+      SEQ_FABRIC_INIT: if (fabric_ready)                    seq_d = SEQ_RUN;
+      SEQ_RUN:         if (warm_rst_req)                    seq_d = SEQ_WARM_DRAIN;
+      SEQ_WARM_DRAIN:  if (all_cores_off && !warm_rst_req)  seq_d = SEQ_RUN;
+      default:                                              seq_d = SEQ_RESET;
+    endcase
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      seq_q     <= SEQ_RESET;
+      stagger_q <= STAGGER_RELOAD;
+    end else begin
+      seq_q <= seq_d;
+      if (|core_wake_gnt) begin
+        stagger_q <= STAGGER_RELOAD;
+      end else if (seq_run && (stagger_q != '0)) begin
+        stagger_q <= stagger_q - stagger_t'(1);
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Core Lifecycle : power / clock / reset / quiesce / containment
+  // ---------------------------------------------------------------------------
+  //  OFF   : clock gated, reset asserted, snoops proxied
+  //  WAKE  : clock running, reset asserted for CORE_WAKE_CYC
+  //  ON    : operational
+  //  DRAIN : quiesce requested; exits once the core reports quiesced (or is
+  //          contained) and holds no fabric transactions or snoops
+  // ===========================================================================
+
+  always_comb begin
+    arb_vec_t wake_req_ext;
+    wake_req_ext  = '0;
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      wake_req_ext[c] = core_wake_req[c];
+    end
+    core_wake_gnt = stagger_slot ? sf_lowest_set(wake_req_ext) : '0;
+  end
+
+  always_comb begin
+    all_cores_off = 1'b1;
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      if (core_state_q[c] != CORE_OFF) all_cores_off = 1'b0;
+    end
+  end
+
+  for (genvar c = 0; c < NUM_CORES; c++) begin : g_core_life
+
+    core_state_e core_state_d;
+    wake_cnt_t   wake_cnt_q;
+    drain_to_t   drain_cnt_q;
+    snp_outst_t  snp_outst_q;
+    logic        eligible;
+    logic        drained;
+    logic        snp_deliver;
+    logic        snp_retire;
+
+    assign eligible    = seq_run && ctrl_q.cluster_en && core_en_q[c] && !core_isolated_q[c];
+    assign snp_deliver = core_snp_valid[c] && core_snp_ready[c];
+    assign snp_retire  = core_snp_rsp_valid[c] && core_snp_rsp_ready[c];
+    assign drained     = (core_status[c].quiesced || core_isolated_q[c]) &&
+                         (outst_q[c] == '0) && (snp_outst_q == '0) &&
+                         !snp_deliver && !rq_valid[c];
+
+    assign core_wake_req[c]    = (core_state_q[c] == CORE_OFF) && eligible;
+    assign core_fenced[c]      = (core_state_q[c] == CORE_OFF) || (core_state_q[c] == CORE_WAKE);
+    assign core_req_block[c]   = core_fenced[c] ||
+                                 ((core_state_q[c] == CORE_DRAIN) && core_isolated_q[c]);
+    assign core_quiesce_req[c] = (core_state_q[c] == CORE_DRAIN);
+    assign core_drain_hang[c]  = (core_state_q[c] == CORE_DRAIN) &&
+                                 (drain_cnt_q == (DRAIN_TO_LIMIT - drain_to_t'(1)));
+
+    always_comb begin
+      core_state_d = core_state_q[c];
+      case (core_state_q[c])
+        CORE_OFF:   if (core_wake_gnt[c])            core_state_d = CORE_WAKE;
+        CORE_WAKE:  if (!eligible)                   core_state_d = CORE_OFF;
+                    else if (wake_cnt_q == '0)       core_state_d = CORE_ON;
+        CORE_ON:    if (!eligible)                   core_state_d = CORE_DRAIN;
+        CORE_DRAIN: if (drained)                     core_state_d = CORE_OFF;
+        default:                                     core_state_d = CORE_OFF;
+      endcase
+    end
+
+    always_ff @(posedge clk_i or negedge cl_rst_n) begin
+      if (!cl_rst_n) begin
+        core_state_q[c]  <= CORE_OFF;
+        core_clk_en_q[c] <= 1'b0;
+        core_rst_n_q[c]  <= 1'b0;
+        wake_cnt_q       <= '0;
+        drain_cnt_q      <= '0;
+        snp_outst_q      <= '0;
+      end else begin
+        core_state_q[c]  <= core_state_d;
+        core_clk_en_q[c] <= (core_state_d != CORE_OFF);
+        core_rst_n_q[c]  <= (core_state_d == CORE_ON) || (core_state_d == CORE_DRAIN);
+
+        if (core_state_d == CORE_WAKE && core_state_q[c] == CORE_OFF) begin
+          wake_cnt_q <= WAKE_RELOAD;
+        end else if (wake_cnt_q != '0) begin
+          wake_cnt_q <= wake_cnt_q - wake_cnt_t'(1);
+        end
+
+        if (core_state_q[c] != CORE_DRAIN) begin
+          drain_cnt_q <= '0;
+        end else if (drain_cnt_q != DRAIN_TO_LIMIT) begin
+          drain_cnt_q <= drain_cnt_q + drain_to_t'(1);
+        end
+
+        snp_outst_q <= snp_outst_q + snp_outst_t'(snp_deliver) - snp_outst_t'(snp_retire);
+      end
+    end
+
+    // Clock gate and reset are both driven from flops; scan forces both
+    // to the cluster-level controls.
+    sf_icg u_core_icg (
+      .clk_i     (clk_i),
+      .en_i      (core_clk_en_q[c]),
+      .test_en_i (scan_mode_i),
+      .clk_o     (core_clk[c])
+    );
+
+    assign core_rst_n[c] = scan_mode_i ? cl_rst_n : core_rst_n_q[c];
+
+  end : g_core_life
+
+  // ===========================================================================
+  // Core Complexes
+  // ===========================================================================
+
+  for (genvar c = 0; c < NUM_CORES; c++) begin : g_core
+
+    sf_core_complex #(
+      .CORE_ID    (c),
+      .CLUSTER_ID (CLUSTER_ID),
+      .VEC_EN     (VEC_EN),
+      .TNS_EN     (TNS_EN)
+    ) u_core (
+      .clk_i           (core_clk[c]),
+      .rst_ni          (core_rst_n[c]),
+      .boot_addr_i     (boot_addr_q),
+      .mtime_i         (mtime),
+      .irq_i           (core_irq[c]),
+      .quiesce_req_i   (core_quiesce_req[c]),
+      .status_o        (core_status[c]),
+      .coh_req_valid_o (core_req_valid[c]),
+      .coh_req_ready_i (core_req_ready[c]),
+      .coh_req_o       (core_req[c]),
+      .coh_rsp_valid_i (rs_valid[c]),
+      .coh_rsp_ready_o (core_rsp_ready[c]),
+      .coh_rsp_i       (rs_rsp[c]),
+      .snp_req_valid_i (core_snp_valid[c]),
+      .snp_req_ready_o (core_snp_ready[c]),
+      .snp_req_i       (core_snp[c]),
+      .snp_rsp_valid_o (core_snp_rsp_valid[c]),
+      .snp_rsp_ready_i (core_snp_rsp_ready[c]),
+      .snp_rsp_o       (core_snp_rsp[c]),
+      .dbg_req_i       (core_dbg_req[c]),
+      .dbg_rsp_o       (core_dbg_rsp[c]),
+      .trace_valid_o   (core_trace_valid[c]),
+      .trace_ready_i   (core_trace_ready[c]),
+      .trace_o         (core_trace[c]),
+      .perf_o          (core_perf[c]),
+      .fault_o         (core_fault[c])
+    );
+
+  end : g_core
+
+  // ---- Requester port assembly ------------------------------------------------
+  // Fenced / contained cores are isolated from the request network and the
+  // fabric stamps the source node identity of every requester.
+  always_comb begin
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      rq_valid[c]       = core_req_valid[c] && !core_req_block[c];
+      rq_req[c]         = core_req[c];
+      rq_req[c].src     = node_id_t'(c);
+      core_req_ready[c] = rq_ready[c] && !core_req_block[c];
+    end
+    rq_valid[REQ_DMA]     = dma_req_valid;
+    rq_req[REQ_DMA]       = dma_req;
+    rq_req[REQ_DMA].src   = NODE_ID_DMA;
+    dma_req_ready         = rq_ready[REQ_DMA];
+  end
+
+  // ===========================================================================
+  // IO-Coherent DMA Bridge
+  // ===========================================================================
+
+  if (DMA_EN) begin : g_dma
+
+    sf_dma_bridge u_dma_bridge (
+      .clk_i           (clk_i),
+      .rst_ni          (cl_rst_n),
+      .enable_i        (seq_run || (seq_q == SEQ_WARM_DRAIN)),
+      .s_aw_valid_i    (s_dma_aw_valid_i),
+      .s_aw_ready_o    (s_dma_aw_ready_o),
+      .s_aw_i          (s_dma_aw_i),
+      .s_w_valid_i     (s_dma_w_valid_i),
+      .s_w_ready_o     (s_dma_w_ready_o),
+      .s_w_i           (s_dma_w_i),
+      .s_b_valid_o     (s_dma_b_valid_o),
+      .s_b_ready_i     (s_dma_b_ready_i),
+      .s_b_o           (s_dma_b_o),
+      .s_ar_valid_i    (s_dma_ar_valid_i),
+      .s_ar_ready_o    (s_dma_ar_ready_o),
+      .s_ar_i          (s_dma_ar_i),
+      .s_r_valid_o     (s_dma_r_valid_o),
+      .s_r_ready_i     (s_dma_r_ready_i),
+      .s_r_o           (s_dma_r_o),
+      .coh_req_valid_o (dma_req_valid),
+      .coh_req_ready_i (dma_req_ready),
+      .coh_req_o       (dma_req),
+      .coh_rsp_valid_i (rs_valid[REQ_DMA]),
+      .coh_rsp_ready_o (dma_rsp_ready),
+      .coh_rsp_i       (rs_rsp[REQ_DMA]),
+      .active_o        (dma_active),
+      .fault_o         (dma_fault)
+    );
+
+  end else begin : g_no_dma
+
+    assign dma_req_valid     = 1'b0;
+    assign dma_req           = '0;
+    assign dma_rsp_ready     = 1'b1;
+    assign dma_active        = 1'b0;
+    assign dma_fault         = '0;
+    assign s_dma_aw_ready_o  = 1'b0;
+    assign s_dma_w_ready_o   = 1'b0;
+    assign s_dma_b_valid_o   = 1'b0;
+    assign s_dma_b_o         = '0;
+    assign s_dma_ar_ready_o  = 1'b0;
+    assign s_dma_r_valid_o   = 1'b0;
+    assign s_dma_r_o         = '0;
+
+  end
+
+  // ===========================================================================
+  // Coherent Fabric : Request Crossbar (requesters -> LLC banks)
+  // ---------------------------------------------------------------------------
+  //  XOR-folded line interleave selects the home bank. Each bank owns a
+  //  round-robin arbiter feeding a two-entry ingress queue, which isolates
+  //  bank-side backpressure from requester-side timing.
+  // ===========================================================================
+
+  arb_vec_t                  bk_arb_req    [NUM_LLC_BANKS];
+  arb_vec_t                  bk_arb_gnt    [NUM_LLC_BANKS];
+  arb_vec_t                  bk_arb_last_q [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  bk_q_push;
+  logic [NUM_LLC_BANKS-1:0]  bk_q_full;
+  logic [NUM_LLC_BANKS-1:0]  bk_q_empty;
+  coh_req_t                  bk_q_din      [NUM_LLC_BANKS];
+
+  always_comb begin
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      rq_bank[r] = sf_llc_bank_sel(rq_req[r].addr, NUM_LLC_BANKS);
+    end
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+      bk_arb_req[b] = '0;
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        bk_arb_req[b][r] = rq_valid[r] && (rq_bank[r] == bank_id_t'(b));
+      end
+      bk_arb_gnt[b] = sf_rr_grant(bk_arb_req[b], bk_arb_last_q[b]);
+      bk_q_push[b]  = (|bk_arb_gnt[b]) && !bk_q_full[b];
+      bk_q_din[b]   = rq_req[0];
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        if (bk_arb_gnt[b][r]) bk_q_din[b] = rq_req[r];
+      end
+    end
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      rq_ready[r] = 1'b0;
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (bk_arb_gnt[b][r] && !bk_q_full[b]) rq_ready[r] = 1'b1;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) bk_arb_last_q[b] <= '0;
+    end else begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (bk_q_push[b]) bk_arb_last_q[b] <= bk_arb_gnt[b];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Coherent Fabric : Response Return (LLC banks -> requesters)
+  // ===========================================================================
+
+  arb_vec_t                  rs_arb_req    [NUM_REQ];
+  arb_vec_t                  rs_arb_gnt    [NUM_REQ];
+  arb_vec_t                  rs_arb_last_q [NUM_REQ];
+  logic [NUM_REQ-1:0]        rs_q_push;
+  logic [NUM_REQ-1:0]        rs_q_full;
+  logic [NUM_REQ-1:0]        rs_q_empty;
+  coh_rsp_t                  rs_q_din      [NUM_REQ];
+
+  always_comb begin
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      rs_arb_req[r] = '0;
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        rs_arb_req[r][b] = llc_rsp_valid[b] && node_is_req(llc_rsp[b].dst, r);
+      end
+      rs_arb_gnt[r] = sf_rr_grant(rs_arb_req[r], rs_arb_last_q[r]);
+      rs_q_push[r]  = (|rs_arb_gnt[r]) && !rs_q_full[r];
+      rs_q_din[r]   = llc_rsp[0];
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (rs_arb_gnt[r][b]) rs_q_din[r] = llc_rsp[b];
+      end
+    end
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+      llc_rsp_ready[b] = 1'b0;
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        if (rs_arb_gnt[r][b] && !rs_q_full[r]) llc_rsp_ready[b] = 1'b1;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned r = 0; r < NUM_REQ; r++) rs_arb_last_q[r] <= '0;
+    end else begin
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        if (rs_q_push[r]) rs_arb_last_q[r] <= rs_arb_gnt[r];
+      end
+    end
+  end
+
+  for (genvar r = 0; r < NUM_REQ; r++) begin : g_rsp_q
+    sf_fifo #(.T(coh_rsp_t), .DEPTH(2)) u_rsp_q (
+      .clk_i   (clk_i),
+      .rst_ni  (cl_rst_n),
+      .flush_i (1'b0),
+      .push_i  (rs_q_push[r]),
+      .data_i  (rs_q_din[r]),
+      .full_o  (rs_q_full[r]),
+      .pop_i   (rs_valid[r] && rs_ready[r]),
+      .data_o  (rs_rsp[r]),
+      .empty_o (rs_q_empty[r])
+    );
+  end : g_rsp_q
+
+  assign rs_valid = ~rs_q_empty;
+  assign rs_ready = {dma_rsp_ready, core_rsp_ready};
+
+  // ===========================================================================
+  // Transaction Tracking and Fabric Watchdog
+  // ===========================================================================
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        outst_q[r]  <= '0;
+        wd_cnt_q[r] <= '0;
+      end
+    end else begin
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        outst_q[r] <= outst_q[r] + outst_t'(rq_valid[r] && rq_ready[r])
+                                 - outst_t'(rs_valid[r] && rs_ready[r]);
+        if ((outst_q[r] == '0) || (rs_valid[r] && rs_ready[r])) begin
+          wd_cnt_q[r] <= '0;
+        end else if (wd_cnt_q[r] != FAB_TO_LIMIT) begin
+          wd_cnt_q[r] <= wd_cnt_q[r] + fab_to_t'(1);
+        end
+      end
+    end
+  end
+
+  always_comb begin
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      wd_timeout[r] = (wd_cnt_q[r] == (FAB_TO_LIMIT - fab_to_t'(1))) && (outst_q[r] != '0);
+    end
+  end
+
+  // ===========================================================================
+  // Coherent Fabric : Snoop Distribution (LLC banks -> cores)
+  // ---------------------------------------------------------------------------
+  //  Each bank holds one multicast snoop and a pending-target mask. Targets
+  //  arbitrate independently across banks; a target is retired when its
+  //  core (or the snoop proxy) accepts. The bank may issue its next snoop
+  //  once all targets have retired.
+  // ===========================================================================
+
+  snp_req_t                  sn_hold_q     [NUM_LLC_BANKS];
+  logic [NUM_CORES-1:0]      sn_pend_q     [NUM_LLC_BANKS];
+  arb_vec_t                  sn_arb_req    [NUM_CORES];
+  arb_vec_t                  sn_arb_gnt    [NUM_CORES];
+  arb_vec_t                  sn_arb_last_q [NUM_CORES];
+  logic [NUM_CORES-1:0]      sn_to_proxy;
+  logic [NUM_CORES-1:0]      sn_accept;
+  snp_req_t                  sn_sel        [NUM_CORES];
+
+  logic [NUM_CORES-1:0]      px_valid_q;
+  snp_rsp_t                  px_rsp_q      [NUM_CORES];
+  snp_rsp_t                  px_rsp_d      [NUM_CORES];
+
+  logic [NUM_CORES-1:0]      sr_valid;
+  logic [NUM_CORES-1:0]      sr_ready;
+  snp_rsp_t                  sr_rsp        [NUM_CORES];
+
+  always_comb begin
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+      llc_snp_ready[b] = (sn_pend_q[b] == '0);
+    end
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      sn_to_proxy[c] = core_fenced[c] || !coh_domain_q[c];
+      sn_arb_req[c]  = '0;
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        sn_arb_req[c][b] = sn_pend_q[b][c];
+      end
+      sn_arb_gnt[c] = sf_rr_grant(sn_arb_req[c], sn_arb_last_q[c]);
+      sn_sel[c]     = sn_hold_q[0];
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (sn_arb_gnt[c][b]) sn_sel[c] = sn_hold_q[b];
+      end
+      core_snp_valid[c] = (|sn_arb_gnt[c]) && !sn_to_proxy[c];
+      core_snp[c]       = sn_sel[c];
+      px_rsp_d[c]             = '0;
+      px_rsp_d[c].bank        = sn_sel[c].bank;
+      px_rsp_d[c].id          = sn_sel[c].id;
+      px_rsp_d[c].core        = core_id_t'(c);
+      px_rsp_d[c].final_state = COH_I;
+      sn_accept[c]      = sn_to_proxy[c] ? ((|sn_arb_gnt[c]) && !px_valid_q[c])
+                                         : (core_snp_valid[c] && core_snp_ready[c]);
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) sn_pend_q[b] <= '0;
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        sn_arb_last_q[c] <= '0;
+        px_valid_q[c]    <= 1'b0;
+      end
+    end else begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (llc_snp_valid[b] && llc_snp_ready[b]) begin
+          sn_pend_q[b] <= llc_snp[b].tgt[NUM_CORES-1:0];
+        end else begin
+          for (int unsigned c = 0; c < NUM_CORES; c++) begin
+            if (sn_accept[c] && sn_arb_gnt[c][b]) sn_pend_q[b][c] <= 1'b0;
+          end
+        end
+      end
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        if (sn_accept[c]) sn_arb_last_q[c] <= sn_arb_gnt[c];
+        if (sn_to_proxy[c] && sn_accept[c]) begin
+          px_valid_q[c] <= 1'b1;
+        end else if (px_valid_q[c] && sr_ready[c]) begin
+          px_valid_q[c] <= 1'b0;
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+      if (llc_snp_valid[b] && llc_snp_ready[b]) sn_hold_q[b] <= llc_snp[b];
+    end
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      if (sn_to_proxy[c] && sn_accept[c]) px_rsp_q[c] <= px_rsp_d[c];
+    end
+  end
+
+  // ===========================================================================
+  // Coherent Fabric : Snoop Response Collection (cores / proxy -> banks)
+  // ===========================================================================
+
+  arb_vec_t                  sr_arb_req    [NUM_LLC_BANKS];
+  arb_vec_t                  sr_arb_gnt    [NUM_LLC_BANKS];
+  arb_vec_t                  sr_arb_last_q [NUM_LLC_BANKS];
+  logic [NUM_LLC_BANKS-1:0]  sr_q_push;
+  logic [NUM_LLC_BANKS-1:0]  sr_q_full;
+  logic [NUM_LLC_BANKS-1:0]  sr_q_empty;
+  snp_rsp_t                  sr_q_din      [NUM_LLC_BANKS];
+
+  always_comb begin
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      sr_valid[c] = px_valid_q[c] || core_snp_rsp_valid[c];
+      sr_rsp[c]   = px_valid_q[c] ? px_rsp_q[c] : core_snp_rsp[c];
+    end
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+      sr_arb_req[b] = '0;
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        sr_arb_req[b][c] = sr_valid[c] && (sr_rsp[c].bank == bank_id_t'(b));
+      end
+      sr_arb_gnt[b] = sf_rr_grant(sr_arb_req[b], sr_arb_last_q[b]);
+      sr_q_push[b]  = (|sr_arb_gnt[b]) && !sr_q_full[b];
+      sr_q_din[b]   = sr_rsp[0];
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        if (sr_arb_gnt[b][c]) sr_q_din[b] = sr_rsp[c];
+      end
+    end
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      sr_ready[c] = 1'b0;
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (sr_arb_gnt[b][c] && !sr_q_full[b]) sr_ready[c] = 1'b1;
+      end
+      core_snp_rsp_ready[c] = sr_ready[c] && !px_valid_q[c];
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) sr_arb_last_q[b] <= '0;
+    end else begin
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        if (sr_q_push[b]) sr_arb_last_q[b] <= sr_arb_gnt[b];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Shared LLC Banks
+  // ===========================================================================
+
+  for (genvar b = 0; b < NUM_LLC_BANKS; b++) begin : g_llc
+
+    sf_fifo #(.T(coh_req_t), .DEPTH(2)) u_req_q (
+      .clk_i   (clk_i),
+      .rst_ni  (cl_rst_n),
+      .flush_i (1'b0),
+      .push_i  (bk_q_push[b]),
+      .data_i  (bk_q_din[b]),
+      .full_o  (bk_q_full[b]),
+      .pop_i   (bk_in_valid[b] && bk_in_ready[b]),
+      .data_o  (bk_in_req[b]),
+      .empty_o (bk_q_empty[b])
+    );
+
+    sf_fifo #(.T(snp_rsp_t), .DEPTH(2)) u_srsp_q (
+      .clk_i   (clk_i),
+      .rst_ni  (cl_rst_n),
+      .flush_i (1'b0),
+      .push_i  (sr_q_push[b]),
+      .data_i  (sr_q_din[b]),
+      .full_o  (sr_q_full[b]),
+      .pop_i   (llc_srsp_valid[b] && llc_srsp_ready[b]),
+      .data_o  (llc_srsp[b]),
+      .empty_o (sr_q_empty[b])
+    );
+
+    assign bk_in_valid[b]    = !bk_q_empty[b];
+    assign llc_srsp_valid[b] = !sr_q_empty[b];
+
+    sf_llc_bank #(
+      .BANK_ID   (b),
+      .NUM_BANKS (NUM_LLC_BANKS),
+      .NUM_CORES (NUM_CORES)
+    ) u_llc_bank (
+      .clk_i           (clk_i),
+      .rst_ni          (cl_rst_n),
+      .init_done_o     (llc_init_done[b]),
+      .req_valid_i     (bk_in_valid[b]),
+      .req_ready_o     (bk_in_ready[b]),
+      .req_i           (bk_in_req[b]),
+      .rsp_valid_o     (llc_rsp_valid[b]),
+      .rsp_ready_i     (llc_rsp_ready[b]),
+      .rsp_o           (llc_rsp[b]),
+      .snp_valid_o     (llc_snp_valid[b]),
+      .snp_ready_i     (llc_snp_ready[b]),
+      .snp_o           (llc_snp[b]),
+      .snp_rsp_valid_i (llc_srsp_valid[b]),
+      .snp_rsp_ready_o (llc_srsp_ready[b]),
+      .snp_rsp_i       (llc_srsp[b]),
+      .mem_req_valid_o (llc_mreq_valid[b]),
+      .mem_req_ready_i (llc_mreq_ready[b]),
+      .mem_req_o       (llc_mreq[b]),
+      .mem_rsp_valid_i (llc_mrsp_valid[b]),
+      .mem_rsp_ready_o (llc_mrsp_ready[b]),
+      .mem_rsp_i       (llc_mrsp[b]),
+      .perf_o          (llc_perf[b]),
+      .fault_o         (llc_fault[b])
+    );
+
+  end : g_llc
+
+  // ===========================================================================
+  // Memory Fabric : LLC banks -> AXI memory edges
+  // ---------------------------------------------------------------------------
+  //  Bank b is statically homed on port (b mod NUM_MEM_PORTS). A presented
+  //  grant is held until accepted so the edge sees a stable request.
+  // ===========================================================================
+
+  for (genvar p = 0; p < NUM_MEM_PORTS; p++) begin : g_mem
+
+    arb_vec_t  mp_req;
+    arb_vec_t  mp_gnt;
+    arb_vec_t  mp_last_q;
+    arb_vec_t  mp_hold_gnt_q;
+    logic      mp_hold_q;
+
+    always_comb begin
+      mp_req = '0;
+      for (int unsigned k = 0; k < BANKS_PER_PORT; k++) begin
+        mp_req[k] = llc_mreq_valid[k*NUM_MEM_PORTS + p];
+      end
+      mp_gnt         = mp_hold_q ? mp_hold_gnt_q : sf_rr_grant(mp_req, mp_last_q);
+      edge_req_valid[p] = |mp_gnt;
+      edge_req[p]       = llc_mreq[p];
+      for (int unsigned k = 0; k < BANKS_PER_PORT; k++) begin
+        if (mp_gnt[k]) edge_req[p] = llc_mreq[k*NUM_MEM_PORTS + p];
+      end
+    end
+
+    for (genvar k = 0; k < BANKS_PER_PORT; k++) begin : g_bank_port
+      localparam int unsigned B = k*NUM_MEM_PORTS + p;
+      assign llc_mreq_ready[B] = mp_gnt[k] && edge_req_ready[p];
+      assign llc_mrsp_valid[B] = edge_rsp_valid[p] && (edge_rsp[p].id.bank == bank_id_t'(B));
+      assign llc_mrsp[B]       = edge_rsp[p];
+    end : g_bank_port
+
+    always_comb begin
+      logic matched;
+      matched           = 1'b0;
+      edge_rsp_ready[p] = 1'b0;
+      for (int unsigned k = 0; k < BANKS_PER_PORT; k++) begin
+        if (edge_rsp[p].id.bank == bank_id_t'(k*NUM_MEM_PORTS + p)) begin
+          matched           = 1'b1;
+          edge_rsp_ready[p] = llc_mrsp_ready[k*NUM_MEM_PORTS + p];
+        end
+      end
+      if (!matched) edge_rsp_ready[p] = 1'b1;
+    end
+
+    always_ff @(posedge clk_i or negedge cl_rst_n) begin
+      if (!cl_rst_n) begin
+        mp_last_q     <= '0;
+        mp_hold_q     <= 1'b0;
+        mp_hold_gnt_q <= '0;
+      end else begin
+        mp_hold_q     <= edge_req_valid[p] && !edge_req_ready[p];
+        mp_hold_gnt_q <= mp_gnt;
+        if (edge_req_valid[p] && edge_req_ready[p]) mp_last_q <= mp_gnt;
+      end
+    end
+
+    sf_axi_mem_edge #(
+      .PORT_ID (p)
+    ) u_mem_edge (
+      .clk_i         (clk_i),
+      .rst_ni        (cl_rst_n),
+      .mem_clk_i     (mem_clk_i),
+      .mem_rst_ni    (mem_rst_ni),
+      .ready_o       (edge_ready[p]),
+      .req_valid_i   (edge_req_valid[p]),
+      .req_ready_o   (edge_req_ready[p]),
+      .req_i         (edge_req[p]),
+      .rsp_valid_o   (edge_rsp_valid[p]),
+      .rsp_ready_i   (edge_rsp_ready[p]),
+      .rsp_o         (edge_rsp[p]),
+      .m_aw_valid_o  (m_axi_aw_valid_o[p]),
+      .m_aw_ready_i  (m_axi_aw_ready_i[p]),
+      .m_aw_o        (m_axi_aw_o[p]),
+      .m_w_valid_o   (m_axi_w_valid_o[p]),
+      .m_w_ready_i   (m_axi_w_ready_i[p]),
+      .m_w_o         (m_axi_w_o[p]),
+      .m_b_valid_i   (m_axi_b_valid_i[p]),
+      .m_b_ready_o   (m_axi_b_ready_o[p]),
+      .m_b_i         (m_axi_b_i[p]),
+      .m_ar_valid_o  (m_axi_ar_valid_o[p]),
+      .m_ar_ready_i  (m_axi_ar_ready_i[p]),
+      .m_ar_o        (m_axi_ar_o[p]),
+      .m_r_valid_i   (m_axi_r_valid_i[p]),
+      .m_r_ready_o   (m_axi_r_ready_o[p]),
+      .m_r_i         (m_axi_r_i[p]),
+      .fault_o       (edge_fault[p])
+    );
+
+  end : g_mem
+
+  // ===========================================================================
+  // Host Control Interface : APB region decode
+  // ===========================================================================
+
+  logic [HOST_RGN_W-1:0]  apb_rgn;
+  logic                   apb_sel_csr;
+  logic                   apb_sel_irq;
+  logic                   apb_sel_pmu;
+  logic                   apb_access;
+  logic [CLCSR_OFF_W-1:0] csr_off;
+  logic                   csr_wr;
+  logic [APB_DATA_W-1:0]  csr_rdata;
+  logic                   csr_err;
+
+  assign apb_rgn     = host_apb_req_i.paddr[APB_ADDR_W-1:HOST_RGN_LSB];
+  assign apb_sel_csr = host_apb_req_i.psel && (apb_rgn == HOST_RGN_CLUSTER);
+  assign apb_sel_irq = host_apb_req_i.psel && (apb_rgn == HOST_RGN_IRQ);
+  assign apb_sel_pmu = host_apb_req_i.psel && (apb_rgn == HOST_RGN_PMU);
+  assign apb_access  = host_apb_req_i.psel && host_apb_req_i.penable;
+  assign csr_off     = host_apb_req_i.paddr[CLCSR_OFF_W-1:0];
+  assign csr_wr      = apb_access && apb_sel_csr && host_apb_req_i.pwrite;
+
+  always_comb begin
+    apb_irq_req      = host_apb_req_i;
+    apb_irq_req.psel = apb_sel_irq;
+    apb_pmu_req      = host_apb_req_i;
+    apb_pmu_req.psel = apb_sel_pmu;
+  end
+
+  always_comb begin
+    host_apb_rsp_o = '{prdata: '0, pready: 1'b1, pslverr: 1'b0};
+    if (apb_sel_csr) begin
+      host_apb_rsp_o.prdata  = csr_rdata;
+      host_apb_rsp_o.pslverr = csr_err;
+    end else if (apb_sel_irq) begin
+      host_apb_rsp_o = apb_irq_rsp;
+    end else if (apb_sel_pmu) begin
+      host_apb_rsp_o = apb_pmu_rsp;
+    end else if (host_apb_req_i.psel) begin
+      host_apb_rsp_o.pslverr = 1'b1;
+    end
+  end
+
+  // ===========================================================================
+  // Cluster Control Registers
+  // ===========================================================================
+
+  always_comb begin
+    csr_rdata = '0;
+    csr_err   = 1'b0;
+    case (csr_off)
+      CLCSR_ID:          csr_rdata = SF_ARCH_REVISION;
+      CLCSR_CFG:         csr_rdata = {CLUSTER_ID,
+                                      TRACE_EN, DMA_EN, TNS_EN, VEC_EN,
+                                      4'(NUM_MEM_PORTS),
+                                      8'(NUM_LLC_BANKS),
+                                      8'(NUM_CORES)};
+      CLCSR_CTRL:        csr_rdata = APB_DATA_W'(ctrl_q);
+      CLCSR_CORE_EN:     csr_rdata = APB_DATA_W'(core_en_q);
+      CLCSR_BOOT_LO:     csr_rdata = boot_addr_q[31:0];
+      CLCSR_BOOT_HI:     csr_rdata = APB_DATA_W'(boot_addr_q[VADDR_W-1:32]);
+      CLCSR_STATUS:      csr_rdata = APB_DATA_W'({fatal_q, cluster_idle_o, fabric_ready, seq_q});
+      CLCSR_CORE_STATE:  csr_rdata = {core_isolated_q, core_active_o};
+      CLCSR_ISOLATE:     csr_rdata = APB_DATA_W'(core_isolated_q);
+      CLCSR_COH_DOMAIN:  csr_rdata = APB_DATA_W'(coh_domain_q);
+      CLCSR_FAULT_STAT:  csr_rdata = APB_DATA_W'({flt_rec_q.sev, flt_rec_q.code, flt_rec_q.unit,
+                                                  flt_rec_q.src, flt_ovf_q, flt_rec_q.valid});
+      CLCSR_FAULT_ADDR0: csr_rdata = flt_rec_q.addr[31:0];
+      CLCSR_FAULT_ADDR1: csr_rdata = APB_DATA_W'(flt_rec_q.addr[PADDR_W-1:32]);
+      CLCSR_FAULT_CNT:   csr_rdata = flt_cnt_q;
+      CLCSR_SCRATCH:     csr_rdata = scratch_q;
+      default:           csr_err   = 1'b1;
+    endcase
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      ctrl_q       <= '0;
+      core_en_q    <= CORE_EN_RST;
+      coh_domain_q <= COH_DOMAIN_RST;
+      boot_addr_q  <= BOOT_ADDR_RST;
+      scratch_q    <= '0;
+    end else begin
+      if (seq_q == SEQ_RESET) begin
+        ctrl_q.cluster_en <= cluster_en_strap_i;
+      end
+      if (seq_q == SEQ_WARM_DRAIN) begin
+        ctrl_q.warm_reset <= 1'b0;
+      end
+      if (csr_wr) begin
+        case (csr_off)
+          CLCSR_CTRL:       ctrl_q       <= cl_ctrl_t'(sf_apb_merge(APB_DATA_W'(ctrl_q),
+                                                                     host_apb_req_i.pwdata,
+                                                                     host_apb_req_i.pstrb));
+          CLCSR_CORE_EN:    core_en_q    <= core_mask_t'(sf_apb_merge(APB_DATA_W'(core_en_q),
+                                                                       host_apb_req_i.pwdata,
+                                                                       host_apb_req_i.pstrb));
+          CLCSR_COH_DOMAIN: coh_domain_q <= core_mask_t'(sf_apb_merge(APB_DATA_W'(coh_domain_q),
+                                                                       host_apb_req_i.pwdata,
+                                                                       host_apb_req_i.pstrb));
+          CLCSR_BOOT_LO:    boot_addr_q[31:0] <= sf_apb_merge(boot_addr_q[31:0],
+                                                              host_apb_req_i.pwdata,
+                                                              host_apb_req_i.pstrb);
+          CLCSR_BOOT_HI:    boot_addr_q[VADDR_W-1:32] <=
+                              (VADDR_W-32)'(sf_apb_merge(APB_DATA_W'(boot_addr_q[VADDR_W-1:32]),
+                                                         host_apb_req_i.pwdata,
+                                                         host_apb_req_i.pstrb));
+          CLCSR_SCRATCH:    scratch_q    <= sf_apb_merge(scratch_q,
+                                                         host_apb_req_i.pwdata,
+                                                         host_apb_req_i.pstrb);
+          default: ;
+        endcase
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Fault Telemetry, Containment and Escalation
+  // ---------------------------------------------------------------------------
+  //  All fault sources are registered at the cluster boundary, then reduced
+  //  to a single first-fault record (highest severity, lowest index). Core
+  //  faults at or above UNCORRECTABLE isolate the originating core when
+  //  containment is enabled. Fabric timeouts and drain hangs are fatal.
+  // ===========================================================================
+
+  for (genvar c = 0; c < NUM_CORES; c++) begin : g_flt_core
+    assign flt_in[FLT_CORE_BASE + c]  = core_fenced[c] ? '0 : core_fault[c];
+    assign flt_in[FLT_DRAIN_BASE + c] = '{valid : core_drain_hang[c],
+                                          src   : FSRC_CLUSTER,
+                                          unit  : FAULT_UNIT_W'(c),
+                                          code  : FLT_DRAIN_HANG,
+                                          sev   : FSEV_FATAL,
+                                          addr  : '0};
+  end : g_flt_core
+
+  for (genvar b = 0; b < NUM_LLC_BANKS; b++) begin : g_flt_llc
+    assign flt_in[FLT_LLC_BASE + b] = llc_fault[b];
+  end : g_flt_llc
+
+  for (genvar p = 0; p < NUM_MEM_PORTS; p++) begin : g_flt_mem
+    assign flt_in[FLT_MEM_BASE + p] = edge_fault[p];
+  end : g_flt_mem
+
+  for (genvar r = 0; r < NUM_REQ; r++) begin : g_flt_wd
+    assign flt_in[FLT_WD_BASE + r] = '{valid : wd_timeout[r],
+                                       src   : FSRC_FABRIC,
+                                       unit  : FAULT_UNIT_W'(r),
+                                       code  : FLT_TIMEOUT,
+                                       sev   : FSEV_FATAL,
+                                       addr  : '0};
+  end : g_flt_wd
+
+  assign flt_in[FLT_DMA_IDX] = dma_fault;
+
+  fault_rec_t flt_sel;
+  logic       flt_any;
+  logic       flt_fatal_any;
+  flt_cnt_t   flt_num;
+
+  always_comb begin
+    fault_sev_e max_sev;
+    max_sev       = FSEV_CORRECTED;
+    flt_any       = 1'b0;
+    flt_fatal_any = 1'b0;
+    flt_num       = '0;
+    for (int unsigned i = 0; i < NUM_FLT; i++) begin
+      if (flt_in_q[i].valid) begin
+        flt_any = 1'b1;
+        flt_num = flt_num + flt_cnt_t'(1);
+        if (flt_in_q[i].sev > max_sev) max_sev = flt_in_q[i].sev;
+        if ((flt_in_q[i].sev == FSEV_FATAL) ||
+            ((flt_in_q[i].sev == FSEV_UNCORRECTABLE) && (flt_in_q[i].src != FSRC_CORE))) begin
+          flt_fatal_any = 1'b1;
+        end
+      end
+    end
+    flt_sel = '0;
+    for (int i = NUM_FLT - 1; i >= 0; i--) begin
+      if (flt_in_q[i].valid && (flt_in_q[i].sev == max_sev)) flt_sel = flt_in_q[i];
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      for (int unsigned i = 0; i < NUM_FLT; i++) flt_in_q[i] <= '0;
+      flt_ovf_q       <= 1'b0;
+      flt_rec_q       <= '0;
+      flt_cnt_q       <= '0;
+      fatal_q         <= 1'b0;
+      fault_irq_q     <= 1'b0;
+      core_isolated_q <= '0;
+    end else begin
+      for (int unsigned i = 0; i < NUM_FLT; i++) flt_in_q[i] <= flt_in[i];
+
+      if (flt_any) begin
+        if (!flt_rec_q.valid) begin
+          flt_rec_q   <= flt_sel;
+        end else begin
+          flt_ovf_q   <= 1'b1;
+        end
+        flt_cnt_q <= ((flt_cnt_q + flt_num) < flt_cnt_q) ? '1 : (flt_cnt_q + flt_num);
+      end
+
+      if (csr_wr && (csr_off == CLCSR_FAULT_STAT) && host_apb_req_i.pstrb[0]) begin
+        if (host_apb_req_i.pwdata[0]) flt_rec_q.valid <= 1'b0;
+        if (host_apb_req_i.pwdata[1]) flt_ovf_q   <= 1'b0;
+      end
+
+      if (flt_fatal_any) fatal_q <= 1'b1;
+
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        if (ctrl_q.contain_en && sf_fault_contains(flt_in_q[FLT_CORE_BASE + c])) begin
+          core_isolated_q[c] <= 1'b1;
+        end else if (csr_wr && (csr_off == CLCSR_ISOLATE) &&
+                     host_apb_req_i.pstrb[c/8] && host_apb_req_i.pwdata[c]) begin
+          core_isolated_q[c] <= 1'b0;
+        end
+      end
+
+      fault_irq_q <= flt_rec_q.valid && ctrl_q.fault_irq_en;
+    end
+  end
+
+  assign cluster_irq_o   = fault_irq_q;
+  assign cluster_fatal_o = fatal_q;
+
+  // ===========================================================================
+  // Interrupt Controller
+  // ===========================================================================
+
+  assign irq_src = {pmu_ovf_irq, fault_irq_q, ext_irq_sync};
+
+  sf_irq_ctrl #(
+    .NUM_SRC (NUM_IRQ_SRC),
+    .NUM_TGT (NUM_CORES)
+  ) u_irq_ctrl (
+    .clk_i      (clk_i),
+    .rst_ni     (cl_rst_n),
+    .rtc_tick_i (rtc_tick_pulse),
+    .src_i      (irq_src),
+    .apb_req_i  (apb_irq_req),
+    .apb_rsp_o  (apb_irq_rsp),
+    .irq_o      (core_irq),
+    .mtime_o    (mtime)
+  );
+
+  // ===========================================================================
+  // Debug Module
+  // ===========================================================================
+
+  sf_debug_module #(
+    .NUM_HARTS (NUM_CORES)
+  ) u_debug (
+    .clk_i           (clk_i),
+    .rst_ni          (cl_rst_n),
+    .dbg_clk_i       (dbg_clk_i),
+    .dbg_rst_ni      (dbg_rst_ni),
+    .dmi_req_valid_i (dmi_req_valid_i),
+    .dmi_req_ready_o (dmi_req_ready_o),
+    .dmi_req_i       (dmi_req_i),
+    .dmi_rsp_valid_o (dmi_rsp_valid_o),
+    .dmi_rsp_ready_i (dmi_rsp_ready_i),
+    .dmi_rsp_o       (dmi_rsp_o),
+    .hart_avail_i    (core_rst_n_q),
+    .hart_req_o      (core_dbg_req),
+    .hart_rsp_i      (core_dbg_rsp),
+    .ndmreset_o      (dbg_ndmreset)
+  );
+
+  // ===========================================================================
+  // Trace Aggregation
+  // ===========================================================================
+
+  if (TRACE_EN) begin : g_trace
+
+    arb_vec_t   trc_req;
+    arb_vec_t   trc_gnt;
+    arb_vec_t   trc_last_q;
+    logic       trc_push;
+    logic       trc_full;
+    logic       trc_empty;
+    trace_pkt_t trc_din;
+
+    always_comb begin
+      trc_req = '0;
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        trc_req[c] = core_trace_valid[c] && !core_fenced[c];
+      end
+      trc_gnt  = sf_rr_grant(trc_req, trc_last_q);
+      trc_push = (|trc_gnt) && !trc_full;
+      trc_din  = core_trace[0];
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        if (trc_gnt[c]) trc_din = core_trace[c];
+      end
+      trc_din.core = core_id_t'(sf_oh2bin(trc_gnt));
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        core_trace_ready[c] = trc_gnt[c] && !trc_full;
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge cl_rst_n) begin
+      if (!cl_rst_n)     trc_last_q <= '0;
+      else if (trc_push) trc_last_q <= trc_gnt;
+    end
+
+    sf_fifo #(.T(trace_pkt_t), .DEPTH(4)) u_trace_q (
+      .clk_i   (clk_i),
+      .rst_ni  (cl_rst_n),
+      .flush_i (1'b0),
+      .push_i  (trc_push),
+      .data_i  (trc_din),
+      .full_o  (trc_full),
+      .pop_i   (trace_valid_o && trace_ready_i),
+      .data_o  (trace_o),
+      .empty_o (trc_empty)
+    );
+
+    assign trace_valid_o = !trc_empty;
+
+  end else begin : g_no_trace
+
+    assign core_trace_ready = '1;
+    assign trace_valid_o    = 1'b0;
+    assign trace_o          = '0;
+
+  end
+
+  // ===========================================================================
+  // Performance Monitoring
+  // ===========================================================================
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) begin
+      fabric_perf_q <= '0;
+    end else begin
+      fabric_perf_q <= '0;
+      for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) begin
+        fabric_perf_q.bank_req_stall[b] <= (|bk_arb_req[b]) && bk_q_full[b];
+      end
+      for (int unsigned c = 0; c < NUM_CORES; c++) begin
+        fabric_perf_q.core_rsp_stall[c] <= rs_valid[c] && !rs_ready[c];
+        fabric_perf_q.core_snp_stall[c] <= core_snp_valid[c] && !core_snp_ready[c];
+      end
+      fabric_perf_q.dma_active    <= dma_active;
+      fabric_perf_q.mem_req_stall <= |(edge_req_valid & ~edge_req_ready);
+    end
+  end
+
+  sf_perf_monitor #(
+    .NUM_CORES (NUM_CORES),
+    .NUM_BANKS (NUM_LLC_BANKS)
+  ) u_perf_mon (
+    .clk_i        (clk_i),
+    .rst_ni       (cl_rst_n),
+    .core_evt_i   (core_perf),
+    .core_active_i(core_rst_n_q),
+    .llc_evt_i    (llc_perf),
+    .fabric_evt_i (fabric_perf_q),
+    .apb_req_i    (apb_pmu_req),
+    .apb_rsp_o    (apb_pmu_rsp),
+    .ovf_irq_o    (pmu_ovf_irq)
+  );
+
+  // ===========================================================================
+  // Cluster Status
+  // ===========================================================================
+
+  logic cluster_idle_d;
+  logic cluster_idle_q;
+
+  always_comb begin
+    cluster_idle_d = !dma_active;
+    for (int unsigned c = 0; c < NUM_CORES; c++) begin
+      if (!core_fenced[c] && !(core_status[c].idle || core_status[c].wfi)) cluster_idle_d = 1'b0;
+    end
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      if (outst_q[r] != '0) cluster_idle_d = 1'b0;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge cl_rst_n) begin
+    if (!cl_rst_n) cluster_idle_q <= 1'b0;
+    else           cluster_idle_q <= cluster_idle_d;
+  end
+
+  assign cluster_ready_o = seq_run;
+  assign cluster_idle_o  = cluster_idle_q;
+  assign core_active_o   = core_mask_t'(core_rst_n_q);
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+
+`ifndef SYNTHESIS
+
+  for (genvar b = 0; b < NUM_LLC_BANKS; b++) begin : g_sva_bank
+    a_bank_gnt_onehot : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      $onehot0(bk_arb_gnt[b]))
+      else $error("silicaflux_top: bank %0d request grant not one-hot", b);
+
+    a_snp_tgt_range : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      llc_snp_valid[b] |-> ((llc_snp[b].tgt & ~CORE_PRESENT) == '0))
+      else $error("silicaflux_top: bank %0d snoop targets absent core", b);
+
+    a_mem_id_home : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      llc_mreq_valid[b] |-> (llc_mreq[b].id.bank == bank_id_t'(b)))
+      else $error("silicaflux_top: bank %0d memory request carries foreign bank id", b);
+  end : g_sva_bank
+
+  for (genvar r = 0; r < NUM_REQ; r++) begin : g_sva_req
+    a_rsp_has_txn : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      (rs_valid[r] && rs_ready[r]) |-> (outst_q[r] != '0))
+      else $error("silicaflux_top: requester %0d response without outstanding request", r);
+
+    a_outst_no_wrap : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      (rq_valid[r] && rq_ready[r]) |-> (outst_q[r] != '1))
+      else $error("silicaflux_top: requester %0d outstanding counter overflow", r);
+  end : g_sva_req
+
+  for (genvar c = 0; c < NUM_CORES; c++) begin : g_sva_core
+    a_fenced_no_rsp : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      core_fenced[c] |-> !rs_valid[c])
+      else $error("silicaflux_top: response routed to fenced core %0d", c);
+
+    a_core_rst_in_run : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      core_rst_n_q[c] |-> ((seq_q == SEQ_RUN) || (seq_q == SEQ_WARM_DRAIN)))
+      else $error("silicaflux_top: core %0d released outside run window", c);
+  end : g_sva_core
+
+  for (genvar p = 0; p < NUM_MEM_PORTS; p++) begin : g_sva_mem
+    a_edge_req_stable : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+      (edge_req_valid[p] && !edge_req_ready[p]) |=> (edge_req_valid[p] && $stable(edge_req[p])))
+      else $error("silicaflux_top: memory edge %0d request unstable under backpressure", p);
+  end : g_sva_mem
+
+  a_wake_onehot : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+    $onehot0(core_wake_gnt))
+    else $error("silicaflux_top: multiple cores released in one stagger slot");
+
+  a_apb_protocol : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+    host_apb_req_i.penable |-> host_apb_req_i.psel)
+    else $error("silicaflux_top: APB penable without psel");
+
+  a_ctrl_known : assert property (@(posedge clk_i) disable iff (!cl_rst_n)
+    !$isunknown({rq_valid, rs_valid, llc_snp_valid, edge_req_valid, seq_q}))
+    else $error("silicaflux_top: X on fabric control");
+
+`endif
+
+endmodule : silicaflux_top
