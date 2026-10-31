@@ -1,0 +1,1379 @@
+// =============================================================================
+//  SilicaFlux Compute Architecture
+// -----------------------------------------------------------------------------
+//  File        : decoder.sf
+//  Language    : Silica Flux-2017
+//  Description : Superscalar SFX-32 instruction decode stage.
+//
+//  Organisation :
+//    L0 Format    : opcode group selects one of four decode classes
+//                     R : register-register integer / multiply / bitmanip
+//                     I : immediate integer, upper-immediate, control transfer
+//                     M : scalar memory (load / store / atomic / fence / CMO)
+//                     X : FP, vector, tensor, system / CSR, custom accelerators
+//    L1 Group     : per-group decoder (dec_int .. dec_sys) produces encoding
+//                   legality, FU routing, operand classes and control flags
+//    L2 Qualify   : architectural state (privilege, extension enables,
+//                   trap-virtualisation controls, vtype) gates legality and
+//                   raises decode-time exceptions in fixed priority order
+//    L3 Assemble  : immediates, CFI targets, branch prediction metadata and
+//                   rename / scoreboard dependency metadata per lane
+//    L4 Pipeline  : registered decode packet behind a two-entry skid stage;
+//                   both ready and valid are flop-driven
+//
+//  Exception priority (per lane, highest first) :
+//    fetch fault > illegal / reserved / malformed encoding > disabled
+//    extension > privilege violation > illegal vector configuration
+//    > environment call > breakpoint
+//
+//  Lanes younger than an excepting lane are suppressed when
+//  TRUNCATE_ON_EXC is set. Any backend redirect flushes the stage.
+// =============================================================================
+
+module decoder
+  import silicaflux_pkg::*;
+#(
+  parameter bit TRUNCATE_ON_EXC = 1'b1
+) (
+  input  logic          clk_i,
+  input  logic          rst_ni,
+
+  // ---- Architectural decode qualifiers ---------------------------------------
+  input  dec_ctrl_t     ctrl_i,
+
+  // ---- Backend recovery ------------------------------------------------------
+  input  fe_redirect_t  redirect_i,
+
+  // ---- Fetch frontend --------------------------------------------------------
+  input  logic          fetch_valid_i,
+  output logic          fetch_ready_o,
+  input  fetch_pkt_t    fetch_pkt_i,
+
+  // ---- Rename ----------------------------------------------------------------
+  output logic          decode_valid_o,
+  input  logic          decode_ready_i,
+  output decode_pkt_t   decode_pkt_o,
+
+  // ---- Observability ---------------------------------------------------------
+  output dec_perf_t     perf_o
+);
+
+  // ===========================================================================
+  // Local Parameters and Types
+  // ===========================================================================
+
+  localparam int unsigned W        = DECODE_WIDTH;
+  localparam vaddr_t      INSTR_SZ = vaddr_t'(INSTR_BYTES);
+
+  // Shift-immediate qualifiers derived from the funct7 constants.
+  localparam logic [5:0]  SH6_BASE = F7_BASE[6:1];
+  localparam logic [5:0]  SH6_ALT  = F7_ALT[6:1];
+
+  typedef struct packed {
+    logic          legal;
+    fu_type_e      fu;
+    uop_op_u       op;
+    instr_fmt_e    fmt;
+    imm_fmt_e      imm_fmt;
+    instr_class_e  cls;
+    reg_class_e    rs1_class;
+    reg_class_e    rs2_class;
+    reg_class_e    rs3_class;
+    reg_class_e    rd_class;
+    areg_t         rs3;
+    opnd_sel_e     opnd_a;
+    opnd_sel_e     opnd_b;
+    mem_size_e     mem_size;
+    logic          mem_signed;
+    mem_order_e    mem_order;
+    fence_set_t    fence_pred;
+    fence_set_t    fence_succ;
+    uop_flags_t    flags;
+    priv_e         min_priv;
+    logic          need_fp;
+    logic          need_vec;
+    logic          need_vtype;
+    logic          need_tns;
+    logic          need_xcustom;
+    logic          is_ecall;
+    logic          is_ebreak;
+    logic          is_sret;
+    logic          is_wfi;
+    logic          is_dret;
+    logic          is_sfence;
+    logic          is_csr;
+    logic          csr_wr;
+    logic          vtype_wr;
+    logic          mask_rd;
+    vec_meta_t     vec;
+    tns_meta_t     tns;
+    tile_mask_t    tile_rd;
+    tile_mask_t    tile_wr;
+  } lane_dec_t;
+
+  // ===========================================================================
+  // Elaboration Guards
+  // ===========================================================================
+
+  if (DECODE_WIDTH != FETCH_WIDTH) begin : g_chk_width
+    $error("decoder: DECODE_WIDTH must equal FETCH_WIDTH");
+  end
+  if (IMM_W < (CSR_ADDR_W + AREG_W)) begin : g_chk_imm
+    $error("decoder: IMM_W cannot carry the CSR immediate composite");
+  end
+
+  // ===========================================================================
+  // Field Extraction and Immediate Generation
+  // ===========================================================================
+
+  function automatic areg_t fld_rd (input instr_t ins); return ins[11:7];  endfunction
+  function automatic areg_t fld_rs1(input instr_t ins); return ins[19:15]; endfunction
+  function automatic areg_t fld_rs2(input instr_t ins); return ins[24:20]; endfunction
+  function automatic areg_t fld_rs3(input instr_t ins); return ins[31:27]; endfunction
+
+  function automatic tile_mask_t tile_bit(input treg_t t);
+    return tile_mask_t'(1) << t;
+  endfunction
+
+  function automatic imm_t gen_imm(input imm_fmt_e f, input instr_t ins);
+    case (f)
+      IMM_I:   return sf_imm_i(ins);
+      IMM_S:   return sf_imm_s(ins);
+      IMM_B:   return sf_imm_b(ins);
+      IMM_U:   return sf_imm_u(ins);
+      IMM_J:   return sf_imm_j(ins);
+      IMM_Z:   return {{(IMM_W-CSR_ADDR_W-AREG_W){1'b0}}, ins[19:15], ins[31:20]};
+      IMM_V5:  return {{(IMM_W-AREG_W){ins[19]}}, ins[19:15]};
+      default: return '0;
+    endcase
+  endfunction
+
+  function automatic vaddr_t sext_imm(input imm_t imm);
+    return {{(VADDR_W-IMM_W){imm[IMM_W-1]}}, imm};
+  endfunction
+
+  function automatic mem_size_e size_of_f3(input logic [1:0] f3_lo);
+    return mem_size_e'({1'b0, f3_lo});
+  endfunction
+
+  // ===========================================================================
+  // L1 : Group Decoders
+  // ===========================================================================
+
+  function automatic lane_dec_t lane_init();
+    lane_dec_t d;
+    d           = '0;
+    d.fu        = FU_NONE;
+    d.fmt       = IFMT_X;
+    d.imm_fmt   = IMM_NONE;
+    d.cls       = ICLS_ILLEGAL;
+    d.rs1_class = RC_NONE;
+    d.rs2_class = RC_NONE;
+    d.rs3_class = RC_NONE;
+    d.rd_class  = RC_NONE;
+    d.opnd_a    = OPND_REG;
+    d.opnd_b    = OPND_REG;
+    d.mem_size  = MSZ_D;
+    d.mem_order = MORD_RELAXED;
+    d.min_priv  = PRIV_U;
+    d.vec.cat   = VOP_IVV;
+    d.vec.mop   = VMOP_UNIT;
+    d.tns.dtype = TDT_INT8;
+    return d;
+  endfunction
+
+  // ---- Integer : OPG_INT ------------------------------------------------------
+  function automatic lane_dec_t dec_int(input instr_t ins);
+    lane_dec_t  d;
+    logic [9:0] f73;
+    d           = lane_init();
+    d.fu        = FU_ALU;
+    d.cls       = ICLS_ALU;
+    d.rs1_class = RC_INT;
+    d.rd_class  = RC_INT;
+    d.legal     = 1'b1;
+    f73         = {ins[31:25], ins[14:12]};
+    case (opcode_e'(ins[6:0]))
+      OPC_ALU_R: begin
+        d.fmt       = IFMT_R;
+        d.rs2_class = RC_INT;
+        case (f73)
+          {F7_BASE, F3_ADD_SUB}: d.op.alu = ALU_ADD;
+          {F7_ALT,  F3_ADD_SUB}: d.op.alu = ALU_SUB;
+          {F7_BASE, F3_SLL}:     d.op.alu = ALU_SLL;
+          {F7_BASE, F3_SLT}:     d.op.alu = ALU_SLT;
+          {F7_BASE, F3_SLTU}:    d.op.alu = ALU_SLTU;
+          {F7_BASE, F3_XOR}:     d.op.alu = ALU_XOR;
+          {F7_ALT,  F3_XOR}:     d.op.alu = ALU_XNOR;
+          {F7_BASE, F3_SRL_SRA}: d.op.alu = ALU_SRL;
+          {F7_ALT,  F3_SRL_SRA}: d.op.alu = ALU_SRA;
+          {F7_BASE, F3_OR}:      d.op.alu = ALU_OR;
+          {F7_ALT,  F3_OR}:      d.op.alu = ALU_ORN;
+          {F7_BASE, F3_AND}:     d.op.alu = ALU_AND;
+          {F7_ALT,  F3_AND}:     d.op.alu = ALU_ANDN;
+          default:               d.legal  = 1'b0;
+        endcase
+      end
+      OPC_ALU_RW: begin
+        d.fmt           = IFMT_R;
+        d.rs2_class     = RC_INT;
+        d.flags.word_op = 1'b1;
+        case (f73)
+          {F7_BASE, F3_ADD_SUB}: d.op.alu = ALU_ADDW;
+          {F7_ALT,  F3_ADD_SUB}: d.op.alu = ALU_SUBW;
+          {F7_BASE, F3_SLL}:     d.op.alu = ALU_SLLW;
+          {F7_BASE, F3_SRL_SRA}: d.op.alu = ALU_SRLW;
+          {F7_ALT,  F3_SRL_SRA}: d.op.alu = ALU_SRAW;
+          default:               d.legal  = 1'b0;
+        endcase
+      end
+      OPC_ALU_I: begin
+        d.fmt     = IFMT_I;
+        d.imm_fmt = IMM_I;
+        d.opnd_b  = OPND_IMM;
+        case (alu_f3_e'(ins[14:12]))
+          F3_ADD_SUB: d.op.alu = ALU_ADD;
+          F3_SLT:     d.op.alu = ALU_SLT;
+          F3_SLTU:    d.op.alu = ALU_SLTU;
+          F3_XOR:     d.op.alu = ALU_XOR;
+          F3_OR:      d.op.alu = ALU_OR;
+          F3_AND:     d.op.alu = ALU_AND;
+          F3_SLL: begin
+            d.op.alu = ALU_SLL;
+            d.legal  = (ins[31:26] == SH6_BASE);
+          end
+          F3_SRL_SRA: begin
+            d.op.alu = (ins[31:26] == SH6_ALT) ? ALU_SRA : ALU_SRL;
+            d.legal  = (ins[31:26] == SH6_BASE) || (ins[31:26] == SH6_ALT);
+          end
+          default:    d.legal = 1'b0;
+        endcase
+      end
+      OPC_ALU_IW: begin
+        d.fmt           = IFMT_I;
+        d.imm_fmt       = IMM_I;
+        d.opnd_b        = OPND_IMM;
+        d.flags.word_op = 1'b1;
+        case (alu_f3_e'(ins[14:12]))
+          F3_ADD_SUB: d.op.alu = ALU_ADDW;
+          F3_SLL: begin
+            d.op.alu = ALU_SLLW;
+            d.legal  = (ins[31:25] == F7_BASE);
+          end
+          F3_SRL_SRA: begin
+            d.op.alu = (ins[31:25] == F7_ALT) ? ALU_SRAW : ALU_SRLW;
+            d.legal  = (ins[31:25] == F7_BASE) || (ins[31:25] == F7_ALT);
+          end
+          default:    d.legal = 1'b0;
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Integer extended : OPG_INTX --------------------------------------------
+  function automatic lane_dec_t dec_intx(input instr_t ins);
+    lane_dec_t d;
+    d          = lane_init();
+    d.rd_class = RC_INT;
+    d.legal    = 1'b1;
+    case (opcode_e'(ins[6:0]))
+      OPC_LUI, OPC_AUIPC: begin
+        d.fu      = FU_ALU;
+        d.cls     = ICLS_ALU;
+        d.fmt     = IFMT_I;
+        d.imm_fmt = IMM_U;
+        d.opnd_b  = OPND_IMM;
+        if (opcode_e'(ins[6:0]) == OPC_LUI) begin
+          d.op.alu  = ALU_LUI;
+          d.opnd_a  = OPND_ZERO;
+        end else begin
+          d.op.alu  = ALU_AUIPC;
+          d.opnd_a  = OPND_PC;
+        end
+      end
+      OPC_MULDIV: begin
+        d.fmt       = IFMT_R;
+        d.rs1_class = RC_INT;
+        d.rs2_class = RC_INT;
+        d.fu        = FU_DIV;
+        d.cls       = ICLS_DIV;
+        case ({ins[31:25], ins[14:12]})
+          {F7_MDU,   3'b000}: begin d.op.mdu = MDU_MUL;    d.fu = FU_MUL; d.cls = ICLS_MUL; end
+          {F7_MDU,   3'b001}: begin d.op.mdu = MDU_MULH;   d.fu = FU_MUL; d.cls = ICLS_MUL; end
+          {F7_MDU,   3'b010}: begin d.op.mdu = MDU_MULHSU; d.fu = FU_MUL; d.cls = ICLS_MUL; end
+          {F7_MDU,   3'b011}: begin d.op.mdu = MDU_MULHU;  d.fu = FU_MUL; d.cls = ICLS_MUL; end
+          {F7_MDU,   3'b100}: d.op.mdu = MDU_DIV;
+          {F7_MDU,   3'b101}: d.op.mdu = MDU_DIVU;
+          {F7_MDU,   3'b110}: d.op.mdu = MDU_REM;
+          {F7_MDU,   3'b111}: d.op.mdu = MDU_REMU;
+          {F7_MDU_W, 3'b000}: begin d.op.mdu = MDU_MULW;   d.fu = FU_MUL; d.cls = ICLS_MUL; end
+          {F7_MDU_W, 3'b100}: d.op.mdu = MDU_DIVW;
+          {F7_MDU_W, 3'b101}: d.op.mdu = MDU_DIVUW;
+          {F7_MDU_W, 3'b110}: d.op.mdu = MDU_REMW;
+          {F7_MDU_W, 3'b111}: d.op.mdu = MDU_REMUW;
+          default:            d.legal  = 1'b0;
+        endcase
+        d.flags.word_op = (ins[31:25] == F7_MDU_W);
+      end
+      OPC_BITMANIP: begin
+        d.fu        = FU_ALU;
+        d.cls       = ICLS_ALU;
+        d.fmt       = IFMT_R;
+        d.rs1_class = RC_INT;
+        d.rs2_class = RC_INT;
+        case (bm_f3_e'(ins[14:12]))
+          F3_BM_UNARY: begin
+            d.rs2_class = RC_NONE;
+            d.legal     = (ins[31:25] == F7_BASE);
+            case (bm_unary_e'(ins[24:20]))
+              BMU_CLZ:   d.op.alu = ALU_CLZ;
+              BMU_CTZ:   d.op.alu = ALU_CTZ;
+              BMU_CPOP:  d.op.alu = ALU_CPOP;
+              BMU_SEXTB: d.op.alu = ALU_SEXTB;
+              BMU_SEXTH: d.op.alu = ALU_SEXTH;
+              BMU_REV8:  d.op.alu = ALU_REV8;
+              default:   d.legal  = 1'b0;
+            endcase
+          end
+          F3_BM_ROL: begin
+            d.op.alu = ALU_ROL;
+            d.legal  = (ins[31:25] == F7_BASE);
+          end
+          F3_BM_ROR: begin
+            d.op.alu = ALU_ROR;
+            d.legal  = (ins[31:25] == F7_BASE);
+          end
+          F3_BM_MIN: begin
+            d.op.alu = (ins[31:25] == F7_ALT) ? ALU_MINU : ALU_MIN;
+            d.legal  = (ins[31:25] == F7_BASE) || (ins[31:25] == F7_ALT);
+          end
+          F3_BM_MAX: begin
+            d.op.alu = (ins[31:25] == F7_ALT) ? ALU_MAXU : ALU_MAX;
+            d.legal  = (ins[31:25] == F7_BASE) || (ins[31:25] == F7_ALT);
+          end
+          F3_BM_CZERO: begin
+            d.op.alu = (ins[31:25] == F7_ALT) ? ALU_CZERO_NEZ : ALU_CZERO_EQZ;
+            d.legal  = (ins[31:25] == F7_BASE) || (ins[31:25] == F7_ALT);
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Scalar memory : OPG_MEM ------------------------------------------------
+  function automatic lane_dec_t dec_mem(input instr_t ins);
+    lane_dec_t  d;
+    amo_f5_e    f5;
+    d           = lane_init();
+    d.fu        = FU_LSU;
+    d.fmt       = IFMT_M;
+    d.rs1_class = RC_INT;
+    d.legal     = 1'b1;
+    f5          = amo_f5_e'(ins[31:27]);
+    case (opcode_e'(ins[6:0]))
+      OPC_LOAD: begin
+        d.cls            = ICLS_LOAD;
+        d.op.lsu         = LSU_LOAD;
+        d.imm_fmt        = IMM_I;
+        d.opnd_b         = OPND_IMM;
+        d.rd_class       = RC_INT;
+        d.flags.is_load  = 1'b1;
+        d.mem_size       = size_of_f3(ins[13:12]);
+        d.mem_signed     = !ins[14];
+        d.legal          = (mem_f3_e'(ins[14:12]) != mem_f3_e'(3'b111));
+      end
+      OPC_STORE: begin
+        d.cls            = ICLS_STORE;
+        d.op.lsu         = LSU_STORE;
+        d.imm_fmt        = IMM_S;
+        d.opnd_b         = OPND_IMM;
+        d.rs2_class      = RC_INT;
+        d.flags.is_store = 1'b1;
+        d.mem_size       = size_of_f3(ins[13:12]);
+        d.legal          = !ins[14];
+      end
+      OPC_AMO: begin
+        d.cls        = ICLS_AMO;
+        d.rd_class   = RC_INT;
+        d.rs2_class  = RC_INT;
+        d.mem_size   = size_of_f3(ins[13:12]);
+        d.mem_signed = 1'b1;
+        d.mem_order  = mem_order_e'(ins[26:25]);
+        d.legal      = (mem_f3_e'(ins[14:12]) == F3_MEM_W) || (mem_f3_e'(ins[14:12]) == F3_MEM_D);
+        d.flags.is_amo = 1'b1;
+        case (f5)
+          AMO5_LR: begin
+            d.op.lsu        = LSU_LR;
+            d.rs2_class     = RC_NONE;
+            d.flags.is_amo  = 1'b0;
+            d.flags.is_load = 1'b1;
+            d.legal         = d.legal && (fld_rs2(ins) == AREG_ZERO);
+          end
+          AMO5_SC: begin
+            d.op.lsu         = LSU_SC;
+            d.flags.is_amo   = 1'b0;
+            d.flags.is_store = 1'b1;
+          end
+          AMO5_SWAP: d.op.lsu = LSU_AMO_SWAP;
+          AMO5_ADD:  d.op.lsu = LSU_AMO_ADD;
+          AMO5_XOR:  d.op.lsu = LSU_AMO_XOR;
+          AMO5_AND:  d.op.lsu = LSU_AMO_AND;
+          AMO5_OR:   d.op.lsu = LSU_AMO_OR;
+          AMO5_MIN:  d.op.lsu = LSU_AMO_MIN;
+          AMO5_MAX:  d.op.lsu = LSU_AMO_MAX;
+          AMO5_MINU: d.op.lsu = LSU_AMO_MINU;
+          AMO5_MAXU: d.op.lsu = LSU_AMO_MAXU;
+          default:   d.legal  = 1'b0;
+        endcase
+      end
+      OPC_FENCE: begin
+        d.cls = ICLS_FENCE;
+        case (fence_f3_e'(ins[14:12]))
+          F3_FENCE: begin
+            d.op.lsu        = LSU_FENCE;
+            d.rs1_class     = RC_NONE;
+            d.flags.fence   = 1'b1;
+            d.fence_pred    = fence_set_t'(ins[27:24]);
+            d.fence_succ    = fence_set_t'(ins[23:20]);
+            d.mem_order     = MORD_ACQ_REL;
+            d.legal         = (ins[31:28] == 4'h0) &&
+                              (fld_rs1(ins) == AREG_ZERO) && (fld_rd(ins) == AREG_ZERO);
+          end
+          F3_FENCE_I: begin
+            d.op.lsu         = LSU_FENCE_I;
+            d.rs1_class      = RC_NONE;
+            d.flags.fence    = 1'b1;
+            d.flags.serialize = 1'b1;
+            d.legal          = (ins[31:20] == 12'h000) &&
+                               (fld_rs1(ins) == AREG_ZERO) && (fld_rd(ins) == AREG_ZERO);
+          end
+          F3_CBO: begin
+            d.cls            = ICLS_STORE;
+            d.flags.is_store = 1'b1;
+            d.mem_size       = MSZ_LINE;
+            d.legal          = (fld_rd(ins) == AREG_ZERO);
+            case (cbo_f12_e'(ins[31:20]))
+              CBO_INVAL: d.op.lsu = LSU_CBO_INVAL;
+              CBO_CLEAN: d.op.lsu = LSU_CBO_CLEAN;
+              CBO_FLUSH: d.op.lsu = LSU_CBO_FLUSH;
+              CBO_ZERO:  d.op.lsu = LSU_CBO_ZERO;
+              default:   d.legal  = 1'b0;
+            endcase
+          end
+          F3_PREFETCH: begin
+            d.cls      = ICLS_LOAD;
+            d.op.lsu   = LSU_PREFETCH;
+            d.imm_fmt  = IMM_I;
+            d.opnd_b   = OPND_IMM;
+            d.mem_size = MSZ_LINE;
+            d.legal    = (fld_rd(ins) == AREG_ZERO);
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Control transfer : OPG_CTRL --------------------------------------------
+  function automatic lane_dec_t dec_ctrl(input instr_t ins);
+    lane_dec_t d;
+    d              = lane_init();
+    d.fu           = FU_BRU;
+    d.fmt          = IFMT_I;
+    d.flags.is_cfi = 1'b1;
+    d.legal        = 1'b1;
+    case (opcode_e'(ins[6:0]))
+      OPC_BRANCH: begin
+        d.cls       = ICLS_BRANCH;
+        d.imm_fmt   = IMM_B;
+        d.rs1_class = RC_INT;
+        d.rs2_class = RC_INT;
+        case (br_f3_e'(ins[14:12]))
+          F3_BEQ:  d.op.bru = BRU_EQ;
+          F3_BNE:  d.op.bru = BRU_NE;
+          F3_BLT:  d.op.bru = BRU_LT;
+          F3_BGE:  d.op.bru = BRU_GE;
+          F3_BLTU: d.op.bru = BRU_LTU;
+          F3_BGEU: d.op.bru = BRU_GEU;
+          default: d.legal  = 1'b0;
+        endcase
+      end
+      OPC_JAL: begin
+        d.cls      = ICLS_JUMP;
+        d.op.bru   = BRU_JAL;
+        d.imm_fmt  = IMM_J;
+        d.rd_class = RC_INT;
+        d.opnd_a   = OPND_PC;
+        d.opnd_b   = OPND_IMM;
+      end
+      OPC_JALR: begin
+        d.cls       = ICLS_JUMP;
+        d.op.bru    = BRU_JALR;
+        d.imm_fmt   = IMM_I;
+        d.rs1_class = RC_INT;
+        d.rd_class  = RC_INT;
+        d.opnd_b    = OPND_IMM;
+        d.legal     = (ins[14:12] == 3'b000);
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Floating point : OPG_FP ------------------------------------------------
+  function automatic lane_dec_t dec_fp(input instr_t ins);
+    lane_dec_t  d;
+    fp_f5_e     f5;
+    logic       fmt_ok;
+    logic       rm_ok;
+    logic [2:0] f3;
+    d         = lane_init();
+    d.fu      = FU_FPU;
+    d.cls     = ICLS_FP;
+    d.need_fp = 1'b1;
+    d.legal   = 1'b1;
+    f5        = fp_f5_e'(ins[31:27]);
+    f3        = ins[14:12];
+    fmt_ok    = (fp_fmt_e'(ins[26:25]) == FPFMT_S) || (fp_fmt_e'(ins[26:25]) == FPFMT_D);
+    rm_ok     = (f3 <= 3'(RM_RMM)) || (fp_rm_e'(f3) == RM_DYN);
+    d.flags.fp_rm_dyn = (fp_rm_e'(f3) == RM_DYN);
+    case (opcode_e'(ins[6:0]))
+      OPC_FP_LOAD: begin
+        d.fu              = FU_LSU;
+        d.cls             = ICLS_LOAD;
+        d.fmt             = IFMT_M;
+        d.op.lsu          = LSU_LOAD;
+        d.imm_fmt         = IMM_I;
+        d.opnd_b          = OPND_IMM;
+        d.rs1_class       = RC_INT;
+        d.rd_class        = RC_FP;
+        d.flags.is_load   = 1'b1;
+        d.flags.fp_rm_dyn = 1'b0;
+        d.mem_size        = size_of_f3(f3[1:0]);
+        d.legal           = (mem_f3_e'(f3) == F3_MEM_W) || (mem_f3_e'(f3) == F3_MEM_D);
+      end
+      OPC_FP_STORE: begin
+        d.fu              = FU_LSU;
+        d.cls             = ICLS_STORE;
+        d.fmt             = IFMT_M;
+        d.op.lsu          = LSU_STORE;
+        d.imm_fmt         = IMM_S;
+        d.opnd_b          = OPND_IMM;
+        d.rs1_class       = RC_INT;
+        d.rs2_class       = RC_FP;
+        d.flags.is_store  = 1'b1;
+        d.flags.fp_rm_dyn = 1'b0;
+        d.mem_size        = size_of_f3(f3[1:0]);
+        d.legal           = (mem_f3_e'(f3) == F3_MEM_W) || (mem_f3_e'(f3) == F3_MEM_D);
+      end
+      OPC_FP_FMA: begin
+        d.fmt       = IFMT_X;
+        d.rs1_class = RC_FP;
+        d.rs2_class = RC_FP;
+        d.rs3_class = RC_FP;
+        d.rd_class  = RC_FP;
+        d.rs3       = fld_rs3(ins);
+        d.legal     = rm_ok;
+        case (fma_var_e'(ins[26:25]))
+          FMA_MADD:  d.op.fpu = FPU_MADD;
+          FMA_MSUB:  d.op.fpu = FPU_MSUB;
+          FMA_NMSUB: d.op.fpu = FPU_NMSUB;
+          default:   d.op.fpu = FPU_NMADD;
+        endcase
+      end
+      OPC_FP_OP: begin
+        d.fmt       = IFMT_X;
+        d.rs1_class = RC_FP;
+        d.rs2_class = RC_FP;
+        d.rd_class  = RC_FP;
+        d.legal     = fmt_ok;
+        case (f5)
+          FP5_ADD: begin d.op.fpu = FPU_ADD; d.legal = d.legal && rm_ok; end
+          FP5_SUB: begin d.op.fpu = FPU_SUB; d.legal = d.legal && rm_ok; end
+          FP5_MUL: begin d.op.fpu = FPU_MUL; d.legal = d.legal && rm_ok; end
+          FP5_DIV: begin
+            d.op.fpu = FPU_DIV;
+            d.fu     = FU_FDIV;
+            d.legal  = d.legal && rm_ok;
+          end
+          FP5_SQRT: begin
+            d.op.fpu     = FPU_SQRT;
+            d.fu         = FU_FDIV;
+            d.rs2_class  = RC_NONE;
+            d.legal      = d.legal && rm_ok && (fld_rs2(ins) == AREG_ZERO);
+          end
+          FP5_SGNJ: begin
+            d.flags.fp_rm_dyn = 1'b0;
+            case (f3)
+              3'b000:  d.op.fpu = FPU_SGNJ;
+              3'b001:  d.op.fpu = FPU_SGNJN;
+              3'b010:  d.op.fpu = FPU_SGNJX;
+              default: d.legal  = 1'b0;
+            endcase
+          end
+          FP5_MINMAX: begin
+            d.flags.fp_rm_dyn = 1'b0;
+            case (f3)
+              3'b000:  d.op.fpu = FPU_MIN;
+              3'b001:  d.op.fpu = FPU_MAX;
+              default: d.legal  = 1'b0;
+            endcase
+          end
+          FP5_CVT_F2F: begin
+            d.op.fpu    = FPU_CVT_F2F;
+            d.rs2_class = RC_NONE;
+            d.legal     = d.legal && rm_ok && (ins[24:22] == 3'b000) &&
+                          (ins[21:20] != ins[26:25]) &&
+                          ((fp_fmt_e'(ins[21:20]) == FPFMT_S) || (fp_fmt_e'(ins[21:20]) == FPFMT_D));
+          end
+          FP5_CMP: begin
+            d.rd_class        = RC_INT;
+            d.flags.fp_rm_dyn = 1'b0;
+            case (f3)
+              3'b010:  d.op.fpu = FPU_CMP_EQ;
+              3'b001:  d.op.fpu = FPU_CMP_LT;
+              3'b000:  d.op.fpu = FPU_CMP_LE;
+              default: d.legal  = 1'b0;
+            endcase
+          end
+          FP5_CVT_F2I: begin
+            d.op.fpu    = FPU_CVT_F2I;
+            d.rs2_class = RC_NONE;
+            d.rd_class  = RC_INT;
+            d.legal     = d.legal && rm_ok && (ins[24:22] == 3'b000);
+          end
+          FP5_CVT_I2F: begin
+            d.op.fpu    = FPU_CVT_I2F;
+            d.rs1_class = RC_INT;
+            d.rs2_class = RC_NONE;
+            d.legal     = d.legal && rm_ok && (ins[24:22] == 3'b000);
+          end
+          FP5_MV_F2X: begin
+            d.rs2_class       = RC_NONE;
+            d.rd_class        = RC_INT;
+            d.flags.fp_rm_dyn = 1'b0;
+            d.legal           = d.legal && (fld_rs2(ins) == AREG_ZERO);
+            case (f3)
+              3'b000:  d.op.fpu = FPU_MV_F2X;
+              3'b001:  d.op.fpu = FPU_CLASS;
+              default: d.legal  = 1'b0;
+            endcase
+          end
+          FP5_MV_X2F: begin
+            d.op.fpu          = FPU_MV_X2F;
+            d.rs1_class       = RC_INT;
+            d.rs2_class       = RC_NONE;
+            d.flags.fp_rm_dyn = 1'b0;
+            d.legal           = d.legal && (fld_rs2(ins) == AREG_ZERO) && (f3 == 3'b000);
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Vector : OPG_VEC -------------------------------------------------------
+  function automatic lane_dec_t dec_vec(input instr_t ins);
+    lane_dec_t d;
+    vop_cat_e  cat;
+    logic      vm;
+    logic      masked_vd0;
+    d                 = lane_init();
+    d.fu              = FU_VEC;
+    d.cls             = ICLS_VEC;
+    d.fmt             = IFMT_X;
+    d.need_vec        = 1'b1;
+    d.need_vtype      = 1'b1;
+    d.flags.vec_cfg_dep = 1'b1;
+    d.legal           = 1'b1;
+    vm                = ins[25];
+    cat               = vop_cat_e'(ins[14:12]);
+    masked_vd0        = !vm && (fld_rd(ins) == AREG_ZERO);
+    d.mask_rd         = !vm;
+    d.vec.active      = 1'b1;
+    d.vec.masked      = !vm;
+    d.vec.funct6      = ins[31:26];
+    case (opcode_e'(ins[6:0]))
+      OPC_VEC_CFG: begin
+        d.op.vec            = VEC_SETVL;
+        d.need_vtype        = 1'b0;
+        d.flags.vec_cfg_dep = 1'b0;
+        d.vtype_wr          = 1'b1;
+        d.mask_rd           = 1'b0;
+        d.vec.masked        = 1'b0;
+        d.rs1_class         = RC_INT;
+        d.rd_class          = RC_INT;
+        case (vcfg_f3_e'(ins[14:12]))
+          F3_VSETVLI: begin
+            d.imm_fmt = IMM_I;
+            d.opnd_b  = OPND_IMM;
+            d.legal   = !ins[31];
+          end
+          F3_VSETVL: begin
+            d.rs2_class = RC_INT;
+            d.legal     = (ins[31:25] == F7_BASE);
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      OPC_VEC_LOAD, OPC_VEC_STORE: begin
+        d.fu        = FU_VLSU;
+        d.rs1_class = RC_INT;
+        d.vec.mop   = vmop_e'(ins[27:26]);
+        d.legal     = (ins[31:28] == 4'h0);
+        case (vmem_w_e'(ins[14:12]))
+          VMW_8:   d.mem_size = MSZ_B;
+          VMW_16:  d.mem_size = MSZ_H;
+          VMW_32:  d.mem_size = MSZ_W;
+          VMW_64:  d.mem_size = MSZ_D;
+          default: d.legal    = 1'b0;
+        endcase
+        case (vmop_e'(ins[27:26]))
+          VMOP_UNIT:    d.legal     = d.legal && (fld_rs2(ins) == AREG_ZERO);
+          VMOP_STRIDED: d.rs2_class = RC_INT;
+          VMOP_INDEXED: d.rs2_class = RC_VEC;
+          default:      d.legal     = 1'b0;
+        endcase
+        if (opcode_e'(ins[6:0]) == OPC_VEC_LOAD) begin
+          d.flags.is_load = 1'b1;
+          d.rd_class      = RC_VEC;
+          d.legal         = d.legal && !masked_vd0;
+          case (vmop_e'(ins[27:26]))
+            VMOP_STRIDED: d.op.vec = VEC_LD_STRD;
+            VMOP_INDEXED: d.op.vec = VEC_LD_IDX;
+            default:      d.op.vec = VEC_LD_UNIT;
+          endcase
+        end else begin
+          d.flags.is_store = 1'b1;
+          d.rs3_class      = RC_VEC;
+          d.rs3            = fld_rd(ins);
+          case (vmop_e'(ins[27:26]))
+            VMOP_STRIDED: d.op.vec = VEC_ST_STRD;
+            VMOP_INDEXED: d.op.vec = VEC_ST_IDX;
+            default:      d.op.vec = VEC_ST_UNIT;
+          endcase
+        end
+      end
+      OPC_VEC_ARITH: begin
+        d.vec.cat   = cat;
+        d.rs2_class = RC_VEC;
+        d.rd_class  = RC_VEC;
+        d.legal     = !masked_vd0 && (ins[14:12] != 3'b111);
+        case (cat)
+          VOP_IVV, VOP_MVV, VOP_FVV: d.rs1_class = RC_VEC;
+          VOP_IVX, VOP_MVX:          d.rs1_class = RC_INT;
+          VOP_FVF:                   d.rs1_class = RC_FP;
+          default: begin
+            d.rs1_class = RC_NONE;
+            d.imm_fmt   = IMM_V5;
+            d.opnd_b    = OPND_IMM;
+          end
+        endcase
+        case (cat)
+          VOP_IVV, VOP_IVX, VOP_IVI: begin
+            case (vi_f6_e'(ins[31:26]))
+              VI6_ADD:     d.op.vec = VEC_ADD;
+              VI6_SUB: begin
+                d.op.vec = VEC_SUB;
+                d.legal  = d.legal && (cat != VOP_IVI);
+              end
+              VI6_MIN:     d.op.vec = VEC_MIN;
+              VI6_MAX:     d.op.vec = VEC_MAX;
+              VI6_AND:     d.op.vec = VEC_AND;
+              VI6_OR:      d.op.vec = VEC_OR;
+              VI6_XOR:     d.op.vec = VEC_XOR;
+              VI6_GATHER:  d.op.vec = VEC_GATHER;
+              VI6_SLIDEUP: begin
+                d.op.vec = VEC_SLIDEUP;
+                d.legal  = d.legal && (cat != VOP_IVV);
+              end
+              VI6_SLIDEDN: begin
+                d.op.vec = VEC_SLIDEDN;
+                d.legal  = d.legal && (cat != VOP_IVV);
+              end
+              VI6_MERGE: begin
+                d.op.vec = vm ? VEC_MV : VEC_MERGE;
+                if (vm) begin
+                  d.rs2_class = RC_NONE;
+                  d.legal     = d.legal && (fld_rs2(ins) == AREG_ZERO);
+                end
+              end
+              VI6_SLL:     d.op.vec = VEC_SLL;
+              VI6_SRL:     d.op.vec = VEC_SRL;
+              VI6_SRA:     d.op.vec = VEC_SRA;
+              default:     d.legal  = 1'b0;
+            endcase
+          end
+          VOP_MVV, VOP_MVX: begin
+            case (vm_f6_e'(ins[31:26]))
+              VM6_REDSUM: begin
+                d.op.vec = VEC_REDSUM;
+                d.legal  = d.legal && (cat == VOP_MVV);
+              end
+              VM6_REDMAX: begin
+                d.op.vec = VEC_REDMAX;
+                d.legal  = d.legal && (cat == VOP_MVV);
+              end
+              VM6_COMPRESS: begin
+                d.op.vec = VEC_COMPRESS;
+                d.legal  = d.legal && (cat == VOP_MVV) && vm;
+              end
+              VM6_MUL:  d.op.vec = VEC_MUL;
+              VM6_MACC: begin
+                d.op.vec     = VEC_MACC;
+                d.rs3_class  = RC_VEC;
+                d.rs3        = fld_rd(ins);
+              end
+              default:  d.legal = 1'b0;
+            endcase
+          end
+          default: begin
+            d.need_fp = 1'b1;
+            case (vf_f6_e'(ins[31:26]))
+              VF6_ADD:  d.op.vec = VEC_FADD;
+              VF6_MUL:  d.op.vec = VEC_FMUL;
+              VF6_MACC: begin
+                d.op.vec     = VEC_FMACC;
+                d.rs3_class  = RC_VEC;
+                d.rs3        = fld_rd(ins);
+              end
+              default:  d.legal = 1'b0;
+            endcase
+          end
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Tensor : OPG_TNS -------------------------------------------------------
+  function automatic lane_dec_t dec_tns(input instr_t ins);
+    lane_dec_t    d;
+    instr_word_t  iw;
+    logic         rsvd_ok;
+    iw              = ins;
+    d               = lane_init();
+    d.fu            = FU_TNS;
+    d.cls           = ICLS_TNS;
+    d.fmt           = IFMT_X;
+    d.need_tns      = 1'b1;
+    d.flags.tns_dep = 1'b1;
+    d.legal         = 1'b1;
+    d.tns.active    = 1'b1;
+    d.tns.td        = iw.t.td;
+    d.tns.ts1       = iw.t.ts1;
+    d.tns.ts2       = iw.t.ts2;
+    rsvd_ok         = (iw.t.rsvd == '0) && (iw.t.rsvd1 == '0) && (iw.t.rsvd2 == '0);
+    case (opcode_e'(ins[6:0]))
+      OPC_TNS_LOAD, OPC_TNS_STORE: begin
+        d.rs1_class = RC_INT;
+        d.rs2_class = RC_INT;
+        d.mem_size  = MSZ_LINE;
+        d.tns.td    = ins[9:7];
+        d.tns.ts1   = '0;
+        d.tns.ts2   = '0;
+        d.tns.dtype = tns_dtype_e'(ins[14:12]);
+        d.legal     = (ins[31:25] == F7_BASE) && (ins[11:10] == 2'b00) && (ins[14:12] != 3'b111);
+        if (opcode_e'(ins[6:0]) == OPC_TNS_LOAD) begin
+          d.op.tns         = TNS_LOAD;
+          d.flags.is_load  = 1'b1;
+          d.tile_wr        = tile_bit(ins[9:7]);
+        end else begin
+          d.op.tns         = TNS_STORE;
+          d.flags.is_store = 1'b1;
+          d.tile_rd        = tile_bit(ins[9:7]);
+        end
+      end
+      OPC_TNS_MMA: begin
+        d.tile_rd = tile_bit(iw.t.td) | tile_bit(iw.t.ts1) | tile_bit(iw.t.ts2);
+        d.tile_wr = tile_bit(iw.t.td);
+        d.legal   = rsvd_ok && (iw.t.tfunct5 == '0) && (iw.t.tfunct3 == '0);
+        case (tns_mma_dt_e'(iw.t.dtype))
+          TMMA_INT8: begin d.op.tns = TNS_MMA_INT8; d.tns.dtype = TDT_INT8;     end
+          TMMA_FP8:  begin d.op.tns = TNS_MMA_FP8;  d.tns.dtype = TDT_FP8_E4M3; end
+          TMMA_FP16: begin d.op.tns = TNS_MMA_FP16; d.tns.dtype = TDT_FP16;     end
+          default:   begin d.op.tns = TNS_MMA_BF16; d.tns.dtype = TDT_BF16;     end
+        endcase
+      end
+      OPC_TNS_CTRL: begin
+        d.legal = rsvd_ok && (iw.t.tfunct3 == '0) && (iw.t.dtype == '0);
+        case (tns_ctrl_f5_e'(iw.t.tfunct5))
+          TF5_ZERO: begin
+            d.op.tns = TNS_ZERO;
+            d.tile_wr = tile_bit(iw.t.td);
+            d.legal   = d.legal && (iw.t.ts1 == '0) && (iw.t.ts2 == '0);
+          end
+          TF5_ACC_READ, TF5_RELU, TF5_GELU, TF5_TRANSPOSE: begin
+            d.tile_rd = tile_bit(iw.t.ts1);
+            d.tile_wr = tile_bit(iw.t.td);
+            d.legal   = d.legal && (iw.t.ts2 == '0);
+            case (tns_ctrl_f5_e'(iw.t.tfunct5))
+              TF5_ACC_READ: d.op.tns = TNS_ACC_READ;
+              TF5_RELU:     d.op.tns = TNS_ACT_RELU;
+              TF5_GELU:     d.op.tns = TNS_ACT_GELU;
+              default:      d.op.tns = TNS_TRANSPOSE;
+            endcase
+          end
+          TF5_SYNC: begin
+            d.op.tns          = TNS_SYNC;
+            d.flags.serialize = 1'b1;
+            d.tile_rd         = '1;
+            d.legal           = d.legal && (iw.t.td == '0) && (iw.t.ts1 == '0) && (iw.t.ts2 == '0);
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- System / CSR / custom : OPG_SYS ----------------------------------------
+  function automatic lane_dec_t dec_sys(input instr_t ins);
+    lane_dec_t d;
+    sys_f3_e   f3;
+    logic      zero_regs;
+    d         = lane_init();
+    d.fmt     = IFMT_X;
+    d.legal   = 1'b1;
+    f3        = sys_f3_e'(ins[14:12]);
+    zero_regs = (fld_rd(ins) == AREG_ZERO) && (fld_rs1(ins) == AREG_ZERO);
+    case (opcode_e'(ins[6:0]))
+      OPC_SYSTEM: begin
+        d.fu              = FU_CSR;
+        d.cls             = ICLS_SYSTEM;
+        d.flags.serialize = 1'b1;
+        case (f3)
+          F3_PRIV: begin
+            if ((ins[31:25] == F7_SFENCE_VMA) && (fld_rd(ins) == AREG_ZERO)) begin
+              d.fu        = FU_LSU;
+              d.op.lsu    = LSU_SFENCE_VMA;
+              d.rs1_class = RC_INT;
+              d.rs2_class = RC_INT;
+              d.min_priv  = PRIV_S;
+              d.is_sfence = 1'b1;
+              d.flags.fence = 1'b1;
+            end else begin
+              d.legal = zero_regs;
+              case (sys_f12_e'(ins[31:20]))
+                F12_ECALL:  begin d.op.csr = CSR_ECALL;  d.is_ecall  = 1'b1; end
+                F12_EBREAK: begin d.op.csr = CSR_EBREAK; d.is_ebreak = 1'b1; end
+                F12_SRET:   begin d.op.csr = CSR_SRET;   d.is_sret   = 1'b1; d.min_priv = PRIV_S; end
+                F12_MRET:   begin d.op.csr = CSR_MRET;                       d.min_priv = PRIV_M; end
+                F12_DRET:   begin d.op.csr = CSR_DRET;   d.is_dret   = 1'b1; d.min_priv = PRIV_M; end
+                F12_WFI:    begin d.op.csr = CSR_WFI;    d.is_wfi    = 1'b1; d.min_priv = PRIV_S; end
+                default:    d.legal = 1'b0;
+              endcase
+            end
+          end
+          F3_CSRRW, F3_CSRRS, F3_CSRRC, F3_CSRRWI, F3_CSRRSI, F3_CSRRCI: begin
+            d.cls      = ICLS_CSR;
+            d.is_csr   = 1'b1;
+            d.rd_class = RC_INT;
+            d.imm_fmt  = IMM_Z;
+            d.opnd_b   = OPND_IMM;
+            d.min_priv = priv_e'(ins[29:28]);
+            d.csr_wr   = (f3 == F3_CSRRW) || (f3 == F3_CSRRWI) || (fld_rs1(ins) != AREG_ZERO);
+            if (ins[14]) begin
+              d.opnd_a = OPND_ZERO;
+            end else begin
+              d.rs1_class = RC_INT;
+            end
+            case (f3)
+              F3_CSRRW, F3_CSRRWI: d.op.csr = CSR_RW;
+              F3_CSRRS, F3_CSRRSI: d.op.csr = CSR_RS;
+              default:             d.op.csr = CSR_RC;
+            endcase
+          end
+          default: d.legal = 1'b0;
+        endcase
+      end
+      OPC_CUSTOM0, OPC_CUSTOM1: begin
+        d.fu           = FU_TNS;
+        d.cls          = ICLS_CUSTOM;
+        d.need_xcustom = 1'b1;
+        d.rs1_class    = RC_INT;
+        d.rs2_class    = RC_INT;
+        d.rd_class     = RC_INT;
+        if (opcode_e'(ins[6:0]) == OPC_CUSTOM1) begin
+          d.rs3_class = RC_INT;
+          d.rs3       = fld_rs3(ins);
+          d.op.raw    = {ins[14:12], 1'b1, ins[26:25]};
+        end else begin
+          d.op.raw    = {ins[14:12], ins[27:25]};
+        end
+      end
+      default: d.legal = 1'b0;
+    endcase
+    return d;
+  endfunction
+
+  // ---- Group dispatch ---------------------------------------------------------
+  function automatic lane_dec_t dec_dispatch(input instr_t ins);
+    lane_dec_t d;
+    case (sf_opc_group(ins))
+      OPG_INT:  d = dec_int(ins);
+      OPG_INTX: d = dec_intx(ins);
+      OPG_MEM:  d = dec_mem(ins);
+      OPG_CTRL: d = dec_ctrl(ins);
+      OPG_FP:   d = dec_fp(ins);
+      OPG_VEC:  d = dec_vec(ins);
+      OPG_TNS:  d = dec_tns(ins);
+      default:  d = dec_sys(ins);
+    endcase
+    d.legal = d.legal && sf_is_32b(ins);
+    return d;
+  endfunction
+
+  // ===========================================================================
+  // L2 : Architectural Qualification and Exception Generation
+  // ===========================================================================
+
+  function automatic exc_info_t dec_qualify(
+    input lane_dec_t d,
+    input instr_t    ins,
+    input vaddr_t    pc,
+    input dec_ctrl_t ctl
+  );
+    exc_info_t           e;
+    priv_e               ep;
+    logic [CSR_ADDR_W-1:0] csr;
+    logic                feat_bad;
+    logic                priv_bad;
+    ep  = ctl.debug_mode ? PRIV_M : ctl.priv;
+    csr = ins[31:20];
+
+    feat_bad = (d.need_fp      && !ctl.fp_en)  ||
+               (d.need_vec     && !ctl.vec_en) ||
+               (d.need_tns     && !ctl.tns_en) ||
+               (d.need_xcustom && !ctl.xcustom_en);
+
+    priv_bad = (ep < d.min_priv)                                       ||
+               (d.is_sret   && (ep == PRIV_S) && ctl.tsr)              ||
+               (d.is_sfence && (ep == PRIV_S) && ctl.tvm)              ||
+               (d.is_wfi    && (ep != PRIV_M) && ctl.tw)               ||
+               (d.is_dret   && !ctl.debug_mode)                        ||
+               (d.is_csr    && d.csr_wr && (csr[11:10] == CSR_RO_CODE)) ||
+               (d.is_csr    && (csr == CSR_SATP) && (ep == PRIV_S) && ctl.tvm) ||
+               (d.is_csr    && (csr[11:4] == CSR_DBG_PAGE) && !ctl.debug_mode);
+
+    e = '{valid: 1'b0, cause: EXC_ILLEGAL_INSTR, tval: '0};
+    if (!d.legal || feat_bad || priv_bad) begin
+      e.valid = 1'b1;
+      e.cause = EXC_ILLEGAL_INSTR;
+      e.tval  = xlen_t'(ins);
+    end else if (d.need_vtype && ctl.vill) begin
+      e.valid = 1'b1;
+      e.cause = EXC_VEC_ILLEGAL_CFG;
+      e.tval  = xlen_t'(ins);
+    end else if (d.is_ecall) begin
+      e.valid = 1'b1;
+      case (ctl.priv)
+        PRIV_U:  e.cause = EXC_ECALL_U;
+        PRIV_M:  e.cause = EXC_ECALL_M;
+        default: e.cause = EXC_ECALL_S;
+      endcase
+    end else if (d.is_ebreak) begin
+      e.valid = 1'b1;
+      e.cause = EXC_BREAKPOINT;
+      e.tval  = xlen_t'(pc);
+    end
+    return e;
+  endfunction
+
+  // ===========================================================================
+  // L3 : Per-Lane Decode and Metadata Assembly
+  // ===========================================================================
+
+  lane_dec_t   lane_d     [W];
+  exc_info_t   lane_exc   [W];
+  vaddr_t      lane_pc    [W];
+  logic [W-1:0] lane_raw_valid;
+  logic [W-1:0] lane_valid;
+  logic [W-1:0] lane_excepts;
+  uop_t        lane_uop   [W];
+  dec_meta_t   lane_meta  [W];
+  cfi_type_e   lane_cfi   [W];
+
+  for (genvar i = 0; i < W; i++) begin : g_lane
+
+    instr_t     ins;
+    predecode_t pd;
+    imm_t       imm;
+    logic       last_lane;
+    logic       pred_lane;
+
+    assign ins               = fetch_pkt_i.instr[i];
+    assign pd                = sf_predecode(ins);
+    assign lane_cfi[i]       = pd.cfi_type;
+    assign lane_pc[i]        = fetch_pkt_i.pc + (vaddr_t'(i) * INSTR_SZ);
+    assign lane_raw_valid[i] = fetch_pkt_i.lane_valid[i];
+    assign lane_d[i]         = dec_dispatch(ins);
+    assign imm               = gen_imm(lane_d[i].imm_fmt, ins);
+    assign pred_lane         = fetch_pkt_i.pred.taken && (fetch_pkt_i.pred.cfi_lane == fetch_lane_t'(i));
+
+    if (i == W - 1) begin : g_last
+      assign last_lane = 1'b1;
+    end else begin : g_mid
+      assign last_lane = !fetch_pkt_i.lane_valid[i+1];
+    end
+
+    // Fetch faults are attached to lane 0 and take precedence over decode.
+    always_comb begin
+      if ((i == 0) && fetch_pkt_i.exc.valid) begin
+        lane_exc[i] = fetch_pkt_i.exc;
+      end else begin
+        lane_exc[i] = dec_qualify(lane_d[i], ins, lane_pc[i], ctrl_i);
+      end
+    end
+
+    assign lane_excepts[i] = lane_raw_valid[i] && lane_exc[i].valid;
+
+    always_comb begin
+      lane_dec_t d;
+      logic      ok;
+      d  = lane_d[i];
+      ok = !lane_exc[i].valid;
+
+      // ---- micro-op ----------------------------------------------------------
+      lane_uop[i]                = '0;
+      lane_uop[i].valid          = lane_valid[i];
+      lane_uop[i].pc             = lane_pc[i];
+      lane_uop[i].instr          = ins;
+      lane_uop[i].fu             = ok ? d.fu        : FU_NONE;
+      lane_uop[i].op             = d.op;
+      lane_uop[i].rs1_class      = ok ? d.rs1_class : RC_NONE;
+      lane_uop[i].rs2_class      = ok ? d.rs2_class : RC_NONE;
+      lane_uop[i].rs3_class      = ok ? d.rs3_class : RC_NONE;
+      lane_uop[i].rd_class       = ok ? d.rd_class  : RC_NONE;
+      lane_uop[i].rs1            = fld_rs1(ins);
+      lane_uop[i].rs2            = fld_rs2(ins);
+      lane_uop[i].rs3            = d.rs3;
+      lane_uop[i].rd             = fld_rd(ins);
+      lane_uop[i].opnd_a         = d.opnd_a;
+      lane_uop[i].opnd_b         = d.opnd_b;
+      lane_uop[i].imm            = imm;
+      lane_uop[i].mem_size       = d.mem_size;
+      lane_uop[i].mem_signed     = d.mem_signed;
+      lane_uop[i].flags          = ok ? d.flags : '0;
+      lane_uop[i].bp.cfi_type    = pd.cfi_type;
+      lane_uop[i].bp.pred_taken  = pred_lane;
+      lane_uop[i].bp.pred_target = last_lane ? fetch_pkt_i.next_pc : (lane_pc[i] + INSTR_SZ);
+      lane_uop[i].bp.conf        = pred_lane ? fetch_pkt_i.pred.conf : '0;
+      lane_uop[i].exc            = lane_exc[i];
+
+      // ---- decode metadata ---------------------------------------------------
+      lane_meta[i]               = '0;
+      lane_meta[i].fmt           = d.fmt;
+      lane_meta[i].imm_fmt       = d.imm_fmt;
+      lane_meta[i].cls           = d.legal ? d.cls : ICLS_ILLEGAL;
+      lane_meta[i].min_priv      = d.min_priv;
+      lane_meta[i].mem_order     = d.mem_order;
+      lane_meta[i].fence_pred    = d.fence_pred;
+      lane_meta[i].fence_succ    = d.fence_succ;
+      lane_meta[i].cfi_target    = pd.is_direct ? (lane_pc[i] + sext_imm(pd.offset)) : '0;
+      lane_meta[i].vec           = d.vec;
+      lane_meta[i].tns           = d.tns;
+
+      if (ok) begin
+        lane_meta[i].dep.rs1_rd       = (d.rs1_class != RC_NONE) &&
+                                        !((d.rs1_class == RC_INT) && (fld_rs1(ins) == AREG_ZERO));
+        lane_meta[i].dep.rs2_rd       = (d.rs2_class != RC_NONE) &&
+                                        !((d.rs2_class == RC_INT) && (fld_rs2(ins) == AREG_ZERO));
+        lane_meta[i].dep.rs3_rd       = (d.rs3_class != RC_NONE) &&
+                                        !((d.rs3_class == RC_INT) && (d.rs3 == AREG_ZERO));
+        lane_meta[i].dep.rd_wr        = (d.rd_class != RC_NONE) &&
+                                        !((d.rd_class == RC_INT) && (fld_rd(ins) == AREG_ZERO));
+        lane_meta[i].dep.mask_rd      = d.mask_rd;
+        lane_meta[i].dep.vtype_rd     = d.flags.vec_cfg_dep;
+        lane_meta[i].dep.vtype_wr     = d.vtype_wr;
+        lane_meta[i].dep.ldq_alloc    = d.flags.is_load;
+        lane_meta[i].dep.stq_alloc    = d.flags.is_store || d.flags.is_amo;
+        lane_meta[i].dep.br_alloc     = (d.cls == ICLS_BRANCH) ||
+                                        ((d.fu == FU_BRU) && (d.op.bru == BRU_JALR));
+        lane_meta[i].dep.spec_barrier = d.flags.serialize;
+        lane_meta[i].dep.commit_exec  = d.flags.serialize || d.flags.fence || d.is_csr;
+        lane_meta[i].dep.tile_rd      = d.tile_rd;
+        lane_meta[i].dep.tile_wr      = d.tile_wr;
+      end
+    end
+
+  end : g_lane
+
+  // ---- Lane truncation behind the oldest excepting lane ------------------------
+  always_comb begin
+    logic older_exc;
+    older_exc = 1'b0;
+    for (int unsigned i = 0; i < W; i++) begin
+      lane_valid[i] = lane_raw_valid[i] && !(TRUNCATE_ON_EXC && older_exc);
+      older_exc     = older_exc || lane_excepts[i];
+    end
+  end
+
+  // ===========================================================================
+  // L4 : Packet Assembly and Pipeline Register
+  // ===========================================================================
+
+  decode_pkt_t dec_pkt;
+
+  always_comb begin
+    dec_pkt      = '0;
+    dec_pkt.snap = fetch_pkt_i.pred.snap;
+    dec_pkt.seq  = fetch_pkt_i.seq;
+    for (int unsigned i = 0; i < W; i++) begin
+      dec_pkt.uop[i]  = lane_uop[i];
+      dec_pkt.meta[i] = lane_meta[i];
+    end
+  end
+
+  logic        flush;
+  logic        in_fire;
+  logic        out_fire;
+  logic        out_valid_q;
+  logic        skid_valid_q;
+  decode_pkt_t out_pkt_q;
+  decode_pkt_t skid_pkt_q;
+
+  assign flush         = redirect_i.valid;
+  assign fetch_ready_o = !skid_valid_q;
+  assign in_fire       = fetch_valid_i && fetch_ready_o && !flush;
+  assign out_fire      = out_valid_q && decode_ready_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      out_valid_q  <= 1'b0;
+      skid_valid_q <= 1'b0;
+    end else if (flush) begin
+      out_valid_q  <= 1'b0;
+      skid_valid_q <= 1'b0;
+    end else if (!out_valid_q || out_fire) begin
+      out_valid_q  <= skid_valid_q || in_fire;
+      skid_valid_q <= 1'b0;
+    end else if (in_fire) begin
+      skid_valid_q <= 1'b1;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (!out_valid_q || out_fire) begin
+      if (skid_valid_q) begin
+        out_pkt_q <= skid_pkt_q;
+      end else if (in_fire) begin
+        out_pkt_q <= dec_pkt;
+      end
+    end else if (in_fire) begin
+      skid_pkt_q <= dec_pkt;
+    end
+  end
+
+  assign decode_valid_o = out_valid_q;
+  assign decode_pkt_o   = out_pkt_q;
+
+  // ===========================================================================
+  // Observability
+  // ===========================================================================
+
+  dec_perf_t perf_q;
+  dec_perf_t perf_d;
+
+  always_comb begin
+    perf_d              = '0;
+    perf_d.pkt_fire     = in_fire;
+    perf_d.flush        = flush;
+    perf_d.replay       = flush && (redirect_i.cause == RDR_REPLAY);
+    perf_d.backpressure = out_valid_q && !decode_ready_i;
+    perf_d.starved      = !fetch_valid_i && fetch_ready_o;
+    for (int unsigned i = 0; i < W; i++) begin
+      if (in_fire && lane_valid[i]) begin
+        perf_d.lanes = perf_d.lanes + {{(DECODE_CNT_W-1){1'b0}}, 1'b1};
+        if (lane_exc[i].valid && (lane_exc[i].cause == EXC_ILLEGAL_INSTR)) perf_d.illegal   = 1'b1;
+        if (lane_uop[i].flags.serialize)                                   perf_d.serialize = 1'b1;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) perf_q <= '0;
+    else         perf_q <= perf_d;
+  end
+
+  assign perf_o = perf_q;
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+
+`ifndef SYNTHESIS
+
+  for (genvar i = 0; i < W; i++) begin : g_sva_lane
+
+    a_cfi_consistent : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (fetch_valid_i && lane_raw_valid[i] && !((i == 0) && fetch_pkt_i.exc.valid))
+        |-> (fetch_pkt_i.lane_cfi[i] == lane_cfi[i]))
+      else $error("decoder: lane %0d predecode disagrees with fetch", i);
+
+    a_class_exclusive : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      lane_valid[i] |-> $onehot0({lane_uop[i].flags.is_load, lane_uop[i].flags.is_store,
+                                  lane_uop[i].flags.is_amo,  lane_uop[i].flags.is_cfi}))
+      else $error("decoder: lane %0d memory/control classification not exclusive", i);
+
+    a_fu_routed : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && !lane_exc[i].valid) |-> (lane_uop[i].fu != FU_NONE))
+      else $error("decoder: lane %0d legal instruction without functional unit", i);
+
+    a_exc_no_alloc : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && lane_exc[i].valid)
+        |-> ((lane_uop[i].fu == FU_NONE) && (lane_meta[i].dep == '0)))
+      else $error("decoder: lane %0d excepting instruction allocates resources", i);
+
+    a_fmt_r_no_imm : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && !lane_exc[i].valid && (lane_meta[i].fmt == IFMT_R))
+        |-> (lane_meta[i].imm_fmt == IMM_NONE))
+      else $error("decoder: lane %0d R-format carries an immediate", i);
+
+    a_fmt_m_lsu : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && !lane_exc[i].valid && (lane_meta[i].fmt == IFMT_M))
+        |-> (lane_uop[i].fu == FU_LSU))
+      else $error("decoder: lane %0d M-format not routed to LSU", i);
+
+    a_x0_never_renamed : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && lane_meta[i].dep.rd_wr)
+        |-> !((lane_uop[i].rd_class == RC_INT) && (lane_uop[i].rd == AREG_ZERO)))
+      else $error("decoder: lane %0d schedules a rename of x0", i);
+
+    a_imm_fmt_valid : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (lane_valid[i] && !lane_exc[i].valid && (lane_uop[i].opnd_b == OPND_IMM))
+        |-> (lane_meta[i].imm_fmt != IMM_NONE))
+      else $error("decoder: lane %0d immediate operand without immediate format", i);
+
+  end : g_sva_lane
+
+  a_out_contiguous : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    decode_valid_o |-> decode_pkt_o.uop[0].valid)
+    else $error("decoder: output packet without lane 0");
+
+  a_out_stable : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (decode_valid_o && !decode_ready_i && !flush) |=> (decode_valid_o && $stable(decode_pkt_o)))
+    else $error("decoder: decode packet changed under backpressure");
+
+  a_skid_ordering : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    skid_valid_q |-> out_valid_q)
+    else $error("decoder: skid entry without output entry");
+
+  a_ctrl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({fetch_ready_o, decode_valid_o, out_valid_q, skid_valid_q}))
+    else $error("decoder: X on decode control");
+
+`endif
+
+endmodule : decoder

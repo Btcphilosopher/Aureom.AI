@@ -80,6 +80,7 @@ package silicaflux_pkg;
 
   // ---- Out-of-order backend ---------------------------------------------------
   localparam int unsigned DECODE_WIDTH    = 4;
+  localparam int unsigned DECODE_CNT_W    = $clog2(DECODE_WIDTH + 1);
   localparam int unsigned RENAME_WIDTH    = 4;
   localparam int unsigned DISPATCH_WIDTH  = 4;
   localparam int unsigned ISSUE_WIDTH     = 8;
@@ -287,7 +288,8 @@ package silicaflux_pkg;
     IMM_B    = 3'd3,
     IMM_U    = 3'd4,
     IMM_J    = 3'd5,
-    IMM_Z    = 3'd6
+    IMM_Z    = 3'd6,
+    IMM_V5   = 3'd7
   } imm_fmt_e;
 
   typedef enum logic [2:0] {
@@ -418,6 +420,188 @@ package silicaflux_pkg;
   localparam logic [6:0] F7_BASE = 7'b000_0000;
   localparam logic [6:0] F7_ALT  = 7'b010_0000;
   localparam logic [6:0] F7_MDU  = 7'b000_0001;
+  localparam logic [6:0] F7_MDU_W        = 7'b000_0101;
+  localparam logic [6:0] F7_SFENCE_VMA   = 7'b000_1001;
+
+  // ---- Memory ordering / cache maintenance ------------------------------------
+  typedef enum logic [2:0] {
+    F3_FENCE    = 3'b000,
+    F3_FENCE_I  = 3'b001,
+    F3_CBO      = 3'b010,
+    F3_PREFETCH = 3'b011
+  } fence_f3_e;
+
+  typedef enum logic [11:0] {
+    CBO_INVAL = 12'h000,
+    CBO_CLEAN = 12'h001,
+    CBO_FLUSH = 12'h002,
+    CBO_ZERO  = 12'h004
+  } cbo_f12_e;
+
+  typedef enum logic [4:0] {
+    AMO5_ADD  = 5'b00000,
+    AMO5_SWAP = 5'b00001,
+    AMO5_LR   = 5'b00010,
+    AMO5_SC   = 5'b00011,
+    AMO5_XOR  = 5'b00100,
+    AMO5_OR   = 5'b01000,
+    AMO5_AND  = 5'b01100,
+    AMO5_MIN  = 5'b10000,
+    AMO5_MAX  = 5'b10100,
+    AMO5_MINU = 5'b11000,
+    AMO5_MAXU = 5'b11100
+  } amo_f5_e;
+
+  // ---- Bit manipulation (OPC_BITMANIP, R layout) ------------------------------
+  typedef enum logic [2:0] {
+    F3_BM_UNARY = 3'b000,
+    F3_BM_ROL   = 3'b001,
+    F3_BM_MIN   = 3'b100,
+    F3_BM_ROR   = 3'b101,
+    F3_BM_MAX   = 3'b110,
+    F3_BM_CZERO = 3'b111
+  } bm_f3_e;
+
+  typedef enum logic [4:0] {
+    BMU_CLZ   = 5'd0,
+    BMU_CTZ   = 5'd1,
+    BMU_CPOP  = 5'd2,
+    BMU_SEXTB = 5'd3,
+    BMU_SEXTH = 5'd4,
+    BMU_REV8  = 5'd5
+  } bm_unary_e;
+
+  // ---- Floating point (OPC_FP_OP: funct7 = {funct5, fmt}) ---------------------
+  typedef enum logic [4:0] {
+    FP5_ADD     = 5'b00000,
+    FP5_SUB     = 5'b00001,
+    FP5_MUL     = 5'b00010,
+    FP5_DIV     = 5'b00011,
+    FP5_SGNJ    = 5'b00100,
+    FP5_MINMAX  = 5'b00101,
+    FP5_CVT_F2F = 5'b01000,
+    FP5_SQRT    = 5'b01011,
+    FP5_CMP     = 5'b10100,
+    FP5_CVT_F2I = 5'b11000,
+    FP5_CVT_I2F = 5'b11010,
+    FP5_MV_F2X  = 5'b11100,
+    FP5_MV_X2F  = 5'b11110
+  } fp_f5_e;
+
+  typedef enum logic [1:0] {
+    FPFMT_S = 2'b00,
+    FPFMT_D = 2'b01
+  } fp_fmt_e;
+
+  // Fused multiply-add executes at FLEN; fmt selects the negation variant.
+  typedef enum logic [1:0] {
+    FMA_MADD  = 2'b00,
+    FMA_MSUB  = 2'b01,
+    FMA_NMSUB = 2'b10,
+    FMA_NMADD = 2'b11
+  } fma_var_e;
+
+  typedef enum logic [2:0] {
+    RM_RNE = 3'b000,
+    RM_RTZ = 3'b001,
+    RM_RDN = 3'b010,
+    RM_RUP = 3'b011,
+    RM_RMM = 3'b100,
+    RM_DYN = 3'b111
+  } fp_rm_e;
+
+  // ---- Vector (OPC_VEC_ARITH: funct3 = operand category) ----------------------
+  typedef enum logic [2:0] {
+    VOP_IVV = 3'b000,
+    VOP_FVV = 3'b001,
+    VOP_MVV = 3'b010,
+    VOP_IVI = 3'b011,
+    VOP_IVX = 3'b100,
+    VOP_FVF = 3'b101,
+    VOP_MVX = 3'b110
+  } vop_cat_e;
+
+  typedef enum logic [5:0] {
+    VI6_ADD     = 6'b000000,
+    VI6_SUB     = 6'b000010,
+    VI6_MIN     = 6'b000101,
+    VI6_MAX     = 6'b000111,
+    VI6_AND     = 6'b001001,
+    VI6_OR      = 6'b001010,
+    VI6_XOR     = 6'b001011,
+    VI6_GATHER  = 6'b001100,
+    VI6_SLIDEUP = 6'b001110,
+    VI6_SLIDEDN = 6'b001111,
+    VI6_MERGE   = 6'b010111,
+    VI6_SLL     = 6'b100101,
+    VI6_SRL     = 6'b101000,
+    VI6_SRA     = 6'b101001
+  } vi_f6_e;
+
+  typedef enum logic [5:0] {
+    VM6_REDSUM   = 6'b000000,
+    VM6_REDMAX   = 6'b000111,
+    VM6_COMPRESS = 6'b010111,
+    VM6_MUL      = 6'b100101,
+    VM6_MACC     = 6'b101101
+  } vm_f6_e;
+
+  typedef enum logic [5:0] {
+    VF6_ADD  = 6'b000000,
+    VF6_MUL  = 6'b100100,
+    VF6_MACC = 6'b101100
+  } vf_f6_e;
+
+  typedef enum logic [2:0] {
+    F3_VSETVL  = 3'b000,
+    F3_VSETVLI = 3'b111
+  } vcfg_f3_e;
+
+  typedef enum logic [1:0] {
+    VMOP_UNIT    = 2'b00,
+    VMOP_INDEXED = 2'b01,
+    VMOP_STRIDED = 2'b10
+  } vmop_e;
+
+  typedef enum logic [2:0] {
+    VMW_8  = 3'b000,
+    VMW_16 = 3'b101,
+    VMW_32 = 3'b110,
+    VMW_64 = 3'b111
+  } vmem_w_e;
+
+  // ---- Tensor (OPC_TNS_MMA / OPC_TNS_CTRL: T layout) --------------------------
+  typedef enum logic [1:0] {
+    TMMA_INT8 = 2'b00,
+    TMMA_FP8  = 2'b01,
+    TMMA_FP16 = 2'b10,
+    TMMA_BF16 = 2'b11
+  } tns_mma_dt_e;
+
+  typedef enum logic [4:0] {
+    TF5_ZERO      = 5'd0,
+    TF5_ACC_READ  = 5'd1,
+    TF5_RELU      = 5'd2,
+    TF5_GELU      = 5'd3,
+    TF5_TRANSPOSE = 5'd4,
+    TF5_SYNC      = 5'd5
+  } tns_ctrl_f5_e;
+
+  // ---- System (OPC_SYSTEM, funct3 = F3_PRIV: funct12) -------------------------
+  typedef enum logic [11:0] {
+    F12_ECALL  = 12'h000,
+    F12_EBREAK = 12'h001,
+    F12_SRET   = 12'h102,
+    F12_WFI    = 12'h105,
+    F12_MRET   = 12'h302,
+    F12_DRET   = 12'h7B2
+  } sys_f12_e;
+
+  // ---- CSR address space ------------------------------------------------------
+  localparam int unsigned CSR_ADDR_W   = 12;
+  localparam logic [11:0] CSR_SATP     = 12'h180;
+  localparam logic [1:0]  CSR_RO_CODE  = 2'b11;
+  localparam logic [7:0]  CSR_DBG_PAGE = 8'h7B;
 
   // ---- Instruction formats ----------------------------------------------------
   typedef struct packed {
@@ -908,10 +1092,129 @@ package silicaflux_pkg;
     exc_info_t   exc;
   } uop_t;
 
+  // ---- Decode metadata --------------------------------------------------------
+  typedef enum logic [1:0] {
+    IFMT_R = 2'd0,
+    IFMT_I = 2'd1,
+    IFMT_M = 2'd2,
+    IFMT_X = 2'd3
+  } instr_fmt_e;
+
+  typedef enum logic [3:0] {
+    ICLS_ALU     = 4'd0,
+    ICLS_MUL     = 4'd1,
+    ICLS_DIV     = 4'd2,
+    ICLS_BRANCH  = 4'd3,
+    ICLS_JUMP    = 4'd4,
+    ICLS_LOAD    = 4'd5,
+    ICLS_STORE   = 4'd6,
+    ICLS_AMO     = 4'd7,
+    ICLS_FENCE   = 4'd8,
+    ICLS_CSR     = 4'd9,
+    ICLS_SYSTEM  = 4'd10,
+    ICLS_FP      = 4'd11,
+    ICLS_VEC     = 4'd12,
+    ICLS_TNS     = 4'd13,
+    ICLS_CUSTOM  = 4'd14,
+    ICLS_ILLEGAL = 4'd15
+  } instr_class_e;
+
+  typedef enum logic [1:0] {                                          // {aq, rl}
+    MORD_RELAXED = 2'b00,
+    MORD_RELEASE = 2'b01,
+    MORD_ACQUIRE = 2'b10,
+    MORD_ACQ_REL = 2'b11
+  } mem_order_e;
+
   typedef struct packed {
-    uop_t [DECODE_WIDTH-1:0] uop;
-    bp_snapshot_t            snap;
-    fetch_seq_t              seq;
+    logic i;
+    logic o;
+    logic r;
+    logic w;
+  } fence_set_t;
+
+  typedef logic [TNS_NUM_TREGS-1:0] tile_mask_t;
+
+  typedef struct packed {
+    logic        rs1_rd;
+    logic        rs2_rd;
+    logic        rs3_rd;
+    logic        rd_wr;
+    logic        mask_rd;
+    logic        vtype_rd;
+    logic        vtype_wr;
+    logic        ldq_alloc;
+    logic        stq_alloc;
+    logic        br_alloc;
+    logic        spec_barrier;
+    logic        commit_exec;
+    tile_mask_t  tile_rd;
+    tile_mask_t  tile_wr;
+  } dep_meta_t;
+
+  typedef struct packed {
+    logic        active;
+    logic        masked;
+    vop_cat_e    cat;
+    vmop_e       mop;
+    logic [5:0]  funct6;
+  } vec_meta_t;
+
+  typedef struct packed {
+    logic        active;
+    tns_dtype_e  dtype;
+    treg_t       td;
+    treg_t       ts1;
+    treg_t       ts2;
+  } tns_meta_t;
+
+  typedef struct packed {
+    instr_fmt_e   fmt;
+    imm_fmt_e     imm_fmt;
+    instr_class_e cls;
+    priv_e        min_priv;
+    mem_order_e   mem_order;
+    fence_set_t   fence_pred;
+    fence_set_t   fence_succ;
+    vaddr_t       cfi_target;
+    dep_meta_t    dep;
+    vec_meta_t    vec;
+    tns_meta_t    tns;
+  } dec_meta_t;
+
+  // Architectural state qualifying decode legality (sourced from the CSR file).
+  typedef struct packed {
+    priv_e       priv;
+    logic        debug_mode;
+    logic        fp_en;
+    logic        vec_en;
+    logic        tns_en;
+    logic        xcustom_en;
+    logic        tvm;
+    logic        tw;
+    logic        tsr;
+    logic        vill;
+  } dec_ctrl_t;
+
+  typedef struct packed {
+    logic                    pkt_fire;
+    logic [DECODE_CNT_W-1:0] lanes;
+    logic                    illegal;
+    logic                    serialize;
+    logic                    backpressure;
+    logic                    starved;
+    logic                    flush;
+    logic                    replay;
+  } dec_perf_t;
+
+  // uop[i].imm conventions : IMM_Z carries {zimm[16:12], csr[11:0]};
+  //                          IMM_V5 carries sign-extended vs1-field immediate.
+  // uop[i].bp.pred_target  : predicted successor PC of the instruction.
+  typedef struct packed {
+    uop_t      [DECODE_WIDTH-1:0] uop;
+    dec_meta_t [DECODE_WIDTH-1:0] meta;
+    bp_snapshot_t                 snap;
+    fetch_seq_t                   seq;
   } decode_pkt_t;
 
   typedef struct packed {
