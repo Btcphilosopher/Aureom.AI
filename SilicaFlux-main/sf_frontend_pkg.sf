@@ -1,0 +1,255 @@
+// =============================================================================
+// SilicaFlux Frontend :: Shared Frontend Package
+// -----------------------------------------------------------------------------
+// Architectural configuration, enumerations and packed interface structures
+// shared by the fetch unit, branch prediction complex, instruction cache,
+// decode and the backend redirect network.
+// =============================================================================
+
+package sf_frontend_pkg;
+
+  // ---------------------------------------------------------------------------
+  // Architectural configuration
+  // ---------------------------------------------------------------------------
+  localparam int unsigned VADDR_W           = 64;
+  localparam int unsigned ILEN              = 32;
+  localparam int unsigned INSN_BYTES        = ILEN / 8;
+  localparam int unsigned INSN_OFF_W        = $clog2(INSN_BYTES);
+  localparam int unsigned FETCH_WIDTH       = 4;
+  localparam int unsigned LANE_IDX_W        = $clog2(FETCH_WIDTH);
+  localparam int unsigned FETCH_BLOCK_BYTES = FETCH_WIDTH * INSN_BYTES;
+  localparam int unsigned BLOCK_OFF_W       = $clog2(FETCH_BLOCK_BYTES);
+
+  localparam int unsigned GHIST_W           = 16;
+  localparam int unsigned RAS_PTR_W         = 4;
+  localparam int unsigned BHT_CTR_W         = 2;
+
+  localparam int unsigned TXN_ID_W          = 4;
+  localparam int unsigned EPOCH_W           = 4;
+  localparam int unsigned SEQ_W             = 16;
+  localparam int unsigned ASID_W            = 16;
+
+  // ---------------------------------------------------------------------------
+  // Enumerations
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    PRIV_U = 2'b00,
+    PRIV_S = 2'b01,
+    PRIV_M = 2'b11
+  } priv_lvl_e;
+
+  typedef enum logic [2:0] {
+    CFI_NONE   = 3'd0,
+    CFI_BRANCH = 3'd1,
+    CFI_JUMP   = 3'd2,
+    CFI_JALR   = 3'd3,
+    CFI_CALL   = 3'd4,
+    CFI_RET    = 3'd5
+  } cfi_type_e;
+
+  typedef enum logic [1:0] {
+    PRED_SRC_NONE = 2'd0,
+    PRED_SRC_BTB  = 2'd1,
+    PRED_SRC_BHT  = 2'd2,
+    PRED_SRC_RAS  = 2'd3
+  } pred_src_e;
+
+  typedef enum logic [1:0] {
+    CONF_NONE = 2'd0,
+    CONF_LOW  = 2'd1,
+    CONF_MED  = 2'd2,
+    CONF_HIGH = 2'd3
+  } pred_conf_e;
+
+  typedef enum logic [2:0] {
+    FFAULT_NONE       = 3'd0,
+    FFAULT_MISALIGNED = 3'd1,
+    FFAULT_ACCESS     = 3'd2,
+    FFAULT_PAGE       = 3'd3,
+    FFAULT_GUEST_PAGE = 3'd4,
+    FFAULT_ECC        = 3'd5
+  } fetch_fault_e;
+
+  typedef enum logic [2:0] {
+    REDIR_NONE     = 3'd0,
+    REDIR_TRAP     = 3'd1,
+    REDIR_REPLAY   = 3'd2,
+    REDIR_BRU      = 3'd3,
+    REDIR_DEC      = 3'd4,
+    REDIR_ICREPLAY = 3'd5,
+    REDIR_BPRED    = 3'd6
+  } redirect_src_e;
+
+  // ---------------------------------------------------------------------------
+  // Translation / privilege context
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    priv_lvl_e             priv;
+    logic [ASID_W-1:0]     asid;
+    logic                  xlat_en;
+  } fe_ctx_t;
+
+  // ---------------------------------------------------------------------------
+  // Instruction cache interface
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic [VADDR_W-1:0]    vaddr;
+    logic [TXN_ID_W-1:0]   txn_id;
+    fe_ctx_t               ctx;
+  } icache_req_t;
+
+  typedef struct packed {
+    logic [TXN_ID_W-1:0]                txn_id;
+    logic [FETCH_WIDTH-1:0][ILEN-1:0]   data;
+    logic                               replay;
+    fetch_fault_e                       fault;
+  } icache_resp_t;
+
+  // ---------------------------------------------------------------------------
+  // Branch prediction interfaces
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic                  hit;
+    cfi_type_e             cfi_type;
+    logic [VADDR_W-1:0]    target;
+  } btb_lane_t;
+
+  typedef struct packed {
+    logic                          valid;
+    btb_lane_t [FETCH_WIDTH-1:0]   lane;
+  } btb_resp_t;
+
+  typedef struct packed {
+    logic                                    valid;
+    logic [FETCH_WIDTH-1:0][BHT_CTR_W-1:0]   ctr;
+    logic [GHIST_W-1:0]                      ghist;
+  } bht_resp_t;
+
+  typedef struct packed {
+    logic                  valid;
+    logic [VADDR_W-1:0]    target;
+    logic [RAS_PTR_W-1:0]  ptr;
+  } ras_resp_t;
+
+  typedef struct packed {
+    logic [GHIST_W-1:0]                      ghist;
+    logic [RAS_PTR_W-1:0]                    ras_ptr;
+    logic [FETCH_WIDTH-1:0]                  btb_hit;
+    logic [FETCH_WIDTH-1:0][BHT_CTR_W-1:0]   bht_ctr;
+  } bp_meta_t;
+
+  typedef struct packed {
+    logic                  taken;
+    logic [LANE_IDX_W-1:0] slot;
+    cfi_type_e             cfi_type;
+    pred_src_e             src;
+    pred_conf_e            conf;
+    logic [VADDR_W-1:0]    target;
+  } pred_info_t;
+
+  typedef struct packed {
+    logic                  valid;
+    logic [VADDR_W-1:0]    block_pc;
+    logic                  taken;
+    logic [LANE_IDX_W-1:0] slot;
+    cfi_type_e             cfi_type;
+    logic [VADDR_W-1:0]    target;
+    logic [FETCH_WIDTH-1:0] br_mask;
+    logic                  ras_push;
+    logic                  ras_pop;
+    logic [VADDR_W-1:0]    ras_push_addr;
+  } bp_spec_upd_t;
+
+  typedef struct packed {
+    logic                  valid;
+    redirect_src_e         src;
+    logic [VADDR_W-1:0]    target;
+    logic [VADDR_W-1:0]    cfi_pc;
+    cfi_type_e             cfi_type;
+    logic                  taken;
+    bp_meta_t              meta;
+  } bp_recover_t;
+
+  // ---------------------------------------------------------------------------
+  // Redirect network
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic                  valid;
+    logic [VADDR_W-1:0]    target;
+    logic [VADDR_W-1:0]    cfi_pc;
+    cfi_type_e             cfi_type;
+    logic                  taken;
+    bp_meta_t              meta;
+  } fe_redirect_t;
+
+  // ---------------------------------------------------------------------------
+  // Fetch packet
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic [FETCH_WIDTH-1:0]  lane_mask;
+    logic [VADDR_W-1:0]      next_pc;
+    pred_info_t              pred;
+    bp_meta_t                meta;
+  } fetch_pred_t;
+
+  typedef struct packed {
+    logic [EPOCH_W-1:0]    epoch;
+    logic [SEQ_W-1:0]      seq;
+    logic                  redirect_head;
+    logic                  replayed;
+  } spec_meta_t;
+
+  typedef struct packed {
+    fetch_fault_e          cause;
+    logic [LANE_IDX_W-1:0] lane;
+  } fetch_fault_t;
+
+  typedef struct packed {
+    logic [VADDR_W-1:0]                 pc;
+    logic [VADDR_W-1:0]                 next_pc;
+    logic [FETCH_WIDTH-1:0]             lane_valid;
+    logic [FETCH_WIDTH-1:0][ILEN-1:0]   insn;
+    pred_info_t                         pred;
+    bp_meta_t                           bp_meta;
+    spec_meta_t                         spec;
+    fetch_fault_t                       fault;
+  } fetch_pkt_t;
+
+  // ---------------------------------------------------------------------------
+  // Performance events
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic                  req_fire;
+    logic                  req_blocked_credit;
+    logic                  req_blocked_icache;
+    logic                  bp_redirect;
+    logic                  ext_redirect;
+    logic                  ic_replay;
+    logic                  resp_dropped;
+    logic                  fq_full;
+    logic                  stall_cycle;
+  } fe_perf_t;
+
+  // ---------------------------------------------------------------------------
+  // Fetch address helpers
+  // ---------------------------------------------------------------------------
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic logic [VADDR_W-1:0] fetch_block_base(input logic [VADDR_W-1:0] pc);
+    return {pc[VADDR_W-1:BLOCK_OFF_W], {BLOCK_OFF_W{1'b0}}};
+  endfunction
+
+  function automatic logic [VADDR_W-1:0] fetch_next_block(input logic [VADDR_W-1:0] pc);
+    return {pc[VADDR_W-1:BLOCK_OFF_W] + (VADDR_W-BLOCK_OFF_W)'(1'b1), {BLOCK_OFF_W{1'b0}}};
+  endfunction
+
+  function automatic logic [LANE_IDX_W-1:0] fetch_lane_of(input logic [VADDR_W-1:0] pc);
+    return pc[BLOCK_OFF_W-1:INSN_OFF_W];
+  endfunction
+
+  function automatic logic [VADDR_W-1:0] fetch_lane_pc(input logic [VADDR_W-1:0]    pc,
+                                                       input logic [LANE_IDX_W-1:0] lane);
+    return {pc[VADDR_W-1:BLOCK_OFF_W], lane, {INSN_OFF_W{1'b0}}};
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+
+endpackage : sf_frontend_pkg

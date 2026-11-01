@@ -1,0 +1,707 @@
+// =============================================================================
+// SilicaFlux Frontend :: Instruction Fetch Unit
+// -----------------------------------------------------------------------------
+// Pipeline
+//   F0  PC generation, redirect arbitration, I$ request, predictor lookup.
+//   F1  BTB/BHT/RAS integration, lane masking, predictor override redirect
+//       (single-bubble taken path), speculative predictor update.
+//   FR  In-order I$ response, liveness filter, packet build, fetch queue.
+//
+// Ordering and recovery
+//   - Each accepted I$ request owns an Outstanding Transaction Buffer (OTB)
+//     entry and a reserved fetch-queue credit; the response channel never
+//     back-pressures.
+//   - Kills mark every OTB entry dead; dead responses retire without effect.
+//   - Request-side control (valid, address, txn id) is driven from flops only.
+//   - Redirect priority: TRAP > REPLAY > BRU > DEC > I$ REPLAY > BPRED > SEQ.
+//   - Architectural redirects flush the fetch queue; internal redirects
+//     (I$ replay, predictor override, fault halt) preserve older packets.
+//
+// Interface contracts
+//   - I$ responses return in request order, one per accepted request,
+//     minimum latency one cycle; ic_kill_o permits early abandonment of
+//     in-flight work but not suppression of the response.
+//   - BTB/BHT/RAS respond exactly one cycle after bp_req_valid_o; lookups are
+//     side-effect free and speculative state advances only via bp_spec_upd_o.
+//   - Downstream consumers apply architectural flushes coincident with the
+//     redirect inputs; fetch_valid_o is a registered queue-occupancy flag.
+// =============================================================================
+
+module fetch_unit
+  import sf_frontend_pkg::*;
+#(
+  parameter int unsigned FQ_DEPTH        = 8,
+  parameter int unsigned MAX_OUTSTANDING = 4
+) (
+  input  logic                clk_i,
+  input  logic                rst_ni,
+
+  // Frontend control
+  input  logic [VADDR_W-1:0]  boot_addr_i,
+  input  logic                fe_enable_i,
+  input  logic                fe_stall_i,
+  input  fe_ctx_t             fe_ctx_i,
+  output logic                fe_idle_o,
+  output fe_perf_t            fe_perf_o,
+
+  // Redirect network
+  input  fe_redirect_t        trap_redirect_i,
+  input  fe_redirect_t        replay_redirect_i,
+  input  fe_redirect_t        bru_redirect_i,
+  input  fe_redirect_t        dec_redirect_i,
+
+  // Instruction cache
+  output logic                ic_req_valid_o,
+  input  logic                ic_req_ready_i,
+  output icache_req_t         ic_req_o,
+  output logic                ic_kill_o,
+  input  logic                ic_resp_valid_i,
+  input  icache_resp_t        ic_resp_i,
+
+  // Branch prediction complex
+  output logic                bp_req_valid_o,
+  output logic [VADDR_W-1:0]  bp_req_pc_o,
+  input  btb_resp_t           btb_resp_i,
+  input  bht_resp_t           bht_resp_i,
+  input  ras_resp_t           ras_resp_i,
+  output bp_spec_upd_t        bp_spec_upd_o,
+  output bp_recover_t         bp_recover_o,
+
+  // Decode
+  output logic                fetch_valid_o,
+  input  logic                fetch_ready_i,
+  output fetch_pkt_t          fetch_pkt_o
+);
+
+  // ===========================================================================
+  // Local parameters
+  // ===========================================================================
+  localparam int unsigned OTB_IDX_W = $clog2(MAX_OUTSTANDING);
+  localparam int unsigned OTB_CNT_W = $clog2(MAX_OUTSTANDING + 1);
+  localparam int unsigned FQ_IDX_W  = $clog2(FQ_DEPTH);
+  localparam int unsigned FQ_CNT_W  = $clog2(FQ_DEPTH + 1);
+  localparam int unsigned CRD_W     = FQ_CNT_W + 1;
+
+  // ===========================================================================
+  // Elaboration-time configuration checks
+  // ===========================================================================
+  if ((FQ_DEPTH < 2) || ((FQ_DEPTH & (FQ_DEPTH - 1)) != 0)) begin : g_cfg_fq_depth
+    $error("fetch_unit: FQ_DEPTH must be a power of two >= 2");
+  end
+
+  if ((MAX_OUTSTANDING < 2) || ((MAX_OUTSTANDING & (MAX_OUTSTANDING - 1)) != 0)) begin : g_cfg_otb_depth
+    $error("fetch_unit: MAX_OUTSTANDING must be a power of two >= 2");
+  end
+
+  if (MAX_OUTSTANDING > FQ_DEPTH) begin : g_cfg_otb_vs_fq
+    $error("fetch_unit: MAX_OUTSTANDING must not exceed FQ_DEPTH");
+  end
+
+  if (OTB_IDX_W > TXN_ID_W) begin : g_cfg_txn_w
+    $error("fetch_unit: TXN_ID_W too narrow for MAX_OUTSTANDING");
+  end
+
+  if ((FETCH_WIDTH < 2) || ((FETCH_WIDTH & (FETCH_WIDTH - 1)) != 0)) begin : g_cfg_fetch_width
+    $error("fetch_unit: FETCH_WIDTH must be a power of two >= 2");
+  end
+
+  if (INSN_BYTES < 2) begin : g_cfg_ilen
+    $error("fetch_unit: ILEN must be at least 16 bits");
+  end
+
+  // ===========================================================================
+  // Types
+  // ===========================================================================
+  typedef enum logic [1:0] {
+    FE_BOOT  = 2'b00,
+    FE_FETCH = 2'b01,
+    FE_STALL = 2'b10,
+    FE_FAULT = 2'b11
+  } fe_state_e;
+
+  // ===========================================================================
+  // Declarations
+  // ===========================================================================
+
+  // Frontend state
+  fe_state_e                   state_q, state_d;
+  fe_state_e                   run_state;
+  logic                        run_ok;
+  logic                        fe_active;
+  logic [VADDR_W-1:0]          pc_q, pc_d;
+  logic                        pc_misalign;
+  fe_ctx_t                     ctx_q;
+  logic [EPOCH_W-1:0]          epoch_q;
+  logic [SEQ_W-1:0]            seq_q;
+  logic                        redir_pend_q;
+  logic                        replay_pend_q;
+  logic                        bp_lookup_q;
+
+  // F0 issue
+  logic [CRD_W-1:0]            credit_used;
+  logic                        credit_ok;
+  logic                        otb_space;
+  logic                        fetch_req;
+  logic                        ic_fire;
+
+  // F1 prediction
+  logic                        f1_valid_q;
+  logic [VADDR_W-1:0]          f1_pc_q;
+  logic [OTB_IDX_W-1:0]        f1_idx_q;
+  logic                        f1_misalign_q;
+  logic [LANE_IDX_W-1:0]       f1_start_lane;
+  logic [FETCH_WIDTH-1:0]      f1_lane_live;
+  logic [FETCH_WIDTH-1:0]      f1_btb_hit;
+  logic [FETCH_WIDTH-1:0]      f1_bht_taken;
+  logic [FETCH_WIDTH-1:0]      f1_bht_strong;
+  logic [FETCH_WIDTH-1:0]      f1_lane_cond;
+  logic [FETCH_WIDTH-1:0]      f1_lane_taken;
+  logic [FETCH_WIDTH-1:0]      f1_lane_mask;
+  logic [FETCH_WIDTH-1:0]      f1_slot_upto;
+  logic [FETCH_WIDTH-1:0]      f1_br_mask;
+  logic                        f1_hit_taken;
+  logic                        f1_taken;
+  logic [LANE_IDX_W-1:0]       f1_slot;
+  cfi_type_e                   f1_cfi_type;
+  logic [VADDR_W-1:0]          f1_btb_target;
+  logic [VADDR_W-1:0]          f1_seq_pc;
+  logic [VADDR_W-1:0]          f1_next_pc;
+  pred_info_t                  f1_pred;
+  fetch_pred_t                 f1_rec;
+
+  // Outstanding transaction buffer
+  logic [MAX_OUTSTANDING-1:0]  otb_valid_q;
+  logic [MAX_OUTSTANDING-1:0]  otb_killed_q;
+  logic [MAX_OUTSTANDING-1:0]  otb_misalign_q;
+  logic [MAX_OUTSTANDING-1:0]  otb_rhead_q;
+  logic [MAX_OUTSTANDING-1:0]  otb_replay_q;
+  logic [VADDR_W-1:0]          otb_pc_q    [MAX_OUTSTANDING];
+  logic [EPOCH_W-1:0]          otb_epoch_q [MAX_OUTSTANDING];
+  fetch_pred_t                 otb_pred_q  [MAX_OUTSTANDING];
+  logic [OTB_IDX_W-1:0]        otb_head_q;
+  logic [OTB_IDX_W-1:0]        otb_tail_q;
+  logic [OTB_CNT_W-1:0]        otb_cnt_q;
+
+  // Response stage
+  logic [VADDR_W-1:0]          resp_pc;
+  logic [LANE_IDX_W-1:0]       resp_lane;
+  logic                        resp_bypass;
+  fetch_pred_t                 resp_rec;
+  logic                        resp_live;
+  logic                        resp_replay;
+  logic                        resp_data;
+  logic                        resp_fault;
+  fetch_fault_e                resp_cause;
+  fetch_pkt_t                  resp_pkt;
+
+  // Redirect / kill
+  fe_redirect_t                ext_sel;
+  redirect_src_e               ext_src;
+  logic                        ext_flush;
+  logic                        ic_replay_kill;
+  logic                        fault_kill;
+  logic                        kill_all;
+  logic                        bp_redirect;
+
+  // Fetch queue
+  fetch_pkt_t                  fq_mem_q [FQ_DEPTH];
+  logic [FQ_IDX_W-1:0]         fq_head_q;
+  logic [FQ_IDX_W-1:0]         fq_tail_q;
+  logic [FQ_CNT_W-1:0]         fq_cnt_q;
+  logic                        fq_enq;
+  logic                        fq_deq;
+
+  // ===========================================================================
+  // Frontend control
+  // ===========================================================================
+  assign run_ok      = fe_enable_i & ~fe_stall_i;
+  assign run_state   = run_ok ? FE_FETCH : FE_STALL;
+  assign fe_active   = (state_q != FE_BOOT);
+  assign pc_misalign = |pc_q[INSN_OFF_W-1:0];
+
+  always_comb begin
+    state_d = state_q;
+    unique case (state_q)
+      FE_BOOT: begin
+        state_d = run_state;
+      end
+      FE_FETCH,
+      FE_STALL: begin
+        if (ext_flush) begin
+          state_d = run_state;
+        end else if (fault_kill) begin
+          state_d = FE_FAULT;
+        end else begin
+          state_d = run_state;
+        end
+      end
+      FE_FAULT: begin
+        if (ext_flush) begin
+          state_d = run_state;
+        end
+      end
+    endcase
+  end
+
+  // ===========================================================================
+  // F0 :: Issue and credit control
+  // ---------------------------------------------------------------------------
+  // A request is issued only when a fetch-queue slot is reserved for its
+  // response. All fan-in is registered state.
+  // ===========================================================================
+  assign credit_used = CRD_W'(otb_cnt_q) + CRD_W'(fq_cnt_q);
+  assign credit_ok   = (credit_used < CRD_W'(FQ_DEPTH));
+  assign otb_space   = (otb_cnt_q < OTB_CNT_W'(MAX_OUTSTANDING));
+  assign fetch_req   = (state_q == FE_FETCH) & credit_ok & otb_space;
+
+  assign ic_req_valid_o = fetch_req;
+  assign ic_fire        = ic_req_valid_o & ic_req_ready_i;
+  assign bp_req_valid_o = fetch_req;
+  assign bp_req_pc_o    = fetch_block_base(pc_q);
+
+  always_comb begin
+    ic_req_o        = '0;
+    ic_req_o.vaddr  = fetch_block_base(pc_q);
+    ic_req_o.txn_id = TXN_ID_W'(otb_tail_q);
+    ic_req_o.ctx    = ctx_q;
+  end
+
+  // ===========================================================================
+  // F1 :: Prediction integration
+  // ---------------------------------------------------------------------------
+  // Lane-parallel qualification of BTB hits against BHT direction, followed by
+  // a lowest-lane-first taken priority encode and RAS/BTB target selection.
+  // ===========================================================================
+  assign f1_start_lane = fetch_lane_of(f1_pc_q);
+  assign f1_seq_pc     = fetch_next_block(f1_pc_q);
+
+  assign f1_lane_live = ~((FETCH_WIDTH'(1'b1) << f1_start_lane) - FETCH_WIDTH'(1'b1));
+  assign f1_slot_upto = (FETCH_WIDTH'(2'd2) << f1_slot) - FETCH_WIDTH'(1'b1);
+
+  for (genvar l = 0; l < FETCH_WIDTH; l++) begin : g_f1_lane
+    assign f1_btb_hit[l]    = btb_resp_i.valid
+                            & btb_resp_i.lane[l].hit
+                            & (btb_resp_i.lane[l].cfi_type != CFI_NONE);
+    assign f1_bht_taken[l]  = bht_resp_i.valid & bht_resp_i.ctr[l][BHT_CTR_W-1];
+    assign f1_bht_strong[l] = bht_resp_i.valid
+                            & ((&bht_resp_i.ctr[l]) | ~(|bht_resp_i.ctr[l]));
+    assign f1_lane_cond[l]  = f1_btb_hit[l] & (btb_resp_i.lane[l].cfi_type == CFI_BRANCH);
+    assign f1_lane_taken[l] = f1_lane_live[l] & f1_btb_hit[l] & (~f1_lane_cond[l] | f1_bht_taken[l]);
+    assign f1_lane_mask[l]  = f1_lane_live[l] & (~f1_taken | f1_slot_upto[l]);
+    assign f1_br_mask[l]    = f1_lane_mask[l] & f1_lane_cond[l] & ~f1_misalign_q;
+  end
+
+  always_comb begin
+    f1_hit_taken = 1'b0;
+    f1_slot      = '0;
+    for (int i = FETCH_WIDTH - 1; i >= 0; i--) begin
+      if (f1_lane_taken[i]) begin
+        f1_hit_taken = 1'b1;
+        f1_slot      = LANE_IDX_W'(unsigned'(i));
+      end
+    end
+  end
+
+  assign f1_taken      = f1_hit_taken & ~f1_misalign_q;
+  assign f1_cfi_type   = btb_resp_i.lane[f1_slot].cfi_type;
+  assign f1_btb_target = btb_resp_i.lane[f1_slot].target;
+
+  always_comb begin
+    f1_pred = '0;
+    if (f1_taken) begin
+      f1_pred.taken    = 1'b1;
+      f1_pred.slot     = f1_slot;
+      f1_pred.cfi_type = f1_cfi_type;
+      case (f1_cfi_type)
+        CFI_RET: begin
+          if (ras_resp_i.valid) begin
+            f1_pred.target = ras_resp_i.target;
+            f1_pred.src    = PRED_SRC_RAS;
+            f1_pred.conf   = CONF_HIGH;
+          end else begin
+            f1_pred.target = f1_btb_target;
+            f1_pred.src    = PRED_SRC_BTB;
+            f1_pred.conf   = CONF_LOW;
+          end
+        end
+        CFI_BRANCH: begin
+          f1_pred.target = f1_btb_target;
+          f1_pred.src    = PRED_SRC_BHT;
+          f1_pred.conf   = f1_bht_strong[f1_slot] ? CONF_HIGH : CONF_MED;
+        end
+        CFI_JALR: begin
+          f1_pred.target = f1_btb_target;
+          f1_pred.src    = PRED_SRC_BTB;
+          f1_pred.conf   = CONF_MED;
+        end
+        default: begin
+          f1_pred.target = f1_btb_target;
+          f1_pred.src    = PRED_SRC_BTB;
+          f1_pred.conf   = CONF_HIGH;
+        end
+      endcase
+    end
+  end
+
+  assign f1_next_pc = f1_taken ? f1_pred.target : f1_seq_pc;
+
+  always_comb begin
+    f1_rec              = '0;
+    f1_rec.lane_mask    = f1_lane_mask;
+    f1_rec.next_pc      = f1_next_pc;
+    f1_rec.pred         = f1_pred;
+    f1_rec.meta.ghist   = bht_resp_i.ghist;
+    f1_rec.meta.ras_ptr = ras_resp_i.ptr;
+    f1_rec.meta.btb_hit = f1_btb_hit;
+    f1_rec.meta.bht_ctr = bht_resp_i.ctr;
+  end
+
+  // Predictor override: redirect to the predicted target; the request issued
+  // in this cycle from the fall-through PC is allocated dead.
+  assign bp_redirect = f1_valid_q & f1_taken & ~kill_all;
+
+  always_comb begin
+    bp_spec_upd_o               = '0;
+    bp_spec_upd_o.valid         = f1_valid_q & ~kill_all;
+    bp_spec_upd_o.block_pc      = fetch_block_base(f1_pc_q);
+    bp_spec_upd_o.taken         = f1_taken;
+    bp_spec_upd_o.slot          = f1_slot;
+    bp_spec_upd_o.cfi_type      = f1_pred.cfi_type;
+    bp_spec_upd_o.target        = f1_next_pc;
+    bp_spec_upd_o.br_mask       = f1_br_mask;
+    bp_spec_upd_o.ras_push      = f1_taken & (f1_cfi_type == CFI_CALL);
+    bp_spec_upd_o.ras_pop       = f1_taken & (f1_cfi_type == CFI_RET);
+    bp_spec_upd_o.ras_push_addr = fetch_lane_pc(f1_pc_q, f1_slot) + VADDR_W'(INSN_BYTES);
+  end
+
+  // ===========================================================================
+  // FR :: Response qualification and packet build
+  // ---------------------------------------------------------------------------
+  // Responses retire the OTB head. Prediction state is bypassed from F1 when
+  // the head entry is resolving its prediction in the same cycle.
+  // ===========================================================================
+  assign resp_pc     = otb_pc_q[otb_head_q];
+  assign resp_lane   = fetch_lane_of(resp_pc);
+  assign resp_bypass = f1_valid_q & (f1_idx_q == otb_head_q);
+  assign resp_rec    = resp_bypass ? f1_rec : otb_pred_q[otb_head_q];
+  assign resp_live   = ic_resp_valid_i & otb_valid_q[otb_head_q] & ~otb_killed_q[otb_head_q];
+  assign resp_replay = resp_live & ic_resp_i.replay;
+  assign resp_data   = resp_live & ~ic_resp_i.replay;
+  assign resp_cause  = otb_misalign_q[otb_head_q] ? FFAULT_MISALIGNED : ic_resp_i.fault;
+  assign resp_fault  = resp_data & (resp_cause != FFAULT_NONE);
+
+  always_comb begin
+    resp_pkt                    = '0;
+    resp_pkt.pc                 = resp_pc;
+    resp_pkt.insn               = ic_resp_i.data;
+    resp_pkt.bp_meta            = resp_rec.meta;
+    resp_pkt.spec.epoch         = otb_epoch_q[otb_head_q];
+    resp_pkt.spec.seq           = seq_q;
+    resp_pkt.spec.redirect_head = otb_rhead_q[otb_head_q];
+    resp_pkt.spec.replayed      = otb_replay_q[otb_head_q];
+    resp_pkt.fault.cause        = resp_cause;
+    resp_pkt.fault.lane         = resp_lane;
+    if (resp_cause != FFAULT_NONE) begin
+      resp_pkt.next_pc    = resp_pc;
+      resp_pkt.lane_valid = FETCH_WIDTH'(1'b1) << resp_lane;
+    end else begin
+      resp_pkt.next_pc    = resp_rec.next_pc;
+      resp_pkt.lane_valid = resp_rec.lane_mask;
+      resp_pkt.pred       = resp_rec.pred;
+    end
+  end
+
+  // ===========================================================================
+  // Redirect arbitration
+  // ===========================================================================
+  always_comb begin
+    ext_sel = '0;
+    ext_src = REDIR_NONE;
+    if (trap_redirect_i.valid) begin
+      ext_sel = trap_redirect_i;
+      ext_src = REDIR_TRAP;
+    end else if (replay_redirect_i.valid) begin
+      ext_sel = replay_redirect_i;
+      ext_src = REDIR_REPLAY;
+    end else if (bru_redirect_i.valid) begin
+      ext_sel = bru_redirect_i;
+      ext_src = REDIR_BRU;
+    end else if (dec_redirect_i.valid) begin
+      ext_sel = dec_redirect_i;
+      ext_src = REDIR_DEC;
+    end
+  end
+
+  assign ext_flush      = fe_active & ext_sel.valid;
+  assign ic_replay_kill = resp_replay & ~ext_flush;
+  assign fault_kill     = resp_fault & ~ext_flush;
+  assign kill_all       = ext_flush | ic_replay_kill | fault_kill;
+  assign ic_kill_o      = kill_all;
+
+  always_comb begin
+    pc_d = pc_q;
+    if (!fe_active) begin
+      pc_d = boot_addr_i;
+    end else if (ext_flush) begin
+      pc_d = ext_sel.target;
+    end else if (ic_replay_kill) begin
+      pc_d = resp_pc;
+    end else if (bp_redirect) begin
+      pc_d = f1_next_pc;
+    end else if (ic_fire) begin
+      pc_d = fetch_next_block(pc_q);
+    end
+  end
+
+  always_comb begin
+    bp_recover_o = '0;
+    if (ext_flush) begin
+      bp_recover_o.valid    = 1'b1;
+      bp_recover_o.src      = ext_src;
+      bp_recover_o.target   = ext_sel.target;
+      bp_recover_o.cfi_pc   = ext_sel.cfi_pc;
+      bp_recover_o.cfi_type = ext_sel.cfi_type;
+      bp_recover_o.taken    = ext_sel.taken;
+      bp_recover_o.meta     = ext_sel.meta;
+    end else if (ic_replay_kill) begin
+      bp_recover_o.valid    = 1'b1;
+      bp_recover_o.src      = REDIR_ICREPLAY;
+      bp_recover_o.target   = resp_pc;
+      bp_recover_o.cfi_pc   = resp_pc;
+      bp_recover_o.cfi_type = CFI_NONE;
+      bp_recover_o.taken    = 1'b0;
+      bp_recover_o.meta     = resp_rec.meta;
+    end
+  end
+
+  // ===========================================================================
+  // Sequential :: Frontend state
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      state_q       <= FE_BOOT;
+      pc_q          <= '0;
+      ctx_q         <= '0;
+      epoch_q       <= '0;
+      seq_q         <= '0;
+      redir_pend_q  <= 1'b1;
+      replay_pend_q <= 1'b0;
+      bp_lookup_q   <= 1'b0;
+    end else begin
+      state_q     <= state_d;
+      pc_q        <= pc_d;
+      ctx_q       <= fe_ctx_i;
+      bp_lookup_q <= bp_req_valid_o;
+
+      if (kill_all) begin
+        epoch_q <= epoch_q + EPOCH_W'(1'b1);
+      end
+
+      if (fq_enq) begin
+        seq_q <= seq_q + SEQ_W'(1'b1);
+      end
+
+      if (kill_all | bp_redirect) begin
+        redir_pend_q <= 1'b1;
+      end else if (ic_fire) begin
+        redir_pend_q <= 1'b0;
+      end
+
+      if (ic_replay_kill | (ext_flush & (ext_src == REDIR_REPLAY))) begin
+        replay_pend_q <= 1'b1;
+      end else if (kill_all | bp_redirect | ic_fire) begin
+        replay_pend_q <= 1'b0;
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Sequential :: F1 stage
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      f1_valid_q <= 1'b0;
+    end else begin
+      f1_valid_q <= ic_fire & ~kill_all & ~bp_redirect;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (ic_fire) begin
+      f1_pc_q       <= pc_q;
+      f1_idx_q      <= otb_tail_q;
+      f1_misalign_q <= pc_misalign;
+    end
+  end
+
+  // ===========================================================================
+  // Sequential :: Outstanding transaction buffer
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      otb_valid_q  <= '0;
+      otb_killed_q <= '0;
+      otb_head_q   <= '0;
+      otb_tail_q   <= '0;
+      otb_cnt_q    <= '0;
+    end else begin
+      if (kill_all) begin
+        otb_killed_q <= '1;
+      end
+      if (ic_resp_valid_i) begin
+        otb_valid_q[otb_head_q] <= 1'b0;
+        otb_head_q              <= otb_head_q + OTB_IDX_W'(1'b1);
+      end
+      if (ic_fire) begin
+        otb_valid_q[otb_tail_q]  <= 1'b1;
+        otb_killed_q[otb_tail_q] <= kill_all | bp_redirect;
+        otb_tail_q               <= otb_tail_q + OTB_IDX_W'(1'b1);
+      end
+      otb_cnt_q <= otb_cnt_q + OTB_CNT_W'(ic_fire) - OTB_CNT_W'(ic_resp_valid_i);
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (ic_fire) begin
+      otb_pc_q[otb_tail_q]       <= pc_q;
+      otb_epoch_q[otb_tail_q]    <= epoch_q;
+      otb_misalign_q[otb_tail_q] <= pc_misalign;
+      otb_rhead_q[otb_tail_q]    <= redir_pend_q;
+      otb_replay_q[otb_tail_q]   <= replay_pend_q;
+    end
+    if (f1_valid_q) begin
+      otb_pred_q[f1_idx_q] <= f1_rec;
+    end
+  end
+
+  // ===========================================================================
+  // Fetch queue
+  // ===========================================================================
+  assign fq_enq        = resp_data & ~ext_flush;
+  assign fq_deq        = fetch_valid_o & fetch_ready_i;
+  assign fetch_valid_o = (fq_cnt_q != '0);
+  assign fetch_pkt_o   = fq_mem_q[fq_head_q];
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      fq_head_q <= '0;
+      fq_tail_q <= '0;
+      fq_cnt_q  <= '0;
+    end else if (ext_flush) begin
+      fq_head_q <= '0;
+      fq_tail_q <= '0;
+      fq_cnt_q  <= '0;
+    end else begin
+      if (fq_enq) begin
+        fq_tail_q <= fq_tail_q + FQ_IDX_W'(1'b1);
+      end
+      if (fq_deq) begin
+        fq_head_q <= fq_head_q + FQ_IDX_W'(1'b1);
+      end
+      fq_cnt_q <= fq_cnt_q + FQ_CNT_W'(fq_enq) - FQ_CNT_W'(fq_deq);
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (fq_enq) begin
+      fq_mem_q[fq_tail_q] <= resp_pkt;
+    end
+  end
+
+  // ===========================================================================
+  // Status and performance events
+  // ===========================================================================
+  assign fe_idle_o = ((state_q == FE_STALL) | (state_q == FE_FAULT))
+                   & (otb_cnt_q == '0)
+                   & (fq_cnt_q == '0)
+                   & ~f1_valid_q;
+
+  always_comb begin
+    fe_perf_o                    = '0;
+    fe_perf_o.req_fire           = ic_fire;
+    fe_perf_o.req_blocked_credit = (state_q == FE_FETCH) & ~(credit_ok & otb_space);
+    fe_perf_o.req_blocked_icache = ic_req_valid_o & ~ic_req_ready_i;
+    fe_perf_o.bp_redirect        = bp_redirect;
+    fe_perf_o.ext_redirect       = ext_flush;
+    fe_perf_o.ic_replay          = ic_replay_kill;
+    fe_perf_o.resp_dropped       = ic_resp_valid_i & ~fq_enq;
+    fe_perf_o.fq_full            = (fq_cnt_q == FQ_CNT_W'(FQ_DEPTH));
+    fe_perf_o.stall_cycle        = (state_q == FE_STALL);
+  end
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+`ifndef SYNTHESIS
+  // pragma translate_off
+
+  // I$ protocol
+  a_ic_resp_has_owner: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ic_resp_valid_i |-> (otb_cnt_q != '0) && otb_valid_q[otb_head_q]);
+
+  a_ic_resp_in_order: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ic_resp_valid_i |-> (ic_resp_i.txn_id == TXN_ID_W'(otb_head_q)));
+
+  a_ic_req_block_aligned: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ic_req_valid_o |-> (ic_req_o.vaddr[BLOCK_OFF_W-1:0] == '0));
+
+  a_ic_req_stable: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (ic_req_valid_o && !ic_req_ready_i && !kill_all && !bp_redirect)
+      |=> (!ic_req_valid_o || ($stable(ic_req_o.vaddr) && $stable(ic_req_o.txn_id))));
+
+  a_ic_req_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown(ic_req_valid_o));
+
+  // Credit and occupancy
+  a_otb_no_overflow: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ic_fire |-> (otb_cnt_q < OTB_CNT_W'(MAX_OUTSTANDING)));
+
+  a_credit_bound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (credit_used <= CRD_W'(FQ_DEPTH)));
+
+  a_fq_no_overflow: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    fq_enq |-> (fq_cnt_q < FQ_CNT_W'(FQ_DEPTH)) || fq_deq);
+
+  // Predictor protocol
+  a_btb_resp_follows_req: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    btb_resp_i.valid |-> bp_lookup_q);
+
+  a_bht_resp_follows_req: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    bht_resp_i.valid |-> bp_lookup_q);
+
+  a_spec_upd_slot_live: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (bp_spec_upd_o.valid && bp_spec_upd_o.taken) |-> (bp_spec_upd_o.slot >= f1_start_lane));
+
+  // Redirect discipline
+  a_no_redirect_in_boot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (state_q == FE_BOOT) |-> !ext_sel.valid);
+
+  a_no_fetch_in_fault: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (state_q == FE_FAULT) |-> !ic_req_valid_o);
+
+  // Packet integrity and alignment
+  a_pkt_lane_nonzero: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    fetch_valid_o |-> (fetch_pkt_o.lane_valid != '0));
+
+  a_pkt_lane_aligned: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    fetch_valid_o |-> ((fetch_pkt_o.lane_valid
+                        & ((FETCH_WIDTH'(1'b1) << fetch_lane_of(fetch_pkt_o.pc)) - FETCH_WIDTH'(1'b1))) == '0));
+
+  a_pkt_fault_single_lane: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (fetch_valid_o && (fetch_pkt_o.fault.cause != FFAULT_NONE)) |-> $onehot(fetch_pkt_o.lane_valid));
+
+  a_pkt_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (fetch_valid_o && !fetch_ready_i && !ext_flush) |=> (fetch_valid_o && $stable(fetch_pkt_o)));
+
+  // Coverage
+  c_bp_redirect:     cover property (@(posedge clk_i) disable iff (!rst_ni) bp_redirect);
+  c_ic_replay:       cover property (@(posedge clk_i) disable iff (!rst_ni) ic_replay_kill);
+  c_resp_bypass:     cover property (@(posedge clk_i) disable iff (!rst_ni) ic_resp_valid_i && resp_bypass);
+  c_fault_halt:      cover property (@(posedge clk_i) disable iff (!rst_ni) fault_kill);
+  c_flush_with_fire: cover property (@(posedge clk_i) disable iff (!rst_ni) ext_flush && ic_fire);
+  c_fq_full:         cover property (@(posedge clk_i) disable iff (!rst_ni) fq_cnt_q == FQ_CNT_W'(FQ_DEPTH));
+
+  // pragma translate_on
+`endif
+
+endmodule : fetch_unit
