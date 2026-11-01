@@ -1,0 +1,684 @@
+// =====================================================================================
+//  SilicaFlux Architecture
+//  vector_engine.sf -- Parameterized lane-parallel SIMD integer execution engine
+//  Language : Silica Flux-2017
+// =====================================================================================
+//
+//  Pipeline organisation
+//
+//      issue_*_i                                                                 wb_*_o
+//          |                                                                       ^
+//   +------v-------+    +-----------+    +---------------------------------+  +----+----+
+//   | DEC          |    | EX1 reg   |    | EXE  (LANES x g_lane)           |  | WB reg  |
+//   |  op decode   |--->| optional  |--->|  operand isolation              |->| result  |
+//   |  src-B select|    | EX_STAGES |    |  FU array (add/mul/shift/logic) |  | packet  |
+//   |  mask eval   |    |   == 2    |    |  one-hot AND-OR result select   |  |         |
+//   +--------------+    +-----------+    |  mask merge                     |  +---------+
+//                                        +---------------------------------+
+//
+//    EX_STAGES == 1 : DEC + EXE in one cycle, latency 1.
+//    EX_STAGES == 2 : DEC isolated behind EX1 register (decoded uop broadcast from flops
+//                     to all lanes), EXE given a full cycle, latency 2.
+//    Throughput is one uop per cycle in both configurations. Stages use valid/ready
+//    flow control; ready propagates combinationally from wb_ready_i, which a backend
+//    with a reserved writeback slot ties high.
+//
+//  Lane datapath (identical per lane, no inter-lane paths)
+//
+//    a,b --[ISO]--+--> ADD/SUB/SLT shared (ELEN+1)-bit adder --> SAT clamp --+
+//                 +--> MUL (ELEN x ELEN, low half)  ------------------------+
+//                 +--> SHL barrel                   ------------------------+--> AND-OR --> MERGE
+//                 +--> SHR/SAR logical barrel + fill mask   ---------------+     9:1         |
+//                 +--> AND / OR / XOR / PASS        ------------------------+   one-hot       v
+//                                                                                        vdata, we
+//
+//    EXE critical path : ISO AND -> MUL -> AND-OR select -> merge AND-OR -> WB flop.
+//    Decode produces a one-hot result select once per uop; lanes never decode.
+//
+//  Masking
+//
+//    emask[l] = (ctrl.masked ? issue_mask_i[l] : 1) & legal
+//    Active lanes   : vdata = lane result,          lane_we = 1
+//    Inactive lanes : SF_VMPOL_UNDISTURBED -> vdata = vdst_old, lane_we = 0
+//                     SF_VMPOL_ZERO        -> vdata = 0,        lane_we = 1
+//    Illegal uop    : all lanes inactive, lane_we = 0, wb_illegal_o = 1.
+//    The mask is applied after result select and is opcode independent.
+//
+//  Flush
+//
+//    flush_i kills every uop held in EX1/WB. Issue and WB handshakes in a flush cycle
+//    are void.
+//
+//  Extension architecture
+//
+//    EX1/EX2 pipelining    : EX_STAGES parameter (implemented).
+//    Reduction             : red_lane_data_o / red_lane_vld_o export pre-merge lane
+//                            results with the execution mask, aligned to wb_valid_o, for an
+//                            external log2(LANES) reduction tree (RED_HOOK_EN).
+//    Cross-lane shuffle    : xlane_b_valid_i / xlane_b_i substitute operand B with the
+//                            output of a permutation network at issue (XLANE_EN).
+//    Predication expansion : wb_cmp_mask_o packs per-lane SLT results into a LANES-bit
+//                            predicate aligned to the mask register file.
+//    Saturation            : signed saturating ADD/SUB on the shared adder, per-uop
+//                            wb_vxsat_o (SAT_EN). Unsigned saturation adds a second clamp
+//                            constant pair on the same overflow detect.
+//    FP/vector fusion      : res_sel_t is the single point of result-class extension; an
+//                            FP lane FU adds one select bit and one AND-OR term without
+//                            altering decode, masking, or pipeline control.
+//
+//  silicaflux_pkg contract
+//
+//    localparam int unsigned SF_XLEN      scalar datapath width
+//    localparam int unsigned SF_VELEN     default vector element (lane) width
+//    typedef enum { SF_VOP_ADD, SF_VOP_SUB, SF_VOP_MUL, SF_VOP_AND, SF_VOP_OR,
+//                   SF_VOP_XOR, SF_VOP_SHL, SF_VOP_SHR, SF_VOP_SAR, SF_VOP_SLT,
+//                   SF_VOP_PASS }                                   sf_vop_e;
+//    typedef enum { SF_VSRC_VV, SF_VSRC_VX }                         sf_vsrc_e;
+//    typedef enum { SF_VMPOL_UNDISTURBED, SF_VMPOL_ZERO }            sf_vmpol_e;
+//    typedef struct packed { sf_vop_e op; sf_vsrc_e src_b; sf_vmpol_e mpol;
+//                            logic masked; logic sat; }              sf_vex_ctrl_t;
+//    typedef struct packed { ... }                                   sf_uop_tag_t;
+//      (sf_uop_tag_t is carried opaquely from issue to writeback)
+//
+// =====================================================================================
+
+module vector_engine
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned LANES       = 8,          // SIMD width: 4 / 8 / 16
+  parameter int unsigned ELEN        = SF_VELEN,   // element (lane) width in bits
+  parameter int unsigned EX_STAGES   = 1,          // 1: DEC+EXE, 2: DEC | EXE
+  parameter bit          MUL_EN      = 1'b1,       // instantiate lane multipliers
+  parameter bit          SAT_EN      = 1'b1,       // signed saturating ADD/SUB
+  parameter bit          XLANE_EN    = 1'b0,       // cross-lane operand-B substitution
+  parameter bit          RED_HOOK_EN = 1'b0,       // registered reduction export
+  parameter bit          OPERAND_ISO = 1'b1,       // zero operands of inactive lanes
+  parameter int unsigned ENGINE_ID   = 0           // instance identifier for diagnostics
+) (
+  input  logic                          clk_i,
+  input  logic                          rst_ni,
+
+  // ---------------------------------------------------------------------------------
+  // Pipeline control
+  // ---------------------------------------------------------------------------------
+  input  logic                          flush_i,
+  output logic                          busy_o,
+
+  // ---------------------------------------------------------------------------------
+  // Issue interface
+  // ---------------------------------------------------------------------------------
+  input  logic                          issue_valid_i,
+  output logic                          issue_ready_o,
+  input  sf_vex_ctrl_t                  issue_ctrl_i,
+  input  sf_uop_tag_t                   issue_tag_i,
+  input  logic [LANES-1:0]              issue_mask_i,
+  input  logic [LANES-1:0][ELEN-1:0]    issue_vsrc_a_i,
+  input  logic [LANES-1:0][ELEN-1:0]    issue_vsrc_b_i,
+  input  logic [LANES-1:0][ELEN-1:0]    issue_vdst_old_i,
+  input  logic [SF_XLEN-1:0]            issue_xsrc_i,
+
+  // ---------------------------------------------------------------------------------
+  // Cross-lane network hook (sampled with the issue handshake)
+  // ---------------------------------------------------------------------------------
+  input  logic                          xlane_b_valid_i,
+  input  logic [LANES-1:0][ELEN-1:0]    xlane_b_i,
+
+  // ---------------------------------------------------------------------------------
+  // Writeback interface
+  // ---------------------------------------------------------------------------------
+  output logic                          wb_valid_o,
+  input  logic                          wb_ready_i,
+  output sf_uop_tag_t                   wb_tag_o,
+  output logic [LANES-1:0][ELEN-1:0]    wb_vdata_o,
+  output logic [LANES-1:0]              wb_lane_we_o,
+  output logic [LANES-1:0]              wb_cmp_mask_o,
+  output logic                          wb_vxsat_o,
+  output logic                          wb_illegal_o,
+
+  // ---------------------------------------------------------------------------------
+  // Reduction hook (aligned to wb_valid_o)
+  // ---------------------------------------------------------------------------------
+  output logic [LANES-1:0][ELEN-1:0]    red_lane_data_o,
+  output logic [LANES-1:0]              red_lane_vld_o
+);
+
+  // ===================================================================================
+  // Derived geometry and constants
+  // ===================================================================================
+  localparam int unsigned VLEN     = LANES * ELEN;
+  localparam int unsigned SHAMT_W  = $clog2(ELEN);
+  localparam int unsigned NUM_VOPS = 11;
+
+  localparam logic [ELEN-1:0] ELEM_SMAX = {1'b0, {(ELEN-1){1'b1}}};
+  localparam logic [ELEN-1:0] ELEM_SMIN = {1'b1, {(ELEN-1){1'b0}}};
+
+  // ===================================================================================
+  // Local vector types
+  // ===================================================================================
+  typedef logic [ELEN-1:0]    velem_t;
+  typedef velem_t [LANES-1:0] vreg_t;
+  typedef logic [LANES-1:0]   vmask_t;
+
+  // One-hot lane result class select
+  typedef struct packed {
+    logic pass;
+    logic slt;
+    logic shr;
+    logic shl;
+    logic lxor;
+    logic lor;
+    logic land;
+    logic mul;
+    logic arith;
+  } res_sel_t;
+
+  // Decoded lane control, broadcast to every lane
+  typedef struct packed {
+    res_sel_t sel;
+    logic     sub;     // invert B and carry-in on the shared adder (SUB, SLT)
+    logic     sar;     // arithmetic fill on the unified right shifter
+    logic     sat;     // signed saturation on the arithmetic result
+    logic     legal;
+  } vdec_t;
+
+  // Decoded uop: DEC -> (EX1) -> EXE
+  typedef struct packed {
+    sf_uop_tag_t tag;
+    vdec_t       dec;
+    logic        mpol_zero;
+    vmask_t      emask;
+    vreg_t       opa;
+    vreg_t       opb;
+    vreg_t       old;
+  } vex_uop_t;
+
+  // Result packet: EXE -> WB
+  typedef struct packed {
+    sf_uop_tag_t tag;
+    vreg_t       vdata;
+    vmask_t      lane_we;
+    vmask_t      cmp_mask;
+    logic        vxsat;
+    logic        illegal;
+  } vex_res_t;
+
+  // ===================================================================================
+  // Elaboration-time configuration checks
+  // ===================================================================================
+  if (!((LANES == 32'd4) || (LANES == 32'd8) || (LANES == 32'd16))) begin : g_chk_lanes
+    $fatal(1, "vector_engine[%0d]: LANES=%0d unsupported, expected 4/8/16", ENGINE_ID, LANES);
+  end
+
+  if ((ELEN < 32'd8) || ((ELEN & (ELEN - 32'd1)) != 32'd0)) begin : g_chk_elen
+    $fatal(1, "vector_engine[%0d]: ELEN=%0d must be a power of two >= 8", ENGINE_ID, ELEN);
+  end
+
+  if (!((EX_STAGES == 32'd1) || (EX_STAGES == 32'd2))) begin : g_chk_stages
+    $fatal(1, "vector_engine[%0d]: EX_STAGES=%0d unsupported, expected 1/2", ENGINE_ID,
+           EX_STAGES);
+  end
+
+  if (unsigned'($bits(vmask_t)) != LANES) begin : g_chk_mask_w
+    $fatal(1, "vector_engine[%0d]: mask width %0d != LANES %0d", ENGINE_ID,
+           $bits(vmask_t), LANES);
+  end
+
+  if ((unsigned'($bits(vreg_t))         != VLEN) ||
+      (unsigned'($bits(issue_vsrc_a_i)) != VLEN)) begin : g_chk_vreg_w
+    $fatal(1, "vector_engine[%0d]: vector packing width != LANES*ELEN (%0d)", ENGINE_ID,
+           VLEN);
+  end
+
+  // ===================================================================================
+  // Opcode decode
+  // ===================================================================================
+  function automatic vdec_t vex_decode(input sf_vop_e op, input logic sat_req);
+    vdec_t d;
+    d = '0;
+    case (op)
+      SF_VOP_ADD: begin
+        d.sel.arith = 1'b1;
+        d.sat       = sat_req;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_SUB: begin
+        d.sel.arith = 1'b1;
+        d.sub       = 1'b1;
+        d.sat       = sat_req;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_MUL: begin
+        d.sel.mul   = MUL_EN;
+        d.legal     = MUL_EN;
+      end
+      SF_VOP_AND: begin
+        d.sel.land  = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_OR: begin
+        d.sel.lor   = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_XOR: begin
+        d.sel.lxor  = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_SHL: begin
+        d.sel.shl   = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_SHR: begin
+        d.sel.shr   = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_SAR: begin
+        d.sel.shr   = 1'b1;
+        d.sar       = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_SLT: begin
+        d.sel.slt   = 1'b1;
+        d.sub       = 1'b1;
+        d.legal     = 1'b1;
+      end
+      SF_VOP_PASS: begin
+        d.sel.pass  = 1'b1;
+        d.legal     = 1'b1;
+      end
+      default: begin
+        d = '0;
+      end
+    endcase
+    return d;
+  endfunction
+
+  // ===================================================================================
+  // DEC stage: decode, operand-B source select, effective mask
+  // ===================================================================================
+  logic     dec_valid;
+  logic     dec_sat_req;
+  vdec_t    dec_info;
+  logic     dec_mpol_zero;
+  vmask_t   dec_emask;
+  velem_t   dec_xsrc_elem;
+  vreg_t    dec_xsrc_bcast;
+  vreg_t    dec_opb;
+  vex_uop_t dec_uop;
+
+  assign dec_valid   = issue_valid_i & ~flush_i;
+  assign dec_sat_req = SAT_EN & issue_ctrl_i.sat;
+
+  // Scalar operand to element width
+  if (ELEN <= SF_XLEN) begin : g_xsrc_trunc
+    assign dec_xsrc_elem = issue_xsrc_i[ELEN-1:0];
+    if (ELEN < SF_XLEN) begin : g_xsrc_hi
+      logic unused_xsrc_hi;
+      assign unused_xsrc_hi = ^issue_xsrc_i[SF_XLEN-1:ELEN];
+    end
+  end else begin : g_xsrc_sext
+    assign dec_xsrc_elem = {{(ELEN-SF_XLEN){issue_xsrc_i[SF_XLEN-1]}}, issue_xsrc_i};
+  end
+
+  assign dec_xsrc_bcast = vreg_t'({LANES{dec_xsrc_elem}});
+
+  always_comb begin : p_dec
+    dec_info = vex_decode(issue_ctrl_i.op, dec_sat_req);
+
+    case (issue_ctrl_i.mpol)
+      SF_VMPOL_ZERO:        dec_mpol_zero = 1'b1;
+      SF_VMPOL_UNDISTURBED: dec_mpol_zero = 1'b0;
+      default:              dec_mpol_zero = 1'b0;
+    endcase
+
+    dec_emask = (issue_ctrl_i.masked ? issue_mask_i : {LANES{1'b1}})
+              & {LANES{dec_info.legal}};
+
+    case (issue_ctrl_i.src_b)
+      SF_VSRC_VV: dec_opb = issue_vsrc_b_i;
+      SF_VSRC_VX: dec_opb = dec_xsrc_bcast;
+      default:    dec_opb = issue_vsrc_b_i;
+    endcase
+
+    if (XLANE_EN && xlane_b_valid_i) begin
+      dec_opb = xlane_b_i;
+    end
+
+    dec_uop.tag       = issue_tag_i;
+    dec_uop.dec       = dec_info;
+    dec_uop.mpol_zero = dec_mpol_zero;
+    dec_uop.emask     = dec_emask;
+    dec_uop.opa       = issue_vsrc_a_i;
+    dec_uop.opb       = dec_opb;
+    dec_uop.old       = issue_vdst_old_i;
+  end
+
+  // ===================================================================================
+  // EX1 stage register (EX_STAGES == 2)
+  // ===================================================================================
+  logic     exe_valid;
+  logic     exe_ready;
+  vex_uop_t exe_uop;
+  logic     ex1_busy;
+
+  if (EX_STAGES == 32'd2) begin : g_ex1
+    logic     ex1_valid_q;
+    logic     ex1_ready;
+    vex_uop_t ex1_uop_q;
+
+    assign ex1_ready = ~ex1_valid_q | exe_ready;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_ex1_valid
+      if (!rst_ni) begin
+        ex1_valid_q <= 1'b0;
+      end else if (flush_i) begin
+        ex1_valid_q <= 1'b0;
+      end else if (ex1_ready) begin
+        ex1_valid_q <= dec_valid;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_ex1_data
+      if (ex1_ready && dec_valid) begin
+        ex1_uop_q <= dec_uop;
+      end
+    end
+
+    assign issue_ready_o = ex1_ready;
+    assign exe_valid     = ex1_valid_q;
+    assign exe_uop       = ex1_uop_q;
+    assign ex1_busy      = ex1_valid_q;
+  end else begin : g_ex1_bypass
+    assign issue_ready_o = exe_ready;
+    assign exe_valid     = dec_valid;
+    assign exe_uop       = dec_uop;
+    assign ex1_busy      = 1'b0;
+  end
+
+  // ===================================================================================
+  // EXE stage: lane array
+  // ===================================================================================
+  vreg_t  exe_raw;
+  vreg_t  exe_vdata;
+  vmask_t exe_lane_we;
+  vmask_t exe_cmp;
+  vmask_t exe_sat;
+
+  for (genvar gl = 0; gl < LANES; gl++) begin : g_lane
+    logic                 lane_act;
+    velem_t               lane_a;
+    velem_t               lane_b;
+    velem_t               lane_b_inv;
+    logic [ELEN:0]        lane_sum;
+    logic                 lane_ovf;
+    logic                 lane_lt;
+    velem_t               lane_arith;
+    velem_t               lane_mul;
+    logic [SHAMT_W-1:0]   lane_shamt;
+    velem_t               lane_shl;
+    logic                 lane_fill;
+    velem_t               lane_shr;
+    velem_t               lane_raw;
+    velem_t               lane_out;
+
+    assign lane_act = exe_uop.emask[gl];
+
+    // Operand isolation: inactive lanes present constant operands to the FU array
+    assign lane_a = exe_uop.opa[gl] & {ELEN{lane_act | ~OPERAND_ISO}};
+    assign lane_b = exe_uop.opb[gl] & {ELEN{lane_act | ~OPERAND_ISO}};
+
+    if (MUL_EN) begin : g_mul
+      assign lane_mul = lane_a * lane_b;
+    end else begin : g_no_mul
+      assign lane_mul = '0;
+    end
+
+    always_comb begin : p_lane_fu
+      // Shared adder: ADD (a + b), SUB / SLT (a + ~b + 1), sign-extended to ELEN+1
+      lane_b_inv = lane_b ^ {ELEN{exe_uop.dec.sub}};
+      lane_sum   = {lane_a[ELEN-1], lane_a}
+                 + {lane_b_inv[ELEN-1], lane_b_inv}
+                 + {{ELEN{1'b0}}, exe_uop.dec.sub};
+      lane_lt    = lane_sum[ELEN];
+      lane_ovf   = lane_sum[ELEN] ^ lane_sum[ELEN-1];
+
+      if (exe_uop.dec.sat && lane_ovf) begin
+        lane_arith = lane_sum[ELEN] ? ELEM_SMIN : ELEM_SMAX;
+      end else begin
+        lane_arith = lane_sum[ELEN-1:0];
+      end
+
+      // Shifters: SHL barrel; SHR/SAR share one logical right barrel, SAR ORs in a
+      // sign-fill thermometer mask derived from the same shift amount
+      lane_shamt   = lane_b[SHAMT_W-1:0];
+      lane_shl     = lane_a << lane_shamt;
+      lane_fill    = exe_uop.dec.sar & lane_a[ELEN-1];
+      lane_shr     = (lane_a >> lane_shamt)
+                   | ({ELEN{lane_fill}} & ~({ELEN{1'b1}} >> lane_shamt));
+    end
+
+    always_comb begin : p_lane_sel
+      lane_raw = ({ELEN{exe_uop.dec.sel.arith}} & lane_arith)
+               | ({ELEN{exe_uop.dec.sel.mul}}   & lane_mul)
+               | ({ELEN{exe_uop.dec.sel.land}}  & (lane_a & lane_b))
+               | ({ELEN{exe_uop.dec.sel.lor}}   & (lane_a | lane_b))
+               | ({ELEN{exe_uop.dec.sel.lxor}}  & (lane_a ^ lane_b))
+               | ({ELEN{exe_uop.dec.sel.shl}}   & lane_shl)
+               | ({ELEN{exe_uop.dec.sel.shr}}   & lane_shr)
+               | ({ELEN{exe_uop.dec.sel.slt}}   & {{(ELEN-1){1'b0}}, lane_lt})
+               | ({ELEN{exe_uop.dec.sel.pass}}  & lane_a);
+
+      lane_out = ({ELEN{lane_act}}                          & lane_raw)
+               | ({ELEN{~lane_act & ~exe_uop.mpol_zero}}    & exe_uop.old[gl]);
+    end
+
+    assign exe_raw[gl]     = lane_raw;
+    assign exe_vdata[gl]   = lane_out;
+    assign exe_lane_we[gl] = lane_act | (exe_uop.mpol_zero & exe_uop.dec.legal);
+    assign exe_cmp[gl]     = lane_act & exe_uop.dec.sel.slt & lane_lt;
+    assign exe_sat[gl]     = lane_act & exe_uop.dec.sat & lane_ovf;
+  end
+
+  // ===================================================================================
+  // Result aggregation
+  // ===================================================================================
+  vex_res_t exe_res;
+
+  always_comb begin : p_exe_pack
+    exe_res.tag      = exe_uop.tag;
+    exe_res.vdata    = exe_vdata;
+    exe_res.lane_we  = exe_lane_we;
+    exe_res.cmp_mask = exe_cmp;
+    exe_res.vxsat    = |exe_sat;
+    exe_res.illegal  = ~exe_uop.dec.legal;
+  end
+
+  // ===================================================================================
+  // WB stage register
+  // ===================================================================================
+  logic     wb_valid_q;
+  vex_res_t wb_res_q;
+
+  assign exe_ready = ~wb_valid_q | wb_ready_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_wb_valid
+    if (!rst_ni) begin
+      wb_valid_q <= 1'b0;
+    end else if (flush_i) begin
+      wb_valid_q <= 1'b0;
+    end else if (exe_ready) begin
+      wb_valid_q <= exe_valid;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_wb_data
+    if (exe_ready && exe_valid) begin
+      wb_res_q <= exe_res;
+    end
+  end
+
+  assign wb_valid_o    = wb_valid_q;
+  assign wb_tag_o      = wb_res_q.tag;
+  assign wb_vdata_o    = wb_res_q.vdata;
+  assign wb_lane_we_o  = wb_res_q.lane_we;
+  assign wb_cmp_mask_o = wb_res_q.cmp_mask;
+  assign wb_vxsat_o    = wb_res_q.vxsat;
+  assign wb_illegal_o  = wb_res_q.illegal;
+
+  assign busy_o        = ex1_busy | wb_valid_q;
+
+  // ===================================================================================
+  // Reduction hook
+  // ===================================================================================
+  if (RED_HOOK_EN) begin : g_red_hook
+    vreg_t  red_data_q;
+    vmask_t red_vld_q;
+
+    always_ff @(posedge clk_i) begin : p_red_data
+      if (exe_ready && exe_valid) begin
+        red_data_q <= exe_raw;
+        red_vld_q  <= exe_uop.emask;
+      end
+    end
+
+    assign red_lane_data_o = red_data_q;
+    assign red_lane_vld_o  = red_vld_q & {LANES{wb_valid_q}};
+  end else begin : g_no_red_hook
+    vreg_t unused_exe_raw;
+
+    assign unused_exe_raw  = exe_raw;
+    assign red_lane_data_o = '0;
+    assign red_lane_vld_o  = '0;
+  end
+
+  // ===================================================================================
+  // Assertions and coverage
+  // ===================================================================================
+`ifndef SYNTHESIS
+
+  localparam sf_vop_e VOP_LIST [NUM_VOPS] = '{
+    SF_VOP_ADD, SF_VOP_SUB, SF_VOP_MUL, SF_VOP_AND, SF_VOP_OR, SF_VOP_XOR,
+    SF_VOP_SHL, SF_VOP_SHR, SF_VOP_SAR, SF_VOP_SLT, SF_VOP_PASS
+  };
+
+  // Every opcode enumerated by silicaflux_pkg has exactly one decode arm
+  initial begin : p_chk_vop_coverage
+    sf_vop_e op_it;
+    vdec_t   dec_it;
+
+    op_it = op_it.first();
+    if (unsigned'(op_it.num()) != NUM_VOPS) begin
+      $error("vector_engine[%0d]: sf_vop_e has %0d members, engine decodes %0d",
+             ENGINE_ID, op_it.num(), NUM_VOPS);
+    end
+    for (int unsigned k = 0; k < unsigned'(op_it.num()); k++) begin
+      dec_it = vex_decode(op_it, 1'b0);
+      if (!dec_it.legal && !((op_it == SF_VOP_MUL) && !MUL_EN)) begin
+        $error("vector_engine[%0d]: opcode %s has no decode arm", ENGINE_ID, op_it.name());
+      end
+      if (dec_it.legal && !$onehot(dec_it.sel)) begin
+        $error("vector_engine[%0d]: opcode %s result select not one-hot", ENGINE_ID,
+               op_it.name());
+      end
+      if (dec_it.sat) begin
+        $error("vector_engine[%0d]: opcode %s asserts saturation without request",
+               ENGINE_ID, op_it.name());
+      end
+      if (dec_it.sar && !dec_it.sel.shr) begin
+        $error("vector_engine[%0d]: opcode %s asserts SAR fill outside shifter class",
+               ENGINE_ID, op_it.name());
+      end
+      if (dec_it.sub && !(dec_it.sel.arith || dec_it.sel.slt)) begin
+        $error("vector_engine[%0d]: opcode %s asserts subtract outside adder class",
+               ENGINE_ID, op_it.name());
+      end
+      op_it = op_it.next();
+    end
+  end
+
+  // Issue-side protocol
+  a_issue_valid_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({issue_valid_i, flush_i, wb_ready_i}))
+    else $error("vector_engine[%0d]: X on control inputs", ENGINE_ID);
+
+  a_issue_ctrl_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    issue_valid_i |-> !$isunknown({issue_ctrl_i, issue_tag_i}))
+    else $error("vector_engine[%0d]: X on issue ctrl/tag", ENGINE_ID);
+
+  a_issue_mask_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (issue_valid_i && issue_ctrl_i.masked) |-> !$isunknown(issue_mask_i))
+    else $error("vector_engine[%0d]: X on issue mask", ENGINE_ID);
+
+  a_issue_op_legal: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    issue_valid_i |-> dec_info.legal)
+    else $error("vector_engine[%0d]: undecodable opcode %0h issued", ENGINE_ID,
+                issue_ctrl_i.op);
+
+  a_dec_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    issue_valid_i |-> ($onehot(dec_info.sel) == dec_info.legal))
+    else $error("vector_engine[%0d]: decode select not one-hot", ENGINE_ID);
+
+  if (!SAT_EN) begin : g_chk_sat_tied
+    a_sat_unsupported: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !(issue_valid_i && issue_ctrl_i.sat))
+      else $error("vector_engine[%0d]: saturation requested with SAT_EN=0", ENGINE_ID);
+  end
+
+  if (!XLANE_EN) begin : g_chk_xlane_tied
+    a_xlane_unsupported: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !(issue_valid_i && xlane_b_valid_i))
+      else $error("vector_engine[%0d]: xlane operand with XLANE_EN=0", ENGINE_ID);
+  end
+
+  // Pipeline behaviour
+  a_wb_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (wb_valid_o && !wb_ready_i && !flush_i) |=> (wb_valid_o && $stable(wb_res_q)))
+    else $error("vector_engine[%0d]: WB packet changed under backpressure", ENGINE_ID);
+
+  a_flush_drains: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i |=> !busy_o)
+    else $error("vector_engine[%0d]: uop survived flush", ENGINE_ID);
+
+  // Result integrity
+  a_wb_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    wb_valid_o |-> !$isunknown(wb_res_q))
+    else $error("vector_engine[%0d]: X on writeback packet", ENGINE_ID);
+
+  a_illegal_no_we: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (wb_valid_o && wb_illegal_o) |-> (wb_lane_we_o == '0))
+    else $error("vector_engine[%0d]: illegal uop wrote lanes", ENGINE_ID);
+
+  a_cmp_within_we: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    wb_valid_o |-> ((wb_cmp_mask_o & ~wb_lane_we_o) == '0))
+    else $error("vector_engine[%0d]: predicate bit on unwritten lane", ENGINE_ID);
+
+  // Coverage
+  for (genvar gk = 0; gk < NUM_VOPS; gk++) begin : g_cov_vop
+    c_vop_issue: cover property (@(posedge clk_i) disable iff (!rst_ni)
+      dec_valid && issue_ready_o && (issue_ctrl_i.op == VOP_LIST[gk]));
+  end
+
+  c_mask_none: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    dec_valid && issue_ready_o && issue_ctrl_i.masked && (issue_mask_i == '0));
+
+  c_mask_partial: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    dec_valid && issue_ready_o && issue_ctrl_i.masked && (issue_mask_i != '0)
+    && (issue_mask_i != {LANES{1'b1}}));
+
+  c_mask_zero_policy: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    dec_valid && issue_ready_o && issue_ctrl_i.masked && dec_mpol_zero);
+
+  c_vx_operand: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    dec_valid && issue_ready_o && (issue_ctrl_i.src_b == SF_VSRC_VX));
+
+  c_vxsat: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    wb_valid_o && wb_vxsat_o);
+
+  c_backpressure: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    wb_valid_o && !wb_ready_i && issue_valid_i);
+
+  c_flush_inflight: cover property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i && busy_o);
+
+`endif
+
+endmodule : vector_engine
