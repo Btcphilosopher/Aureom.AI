@@ -1,0 +1,764 @@
+// =============================================================================
+//  SilicaFlux Compute Architecture
+//  vector_engine.sf
+//
+//  Parameterized lane-parallel SIMD integer execution engine
+//
+//  Geometry
+//    LANES        : 4 / 8 / 16 lanes
+//    LANE_W       : lane element width (power of two, >= 8)
+//    VLEN         : LANES * LANE_W packed vector width
+//
+//  Pipeline
+//    ISSUE : opcode decode, operand-B source select, lane-activity resolve
+//    EX1   : lane-replicated compute (adder/saturator, logic, shifter,
+//            comparator on shared subtractor, multiplier)
+//    EX2   : mask/tail merge, reduction tree, saturation summary
+//    OUT   : result register (writeback packet to register_bank.sf)
+//
+//    EX_STAGES = 1 : ISSUE+EX1+EX2 in one cycle, latency 1
+//    EX_STAGES = 2 : EX1/EX2 boundary register inserted, latency 2
+//
+//  Flow control
+//    stall_i freezes every stage register; a result is consumed on any cycle
+//    with (res_valid_o & ~stall_i). flush_i kills speculative packets in every
+//    stage, including a held output packet.
+//
+//  Lane activity
+//    active[l] = (l < vl) & (mask[l] | ~mask_en)
+//    Inactive lanes never assert res_lane_we_o. Their bus value is defined by
+//    the mask policy: MPOL_PASS -> old destination lane, MPOL_ZERO -> zero.
+//
+//  Opcode map (octal: class digit, function digit)
+//    0x : ADD SUB NOP          1x : AND OR XOR PASS
+//    2x : SHL SHR SAR          3x : SLT SLTU
+//    4x : MUL                  5x : ADDS SUBS ADDUS SUBUS (saturating)
+//    6x : REDSUM REDAND REDOR REDXOR (scalar result)
+//    7x : floating-point fusion class, steered to the FP datapath
+// =============================================================================
+
+module vector_engine
+  import silicaflux_pkg::*;
+#(
+  // ---------------------------------------------------------------------------
+  // Lane geometry
+  // ---------------------------------------------------------------------------
+  parameter  int unsigned LANES        = 4,
+  parameter  int unsigned LANE_W       = 32,
+
+  // ---------------------------------------------------------------------------
+  // Structural features
+  // ---------------------------------------------------------------------------
+  parameter  bit          MUL_EN       = 1'b1,
+  parameter  bit          SAT_EN       = 1'b1,
+  parameter  bit          RED_EN       = 1'b1,
+  parameter  int unsigned EX_STAGES    = 1,
+
+  // ---------------------------------------------------------------------------
+  // Pipeline metadata
+  // ---------------------------------------------------------------------------
+  parameter  int unsigned TAG_W        = 6,
+
+  // ---------------------------------------------------------------------------
+  // Derived / encoding widths
+  // ---------------------------------------------------------------------------
+  localparam int unsigned VLEN         = LANES * LANE_W,
+  localparam int unsigned VL_W         = $clog2(LANES + 1),
+  localparam int unsigned VOP_W        = 6,
+  localparam int unsigned VOP_FN_W     = 3,
+  localparam int unsigned BSRC_W       = 2
+) (
+  // ---------------------------------------------------------------------------
+  // Clock / reset
+  // ---------------------------------------------------------------------------
+  input  logic                                  clk_i,
+  input  logic                                  rst_ni,
+
+  // ---------------------------------------------------------------------------
+  // Pipeline control (control_core.sf)
+  // ---------------------------------------------------------------------------
+  input  logic                                  stall_i,
+  input  logic                                  flush_i,
+  output logic                                  iss_ready_o,
+  output logic                                  busy_o,
+
+  // ---------------------------------------------------------------------------
+  // Issue packet (from vector issue / register read)
+  // ---------------------------------------------------------------------------
+  input  logic                                  iss_valid_i,
+  input  logic                                  iss_spec_i,
+  input  logic [TAG_W-1:0]                      iss_tag_i,
+  input  logic [VOP_W-1:0]                      iss_op_i,
+  input  logic [BSRC_W-1:0]                     iss_bsrc_i,
+  input  logic                                  iss_mask_en_i,
+  input  logic [LANES-1:0]                      iss_mask_i,
+  input  logic [VL_W-1:0]                       iss_vl_i,
+  input  logic                                  iss_mpol_i,
+  input  logic [LANES-1:0][LANE_W-1:0]          iss_va_i,
+  input  logic [LANES-1:0][LANE_W-1:0]          iss_vb_i,
+  input  logic [LANES-1:0][LANE_W-1:0]          iss_vd_i,
+  input  logic [LANE_W-1:0]                     iss_scalar_i,
+
+  // ---------------------------------------------------------------------------
+  // Cross-lane network / FP fusion hooks
+  // ---------------------------------------------------------------------------
+  input  logic [LANES-1:0][LANE_W-1:0]          xlane_b_i,
+  output logic                                  iss_fpx_o,
+
+  // ---------------------------------------------------------------------------
+  // Result packet (to register_bank.sf / forwarding_unit.sf / ROB)
+  // ---------------------------------------------------------------------------
+  output logic                                  res_valid_o,
+  output logic                                  res_spec_o,
+  output logic [TAG_W-1:0]                      res_tag_o,
+  output logic                                  res_illegal_o,
+  output logic [LANES-1:0][LANE_W-1:0]          res_data_o,
+  output logic [LANES-1:0]                      res_lane_we_o,
+  output logic                                  res_sat_o,
+  output logic                                  res_scalar_wr_o,
+  output logic [LANE_W-1:0]                     res_scalar_o
+);
+
+  // ===========================================================================
+  // Local constants
+  // ===========================================================================
+  localparam int unsigned LANE_MSB     = LANE_W - 1;
+  localparam int unsigned SHAMT_W      = $clog2(LANE_W);
+  localparam int unsigned RED_LEVELS   = $clog2(LANES);
+  localparam int unsigned EX_STAGES_MAX = 2;
+
+  // ===========================================================================
+  // Types
+  // ===========================================================================
+  typedef int unsigned                          ve_uint_t;
+
+  typedef logic [LANE_W-1:0]                    lane_t;
+  typedef logic [LANES-1:0][LANE_W-1:0]         lane_vec_t;
+  typedef logic [LANES-1:0]                     lane_mask_t;
+  typedef logic [SHAMT_W-1:0]                   shamt_t;
+  typedef logic [TAG_W-1:0]                     tag_t;
+  typedef logic [VOP_W-VOP_FN_W-1:0]            vop_class_t;
+
+  typedef enum logic [VOP_W-1:0] {
+    VOP_ADD    = 6'o00,
+    VOP_SUB    = 6'o01,
+    VOP_NOP    = 6'o07,
+    VOP_AND    = 6'o10,
+    VOP_OR     = 6'o11,
+    VOP_XOR    = 6'o12,
+    VOP_PASS   = 6'o13,
+    VOP_SHL    = 6'o20,
+    VOP_SHR    = 6'o21,
+    VOP_SAR    = 6'o22,
+    VOP_SLT    = 6'o30,
+    VOP_SLTU   = 6'o31,
+    VOP_MUL    = 6'o40,
+    VOP_ADDS   = 6'o50,
+    VOP_SUBS   = 6'o51,
+    VOP_ADDUS  = 6'o52,
+    VOP_SUBUS  = 6'o53,
+    VOP_REDSUM = 6'o60,
+    VOP_REDAND = 6'o61,
+    VOP_REDOR  = 6'o62,
+    VOP_REDXOR = 6'o63
+  } ve_op_e;
+
+  localparam vop_class_t VOP_CLASS_ARITH = 3'o0;
+  localparam vop_class_t VOP_CLASS_LOGIC = 3'o1;
+  localparam vop_class_t VOP_CLASS_SHIFT = 3'o2;
+  localparam vop_class_t VOP_CLASS_CMP   = 3'o3;
+  localparam vop_class_t VOP_CLASS_MUL   = 3'o4;
+  localparam vop_class_t VOP_CLASS_SAT   = 3'o5;
+  localparam vop_class_t VOP_CLASS_RED   = 3'o6;
+  localparam vop_class_t VOP_CLASS_FPX   = 3'o7;
+
+  typedef enum logic [BSRC_W-1:0] {
+    BSRC_VEC    = 2'd0,
+    BSRC_SCALAR = 2'd1,
+    BSRC_XLANE  = 2'd2
+  } ve_bsrc_e;
+
+  typedef enum logic {
+    MPOL_PASS = 1'b0,
+    MPOL_ZERO = 1'b1
+  } ve_mpol_e;
+
+  typedef enum logic [1:0] {
+    LOP_AND  = 2'd0,
+    LOP_OR   = 2'd1,
+    LOP_XOR  = 2'd2,
+    LOP_PASS = 2'd3
+  } ve_lop_e;
+
+  typedef enum logic [1:0] {
+    ROP_SUM = 2'd0,
+    ROP_AND = 2'd1,
+    ROP_OR  = 2'd2,
+    ROP_XOR = 2'd3
+  } ve_rop_e;
+
+  // One-hot functional-unit select (AND-OR result mux)
+  typedef struct packed {
+    logic mul;
+    logic cmp;
+    logic shf;
+    logic lgc;
+    logic add;
+  } ve_unit_t;
+
+  // Decoded control word
+  typedef struct packed {
+    logic     legal;
+    logic     fpx;
+    logic     vwr;
+    logic     swr;
+    ve_unit_t unit;
+    logic     sub;
+    logic     sat;
+    logic     sat_s;
+    ve_lop_e  lop;
+    logic     sh_r;
+    logic     sh_a;
+    logic     cmp_s;
+    ve_rop_e  rop;
+  } ve_ctrl_t;
+
+  // EX1 -> EX2 stage packet
+  typedef struct packed {
+    logic       vld;
+    logic       spec;
+    tag_t       tag;
+    ve_ctrl_t   ctrl;
+    ve_mpol_e   mpol;
+    lane_mask_t active;
+    lane_mask_t sat;
+    lane_vec_t  vd;
+    lane_vec_t  raw;
+  } ve_ex_pkt_t;
+
+  // ===========================================================================
+  // Lane constants
+  // ===========================================================================
+  localparam lane_t LANE_ZERO = '0;
+  localparam lane_t LANE_ONES = '1;
+  localparam lane_t LANE_UMAX = '1;
+  localparam lane_t LANE_UMIN = '0;
+  localparam lane_t LANE_SMAX = {1'b0, {(LANE_W-1){1'b1}}};
+  localparam lane_t LANE_SMIN = {1'b1, {(LANE_W-1){1'b0}}};
+
+  // ===========================================================================
+  // Decode
+  // ===========================================================================
+  function automatic ve_ctrl_t ve_decode(input logic [VOP_W-1:0] op_raw);
+    ve_ctrl_t c;
+    c     = '0;
+    c.lop = LOP_PASS;
+    c.rop = ROP_SUM;
+
+    case (ve_op_e'(op_raw))
+      VOP_ADD    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.add = 1'b1;                                         end
+      VOP_SUB    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.add = 1'b1; c.sub = 1'b1;                           end
+      VOP_NOP    : begin c.legal = 1'b1;                                                                          end
+      VOP_AND    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.lgc = 1'b1; c.lop = LOP_AND;                        end
+      VOP_OR     : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.lgc = 1'b1; c.lop = LOP_OR;                         end
+      VOP_XOR    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.lgc = 1'b1; c.lop = LOP_XOR;                        end
+      VOP_PASS   : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.lgc = 1'b1; c.lop = LOP_PASS;                       end
+      VOP_SHL    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.shf = 1'b1;                                         end
+      VOP_SHR    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.shf = 1'b1; c.sh_r = 1'b1;                          end
+      VOP_SAR    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.shf = 1'b1; c.sh_r = 1'b1; c.sh_a = 1'b1;           end
+      VOP_SLT    : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.cmp = 1'b1; c.sub = 1'b1; c.cmp_s = 1'b1;           end
+      VOP_SLTU   : begin c.legal = 1'b1; c.vwr = 1'b1; c.unit.cmp = 1'b1; c.sub = 1'b1;                           end
+      VOP_MUL    : begin c.legal = MUL_EN; c.vwr = MUL_EN; c.unit.mul = MUL_EN;                                   end
+      VOP_ADDS   : begin c.legal = SAT_EN; c.vwr = SAT_EN; c.unit.add = SAT_EN; c.sat = SAT_EN; c.sat_s = 1'b1;   end
+      VOP_SUBS   : begin c.legal = SAT_EN; c.vwr = SAT_EN; c.unit.add = SAT_EN; c.sat = SAT_EN; c.sat_s = 1'b1;
+                         c.sub   = 1'b1;                                                                          end
+      VOP_ADDUS  : begin c.legal = SAT_EN; c.vwr = SAT_EN; c.unit.add = SAT_EN; c.sat = SAT_EN;                   end
+      VOP_SUBUS  : begin c.legal = SAT_EN; c.vwr = SAT_EN; c.unit.add = SAT_EN; c.sat = SAT_EN; c.sub = 1'b1;     end
+      VOP_REDSUM : begin c.legal = RED_EN; c.swr = RED_EN; c.unit.lgc = RED_EN; c.rop = ROP_SUM;                  end
+      VOP_REDAND : begin c.legal = RED_EN; c.swr = RED_EN; c.unit.lgc = RED_EN; c.rop = ROP_AND;                  end
+      VOP_REDOR  : begin c.legal = RED_EN; c.swr = RED_EN; c.unit.lgc = RED_EN; c.rop = ROP_OR;                   end
+      VOP_REDXOR : begin c.legal = RED_EN; c.swr = RED_EN; c.unit.lgc = RED_EN; c.rop = ROP_XOR;                  end
+      default    : begin
+                     c     = '0;
+                     c.lop = LOP_PASS;
+                     c.rop = ROP_SUM;
+                     c.fpx = (vop_class_t'(op_raw[VOP_W-1:VOP_FN_W]) == VOP_CLASS_FPX);
+                   end
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // Reduction node operator
+  // ===========================================================================
+  function automatic lane_t ve_red_fn(input ve_rop_e rop, input lane_t x, input lane_t y);
+    case (rop)
+      ROP_SUM : return x + y;
+      ROP_AND : return x & y;
+      ROP_OR  : return x | y;
+      ROP_XOR : return x ^ y;
+      default : return LANE_ZERO;
+    endcase
+  endfunction
+
+  function automatic lane_t ve_red_ident(input ve_rop_e rop);
+    return (rop == ROP_AND) ? LANE_ONES : LANE_ZERO;
+  endfunction
+
+  // #########################################################################
+  // ##                                                                     ##
+  // ##                         ISSUE  (decode)                             ##
+  // ##                                                                     ##
+  // #########################################################################
+  ve_ctrl_t   iss_ctrl;
+  ve_bsrc_e   iss_bsrc;
+  logic       iss_bsrc_ok;
+  logic       iss_claim;
+  lane_vec_t  iss_a;
+  lane_vec_t  iss_b;
+  lane_mask_t iss_active;
+
+  always_comb begin : p_issue_decode
+    iss_ctrl    = ve_decode(iss_op_i);
+    iss_bsrc    = ve_bsrc_e'(iss_bsrc_i);
+    iss_bsrc_ok = 1'b1;
+
+    case (iss_bsrc)
+      BSRC_VEC    : iss_b = iss_vb_i;
+      BSRC_SCALAR : for (int unsigned l = 0; l < LANES; l++) begin
+                      iss_b[l] = iss_scalar_i;
+                    end
+      BSRC_XLANE  : iss_b = xlane_b_i;
+      default     : begin
+                      iss_b       = '0;
+                      iss_bsrc_ok = 1'b0;
+                    end
+    endcase
+
+    if (!iss_bsrc_ok) begin
+      iss_ctrl.legal = 1'b0;
+      iss_ctrl.vwr   = 1'b0;
+      iss_ctrl.swr   = 1'b0;
+      iss_ctrl.unit  = '0;
+    end
+
+    iss_a     = iss_va_i;
+    iss_claim = iss_valid_i & ~iss_ctrl.fpx;
+
+    for (int unsigned l = 0; l < LANES; l++) begin
+      iss_active[l] = (ve_uint_t'(iss_vl_i) > l) & (iss_mask_i[l] | ~iss_mask_en_i);
+    end
+  end
+
+  assign iss_ready_o = ~stall_i;
+  assign iss_fpx_o   = iss_valid_i & iss_ctrl.fpx;
+
+  // #########################################################################
+  // ##                                                                     ##
+  // ##                    EX1  (lane-parallel compute)                     ##
+  // ##                                                                     ##
+  // #########################################################################
+  lane_vec_t  ex1_raw;
+  lane_mask_t ex1_sat;
+
+  generate
+    for (genvar l = 0; l < LANES; l++) begin : g_lane_ex1
+      lane_t           a;
+      lane_t           b;
+      lane_t           b_op;
+      logic [LANE_W:0] add_full;
+      lane_t           add_res;
+      lane_t           arith_res;
+      lane_t           lgc_res;
+      lane_t           shf_res;
+      lane_t           cmp_res;
+      lane_t           mul_res;
+      lane_t           srl_res;
+      lane_t           sign_fill;
+      shamt_t          shamt;
+      logic            ovf_s;
+      logic            ovf_u;
+      logic            lt_s;
+      logic            lt_u;
+      logic            sat_evt;
+      lane_t           raw;
+
+      always_comb begin : p_lane_compute
+        a         = iss_a[l];
+        b         = iss_b[l];
+
+        // ---- shared adder / subtractor -----------------------------------
+        b_op      = iss_ctrl.sub ? ~b : b;
+        add_full  = {1'b0, a} + {1'b0, b_op} + {{LANE_W{1'b0}}, iss_ctrl.sub};
+        add_res   = add_full[LANE_MSB:0];
+        ovf_s     = ~(a[LANE_MSB] ^ b_op[LANE_MSB]) & (add_res[LANE_MSB] ^ a[LANE_MSB]);
+        ovf_u     = add_full[LANE_W] ^ iss_ctrl.sub;
+
+        // ---- saturation --------------------------------------------------
+        sat_evt   = iss_ctrl.sat & (iss_ctrl.sat_s ? ovf_s : ovf_u);
+        if (!sat_evt) begin
+          arith_res = add_res;
+        end else if (iss_ctrl.sat_s) begin
+          arith_res = a[LANE_MSB] ? LANE_SMIN : LANE_SMAX;
+        end else begin
+          arith_res = iss_ctrl.sub ? LANE_UMIN : LANE_UMAX;
+        end
+
+        // ---- comparator (reuses subtractor) ------------------------------
+        lt_s      = add_res[LANE_MSB] ^ ovf_s;
+        lt_u      = ~add_full[LANE_W];
+        cmp_res   = {{(LANE_W-1){1'b0}}, (iss_ctrl.cmp_s ? lt_s : lt_u)};
+
+        // ---- logic -------------------------------------------------------
+        case (iss_ctrl.lop)
+          LOP_AND  : lgc_res = a & b;
+          LOP_OR   : lgc_res = a | b;
+          LOP_XOR  : lgc_res = a ^ b;
+          LOP_PASS : lgc_res = a;
+          default  : lgc_res = LANE_ZERO;
+        endcase
+
+        // ---- barrel shifter ----------------------------------------------
+        shamt     = b[SHAMT_W-1:0];
+        srl_res   = a >> shamt;
+        sign_fill = ~(LANE_ONES >> shamt) & {LANE_W{a[LANE_MSB] & iss_ctrl.sh_a}};
+        shf_res   = iss_ctrl.sh_r ? (srl_res | sign_fill) : (a << shamt);
+
+        // ---- multiplier (low product) ------------------------------------
+        mul_res   = MUL_EN ? (a * b) : LANE_ZERO;
+
+        // ---- one-hot AND-OR result select ---------------------------------
+        raw       = ({LANE_W{iss_ctrl.unit.add}} & arith_res)
+                  | ({LANE_W{iss_ctrl.unit.lgc}} & lgc_res)
+                  | ({LANE_W{iss_ctrl.unit.shf}} & shf_res)
+                  | ({LANE_W{iss_ctrl.unit.cmp}} & cmp_res)
+                  | ({LANE_W{iss_ctrl.unit.mul}} & mul_res);
+      end
+
+      assign ex1_raw[l] = raw;
+      assign ex1_sat[l] = sat_evt & iss_ctrl.unit.add;
+    end
+  endgenerate
+
+  // ===========================================================================
+  // EX1 stage packet
+  // ===========================================================================
+  ve_ex_pkt_t ex1_pkt;
+
+  always_comb begin : p_ex1_pkt
+    ex1_pkt        = '0;
+    ex1_pkt.vld    = iss_claim & ~(flush_i & iss_spec_i);
+    ex1_pkt.spec   = iss_spec_i;
+    ex1_pkt.tag    = iss_tag_i;
+    ex1_pkt.ctrl   = iss_ctrl;
+    ex1_pkt.mpol   = ve_mpol_e'(iss_mpol_i);
+    ex1_pkt.active = iss_active;
+    ex1_pkt.sat    = ex1_sat;
+    ex1_pkt.vd     = iss_vd_i;
+    ex1_pkt.raw    = ex1_raw;
+  end
+
+  // ===========================================================================
+  // EX1 / EX2 boundary
+  // ===========================================================================
+  ve_ex_pkt_t ex2_pkt;
+  logic       ex2_stage_busy;
+
+  generate
+    if (EX_STAGES == EX_STAGES_MAX) begin : g_ex2_reg
+      ve_ex_pkt_t ex2_q;
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin : p_ex2_reg
+        if (!rst_ni) begin
+          ex2_q <= '0;
+        end else if (stall_i) begin
+          ex2_q.vld <= ex2_q.vld & ~(flush_i & ex2_q.spec);
+        end else begin
+          ex2_q <= ex1_pkt;
+        end
+      end
+
+      always_comb begin : p_ex2_flush
+        ex2_pkt     = ex2_q;
+        ex2_pkt.vld = ex2_q.vld & ~(flush_i & ex2_q.spec);
+      end
+
+      assign ex2_stage_busy = ex2_q.vld;
+    end else begin : g_ex2_direct
+      assign ex2_pkt        = ex1_pkt;
+      assign ex2_stage_busy = 1'b0;
+    end
+  endgenerate
+
+  // #########################################################################
+  // ##                                                                     ##
+  // ##                 EX2  (mask merge / reduction / flags)               ##
+  // ##                                                                     ##
+  // #########################################################################
+  lane_vec_t  ex2_res;
+  lane_mask_t ex2_lane_we;
+  logic       ex2_sat;
+  lane_t      ex2_red;
+
+  generate
+    for (genvar l = 0; l < LANES; l++) begin : g_lane_ex2
+      logic  we;
+      lane_t merged;
+
+      always_comb begin : p_lane_merge
+        we = ex2_pkt.active[l] & ex2_pkt.ctrl.vwr;
+        if (we) begin
+          merged = ex2_pkt.raw[l];
+        end else if (ex2_pkt.mpol == MPOL_ZERO) begin
+          merged = LANE_ZERO;
+        end else begin
+          merged = ex2_pkt.vd[l];
+        end
+      end
+
+      assign ex2_lane_we[l] = we;
+      assign ex2_res[l]     = merged;
+    end
+  endgenerate
+
+  assign ex2_sat = |(ex2_pkt.sat & ex2_lane_we);
+
+  // ===========================================================================
+  // Cross-lane reduction tree (heap-ordered, log2(LANES) levels)
+  // ===========================================================================
+  generate
+    if (RED_EN) begin : g_red
+      lane_t red_ident;
+      lane_t red_leaf [LANES];
+
+      assign red_ident = ve_red_ident(ex2_pkt.ctrl.rop);
+
+      for (genvar l = 0; l < LANES; l++) begin : g_leaf
+        assign red_leaf[l] = ex2_pkt.active[l] ? ex2_pkt.raw[l] : red_ident;
+      end
+
+      for (genvar lv = 0; lv < RED_LEVELS; lv++) begin : g_lvl
+        localparam int unsigned NODES = LANES >> (lv + 1);
+        lane_t node [NODES];
+
+        for (genvar n = 0; n < NODES; n++) begin : g_node
+          if (lv == 0) begin : g_from_leaf
+            assign node[n] = ve_red_fn(ex2_pkt.ctrl.rop, red_leaf[2 * n], red_leaf[(2 * n) + 1]);
+          end else begin : g_from_lvl
+            assign node[n] = ve_red_fn(ex2_pkt.ctrl.rop, g_lvl[lv-1].node[2 * n], g_lvl[lv-1].node[(2 * n) + 1]);
+          end
+        end
+      end
+
+      assign ex2_red = g_lvl[RED_LEVELS-1].node[0];
+    end else begin : g_no_red
+      logic unused_red_ctrl;
+
+      assign ex2_red         = LANE_ZERO;
+      assign unused_red_ctrl = ^{ex2_pkt.ctrl.rop, ex2_pkt.ctrl.swr};
+    end
+  endgenerate
+
+  // #########################################################################
+  // ##                                                                     ##
+  // ##                         OUTPUT REGISTER                             ##
+  // ##                                                                     ##
+  // #########################################################################
+  logic       res_valid_q;
+  logic       res_spec_q;
+  tag_t       res_tag_q;
+  logic       res_illegal_q;
+  lane_vec_t  res_data_q;
+  lane_mask_t res_lane_we_q;
+  logic       res_sat_q;
+  logic       res_scalar_wr_q;
+  lane_t      res_scalar_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_out_valid
+    if (!rst_ni) begin
+      res_valid_q <= 1'b0;
+    end else if (stall_i) begin
+      res_valid_q <= res_valid_q & ~(flush_i & res_spec_q);
+    end else begin
+      res_valid_q <= ex2_pkt.vld;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_out_payload
+    if (!rst_ni) begin
+      res_spec_q      <= 1'b0;
+      res_tag_q       <= '0;
+      res_illegal_q   <= 1'b0;
+      res_data_q      <= '0;
+      res_lane_we_q   <= '0;
+      res_sat_q       <= 1'b0;
+      res_scalar_wr_q <= 1'b0;
+      res_scalar_q    <= '0;
+    end else if (!stall_i && ex2_pkt.vld) begin
+      res_spec_q      <= ex2_pkt.spec;
+      res_tag_q       <= ex2_pkt.tag;
+      res_illegal_q   <= ~ex2_pkt.ctrl.legal;
+      res_data_q      <= ex2_res;
+      res_lane_we_q   <= ex2_lane_we;
+      res_sat_q       <= ex2_sat;
+      res_scalar_wr_q <= ex2_pkt.ctrl.swr;
+      res_scalar_q    <= ex2_red;
+    end
+  end
+
+  assign res_valid_o     = res_valid_q;
+  assign res_spec_o      = res_spec_q;
+  assign res_tag_o       = res_tag_q;
+  assign res_illegal_o   = res_valid_q & res_illegal_q;
+  assign res_data_o      = res_data_q;
+  assign res_lane_we_o   = res_valid_q ? res_lane_we_q : '0;
+  assign res_sat_o       = res_valid_q & res_sat_q;
+  assign res_scalar_wr_o = res_valid_q & res_scalar_wr_q;
+  assign res_scalar_o    = res_scalar_q;
+
+  assign busy_o          = ex2_stage_busy | res_valid_q;
+
+  // ===========================================================================
+  // Assertions (simulation / formal only)
+  // ===========================================================================
+`ifndef SYNTHESIS
+
+  // ---------------------------------------------------------------------------
+  // Elaboration-time structure checks
+  // ---------------------------------------------------------------------------
+  initial begin : p_param_check
+    if (!(LANES == 4 || LANES == 8 || LANES == 16))
+      $fatal(1, "vector_engine: LANES must be 4, 8 or 16");
+    if (LANE_W < 8 || (LANE_W & (LANE_W - 1)) != 0)
+      $fatal(1, "vector_engine: LANE_W must be a power of two >= 8");
+    if (EX_STAGES < 1 || EX_STAGES > EX_STAGES_MAX)
+      $fatal(1, "vector_engine: EX_STAGES must be 1 or 2");
+    if (ve_uint_t'($bits(iss_mask_i)) != LANES || ve_uint_t'($bits(res_lane_we_o)) != LANES)
+      $fatal(1, "vector_engine: mask width does not match LANES");
+    if (ve_uint_t'($bits(iss_va_i)) != VLEN || ve_uint_t'($bits(res_data_o)) != VLEN)
+      $fatal(1, "vector_engine: vector operand width does not match LANES * LANE_W");
+    if (TAG_W < 1)
+      $fatal(1, "vector_engine: TAG_W must be >= 1");
+  end
+
+  // ---------------------------------------------------------------------------
+  // Opcode coverage completeness: every enumerated opcode decodes to a legal,
+  // single-unit control word unless its feature class is disabled.
+  // ---------------------------------------------------------------------------
+  initial begin : p_opcode_coverage
+    ve_op_e             op;
+    logic [VOP_W-1:0]   op_bits;
+    /* verilator lint_off UNUSEDSIGNAL */
+    ve_ctrl_t           c;
+    /* verilator lint_on UNUSEDSIGNAL */
+    vop_class_t         cls;
+    logic               exp_legal;
+
+    op = op.first();
+    do begin
+      op_bits   = op;
+      c         = ve_decode(op_bits);
+      cls       = vop_class_t'(op_bits[VOP_W-1:VOP_FN_W]);
+      exp_legal = !((cls == VOP_CLASS_MUL) && !MUL_EN)
+               && !((cls == VOP_CLASS_SAT) && !SAT_EN)
+               && !((cls == VOP_CLASS_RED) && !RED_EN);
+
+      if (c.legal != exp_legal)
+        $fatal(1, "vector_engine: opcode %s decode legality mismatch", op.name());
+      if (c.legal && (op != VOP_NOP) && ($countones(c.unit) != 1))
+        $fatal(1, "vector_engine: opcode %s does not select exactly one unit", op.name());
+      if (c.legal && (op != VOP_NOP) && !(c.vwr ^ c.swr))
+        $fatal(1, "vector_engine: opcode %s has no unique result destination", op.name());
+      if (cls == VOP_CLASS_FPX)
+        $fatal(1, "vector_engine: opcode %s collides with FP fusion class", op.name());
+      if (!(cls inside {VOP_CLASS_ARITH, VOP_CLASS_LOGIC, VOP_CLASS_SHIFT, VOP_CLASS_CMP,
+                        VOP_CLASS_MUL, VOP_CLASS_SAT, VOP_CLASS_RED}))
+        $fatal(1, "vector_engine: opcode %s maps to an unassigned class", op.name());
+
+      op = op.next();
+    end while (op != op.first());
+  end
+
+  // ---------------------------------------------------------------------------
+  // Issue interface integrity
+  // ---------------------------------------------------------------------------
+  a_ctrl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({iss_valid_i, stall_i, flush_i}))
+    else $error("vector_engine: X on pipeline control");
+
+  a_iss_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_valid_i |-> !$isunknown({iss_op_i, iss_bsrc_i, iss_mask_en_i, iss_mask_i, iss_vl_i,
+                                 iss_mpol_i, iss_spec_i, iss_tag_i}))
+    else $error("vector_engine: X on issue packet header");
+
+  a_iss_vl_range : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_valid_i |-> (ve_uint_t'(iss_vl_i) <= LANES))
+    else $error("vector_engine: vector length exceeds LANES");
+
+  // ---------------------------------------------------------------------------
+  // Decode safety
+  // ---------------------------------------------------------------------------
+  a_iss_legal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_claim |-> iss_ctrl.legal)
+    else $error("vector_engine: illegal opcode or operand source reached decode default");
+
+  a_unit_onehot : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    $onehot0(iss_ctrl.unit))
+    else $error("vector_engine: functional-unit select is not one-hot");
+
+  a_illegal_inert : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !iss_ctrl.legal |-> (!iss_ctrl.vwr && !iss_ctrl.swr && (iss_ctrl.unit == '0)))
+    else $error("vector_engine: illegal decode produces side effects");
+
+  // ---------------------------------------------------------------------------
+  // Mask discipline
+  // ---------------------------------------------------------------------------
+  a_lane_we_active : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (ex2_lane_we & ~ex2_pkt.active) == '0)
+    else $error("vector_engine: inactive lane asserted write enable");
+
+  a_lane_we_illegal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    res_illegal_o |-> (res_lane_we_o == '0) && !res_scalar_wr_o)
+    else $error("vector_engine: illegal operation produced a write");
+
+  // ---------------------------------------------------------------------------
+  // Flow control
+  // ---------------------------------------------------------------------------
+  a_stall_hold : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (stall_i && !flush_i) |=> $stable({res_valid_o, res_tag_o, res_data_o, res_lane_we_o, res_scalar_o}))
+    else $error("vector_engine: result packet changed while stalled");
+
+  a_flush_kills_spec : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (stall_i && flush_i && res_valid_o && res_spec_o) |=> !res_valid_o)
+    else $error("vector_engine: speculative result survived flush while stalled");
+
+  a_res_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    res_valid_o |-> !$isunknown({res_data_o, res_lane_we_o, res_scalar_o, res_illegal_o}))
+    else $error("vector_engine: X on result packet");
+
+  // ---------------------------------------------------------------------------
+  // Functional coverage
+  // ---------------------------------------------------------------------------
+  c_partial_mask  : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_claim && iss_mask_en_i && (iss_mask_i != '0) && (iss_mask_i != '1));
+  c_all_masked    : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_claim && (iss_active == '0));
+  c_tail_lanes    : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_claim && (ve_uint_t'(iss_vl_i) < LANES));
+  c_saturate      : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    res_sat_o);
+  c_reduction     : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    res_scalar_wr_o);
+  c_stall_hold    : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    res_valid_o && stall_i);
+  c_flush_spec    : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i && busy_o);
+  c_fpx_steer     : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_fpx_o);
+  c_xlane_operand : cover property (@(posedge clk_i) disable iff (!rst_ni)
+    iss_claim && (iss_bsrc == BSRC_XLANE));
+
+`endif
+
+endmodule : vector_engine
