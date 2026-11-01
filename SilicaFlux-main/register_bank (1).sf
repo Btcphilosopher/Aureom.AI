@@ -1,0 +1,1117 @@
+// =============================================================================
+//  SilicaFlux Architecture
+//  Unified Scalar / Vector Register Bank
+// -----------------------------------------------------------------------------
+//  File      : register_bank.sf
+//  Language  : Silica Flux-2017
+//  Module    : register_bank
+//  Domain    : Execution backend -- physical operand storage
+// -----------------------------------------------------------------------------
+//  Integration
+//    decoder.sf          : operand selection -> *_rd_en_i / *_rd_idx_i
+//    control_core.sf     : flush_i, per-port *_wb_kill_i, spec_ckpt_i,
+//                          spec_restore_i
+//    forwarding_unit.sf  : consumes *_rd_wb_hit_o / *_rd_wb_port_o to steer
+//                          the bypass network for same-cycle RAW
+//    writeback stage     : *_wb_* packets (valid, we, kill, rcls, idx, data,
+//                          tag[, lane mask])
+//    rename / scoreboard : *_wb_accept_o, *_wb_waw_o, *_cmt_* broadcasts,
+//                          *_spec_dirty_o
+//
+//  Organisation
+//    SRF  SRF_ENTRIES x SRF_WIDTH. Indices are physical tags supplied by the
+//         upstream rename stage (architectural == physical at the default
+//         32-entry size). Storage is split into SRF_BANKS low-order
+//         interleaved banks (bank = idx[BANK_W-1:0], row = idx >> BANK_W).
+//         Each read port decodes a one-hot wordline per bank, reduces the
+//         bank onto a local bitline and merges local bitlines onto a global
+//         bitline. SRF_BANK_RD_PORTS < SRF_RD_PORTS models port-limited
+//         banks: excess same-bank readers receive a conflict indication and
+//         must be replayed by issue. Optional hardwired-zero tag.
+//    VRF  VRF_ENTRIES x VRF_WIDTH, lane-sliced into VRF_LANES independent
+//         VRF_LANE_W slices. All accesses are whole-register aligned: lane l
+//         always occupies bits [l*VRF_LANE_W +: VRF_LANE_W] of the packed
+//         vector. Per-lane write enables and per-lane read gating are carried
+//         through the datapath; VRF_LANE_MASK_EN exposes them on the ports.
+//
+//  RAW visibility discipline
+//    * A writeback accepted in cycle N is visible on every read port of its
+//      domain from cycle N+1 onward, for both settings of WB_RETIME_EN. With
+//      WB_RETIME_EN=1 the array update lands at the end of cycle N+1 and the
+//      staged write is bypassed internally during cycle N+1.
+//    * A read in cycle N of an index written in cycle N returns the pre-write
+//      array value unless RD_WRITE_THRU_EN=1. In both modes the read port
+//      raises *_rd_wb_hit_o together with the winning writeback port index.
+//
+//  Write qualification pipeline (write-enable staging discipline)
+//    WQ  request      : valid & we
+//    WG  guards       : register-class match, index legality, zero-tag filter
+//    WS  speculation  : ~kill & ~flush (pipeline-valid gating)
+//    WA  arbitration  : same-cycle WAW, highest port index (youngest) wins;
+//                       SRF per register, VRF per lane
+//    WR  retime       : optional register stage, beyond the kill point
+//    WD  decode       : per-row write wordline + write-data select
+//    WC  commit       : always_ff array update
+//
+//  WAW discipline
+//    Writeback ports are ordered by program age: port 0 oldest, port N-1
+//    youngest. Same-cycle collisions resolve in WA. Cross-cycle ordering is
+//    owned by rename / scoreboard, which observe accept / override / commit
+//    broadcasts tagged with the producer tag.
+//
+//  Speculation
+//    A writeback is killable up to and including WS. Writes captured by WR
+//    are committed and are not affected by a later flush. The *_spec_dirty_o
+//    vectors record every entry committed since the last checkpoint or
+//    restore and form the restore set for checkpoint-based rollback.
+//
+//  Reset
+//    Asynchronous, active low. All storage, staging and status state resets
+//    to zero. Disabled or ungranted read ports drive zero. No state element
+//    is left uninitialised.
+// =============================================================================
+
+module register_bank
+  import silicaflux_pkg::*;
+#(
+  // ------------------------------------------------------------ scalar file
+  parameter int unsigned SRF_ENTRIES       = 32,
+  parameter int unsigned SRF_WIDTH         = 32,
+  parameter int unsigned SRF_RD_PORTS      = 3,
+  parameter int unsigned SRF_WR_PORTS      = 2,
+  parameter bit          SRF_ZERO_EN       = 1'b1,
+  parameter int unsigned SRF_ZERO_TAG      = 0,
+  parameter int unsigned SRF_BANKS         = 1,
+  parameter int unsigned SRF_BANK_RD_PORTS = SRF_RD_PORTS,
+  // ------------------------------------------------------------ vector file
+  parameter int unsigned VRF_ENTRIES       = 16,
+  parameter int unsigned VRF_WIDTH         = 128,
+  parameter int unsigned VRF_LANE_W        = 32,
+  parameter int unsigned VRF_RD_PORTS      = 3,
+  parameter int unsigned VRF_WR_PORTS      = 1,
+  parameter bit          VRF_LANE_MASK_EN  = 1'b0,
+  // ------------------------------------------------------------ pipeline
+  parameter int unsigned WB_TAG_W          = 7,
+  parameter bit          WB_RETIME_EN      = 1'b0,
+  parameter bit          RD_WRITE_THRU_EN  = 1'b0,
+  parameter bit          SPEC_TRACK_EN     = 1'b1,
+  // ------------------------------------------------------------ derived
+  localparam int unsigned SRF_IDX_W        = (SRF_ENTRIES  > 1) ? $clog2(SRF_ENTRIES)  : 1,
+  localparam int unsigned SRF_WP_W         = (SRF_WR_PORTS > 1) ? $clog2(SRF_WR_PORTS) : 1,
+  localparam int unsigned VRF_IDX_W        = (VRF_ENTRIES  > 1) ? $clog2(VRF_ENTRIES)  : 1,
+  localparam int unsigned VRF_WP_W         = (VRF_WR_PORTS > 1) ? $clog2(VRF_WR_PORTS) : 1,
+  localparam int unsigned VRF_LANES        = VRF_WIDTH / VRF_LANE_W,
+  localparam int unsigned RB_RCLS_W        = 2
+) (
+  input  logic                                                    clk_i,
+  input  logic                                                    rst_ni,
+
+  // ---------------------------------------------------------------------------
+  // Pipeline / speculation control (control_core.sf)
+  // ---------------------------------------------------------------------------
+  input  logic                                                    flush_i,
+  input  logic                                                    spec_ckpt_i,
+  input  logic                                                    spec_restore_i,
+
+  // ---------------------------------------------------------------------------
+  // SRF read ports (decoder.sf operand select -> issue operand fetch)
+  // ---------------------------------------------------------------------------
+  input  logic [SRF_RD_PORTS-1:0]                                 srf_rd_en_i,
+  input  logic [SRF_RD_PORTS-1:0][SRF_IDX_W-1:0]                  srf_rd_idx_i,
+  output logic [SRF_RD_PORTS-1:0][SRF_WIDTH-1:0]                  srf_rd_data_o,
+  output logic [SRF_RD_PORTS-1:0]                                 srf_rd_wb_hit_o,
+  output logic [SRF_RD_PORTS-1:0][SRF_WP_W-1:0]                   srf_rd_wb_port_o,
+  output logic [SRF_RD_PORTS-1:0]                                 srf_rd_bank_conflict_o,
+
+  // ---------------------------------------------------------------------------
+  // SRF writeback ports (writeback stage packets, port 0 = oldest)
+  // ---------------------------------------------------------------------------
+  input  logic [SRF_WR_PORTS-1:0]                                 srf_wb_valid_i,
+  input  logic [SRF_WR_PORTS-1:0]                                 srf_wb_we_i,
+  input  logic [SRF_WR_PORTS-1:0]                                 srf_wb_kill_i,
+  input  logic [SRF_WR_PORTS-1:0][RB_RCLS_W-1:0]                  srf_wb_rcls_i,
+  input  logic [SRF_WR_PORTS-1:0][SRF_IDX_W-1:0]                  srf_wb_idx_i,
+  input  logic [SRF_WR_PORTS-1:0][SRF_WIDTH-1:0]                  srf_wb_data_i,
+  input  logic [SRF_WR_PORTS-1:0][WB_TAG_W-1:0]                   srf_wb_tag_i,
+
+  // ---------------------------------------------------------------------------
+  // SRF writeback status (scoreboard / ROB / forwarding hooks)
+  // ---------------------------------------------------------------------------
+  output logic [SRF_WR_PORTS-1:0]                                 srf_wb_accept_o,
+  output logic [SRF_WR_PORTS-1:0]                                 srf_wb_waw_o,
+  output logic [SRF_WR_PORTS-1:0]                                 srf_cmt_valid_o,
+  output logic [SRF_WR_PORTS-1:0][SRF_IDX_W-1:0]                  srf_cmt_idx_o,
+  output logic [SRF_WR_PORTS-1:0][WB_TAG_W-1:0]                   srf_cmt_tag_o,
+  output logic [SRF_ENTRIES-1:0]                                  srf_cmt_mask_o,
+  output logic [SRF_ENTRIES-1:0]                                  srf_spec_dirty_o,
+
+  // ---------------------------------------------------------------------------
+  // VRF read ports
+  // ---------------------------------------------------------------------------
+  input  logic [VRF_RD_PORTS-1:0]                                 vrf_rd_en_i,
+  input  logic [VRF_RD_PORTS-1:0][VRF_IDX_W-1:0]                  vrf_rd_idx_i,
+  input  logic [VRF_RD_PORTS-1:0][VRF_LANES-1:0]                  vrf_rd_lane_en_i,
+  output logic [VRF_RD_PORTS-1:0][VRF_LANES-1:0][VRF_LANE_W-1:0]  vrf_rd_data_o,
+  output logic [VRF_RD_PORTS-1:0][VRF_LANES-1:0]                  vrf_rd_wb_hit_o,
+  output logic [VRF_RD_PORTS-1:0][VRF_LANES-1:0][VRF_WP_W-1:0]    vrf_rd_wb_port_o,
+
+  // ---------------------------------------------------------------------------
+  // VRF writeback ports (writeback stage packets, port 0 = oldest)
+  // ---------------------------------------------------------------------------
+  input  logic [VRF_WR_PORTS-1:0]                                 vrf_wb_valid_i,
+  input  logic [VRF_WR_PORTS-1:0]                                 vrf_wb_we_i,
+  input  logic [VRF_WR_PORTS-1:0]                                 vrf_wb_kill_i,
+  input  logic [VRF_WR_PORTS-1:0][RB_RCLS_W-1:0]                  vrf_wb_rcls_i,
+  input  logic [VRF_WR_PORTS-1:0][VRF_IDX_W-1:0]                  vrf_wb_idx_i,
+  input  logic [VRF_WR_PORTS-1:0][VRF_LANES-1:0]                  vrf_wb_lane_mask_i,
+  input  logic [VRF_WR_PORTS-1:0][VRF_LANES-1:0][VRF_LANE_W-1:0]  vrf_wb_data_i,
+  input  logic [VRF_WR_PORTS-1:0][WB_TAG_W-1:0]                   vrf_wb_tag_i,
+
+  // ---------------------------------------------------------------------------
+  // VRF writeback status
+  // ---------------------------------------------------------------------------
+  output logic [VRF_WR_PORTS-1:0]                                 vrf_wb_accept_o,
+  output logic [VRF_WR_PORTS-1:0]                                 vrf_wb_waw_o,
+  output logic [VRF_WR_PORTS-1:0]                                 vrf_cmt_valid_o,
+  output logic [VRF_WR_PORTS-1:0][VRF_IDX_W-1:0]                  vrf_cmt_idx_o,
+  output logic [VRF_WR_PORTS-1:0][VRF_LANES-1:0]                  vrf_cmt_lane_mask_o,
+  output logic [VRF_WR_PORTS-1:0][WB_TAG_W-1:0]                   vrf_cmt_tag_o,
+  output logic [VRF_ENTRIES-1:0]                                  vrf_cmt_mask_o,
+  output logic [VRF_ENTRIES-1:0]                                  vrf_spec_dirty_o,
+
+  // ---------------------------------------------------------------------------
+  // Integrity status (sticky until reset)
+  // ---------------------------------------------------------------------------
+  output logic                                                    srf_err_idx_o,
+  output logic                                                    vrf_err_idx_o,
+  output logic                                                    rb_err_domain_o
+);
+
+  // ===========================================================================
+  // Local configuration
+  // ===========================================================================
+  localparam int unsigned SRF_BANK_W     = (SRF_BANKS > 1) ? $clog2(SRF_BANKS) : 1;
+  localparam int unsigned SRF_BANK_SHIFT = (SRF_BANKS > 1) ? $clog2(SRF_BANKS) : 0;
+  localparam int unsigned SRF_ROWS       = SRF_ENTRIES / SRF_BANKS;
+  localparam int unsigned SRF_ROW_W      = (SRF_ROWS > 1) ? $clog2(SRF_ROWS) : 1;
+  localparam int unsigned SRF_RANK_W     = $clog2(SRF_RD_PORTS + 1);
+  localparam bit          SRF_IDX_DENSE  = (SRF_ENTRIES == (32'd1 << SRF_IDX_W));
+  localparam bit          VRF_IDX_DENSE  = (VRF_ENTRIES == (32'd1 << VRF_IDX_W));
+  localparam bit          SRF_BANK_LIMIT = (SRF_BANK_RD_PORTS < SRF_RD_PORTS);
+
+  // ===========================================================================
+  // Local types
+  // ===========================================================================
+  typedef logic [SRF_IDX_W-1:0]                  srf_idx_t;
+  typedef logic [SRF_WIDTH-1:0]                  srf_word_t;
+  typedef logic [SRF_BANK_W-1:0]                 srf_bank_t;
+  typedef logic [SRF_ROW_W-1:0]                  srf_row_t;
+  typedef logic [SRF_WP_W-1:0]                   srf_wp_t;
+  typedef logic [SRF_RANK_W-1:0]                 srf_rank_t;
+
+  typedef struct packed {
+    srf_row_t  row;
+    srf_bank_t bank;
+  } srf_loc_t;
+
+  typedef logic [VRF_IDX_W-1:0]                  vrf_idx_t;
+  typedef logic [VRF_LANE_W-1:0]                 vrf_lane_t;
+  typedef logic [VRF_LANES-1:0]                  vrf_lmask_t;
+  typedef logic [VRF_LANES-1:0][VRF_LANE_W-1:0]  vrf_vec_t;
+  typedef logic [VRF_WP_W-1:0]                   vrf_wp_t;
+
+  typedef logic [WB_TAG_W-1:0]                   rb_tag_t;
+
+  typedef enum logic [RB_RCLS_W-1:0] {
+    RB_RCLS_NONE   = 2'b00,
+    RB_RCLS_SCALAR = 2'b01,
+    RB_RCLS_VECTOR = 2'b10,
+    RB_RCLS_RSVD   = 2'b11
+  } rb_rcls_e;
+
+  // Arbitrated / staged / committing scalar write packet
+  typedef struct packed {
+    logic      valid;
+    srf_idx_t  idx;
+    rb_tag_t   tag;
+    srf_word_t data;
+  } srf_wpkt_t;
+
+  // Arbitrated / staged / committing vector write packet (per-lane enables)
+  typedef struct packed {
+    logic       valid;
+    vrf_idx_t   idx;
+    vrf_lmask_t lmask;
+    rb_tag_t    tag;
+    vrf_vec_t   data;
+  } vrf_wpkt_t;
+
+  localparam srf_idx_t SRF_ZERO_IDX = srf_idx_t'(SRF_ZERO_TAG);
+
+  // ===========================================================================
+  // Index helpers
+  // ===========================================================================
+  function automatic logic srf_idx_legal(input srf_idx_t idx);
+    return SRF_IDX_DENSE ? 1'b1 : (32'(idx) < SRF_ENTRIES);
+  endfunction
+
+  function automatic logic srf_is_zero(input srf_idx_t idx);
+    return SRF_ZERO_EN && (idx == SRF_ZERO_IDX);
+  endfunction
+
+  // Low-order interleave: idx = {row, bank}
+  function automatic srf_loc_t srf_locate(input srf_idx_t idx);
+    srf_loc_t loc;
+    loc.bank = (SRF_BANKS > 1) ? srf_bank_t'(idx) : srf_bank_t'(0);
+    loc.row  = srf_row_t'(idx >> SRF_BANK_SHIFT);
+    return loc;
+  endfunction
+
+  function automatic logic vrf_idx_legal(input vrf_idx_t idx);
+    return VRF_IDX_DENSE ? 1'b1 : (32'(idx) < VRF_ENTRIES);
+  endfunction
+
+  // ===========================================================================
+  // Elaboration-time configuration guards
+  // ===========================================================================
+  if (SRF_ENTRIES < 2) begin : g_cfg_srf_entries
+    $fatal(1, "register_bank: SRF_ENTRIES must be >= 2");
+  end
+  if (SRF_WIDTH < 1) begin : g_cfg_srf_width
+    $fatal(1, "register_bank: SRF_WIDTH must be >= 1");
+  end
+  if (SRF_RD_PORTS < 1) begin : g_cfg_srf_rd_ports
+    $fatal(1, "register_bank: SRF_RD_PORTS must be >= 1");
+  end
+  if ((SRF_WR_PORTS < 1) || (SRF_WR_PORTS > 2)) begin : g_cfg_srf_wr_ports
+    $fatal(1, "register_bank: SRF_WR_PORTS must be 1 or 2");
+  end
+  if ((SRF_BANKS < 1) || ((SRF_BANKS & (SRF_BANKS - 1)) != 0)) begin : g_cfg_srf_banks_pow2
+    $fatal(1, "register_bank: SRF_BANKS must be a power of two");
+  end
+  if ((SRF_ENTRIES % SRF_BANKS) != 0) begin : g_cfg_srf_banks_div
+    $fatal(1, "register_bank: SRF_BANKS must divide SRF_ENTRIES");
+  end
+  if ((SRF_BANK_RD_PORTS < 1) || (SRF_BANK_RD_PORTS > SRF_RD_PORTS)) begin : g_cfg_srf_bank_rd
+    $fatal(1, "register_bank: SRF_BANK_RD_PORTS must be in [1, SRF_RD_PORTS]");
+  end
+  if (SRF_ZERO_TAG >= SRF_ENTRIES) begin : g_cfg_srf_zero_tag
+    $fatal(1, "register_bank: SRF_ZERO_TAG out of range");
+  end
+  if (VRF_ENTRIES < 2) begin : g_cfg_vrf_entries
+    $fatal(1, "register_bank: VRF_ENTRIES must be >= 2");
+  end
+  if ((VRF_LANE_W < 1) || (VRF_WIDTH < VRF_LANE_W) || ((VRF_WIDTH % VRF_LANE_W) != 0)) begin : g_cfg_vrf_lanes
+    $fatal(1, "register_bank: VRF_WIDTH must be a non-zero multiple of VRF_LANE_W");
+  end
+  if (VRF_RD_PORTS < 1) begin : g_cfg_vrf_rd_ports
+    $fatal(1, "register_bank: VRF_RD_PORTS must be >= 1");
+  end
+  if ((VRF_WR_PORTS < 1) || (VRF_WR_PORTS > 2)) begin : g_cfg_vrf_wr_ports
+    $fatal(1, "register_bank: VRF_WR_PORTS must be 1 or 2");
+  end
+  if (WB_TAG_W < 1) begin : g_cfg_wb_tag
+    $fatal(1, "register_bank: WB_TAG_W must be >= 1");
+  end
+
+  // ###########################################################################
+  //
+  //   SCALAR REGISTER FILE
+  //
+  // ###########################################################################
+
+  // ===========================================================================
+  // SRF write path -- WQ / WG / WS : request, guards, speculation gating
+  // ===========================================================================
+  logic [SRF_WR_PORTS-1:0] srf_wb_req;
+  logic [SRF_WR_PORTS-1:0] srf_wb_dom_ok;
+  logic [SRF_WR_PORTS-1:0] srf_wb_idx_ok;
+  logic [SRF_WR_PORTS-1:0] srf_wb_zero;
+  logic [SRF_WR_PORTS-1:0] srf_wb_spec_ok;
+  logic [SRF_WR_PORTS-1:0] srf_wb_qual;
+
+  always_comb begin : p_srf_wb_qualify
+    for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+      srf_wb_req[w]     = srf_wb_valid_i[w] & srf_wb_we_i[w];
+      srf_wb_dom_ok[w]  = (srf_wb_rcls_i[w] == RB_RCLS_SCALAR);
+      srf_wb_idx_ok[w]  = srf_idx_legal(srf_wb_idx_i[w]);
+      srf_wb_zero[w]    = srf_is_zero(srf_wb_idx_i[w]);
+      srf_wb_spec_ok[w] = ~srf_wb_kill_i[w] & ~flush_i;
+      srf_wb_qual[w]    = srf_wb_req[w]
+                        & srf_wb_dom_ok[w]
+                        & srf_wb_idx_ok[w]
+                        & ~srf_wb_zero[w]
+                        & srf_wb_spec_ok[w];
+    end
+  end
+
+  // ===========================================================================
+  // SRF write path -- WA : same-cycle WAW arbitration (youngest port wins)
+  // ===========================================================================
+  logic [SRF_WR_PORTS-1:0] srf_wb_over;
+  srf_wpkt_t               srf_arb_pkt [SRF_WR_PORTS];
+
+  always_comb begin : p_srf_wb_arbitrate
+    for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+      srf_wb_over[w] = 1'b0;
+      for (int unsigned y = w + 1; y < SRF_WR_PORTS; y++) begin
+        if (srf_wb_qual[y] && (srf_wb_idx_i[y] == srf_wb_idx_i[w])) begin
+          srf_wb_over[w] = srf_wb_qual[w];
+        end
+      end
+      srf_arb_pkt[w].valid = srf_wb_qual[w] & ~srf_wb_over[w];
+      srf_arb_pkt[w].idx   = srf_wb_idx_i[w];
+      srf_arb_pkt[w].tag   = srf_wb_tag_i[w];
+      srf_arb_pkt[w].data  = srf_wb_data_i[w];
+    end
+  end
+
+  assign srf_wb_accept_o = srf_wb_qual;
+  assign srf_wb_waw_o    = srf_wb_over;
+
+  // ===========================================================================
+  // SRF write path -- WR : optional retiming stage
+  //   srf_cmt_pkt : packets updating the array at the end of this cycle
+  //   srf_byp_pkt : packets accepted in an earlier cycle, not yet in the array
+  // ===========================================================================
+  srf_wpkt_t srf_cmt_pkt [SRF_WR_PORTS];
+  srf_wpkt_t srf_byp_pkt [SRF_WR_PORTS];
+
+  if (WB_RETIME_EN) begin : g_srf_wr_retime
+    srf_wpkt_t srf_stg_q [SRF_WR_PORTS];
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_srf_wr_stage
+      if (!rst_ni) begin
+        for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+          srf_stg_q[w] <= '0;
+        end
+      end else begin
+        for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+          srf_stg_q[w].valid <= srf_arb_pkt[w].valid;
+          if (srf_arb_pkt[w].valid) begin
+            srf_stg_q[w].idx  <= srf_arb_pkt[w].idx;
+            srf_stg_q[w].tag  <= srf_arb_pkt[w].tag;
+            srf_stg_q[w].data <= srf_arb_pkt[w].data;
+          end
+        end
+      end
+    end
+
+    for (genvar w = 0; w < SRF_WR_PORTS; w++) begin : g_port
+      assign srf_cmt_pkt[w] = srf_stg_q[w];
+      assign srf_byp_pkt[w] = srf_stg_q[w];
+    end
+  end else begin : g_srf_wr_direct
+    for (genvar w = 0; w < SRF_WR_PORTS; w++) begin : g_port
+      assign srf_cmt_pkt[w] = srf_arb_pkt[w];
+      assign srf_byp_pkt[w] = '0;
+    end
+  end
+
+  srf_loc_t srf_cmt_loc [SRF_WR_PORTS];
+
+  always_comb begin : p_srf_cmt_status
+    for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+      srf_cmt_loc[w]     = srf_locate(srf_cmt_pkt[w].idx);
+      srf_cmt_valid_o[w] = srf_cmt_pkt[w].valid;
+      srf_cmt_idx_o[w]   = srf_cmt_pkt[w].idx;
+      srf_cmt_tag_o[w]   = srf_cmt_pkt[w].tag;
+    end
+  end
+
+  // ===========================================================================
+  // SRF write path -- WD : per-bank write wordline decode / write data select
+  // ===========================================================================
+  logic [SRF_WR_PORTS-1:0]             srf_row_hit [SRF_BANKS][SRF_ROWS];
+  logic [SRF_BANKS-1:0][SRF_ROWS-1:0]  srf_row_we;
+  srf_word_t                           srf_row_wd  [SRF_BANKS][SRF_ROWS];
+
+  always_comb begin : p_srf_wr_decode
+    for (int unsigned b = 0; b < SRF_BANKS; b++) begin
+      for (int unsigned r = 0; r < SRF_ROWS; r++) begin
+        srf_row_wd[b][r] = '0;
+        for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+          srf_row_hit[b][r][w] = srf_cmt_pkt[w].valid
+                               && (srf_cmt_loc[w].bank == srf_bank_t'(b))
+                               && (srf_cmt_loc[w].row  == srf_row_t'(r));
+          srf_row_wd[b][r]     = srf_row_wd[b][r]
+                               | ({SRF_WIDTH{srf_row_hit[b][r][w]}} & srf_cmt_pkt[w].data);
+        end
+        srf_row_we[b][r] = |srf_row_hit[b][r];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // SRF storage array -- WC : banked row flops, hardwired zero tag
+  // ===========================================================================
+  srf_word_t srf_row_val [SRF_BANKS][SRF_ROWS];
+
+  for (genvar b = 0; b < SRF_BANKS; b++) begin : g_srf_bank
+    for (genvar r = 0; r < SRF_ROWS; r++) begin : g_srf_row
+      localparam int unsigned ENT = (r * SRF_BANKS) + b;
+
+      if (SRF_ZERO_EN && (ENT == SRF_ZERO_TAG)) begin : g_zero
+        logic unused_zero_row_wd;
+        assign unused_zero_row_wd = ^srf_row_wd[b][r];
+        assign srf_row_val[b][r]  = '0;
+      end else begin : g_flop
+        srf_word_t row_q;
+        always_ff @(posedge clk_i or negedge rst_ni) begin : p_row
+          if (!rst_ni) begin
+            row_q <= '0;
+          end else if (srf_row_we[b][r]) begin
+            row_q <= srf_row_wd[b][r];
+          end
+        end
+        assign srf_row_val[b][r] = row_q;
+      end
+
+      assign srf_cmt_mask_o[ENT] = srf_row_we[b][r];
+    end
+  end
+
+  // ===========================================================================
+  // SRF read path -- address decode
+  // ===========================================================================
+  logic [SRF_RD_PORTS-1:0] srf_rd_idx_ok;
+  logic [SRF_RD_PORTS-1:0] srf_rd_zero;
+  logic [SRF_RD_PORTS-1:0] srf_rd_port_req;
+  logic [SRF_RD_PORTS-1:0] srf_rd_conflict;
+  logic [SRF_RD_PORTS-1:0] srf_rd_go;
+  srf_loc_t                srf_rd_loc  [SRF_RD_PORTS];
+
+  always_comb begin : p_srf_rd_addr
+    for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+      srf_rd_idx_ok[p]   = srf_idx_legal(srf_rd_idx_i[p]);
+      srf_rd_zero[p]     = srf_is_zero(srf_rd_idx_i[p]);
+      srf_rd_port_req[p] = srf_rd_en_i[p] & srf_rd_idx_ok[p] & ~srf_rd_zero[p];
+      srf_rd_loc[p]      = srf_locate(srf_rd_idx_i[p]);
+    end
+  end
+
+  // ===========================================================================
+  // SRF read path -- bank read-port allocation (lower port index first)
+  // ===========================================================================
+  if (SRF_BANK_LIMIT) begin : g_srf_bank_arb
+    srf_rank_t srf_rd_rank [SRF_RD_PORTS];
+
+    always_comb begin : p_srf_bank_arb
+      for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+        srf_rd_rank[p] = '0;
+        for (int unsigned q = 0; q < p; q++) begin
+          if (srf_rd_port_req[q] && (srf_rd_loc[q].bank == srf_rd_loc[p].bank)) begin
+            srf_rd_rank[p] = srf_rd_rank[p] + srf_rank_t'(1);
+          end
+        end
+        srf_rd_conflict[p] = srf_rd_port_req[p]
+                           && (32'(srf_rd_rank[p]) >= SRF_BANK_RD_PORTS);
+      end
+    end
+  end else begin : g_srf_bank_full
+    assign srf_rd_conflict = '0;
+  end
+
+  // ===========================================================================
+  // SRF read path -- one-hot wordlines, local / global bitline reduction
+  // ===========================================================================
+  logic [SRF_ROWS-1:0] srf_rd_wl  [SRF_RD_PORTS][SRF_BANKS];
+  srf_word_t           srf_rd_lbl [SRF_RD_PORTS][SRF_BANKS];
+  srf_word_t           srf_rd_gbl [SRF_RD_PORTS];
+
+  always_comb begin : p_srf_rd_wordline
+    for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+      srf_rd_go[p] = srf_rd_port_req[p] & ~srf_rd_conflict[p];
+      for (int unsigned b = 0; b < SRF_BANKS; b++) begin
+        for (int unsigned r = 0; r < SRF_ROWS; r++) begin
+          srf_rd_wl[p][b][r] = srf_rd_go[p]
+                             && (srf_rd_loc[p].bank == srf_bank_t'(b))
+                             && (srf_rd_loc[p].row  == srf_row_t'(r));
+        end
+      end
+    end
+  end
+
+  always_comb begin : p_srf_rd_bitline
+    for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+      srf_rd_gbl[p] = '0;
+      for (int unsigned b = 0; b < SRF_BANKS; b++) begin
+        srf_rd_lbl[p][b] = '0;
+        for (int unsigned r = 0; r < SRF_ROWS; r++) begin
+          srf_rd_lbl[p][b] = srf_rd_lbl[p][b]
+                           | ({SRF_WIDTH{srf_rd_wl[p][b][r]}} & srf_row_val[b][r]);
+        end
+        srf_rd_gbl[p] = srf_rd_gbl[p] | srf_rd_lbl[p][b];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // SRF read path -- staged-write bypass, write-through, forwarding hints
+  //   Overlay order (oldest -> youngest): array, staged write, current write.
+  // ===========================================================================
+  srf_word_t srf_rd_byp [SRF_RD_PORTS];
+
+  always_comb begin : p_srf_rd_bypass
+    for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+      srf_rd_byp[p]       = srf_rd_gbl[p];
+      srf_rd_wb_hit_o[p]  = 1'b0;
+      srf_rd_wb_port_o[p] = '0;
+
+      for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+        if (srf_rd_go[p]
+            && srf_byp_pkt[w].valid
+            && (srf_byp_pkt[w].idx == srf_rd_idx_i[p])) begin
+          srf_rd_byp[p] = srf_byp_pkt[w].data;
+        end
+      end
+
+      for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+        if (srf_rd_go[p]
+            && srf_arb_pkt[w].valid
+            && (srf_arb_pkt[w].idx == srf_rd_idx_i[p])) begin
+          srf_rd_wb_hit_o[p]  = 1'b1;
+          srf_rd_wb_port_o[p] = srf_wp_t'(w);
+          if (RD_WRITE_THRU_EN) begin
+            srf_rd_byp[p] = srf_arb_pkt[w].data;
+          end
+        end
+      end
+
+      srf_rd_data_o[p]          = srf_rd_go[p] ? srf_rd_byp[p] : '0;
+      srf_rd_bank_conflict_o[p] = srf_rd_conflict[p];
+    end
+  end
+
+  // ===========================================================================
+  // SRF speculation tracking -- entries committed since last checkpoint
+  // ===========================================================================
+  if (SPEC_TRACK_EN) begin : g_srf_spec
+    logic [SRF_ENTRIES-1:0] srf_dirty_q;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_srf_dirty
+      if (!rst_ni) begin
+        srf_dirty_q <= '0;
+      end else begin
+        srf_dirty_q <= ((spec_ckpt_i | spec_restore_i) ? '0 : srf_dirty_q) | srf_cmt_mask_o;
+      end
+    end
+
+    assign srf_spec_dirty_o = srf_dirty_q;
+  end else begin : g_srf_spec_off
+    assign srf_spec_dirty_o = '0;
+  end
+
+  // ###########################################################################
+  //
+  //   VECTOR REGISTER FILE
+  //
+  // ###########################################################################
+
+  // ===========================================================================
+  // VRF lane-control hooks -- effective write lane masks / read lane enables
+  // ===========================================================================
+  vrf_lmask_t vrf_wb_lmask [VRF_WR_PORTS];
+  vrf_lmask_t vrf_rd_lmask [VRF_RD_PORTS];
+
+  if (VRF_LANE_MASK_EN) begin : g_vrf_lane_ctl
+    for (genvar w = 0; w < VRF_WR_PORTS; w++) begin : g_wr
+      assign vrf_wb_lmask[w] = vrf_wb_lane_mask_i[w];
+    end
+    for (genvar p = 0; p < VRF_RD_PORTS; p++) begin : g_rd
+      assign vrf_rd_lmask[p] = vrf_rd_lane_en_i[p];
+    end
+  end else begin : g_vrf_lane_full
+    for (genvar w = 0; w < VRF_WR_PORTS; w++) begin : g_wr
+      assign vrf_wb_lmask[w] = '1;
+    end
+    for (genvar p = 0; p < VRF_RD_PORTS; p++) begin : g_rd
+      assign vrf_rd_lmask[p] = '1;
+    end
+    logic unused_vrf_lane_ctl;
+    assign unused_vrf_lane_ctl = ^{vrf_wb_lane_mask_i, vrf_rd_lane_en_i};
+  end
+
+  // ===========================================================================
+  // VRF write path -- WQ / WG / WS : request, guards, speculation gating
+  // ===========================================================================
+  logic [VRF_WR_PORTS-1:0] vrf_wb_req;
+  logic [VRF_WR_PORTS-1:0] vrf_wb_dom_ok;
+  logic [VRF_WR_PORTS-1:0] vrf_wb_idx_ok;
+  logic [VRF_WR_PORTS-1:0] vrf_wb_spec_ok;
+  logic [VRF_WR_PORTS-1:0] vrf_wb_qual;
+  vrf_lmask_t              vrf_wb_qmask [VRF_WR_PORTS];
+
+  always_comb begin : p_vrf_wb_qualify
+    for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+      vrf_wb_req[w]     = vrf_wb_valid_i[w] & vrf_wb_we_i[w];
+      vrf_wb_dom_ok[w]  = (vrf_wb_rcls_i[w] == RB_RCLS_VECTOR);
+      vrf_wb_idx_ok[w]  = vrf_idx_legal(vrf_wb_idx_i[w]);
+      vrf_wb_spec_ok[w] = ~vrf_wb_kill_i[w] & ~flush_i;
+      vrf_wb_qual[w]    = vrf_wb_req[w]
+                        & vrf_wb_dom_ok[w]
+                        & vrf_wb_idx_ok[w]
+                        & vrf_wb_spec_ok[w];
+      vrf_wb_qmask[w]   = vrf_wb_qual[w] ? vrf_wb_lmask[w] : '0;
+    end
+  end
+
+  // ===========================================================================
+  // VRF write path -- WA : per-lane same-cycle WAW arbitration
+  // ===========================================================================
+  vrf_lmask_t              vrf_wb_omask [VRF_WR_PORTS];
+  logic [VRF_WR_PORTS-1:0] vrf_wb_over;
+  vrf_wpkt_t               vrf_arb_pkt  [VRF_WR_PORTS];
+
+  always_comb begin : p_vrf_wb_arbitrate
+    for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+      vrf_wb_omask[w] = '0;
+      for (int unsigned y = w + 1; y < VRF_WR_PORTS; y++) begin
+        if (vrf_wb_idx_i[y] == vrf_wb_idx_i[w]) begin
+          vrf_wb_omask[w] = vrf_wb_omask[w] | (vrf_wb_qmask[w] & vrf_wb_qmask[y]);
+        end
+      end
+      vrf_wb_over[w]       = |vrf_wb_omask[w];
+      vrf_arb_pkt[w].lmask = vrf_wb_qmask[w] & ~vrf_wb_omask[w];
+      vrf_arb_pkt[w].valid = |(vrf_wb_qmask[w] & ~vrf_wb_omask[w]);
+      vrf_arb_pkt[w].idx   = vrf_wb_idx_i[w];
+      vrf_arb_pkt[w].tag   = vrf_wb_tag_i[w];
+      vrf_arb_pkt[w].data  = vrf_wb_data_i[w];
+    end
+  end
+
+  assign vrf_wb_accept_o = vrf_wb_qual;
+  assign vrf_wb_waw_o    = vrf_wb_over;
+
+  // ===========================================================================
+  // VRF write path -- WR : optional retiming stage
+  // ===========================================================================
+  vrf_wpkt_t vrf_cmt_pkt [VRF_WR_PORTS];
+  vrf_wpkt_t vrf_byp_pkt [VRF_WR_PORTS];
+
+  if (WB_RETIME_EN) begin : g_vrf_wr_retime
+    vrf_wpkt_t vrf_stg_q [VRF_WR_PORTS];
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_vrf_wr_stage
+      if (!rst_ni) begin
+        for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+          vrf_stg_q[w] <= '0;
+        end
+      end else begin
+        for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+          vrf_stg_q[w].valid <= vrf_arb_pkt[w].valid;
+          if (vrf_arb_pkt[w].valid) begin
+            vrf_stg_q[w].idx   <= vrf_arb_pkt[w].idx;
+            vrf_stg_q[w].lmask <= vrf_arb_pkt[w].lmask;
+            vrf_stg_q[w].tag   <= vrf_arb_pkt[w].tag;
+            vrf_stg_q[w].data  <= vrf_arb_pkt[w].data;
+          end
+        end
+      end
+    end
+
+    for (genvar w = 0; w < VRF_WR_PORTS; w++) begin : g_port
+      assign vrf_cmt_pkt[w] = vrf_stg_q[w];
+      assign vrf_byp_pkt[w] = vrf_stg_q[w];
+    end
+  end else begin : g_vrf_wr_direct
+    for (genvar w = 0; w < VRF_WR_PORTS; w++) begin : g_port
+      assign vrf_cmt_pkt[w] = vrf_arb_pkt[w];
+      assign vrf_byp_pkt[w] = '0;
+    end
+  end
+
+  always_comb begin : p_vrf_cmt_status
+    for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+      vrf_cmt_valid_o[w]     = vrf_cmt_pkt[w].valid;
+      vrf_cmt_idx_o[w]       = vrf_cmt_pkt[w].idx;
+      vrf_cmt_lane_mask_o[w] = vrf_cmt_pkt[w].valid ? vrf_cmt_pkt[w].lmask : '0;
+      vrf_cmt_tag_o[w]       = vrf_cmt_pkt[w].tag;
+    end
+  end
+
+  // ===========================================================================
+  // VRF write path -- WD : lane-sliced write wordline decode / data select
+  // ===========================================================================
+  logic [VRF_WR_PORTS-1:0]               vrf_ent_hit [VRF_LANES][VRF_ENTRIES];
+  logic [VRF_LANES-1:0][VRF_ENTRIES-1:0] vrf_ent_we;
+  vrf_lane_t                             vrf_ent_wd  [VRF_LANES][VRF_ENTRIES];
+
+  always_comb begin : p_vrf_wr_decode
+    for (int unsigned l = 0; l < VRF_LANES; l++) begin
+      for (int unsigned e = 0; e < VRF_ENTRIES; e++) begin
+        vrf_ent_wd[l][e] = '0;
+        for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+          vrf_ent_hit[l][e][w] = vrf_cmt_pkt[w].valid
+                               && vrf_cmt_pkt[w].lmask[l]
+                               && (vrf_cmt_pkt[w].idx == vrf_idx_t'(e));
+          vrf_ent_wd[l][e]     = vrf_ent_wd[l][e]
+                               | ({VRF_LANE_W{vrf_ent_hit[l][e][w]}} & vrf_cmt_pkt[w].data[l]);
+        end
+        vrf_ent_we[l][e] = |vrf_ent_hit[l][e];
+      end
+    end
+  end
+
+  always_comb begin : p_vrf_cmt_mask
+    for (int unsigned e = 0; e < VRF_ENTRIES; e++) begin
+      vrf_cmt_mask_o[e] = 1'b0;
+      for (int unsigned l = 0; l < VRF_LANES; l++) begin
+        vrf_cmt_mask_o[e] = vrf_cmt_mask_o[e] | vrf_ent_we[l][e];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // VRF storage array -- WC : lane-sliced entry flops
+  // ===========================================================================
+  vrf_lane_t vrf_ent_val [VRF_LANES][VRF_ENTRIES];
+
+  for (genvar l = 0; l < VRF_LANES; l++) begin : g_vrf_lane
+    for (genvar e = 0; e < VRF_ENTRIES; e++) begin : g_vrf_ent
+      vrf_lane_t ent_q;
+      always_ff @(posedge clk_i or negedge rst_ni) begin : p_ent
+        if (!rst_ni) begin
+          ent_q <= '0;
+        end else if (vrf_ent_we[l][e]) begin
+          ent_q <= vrf_ent_wd[l][e];
+        end
+      end
+      assign vrf_ent_val[l][e] = ent_q;
+    end
+  end
+
+  // ===========================================================================
+  // VRF read path -- address decode, lane-gated one-hot wordlines
+  // ===========================================================================
+  logic [VRF_RD_PORTS-1:0] vrf_rd_idx_ok;
+  logic [VRF_RD_PORTS-1:0] vrf_rd_go;
+  vrf_lmask_t              vrf_rd_lane_go [VRF_RD_PORTS];
+  logic [VRF_ENTRIES-1:0]  vrf_rd_wl      [VRF_RD_PORTS][VRF_LANES];
+
+  always_comb begin : p_vrf_rd_wordline
+    for (int unsigned p = 0; p < VRF_RD_PORTS; p++) begin
+      vrf_rd_idx_ok[p]  = vrf_idx_legal(vrf_rd_idx_i[p]);
+      vrf_rd_go[p]      = vrf_rd_en_i[p] & vrf_rd_idx_ok[p];
+      vrf_rd_lane_go[p] = vrf_rd_go[p] ? vrf_rd_lmask[p] : '0;
+      for (int unsigned l = 0; l < VRF_LANES; l++) begin
+        for (int unsigned e = 0; e < VRF_ENTRIES; e++) begin
+          vrf_rd_wl[p][l][e] = vrf_rd_lane_go[p][l]
+                             && (vrf_rd_idx_i[p] == vrf_idx_t'(e));
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // VRF read path -- per-lane bitline reduction
+  // ===========================================================================
+  vrf_vec_t vrf_rd_bl [VRF_RD_PORTS];
+
+  always_comb begin : p_vrf_rd_bitline
+    for (int unsigned p = 0; p < VRF_RD_PORTS; p++) begin
+      for (int unsigned l = 0; l < VRF_LANES; l++) begin
+        vrf_rd_bl[p][l] = '0;
+        for (int unsigned e = 0; e < VRF_ENTRIES; e++) begin
+          vrf_rd_bl[p][l] = vrf_rd_bl[p][l]
+                          | ({VRF_LANE_W{vrf_rd_wl[p][l][e]}} & vrf_ent_val[l][e]);
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // VRF read path -- per-lane staged bypass, write-through, forwarding hints
+  // ===========================================================================
+  vrf_vec_t vrf_rd_byp [VRF_RD_PORTS];
+
+  always_comb begin : p_vrf_rd_bypass
+    for (int unsigned p = 0; p < VRF_RD_PORTS; p++) begin
+      for (int unsigned l = 0; l < VRF_LANES; l++) begin
+        vrf_rd_byp[p][l]       = vrf_rd_bl[p][l];
+        vrf_rd_wb_hit_o[p][l]  = 1'b0;
+        vrf_rd_wb_port_o[p][l] = '0;
+
+        for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+          if (vrf_rd_lane_go[p][l]
+              && vrf_byp_pkt[w].valid
+              && vrf_byp_pkt[w].lmask[l]
+              && (vrf_byp_pkt[w].idx == vrf_rd_idx_i[p])) begin
+            vrf_rd_byp[p][l] = vrf_byp_pkt[w].data[l];
+          end
+        end
+
+        for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+          if (vrf_rd_lane_go[p][l]
+              && vrf_arb_pkt[w].valid
+              && vrf_arb_pkt[w].lmask[l]
+              && (vrf_arb_pkt[w].idx == vrf_rd_idx_i[p])) begin
+            vrf_rd_wb_hit_o[p][l]  = 1'b1;
+            vrf_rd_wb_port_o[p][l] = vrf_wp_t'(w);
+            if (RD_WRITE_THRU_EN) begin
+              vrf_rd_byp[p][l] = vrf_arb_pkt[w].data[l];
+            end
+          end
+        end
+
+        vrf_rd_data_o[p][l] = vrf_rd_lane_go[p][l] ? vrf_rd_byp[p][l] : '0;
+      end
+    end
+  end
+
+  // ===========================================================================
+  // VRF speculation tracking -- entries committed since last checkpoint
+  // ===========================================================================
+  if (SPEC_TRACK_EN) begin : g_vrf_spec
+    logic [VRF_ENTRIES-1:0] vrf_dirty_q;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_vrf_dirty
+      if (!rst_ni) begin
+        vrf_dirty_q <= '0;
+      end else begin
+        vrf_dirty_q <= ((spec_ckpt_i | spec_restore_i) ? '0 : vrf_dirty_q) | vrf_cmt_mask_o;
+      end
+    end
+
+    assign vrf_spec_dirty_o = vrf_dirty_q;
+  end else begin : g_vrf_spec_off
+    logic unused_spec_ctl;
+    assign unused_spec_ctl  = spec_ckpt_i ^ spec_restore_i;
+    assign vrf_spec_dirty_o = '0;
+  end
+
+  // ###########################################################################
+  //
+  //   INTEGRITY STATUS
+  //
+  // ###########################################################################
+
+  logic srf_err_idx_set;
+  logic vrf_err_idx_set;
+  logic rb_err_domain_set;
+
+  always_comb begin : p_rb_err_detect
+    srf_err_idx_set   = 1'b0;
+    vrf_err_idx_set   = 1'b0;
+    rb_err_domain_set = 1'b0;
+
+    for (int unsigned p = 0; p < SRF_RD_PORTS; p++) begin
+      srf_err_idx_set = srf_err_idx_set | (srf_rd_en_i[p] & ~srf_rd_idx_ok[p]);
+    end
+    for (int unsigned w = 0; w < SRF_WR_PORTS; w++) begin
+      srf_err_idx_set   = srf_err_idx_set   | (srf_wb_req[w] & ~srf_wb_idx_ok[w]);
+      rb_err_domain_set = rb_err_domain_set | (srf_wb_req[w] & ~srf_wb_dom_ok[w]);
+    end
+
+    for (int unsigned p = 0; p < VRF_RD_PORTS; p++) begin
+      vrf_err_idx_set = vrf_err_idx_set | (vrf_rd_en_i[p] & ~vrf_rd_idx_ok[p]);
+    end
+    for (int unsigned w = 0; w < VRF_WR_PORTS; w++) begin
+      vrf_err_idx_set   = vrf_err_idx_set   | (vrf_wb_req[w] & ~vrf_wb_idx_ok[w]);
+      rb_err_domain_set = rb_err_domain_set | (vrf_wb_req[w] & ~vrf_wb_dom_ok[w]);
+    end
+  end
+
+  logic srf_err_idx_q;
+  logic vrf_err_idx_q;
+  logic rb_err_domain_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_rb_err_sticky
+    if (!rst_ni) begin
+      srf_err_idx_q   <= 1'b0;
+      vrf_err_idx_q   <= 1'b0;
+      rb_err_domain_q <= 1'b0;
+    end else begin
+      srf_err_idx_q   <= srf_err_idx_q   | srf_err_idx_set;
+      vrf_err_idx_q   <= vrf_err_idx_q   | vrf_err_idx_set;
+      rb_err_domain_q <= rb_err_domain_q | rb_err_domain_set;
+    end
+  end
+
+  assign srf_err_idx_o   = srf_err_idx_q;
+  assign vrf_err_idx_o   = vrf_err_idx_q;
+  assign rb_err_domain_o = rb_err_domain_q;
+
+  // ###########################################################################
+  //
+  //   ASSERTIONS (simulation / formal only)
+  //
+  // ###########################################################################
+
+`ifndef SYNTHESIS
+
+  // ---------------------------------------------------------------------------
+  // Global control
+  // ---------------------------------------------------------------------------
+  a_ctl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({flush_i, spec_ckpt_i, spec_restore_i}))
+    else $error("register_bank: X on flush / speculation control");
+
+  a_spec_ctl_exclusive : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !(spec_ckpt_i && spec_restore_i))
+    else $error("register_bank: checkpoint and restore asserted together");
+
+  a_flush_blocks_accept : assert property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i |-> ((srf_wb_accept_o == '0) && (vrf_wb_accept_o == '0)))
+    else $error("register_bank: writeback accepted during flush");
+
+  // ---------------------------------------------------------------------------
+  // SRF writeback ports
+  // ---------------------------------------------------------------------------
+  for (genvar w = 0; w < SRF_WR_PORTS; w++) begin : g_sva_srf_wb
+    a_ctl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_valid_i[w] |-> !$isunknown({srf_wb_we_i[w], srf_wb_kill_i[w]}))
+      else $error("register_bank: SRF wb%0d X on we/kill", w);
+
+    a_pkt_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_req[w] |-> !$isunknown({srf_wb_rcls_i[w], srf_wb_idx_i[w],
+                                     srf_wb_tag_i[w],  srf_wb_data_i[w]}))
+      else $error("register_bank: SRF wb%0d X on packet", w);
+
+    a_idx_legal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_req[w] |-> srf_wb_idx_ok[w])
+      else $error("register_bank: SRF wb%0d illegal index %0d", w, srf_wb_idx_i[w]);
+
+    a_domain : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_req[w] |-> srf_wb_dom_ok[w])
+      else $error("register_bank: SRF wb%0d non-scalar register class", w);
+
+    a_we_gate : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_accept_o[w] |-> (srf_wb_valid_i[w] && srf_wb_we_i[w] &&
+                              !srf_wb_kill_i[w] && !flush_i &&
+                              !srf_wb_zero[w]))
+      else $error("register_bank: SRF wb%0d write enable not staged", w);
+
+    a_waw_override : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_wb_over[w] |-> (srf_wb_qual[w] && !srf_arb_pkt[w].valid))
+      else $error("register_bank: SRF wb%0d inconsistent WAW override", w);
+
+    a_cmt_clean : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_cmt_pkt[w].valid |-> (srf_idx_legal(srf_cmt_pkt[w].idx) &&
+                                !srf_is_zero(srf_cmt_pkt[w].idx)))
+      else $error("register_bank: SRF commit%0d to illegal or zero tag", w);
+
+    c_waw : cover property (@(posedge clk_i) disable iff (!rst_ni) srf_wb_over[w]);
+  end
+
+  // ---------------------------------------------------------------------------
+  // SRF read ports
+  // ---------------------------------------------------------------------------
+  for (genvar p = 0; p < SRF_RD_PORTS; p++) begin : g_sva_srf_rd
+    a_idx_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_rd_en_i[p] |-> !$isunknown(srf_rd_idx_i[p]))
+      else $error("register_bank: SRF rd%0d X on index", p);
+
+    a_idx_legal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_rd_en_i[p] |-> srf_rd_idx_ok[p])
+      else $error("register_bank: SRF rd%0d illegal index %0d", p, srf_rd_idx_i[p]);
+
+    a_data_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !$isunknown(srf_rd_data_o[p]))
+      else $error("register_bank: SRF rd%0d X on read data", p);
+
+    a_zero_reads_zero : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (srf_rd_en_i[p] && srf_rd_zero[p]) |-> (srf_rd_data_o[p] == '0))
+      else $error("register_bank: SRF rd%0d zero tag returned non-zero", p);
+
+    a_conflict_quiet : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      srf_rd_bank_conflict_o[p] |-> (!srf_rd_wb_hit_o[p] && (srf_rd_data_o[p] == '0)))
+      else $error("register_bank: SRF rd%0d conflicted port not quiesced", p);
+
+    c_wb_hit : cover property (@(posedge clk_i) disable iff (!rst_ni) srf_rd_wb_hit_o[p]);
+  end
+
+  // ---------------------------------------------------------------------------
+  // SRF array write-wordline exclusivity
+  // ---------------------------------------------------------------------------
+  for (genvar b = 0; b < SRF_BANKS; b++) begin : g_sva_srf_bank
+    for (genvar r = 0; r < SRF_ROWS; r++) begin : g_row
+      a_wl_onehot : assert property (@(posedge clk_i) disable iff (!rst_ni)
+        $onehot0(srf_row_hit[b][r]))
+        else $error("register_bank: SRF bank %0d row %0d multi-port write", b, r);
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // VRF writeback ports
+  // ---------------------------------------------------------------------------
+  for (genvar w = 0; w < VRF_WR_PORTS; w++) begin : g_sva_vrf_wb
+    a_ctl_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_wb_valid_i[w] |-> !$isunknown({vrf_wb_we_i[w], vrf_wb_kill_i[w]}))
+      else $error("register_bank: VRF wb%0d X on we/kill", w);
+
+    a_pkt_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_wb_req[w] |-> !$isunknown({vrf_wb_rcls_i[w], vrf_wb_idx_i[w],
+                                     vrf_wb_tag_i[w],  vrf_wb_lmask[w],
+                                     vrf_wb_data_i[w]}))
+      else $error("register_bank: VRF wb%0d X on packet", w);
+
+    a_idx_legal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_wb_req[w] |-> vrf_wb_idx_ok[w])
+      else $error("register_bank: VRF wb%0d illegal index %0d", w, vrf_wb_idx_i[w]);
+
+    a_domain : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_wb_req[w] |-> vrf_wb_dom_ok[w])
+      else $error("register_bank: VRF wb%0d non-vector register class", w);
+
+    a_we_gate : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_wb_accept_o[w] |-> (vrf_wb_valid_i[w] && vrf_wb_we_i[w] &&
+                              !vrf_wb_kill_i[w] && !flush_i))
+      else $error("register_bank: VRF wb%0d write enable not staged", w);
+
+    a_lane_subset : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (vrf_arb_pkt[w].lmask & ~vrf_wb_lmask[w]) == '0)
+      else $error("register_bank: VRF wb%0d lane enable outside write mask", w);
+
+    a_cmt_clean : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_cmt_pkt[w].valid |-> (vrf_idx_legal(vrf_cmt_pkt[w].idx) &&
+                                (vrf_cmt_pkt[w].lmask != '0)))
+      else $error("register_bank: VRF commit%0d illegal index or empty lane mask", w);
+
+    c_waw : cover property (@(posedge clk_i) disable iff (!rst_ni) vrf_wb_over[w]);
+  end
+
+  // ---------------------------------------------------------------------------
+  // VRF read ports
+  // ---------------------------------------------------------------------------
+  for (genvar p = 0; p < VRF_RD_PORTS; p++) begin : g_sva_vrf_rd
+    a_idx_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_rd_en_i[p] |-> !$isunknown(vrf_rd_idx_i[p]))
+      else $error("register_bank: VRF rd%0d X on index", p);
+
+    a_idx_legal : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      vrf_rd_en_i[p] |-> vrf_rd_idx_ok[p])
+      else $error("register_bank: VRF rd%0d illegal index %0d", p, vrf_rd_idx_i[p]);
+
+    a_data_known : assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !$isunknown(vrf_rd_data_o[p]))
+      else $error("register_bank: VRF rd%0d X on read data", p);
+
+    c_wb_hit : cover property (@(posedge clk_i) disable iff (!rst_ni) |vrf_rd_wb_hit_o[p]);
+  end
+
+  // ---------------------------------------------------------------------------
+  // VRF array write-wordline exclusivity (per lane slice)
+  // ---------------------------------------------------------------------------
+  for (genvar l = 0; l < VRF_LANES; l++) begin : g_sva_vrf_lane
+    for (genvar e = 0; e < VRF_ENTRIES; e++) begin : g_ent
+      a_wl_onehot : assert property (@(posedge clk_i) disable iff (!rst_ni)
+        $onehot0(vrf_ent_hit[l][e]))
+        else $error("register_bank: VRF lane %0d entry %0d multi-port write", l, e);
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Scalar / vector domain separation: a producer commits into one domain
+  // ---------------------------------------------------------------------------
+  for (genvar s = 0; s < SRF_WR_PORTS; s++) begin : g_sva_dom_s
+    for (genvar v = 0; v < VRF_WR_PORTS; v++) begin : g_v
+      a_domain_disjoint : assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (srf_wb_accept_o[s] && vrf_wb_accept_o[v]) |-> (srf_wb_tag_i[s] != vrf_wb_tag_i[v]))
+        else $error("register_bank: producer tag %0d written into both domains", srf_wb_tag_i[s]);
+    end
+  end
+
+`endif  // SYNTHESIS
+
+endmodule : register_bank
