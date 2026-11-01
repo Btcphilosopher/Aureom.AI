@@ -1,0 +1,2081 @@
+// =============================================================================
+//  silicaflux_pkg.sf
+// -----------------------------------------------------------------------------
+//  Silica Flux Architecture (SFA) - Core Architectural Package
+//
+//  Language     : Silica Flux-2017
+//  Contents     : Architectural parameters, ISA encoding, micro-op taxonomy,
+//                 execution-resource enumerations, pipeline transaction types,
+//                 memory-subsystem types, exception / trap metadata, utility
+//                 types and pure combinational helper functions.
+//
+//  Conventions  : *_e  enumerated type        *_t  struct / typedef
+//                 *_u  packed union           UPPER_CASE  parameters
+//                 All widths derive from Section 2. Every enumeration carries
+//                 explicit encodings; values are architecturally frozen once
+//                 published and may only be extended into unused code points.
+//
+//  Constraints  : Stateless. No clocked constructs, no macros, no `define.
+//                 All functions are automatic and side-effect free.
+// =============================================================================
+
+package silicaflux_pkg;
+
+  // ===========================================================================
+  // 1. Architectural Identity
+  // ===========================================================================
+
+  localparam logic [7:0]   SF_ARCH_VER_MAJOR   = 8'd2;
+  localparam logic [7:0]   SF_ARCH_VER_MINOR   = 8'd4;
+  localparam logic [7:0]   SF_ARCH_VER_PATCH   = 8'd0;
+
+  localparam logic [31:0]  SF_MVENDORID        = 32'h0000_0000;
+  localparam logic [63:0]  SF_MARCHID          = 64'h8000_0000_0000_5346;
+  localparam logic [63:0]  SF_MIMPID           = {40'h0,
+                                                  SF_ARCH_VER_MAJOR,
+                                                  SF_ARCH_VER_MINOR,
+                                                  SF_ARCH_VER_PATCH};
+
+  // ===========================================================================
+  // 2. Global Architectural Parameters
+  // ===========================================================================
+
+  // --- Datapath --------------------------------------------------------------
+  localparam int unsigned XLEN                = 64;
+  localparam int unsigned XLEN_BYTES          = XLEN / 8;
+  localparam int unsigned XLEN_OFF_W          = $clog2(XLEN_BYTES);
+  localparam int unsigned FLEN                = 64;
+  localparam int unsigned ILEN                = 32;
+  localparam int unsigned ILEN_BYTES          = ILEN / 8;
+  localparam int unsigned INSTR_OFF_W         = $clog2(ILEN_BYTES);
+  localparam int unsigned IMM_W               = 32;
+
+  // --- Encoding Field Widths -------------------------------------------------
+  localparam int unsigned OPCODE_W            = 7;
+  localparam int unsigned FUNCT3_W            = 3;
+  localparam int unsigned FUNCT5_W            = 5;
+  localparam int unsigned FUNCT6_W            = 6;
+  localparam int unsigned FUNCT7_W            = 7;
+  localparam int unsigned IMM_I_W             = 12;
+  localparam int unsigned IMM_U_W             = 20;
+  localparam int unsigned UOP_FUNC_W          = 6;
+
+  // --- Address Space (Sv48 / Sv48x4) -----------------------------------------
+  localparam int unsigned VADDR_W             = 48;
+  localparam int unsigned PADDR_W             = 56;
+  localparam int unsigned GPADDR_W            = 50;
+  localparam int unsigned PAGE_OFFSET_W       = 12;
+  localparam int unsigned VPN_W               = VADDR_W - PAGE_OFFSET_W;
+  localparam int unsigned PPN_W               = PADDR_W - PAGE_OFFSET_W;
+  localparam int unsigned PT_LEVELS           = 4;
+  localparam int unsigned PT_LEVEL_W          = $clog2(PT_LEVELS);
+  localparam int unsigned VPN_SEG_W           = VPN_W / PT_LEVELS;
+  localparam int unsigned ASID_W              = 16;
+  localparam int unsigned VMID_W              = 14;
+
+  // --- Architectural Register Files ------------------------------------------
+  localparam int unsigned AREG_NUM            = 32;
+  localparam int unsigned AREG_W              = $clog2(AREG_NUM);
+  localparam int unsigned TILE_REGS           = 8;
+  localparam int unsigned TILE_IDX_W          = $clog2(TILE_REGS);
+  localparam int unsigned NUM_SRC             = 3;
+
+  // --- Physical Register Files -----------------------------------------------
+  localparam int unsigned PRF_INT_REGS        = 256;
+  localparam int unsigned PRF_FP_REGS         = 192;
+  localparam int unsigned PRF_VEC_REGS        = 96;
+  localparam int unsigned PRF_MAX_REGS        =
+      (PRF_INT_REGS > PRF_FP_REGS)
+        ? ((PRF_INT_REGS > PRF_VEC_REGS) ? PRF_INT_REGS : PRF_VEC_REGS)
+        : ((PRF_FP_REGS  > PRF_VEC_REGS) ? PRF_FP_REGS  : PRF_VEC_REGS);
+  localparam int unsigned PREG_W              = $clog2(PRF_MAX_REGS);
+
+  // --- Front-End Pipeline Widths ---------------------------------------------
+  localparam int unsigned FETCH_WIDTH         = 8;
+  localparam int unsigned FETCH_BYTES         = FETCH_WIDTH * ILEN_BYTES;
+  localparam int unsigned FETCH_OFF_W         = $clog2(FETCH_BYTES);
+  localparam int unsigned FETCH_SLOT_W        = $clog2(FETCH_WIDTH);
+  localparam int unsigned FETCH_BUF_DEPTH     = 32;
+  localparam int unsigned FTQ_DEPTH           = 64;
+  localparam int unsigned FTQ_IDX_W           = $clog2(FTQ_DEPTH);
+
+  // --- Back-End Pipeline Widths ----------------------------------------------
+  localparam int unsigned DECODE_WIDTH        = 6;
+  localparam int unsigned RENAME_WIDTH        = 6;
+  localparam int unsigned DISPATCH_WIDTH      = 6;
+  localparam int unsigned COMMIT_WIDTH        = 6;
+
+  localparam int unsigned LD_PIPES            = 2;
+  localparam int unsigned STA_PIPES           = 1;
+  localparam int unsigned ISSUE_INT           = 4;
+  localparam int unsigned ISSUE_MEM           = LD_PIPES + STA_PIPES;
+  localparam int unsigned ISSUE_FP            = 2;
+  localparam int unsigned ISSUE_VEC           = 1;
+  localparam int unsigned ISSUE_WIDTH         = ISSUE_INT + ISSUE_MEM
+                                              + ISSUE_FP  + ISSUE_VEC;
+
+  localparam int unsigned WB_INT_PORTS        = ISSUE_INT + LD_PIPES;
+  localparam int unsigned WB_FP_PORTS         = ISSUE_FP  + LD_PIPES;
+  localparam int unsigned WB_WIDTH            = WB_INT_PORTS + WB_FP_PORTS;
+
+  // --- Out-of-Order Resources ------------------------------------------------
+  localparam int unsigned ROB_DEPTH           = 256;
+  localparam int unsigned ROB_IDX_W           = $clog2(ROB_DEPTH);
+  localparam int unsigned IQ_INT_DEPTH        = 64;
+  localparam int unsigned IQ_MEM_DEPTH        = 48;
+  localparam int unsigned IQ_FP_DEPTH         = 48;
+  localparam int unsigned IQ_VEC_DEPTH        = 32;
+  localparam int unsigned LDQ_DEPTH           = 96;
+  localparam int unsigned LDQ_IDX_W           = $clog2(LDQ_DEPTH);
+  localparam int unsigned STQ_DEPTH           = 64;
+  localparam int unsigned STQ_IDX_W           = $clog2(STQ_DEPTH);
+  localparam int unsigned LSQ_IDX_W           = (LDQ_IDX_W > STQ_IDX_W) ? LDQ_IDX_W
+                                                                       : STQ_IDX_W;
+  localparam int unsigned MAX_BR_INFLIGHT     = 32;
+  localparam int unsigned BR_TAG_W            = $clog2(MAX_BR_INFLIGHT);
+  localparam int unsigned LAT_W               = 4;
+
+  // --- Memory Dependence Prediction ------------------------------------------
+  localparam int unsigned SSIT_ENTRIES        = 1024;
+  localparam int unsigned LFST_ENTRIES        = 128;
+  localparam int unsigned SSID_W              = $clog2(LFST_ENTRIES);
+
+  // --- Branch Prediction -----------------------------------------------------
+  localparam int unsigned GHIST_BUF_DEPTH     = 1024;
+  localparam int unsigned GHIST_PTR_W         = $clog2(GHIST_BUF_DEPTH);
+  localparam int unsigned TAGE_TABLES         = 8;
+  localparam int unsigned TAGE_PROV_W         = $clog2(TAGE_TABLES + 1);
+  localparam int unsigned BP_CTR_W            = 3;
+  localparam int unsigned BP_CONF_CTR_W       = 4;
+  localparam int unsigned BTB_ENTRIES         = 4096;
+  localparam int unsigned BTB_WAYS            = 4;
+  localparam int unsigned BTB_WAY_W           = $clog2(BTB_WAYS);
+  localparam int unsigned RAS_DEPTH           = 32;
+  localparam int unsigned RAS_PTR_W           = $clog2(RAS_DEPTH);
+
+  // --- Cache Hierarchy -------------------------------------------------------
+  localparam int unsigned CL_BYTES            = 64;
+  localparam int unsigned CL_W                = CL_BYTES * 8;
+  localparam int unsigned CL_OFFSET_W         = $clog2(CL_BYTES);
+  localparam int unsigned LINE_ADDR_W         = PADDR_W - CL_OFFSET_W;
+  localparam int unsigned L1_IDX_W            = PAGE_OFFSET_W - CL_OFFSET_W;
+  localparam int unsigned L1_SETS             = 1 << L1_IDX_W;
+  localparam int unsigned L1_TAG_W            = PPN_W;
+  localparam int unsigned L1I_WAYS            = 8;
+  localparam int unsigned L1D_WAYS            = 12;
+  localparam int unsigned L1I_MSHRS           = 4;
+  localparam int unsigned L1D_MSHRS           = 16;
+  localparam int unsigned MSHR_IDX_W          = $clog2(L1D_MSHRS);
+  localparam int unsigned L2_SETS             = 1024;
+  localparam int unsigned L2_WAYS             = 16;
+  localparam int unsigned L2_IDX_W            = $clog2(L2_SETS);
+  localparam int unsigned L2_TAG_W            = LINE_ADDR_W - L2_IDX_W;
+  localparam int unsigned ECC_DATA_W          = 64;
+  localparam int unsigned ECC_CHECK_W         = 8;
+
+  // --- Translation -----------------------------------------------------------
+  localparam int unsigned ITLB_ENTRIES        = 64;
+  localparam int unsigned DTLB_ENTRIES        = 64;
+  localparam int unsigned STLB_ENTRIES        = 2048;
+  localparam int unsigned STLB_WAYS           = 8;
+  localparam int unsigned PMP_ENTRIES         = 16;
+
+  // --- Coherent System -------------------------------------------------------
+  localparam int unsigned NUM_CORES           = 16;
+  localparam int unsigned CORE_ID_W           = $clog2(NUM_CORES);
+  localparam int unsigned TXN_SRC_W           = 2;
+  localparam int unsigned TXN_ID_W            = CORE_ID_W + TXN_SRC_W + MSHR_IDX_W;
+
+  // --- System Interconnect (AXI4 profile) ------------------------------------
+  localparam int unsigned AXI_ADDR_W          = PADDR_W;
+  localparam int unsigned AXI_DATA_W          = 256;
+  localparam int unsigned AXI_STRB_W          = AXI_DATA_W / 8;
+  localparam int unsigned AXI_ID_W            = TXN_ID_W;
+  localparam int unsigned AXI_USER_W          = 4;
+  localparam int unsigned AXI_LEN_W           = 8;
+  localparam int unsigned AXI_SIZE_W          = 3;
+  localparam int unsigned AXI_CACHE_W         = 4;
+  localparam int unsigned AXI_PROT_W          = 3;
+  localparam int unsigned AXI_QOS_W           = 4;
+  localparam int unsigned AXI_REGION_W        = 4;
+  localparam int unsigned AXI_BEATS_PER_CL    = CL_W / AXI_DATA_W;
+
+  // --- Vector Extension ------------------------------------------------------
+  localparam int unsigned VLEN                = 512;
+  localparam int unsigned VLENB               = VLEN / 8;
+  localparam int unsigned ELEN                = 64;
+  localparam int unsigned VEC_LANES           = VLEN / ELEN;
+  localparam int unsigned VLMAX               = VLEN;
+  localparam int unsigned VL_W                = $clog2(VLMAX) + 1;
+
+  // --- Tensor Extension ------------------------------------------------------
+  localparam int unsigned TILE_ROWS           = 16;
+  localparam int unsigned TILE_COLB           = 64;
+  localparam int unsigned TILE_ROW_W          = $clog2(TILE_ROWS) + 1;
+  localparam int unsigned TILE_COLB_W         = $clog2(TILE_COLB) + 1;
+  localparam int unsigned TCQ_DEPTH           = 16;
+
+  // --- Privilege / CSR / Interrupt -------------------------------------------
+  localparam int unsigned CSR_ADDR_W          = 12;
+  localparam int unsigned CAUSE_W             = 6;
+  localparam int unsigned IRQ_VEC_W           = XLEN;
+  localparam int unsigned IRQ_PRIO_W          = 3;
+
+  // ===========================================================================
+  // 3. Fundamental Typedefs and Ordered Identifiers
+  // ===========================================================================
+
+  typedef logic [XLEN-1:0]          xlen_t;
+  typedef logic [FLEN-1:0]          flen_t;
+  typedef logic [VADDR_W-1:0]       vaddr_t;
+  typedef logic [PADDR_W-1:0]       paddr_t;
+  typedef logic [LINE_ADDR_W-1:0]   line_addr_t;
+  typedef logic [CL_W-1:0]          cl_data_t;
+  typedef logic [CL_BYTES-1:0]      cl_mask_t;
+  typedef logic [IMM_W-1:0]         imm_t;
+  typedef logic [CSR_ADDR_W-1:0]    csr_addr_t;
+
+  // Circular-buffer identifiers carry a wrap bit for O(1) age comparison.
+  typedef struct packed {
+    logic                   wrap;
+    logic [ROB_IDX_W-1:0]   idx;
+  } rob_id_t;
+
+  typedef struct packed {
+    logic                   wrap;
+    logic [LDQ_IDX_W-1:0]   idx;
+  } ldq_id_t;
+
+  typedef struct packed {
+    logic                   wrap;
+    logic [STQ_IDX_W-1:0]   idx;
+  } stq_id_t;
+
+  typedef struct packed {
+    logic [FTQ_IDX_W-1:0]    idx;
+    logic [FETCH_SLOT_W-1:0] slot;
+  } ftq_ref_t;
+
+  typedef logic [BR_TAG_W-1:0]        br_tag_t;
+  typedef logic [MAX_BR_INFLIGHT-1:0] br_mask_t;
+  typedef logic [LD_PIPES-1:0]        ld_spec_mask_t;
+
+  // ===========================================================================
+  // 4. Instruction Encoding
+  // ===========================================================================
+
+  // --- Major Opcode Map (inst[6:0]) ------------------------------------------
+  typedef enum logic [OPCODE_W-1:0] {
+    MOP_LOAD        = 7'b000_0011,
+    MOP_LOAD_FP     = 7'b000_0111,
+    MOP_TENSOR      = 7'b000_1011,  // custom-0 : SF tensor extension
+    MOP_MISC_MEM    = 7'b000_1111,
+    MOP_OP_IMM      = 7'b001_0011,
+    MOP_AUIPC       = 7'b001_0111,
+    MOP_OP_IMM_32   = 7'b001_1011,
+    MOP_STORE       = 7'b010_0011,
+    MOP_STORE_FP    = 7'b010_0111,
+    MOP_ACCEL       = 7'b010_1011,  // custom-1 : SF accelerator control
+    MOP_AMO         = 7'b010_1111,
+    MOP_OP          = 7'b011_0011,
+    MOP_LUI         = 7'b011_0111,
+    MOP_OP_32       = 7'b011_1011,
+    MOP_MADD        = 7'b100_0011,
+    MOP_MSUB        = 7'b100_0111,
+    MOP_NMSUB       = 7'b100_1011,
+    MOP_NMADD       = 7'b100_1111,
+    MOP_OP_FP       = 7'b101_0011,
+    MOP_OP_V        = 7'b101_0111,
+    MOP_CUSTOM_2    = 7'b101_1011,  // reserved for future heterogeneous units
+    MOP_BRANCH      = 7'b110_0011,
+    MOP_JALR        = 7'b110_0111,
+    MOP_JAL         = 7'b110_1111,
+    MOP_SYSTEM      = 7'b111_0011,
+    MOP_CUSTOM_3    = 7'b111_1011   // reserved for future heterogeneous units
+  } sf_opcode_e;
+
+  // --- Minor Opcode Tables ---------------------------------------------------
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_BEQ          = 3'b000,
+    F3_BNE          = 3'b001,
+    F3_BLT          = 3'b100,
+    F3_BGE          = 3'b101,
+    F3_BLTU         = 3'b110,
+    F3_BGEU         = 3'b111
+  } f3_branch_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_LB           = 3'b000,
+    F3_LH           = 3'b001,
+    F3_LW           = 3'b010,
+    F3_LD           = 3'b011,
+    F3_LBU          = 3'b100,
+    F3_LHU          = 3'b101,
+    F3_LWU          = 3'b110
+  } f3_load_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_SB           = 3'b000,
+    F3_SH           = 3'b001,
+    F3_SW           = 3'b010,
+    F3_SD           = 3'b011
+  } f3_store_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_ADD_SUB      = 3'b000,
+    F3_SLL          = 3'b001,
+    F3_SLT          = 3'b010,
+    F3_SLTU         = 3'b011,
+    F3_XOR          = 3'b100,
+    F3_SRL_SRA      = 3'b101,
+    F3_OR           = 3'b110,
+    F3_AND          = 3'b111
+  } f3_op_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_MUL          = 3'b000,
+    F3_MULH         = 3'b001,
+    F3_MULHSU       = 3'b010,
+    F3_MULHU        = 3'b011,
+    F3_DIV          = 3'b100,
+    F3_DIVU         = 3'b101,
+    F3_REM          = 3'b110,
+    F3_REMU         = 3'b111
+  } f3_muldiv_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_FENCE        = 3'b000,
+    F3_FENCE_I      = 3'b001,
+    F3_CBO          = 3'b010
+  } f3_misc_mem_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_AMO_W        = 3'b010,
+    F3_AMO_D        = 3'b011
+  } f3_amo_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_PRIV         = 3'b000,
+    F3_CSRRW        = 3'b001,
+    F3_CSRRS        = 3'b010,
+    F3_CSRRC        = 3'b011,
+    F3_CSRRWI       = 3'b101,
+    F3_CSRRSI       = 3'b110,
+    F3_CSRRCI       = 3'b111
+  } f3_system_e;
+
+  typedef enum logic [FUNCT3_W-1:0] {
+    F3_OPIVV        = 3'b000,
+    F3_OPFVV        = 3'b001,
+    F3_OPMVV        = 3'b010,
+    F3_OPIVI        = 3'b011,
+    F3_OPIVX        = 3'b100,
+    F3_OPFVF        = 3'b101,
+    F3_OPMVX        = 3'b110,
+    F3_OPCFG        = 3'b111
+  } f3_vector_e;
+
+  // Tensor operand form, carried in funct3 of MOP_TENSOR.
+  typedef enum logic [FUNCT3_W-1:0] {
+    TFORM_TT        = 3'b000,   // tile  <- tile  op tile
+    TFORM_TX        = 3'b001,   // tile  <- tile  op xreg
+    TFORM_TM        = 3'b010,   // tile <-> memory [rs1] stride [rs2]
+    TFORM_CFG       = 3'b011    // configuration from xreg
+  } tns_form_e;
+
+  localparam logic [FUNCT7_W-1:0] F7_BASE     = 7'b000_0000;
+  localparam logic [FUNCT7_W-1:0] F7_MULDIV   = 7'b000_0001;
+  localparam logic [FUNCT7_W-1:0] F7_MINMAX   = 7'b000_0101;
+  localparam logic [FUNCT7_W-1:0] F7_CZERO    = 7'b000_0111;
+  localparam logic [FUNCT7_W-1:0] F7_SHADD    = 7'b001_0000;
+  localparam logic [FUNCT7_W-1:0] F7_ALT      = 7'b010_0000;
+  localparam logic [FUNCT7_W-1:0] F7_ROTATE   = 7'b011_0000;
+
+  // --- Instruction Formats ---------------------------------------------------
+  typedef struct packed {
+    logic [FUNCT7_W-1:0]    funct7;
+    logic [AREG_W-1:0]      rs2;
+    logic [AREG_W-1:0]      rs1;
+    logic [FUNCT3_W-1:0]    funct3;
+    logic [AREG_W-1:0]      rd;
+    sf_opcode_e             opcode;
+  } instr_r_t;
+
+  typedef struct packed {
+    logic [IMM_I_W-1:0]     imm;
+    logic [AREG_W-1:0]      rs1;
+    logic [FUNCT3_W-1:0]    funct3;
+    logic [AREG_W-1:0]      rd;
+    sf_opcode_e             opcode;
+  } instr_i_t;
+
+  typedef struct packed {
+    logic [6:0]             imm_hi;
+    logic [AREG_W-1:0]      rs2;
+    logic [AREG_W-1:0]      rs1;
+    logic [FUNCT3_W-1:0]    funct3;
+    logic [4:0]             imm_lo;
+    sf_opcode_e             opcode;
+  } instr_s_t;
+
+  typedef struct packed {
+    logic                   imm12;
+    logic [5:0]             imm10_5;
+    logic [AREG_W-1:0]      rs2;
+    logic [AREG_W-1:0]      rs1;
+    logic [FUNCT3_W-1:0]    funct3;
+    logic [3:0]             imm4_1;
+    logic                   imm11;
+    sf_opcode_e             opcode;
+  } instr_b_t;
+
+  typedef struct packed {
+    logic [IMM_U_W-1:0]     imm;
+    logic [AREG_W-1:0]      rd;
+    sf_opcode_e             opcode;
+  } instr_u_t;
+
+  typedef struct packed {
+    logic                   imm20;
+    logic [9:0]             imm10_1;
+    logic                   imm11;
+    logic [7:0]             imm19_12;
+    logic [AREG_W-1:0]      rd;
+    sf_opcode_e             opcode;
+  } instr_j_t;
+
+  typedef struct packed {
+    logic [AREG_W-1:0]      rs3;
+    logic [1:0]             fmt;
+    logic [AREG_W-1:0]      rs2;
+    logic [AREG_W-1:0]      rs1;
+    logic [FUNCT3_W-1:0]    rm;
+    logic [AREG_W-1:0]      rd;
+    sf_opcode_e             opcode;
+  } instr_r4_t;
+
+  typedef struct packed {
+    logic [FUNCT6_W-1:0]    funct6;
+    logic                   vm;
+    logic [AREG_W-1:0]      vs2;
+    logic [AREG_W-1:0]      vs1;
+    f3_vector_e             funct3;
+    logic [AREG_W-1:0]      vd;
+    sf_opcode_e             opcode;
+  } instr_v_t;
+
+  typedef struct packed {
+    logic [FUNCT6_W-1:0]    funct6;
+    logic                   acc;
+    logic [AREG_W-1:0]      rs2;
+    logic [AREG_W-1:0]      rs1;
+    tns_form_e              form;
+    logic [AREG_W-1:0]      td;
+    sf_opcode_e             opcode;
+  } instr_tns_t;
+
+  typedef union packed {
+    instr_r_t               r;
+    instr_i_t               i;
+    instr_s_t               s;
+    instr_b_t               b;
+    instr_u_t               u;
+    instr_j_t               j;
+    instr_r4_t              r4;
+    instr_v_t               v;
+    instr_tns_t             t;
+    logic [ILEN-1:0]        raw;
+  } instr_t;
+
+  // ===========================================================================
+  // 5. Micro-Op Taxonomy
+  // ===========================================================================
+  //  Two-level hierarchy: op_class_e selects the functional domain; a
+  //  domain-specific function code of UOP_FUNC_W bits is carried in
+  //  uop_func_u. Domains extend independently without global re-encoding.
+
+  typedef enum logic [3:0] {
+    OPC_NONE        = 4'h0,
+    OPC_ARITH       = 4'h1,
+    OPC_LOGIC       = 4'h2,
+    OPC_SHIFT       = 4'h3,
+    OPC_MULDIV      = 4'h4,
+    OPC_BRANCH      = 4'h5,
+    OPC_LOAD        = 4'h6,
+    OPC_STORE       = 4'h7,
+    OPC_ATOMIC      = 4'h8,
+    OPC_FENCE       = 4'h9,
+    OPC_FP          = 4'hA,
+    OPC_VECTOR      = 4'hB,
+    OPC_TENSOR      = 4'hC,
+    OPC_CSR         = 4'hD,
+    OPC_SYSTEM      = 4'hE,
+    OPC_CUSTOM      = 4'hF
+  } op_class_e;
+
+  // --- Integer Arithmetic ----------------------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    ALU_ADD         = 6'h00,
+    ALU_SUB         = 6'h01,
+    ALU_ADDW        = 6'h02,
+    ALU_SUBW        = 6'h03,
+    ALU_SLT         = 6'h04,
+    ALU_SLTU        = 6'h05,
+    ALU_LUI         = 6'h06,
+    ALU_AUIPC       = 6'h07,
+    ALU_MIN         = 6'h08,
+    ALU_MAX         = 6'h09,
+    ALU_MINU        = 6'h0A,
+    ALU_MAXU        = 6'h0B,
+    ALU_SH1ADD      = 6'h0C,
+    ALU_SH2ADD      = 6'h0D,
+    ALU_SH3ADD      = 6'h0E,
+    ALU_ADD_UW      = 6'h0F,
+    ALU_SH1ADD_UW   = 6'h10,
+    ALU_SH2ADD_UW   = 6'h11,
+    ALU_SH3ADD_UW   = 6'h12,
+    ALU_CZERO_EQZ   = 6'h13,
+    ALU_CZERO_NEZ   = 6'h14
+  } alu_op_e;
+
+  // --- Integer Logical / Bit-Manipulation ------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    LGC_AND         = 6'h00,
+    LGC_OR          = 6'h01,
+    LGC_XOR         = 6'h02,
+    LGC_ANDN        = 6'h03,
+    LGC_ORN         = 6'h04,
+    LGC_XNOR        = 6'h05,
+    LGC_CLZ         = 6'h06,
+    LGC_CTZ         = 6'h07,
+    LGC_CPOP        = 6'h08,
+    LGC_CLZW        = 6'h09,
+    LGC_CTZW        = 6'h0A,
+    LGC_CPOPW       = 6'h0B,
+    LGC_SEXT_B      = 6'h0C,
+    LGC_SEXT_H      = 6'h0D,
+    LGC_ZEXT_H      = 6'h0E,
+    LGC_REV8        = 6'h0F,
+    LGC_ORC_B       = 6'h10
+  } logic_op_e;
+
+  // --- Shift / Rotate / Single-Bit -------------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    SHF_SLL         = 6'h00,
+    SHF_SRL         = 6'h01,
+    SHF_SRA         = 6'h02,
+    SHF_SLLW        = 6'h03,
+    SHF_SRLW        = 6'h04,
+    SHF_SRAW        = 6'h05,
+    SHF_ROL         = 6'h06,
+    SHF_ROR         = 6'h07,
+    SHF_ROLW        = 6'h08,
+    SHF_RORW        = 6'h09,
+    SHF_BSET        = 6'h0A,
+    SHF_BCLR        = 6'h0B,
+    SHF_BINV        = 6'h0C,
+    SHF_BEXT        = 6'h0D,
+    SHF_SLLI_UW     = 6'h0E
+  } shift_op_e;
+
+  // --- Multiply / Divide (bit[3] selects the iterative divider) --------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    MDV_MUL         = 6'h00,
+    MDV_MULH        = 6'h01,
+    MDV_MULHSU      = 6'h02,
+    MDV_MULHU       = 6'h03,
+    MDV_MULW        = 6'h04,
+    MDV_DIV         = 6'h08,
+    MDV_DIVU        = 6'h09,
+    MDV_REM         = 6'h0A,
+    MDV_REMU        = 6'h0B,
+    MDV_DIVW        = 6'h0C,
+    MDV_DIVUW       = 6'h0D,
+    MDV_REMW        = 6'h0E,
+    MDV_REMUW       = 6'h0F
+  } muldiv_op_e;
+
+  // --- Control Transfer (conditional codes mirror funct3) --------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    BRU_BEQ         = 6'h00,
+    BRU_BNE         = 6'h01,
+    BRU_BLT         = 6'h04,
+    BRU_BGE         = 6'h05,
+    BRU_BLTU        = 6'h06,
+    BRU_BGEU        = 6'h07,
+    BRU_JAL         = 6'h10,
+    BRU_JALR        = 6'h11
+  } branch_op_e;
+
+  // --- Memory Access Size ----------------------------------------------------
+  typedef enum logic [2:0] {
+    MSZ_B           = 3'd0,     //  1 B
+    MSZ_H           = 3'd1,     //  2 B
+    MSZ_W           = 3'd2,     //  4 B
+    MSZ_D           = 3'd3,     //  8 B
+    MSZ_Q           = 3'd4,     // 16 B
+    MSZ_O           = 3'd5,     // 32 B
+    MSZ_L           = 3'd6      // 64 B (full cache line)
+  } mem_size_e;
+
+  // --- Load / Store Function Descriptor --------------------------------------
+  typedef struct packed {
+    logic                   is_fp;
+    logic                   sext;
+    logic                   ntl;        // non-temporal locality hint
+    mem_size_e              size;
+  } lsu_func_t;
+
+  // --- Atomic Memory Operations (codes mirror funct5) ------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    AMO_ADD         = 6'h00,
+    AMO_SWAP        = 6'h01,
+    AMO_LR          = 6'h02,
+    AMO_SC          = 6'h03,
+    AMO_XOR         = 6'h04,
+    AMO_CAS         = 6'h05,
+    AMO_OR          = 6'h08,
+    AMO_AND         = 6'h0C,
+    AMO_MIN         = 6'h10,
+    AMO_MAX         = 6'h14,
+    AMO_MINU        = 6'h18,
+    AMO_MAXU        = 6'h1C
+  } amo_op_e;
+
+  // --- Ordering / Cache-Management / Translation Fences ----------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    FNC_FENCE       = 6'h00,
+    FNC_FENCE_TSO   = 6'h01,
+    FNC_FENCE_I     = 6'h02,
+    FNC_SFENCE_VMA  = 6'h03,
+    FNC_HFENCE_VVMA = 6'h04,
+    FNC_HFENCE_GVMA = 6'h05,
+    FNC_SINVAL_VMA  = 6'h06,
+    FNC_CBO_INVAL   = 6'h08,
+    FNC_CBO_CLEAN   = 6'h09,
+    FNC_CBO_FLUSH   = 6'h0A,
+    FNC_CBO_ZERO    = 6'h0B,
+    FNC_PREFETCH_I  = 6'h0C,
+    FNC_PREFETCH_R  = 6'h0D,
+    FNC_PREFETCH_W  = 6'h0E
+  } fence_op_e;
+
+  // --- Scalar Floating Point -------------------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    FPU_FADD        = 6'h00,
+    FPU_FSUB        = 6'h01,
+    FPU_FMUL        = 6'h02,
+    FPU_FDIV        = 6'h03,
+    FPU_FSQRT       = 6'h04,
+    FPU_FMADD       = 6'h05,
+    FPU_FMSUB       = 6'h06,
+    FPU_FNMSUB      = 6'h07,
+    FPU_FNMADD      = 6'h08,
+    FPU_FSGNJ       = 6'h09,
+    FPU_FSGNJN      = 6'h0A,
+    FPU_FSGNJX      = 6'h0B,
+    FPU_FMIN        = 6'h0C,
+    FPU_FMAX        = 6'h0D,
+    FPU_FMINM       = 6'h0E,
+    FPU_FMAXM       = 6'h0F,
+    FPU_FEQ         = 6'h10,
+    FPU_FLT         = 6'h11,
+    FPU_FLE         = 6'h12,
+    FPU_FCLASS      = 6'h13,
+    FPU_F2I         = 6'h14,
+    FPU_F2U         = 6'h15,
+    FPU_I2F         = 6'h16,
+    FPU_U2F         = 6'h17,
+    FPU_F2F         = 6'h18,
+    FPU_FMV_F2X     = 6'h19,
+    FPU_FMV_X2F     = 6'h1A,
+    FPU_FROUND      = 6'h1B,
+    FPU_FLI         = 6'h1C
+  } fp_op_e;
+
+  // --- Vector ----------------------------------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    VEC_VADD        = 6'h00,
+    VEC_VSUB        = 6'h01,
+    VEC_VRSUB       = 6'h02,
+    VEC_VMINU       = 6'h03,
+    VEC_VMIN        = 6'h04,
+    VEC_VMAXU       = 6'h05,
+    VEC_VMAX        = 6'h06,
+    VEC_VAND        = 6'h07,
+    VEC_VOR         = 6'h08,
+    VEC_VXOR        = 6'h09,
+    VEC_VSLL        = 6'h0A,
+    VEC_VSRL        = 6'h0B,
+    VEC_VSRA        = 6'h0C,
+    VEC_VMSEQ       = 6'h0D,
+    VEC_VMSNE       = 6'h0E,
+    VEC_VMSLTU      = 6'h0F,
+    VEC_VMSLT       = 6'h10,
+    VEC_VMSLEU      = 6'h11,
+    VEC_VMSLE       = 6'h12,
+    VEC_VMERGE      = 6'h13,
+    VEC_VMV         = 6'h14,
+    VEC_VMUL        = 6'h15,
+    VEC_VMULH       = 6'h16,
+    VEC_VMULHU      = 6'h17,
+    VEC_VMACC       = 6'h18,
+    VEC_VNMSAC      = 6'h19,
+    VEC_VMADD       = 6'h1A,
+    VEC_VDIV        = 6'h1B,
+    VEC_VDIVU       = 6'h1C,
+    VEC_VREM        = 6'h1D,
+    VEC_VREMU       = 6'h1E,
+    VEC_VREDSUM     = 6'h1F,
+    VEC_VREDMAX     = 6'h20,
+    VEC_VREDMIN     = 6'h21,
+    VEC_VSLIDEUP    = 6'h22,
+    VEC_VSLIDEDOWN  = 6'h23,
+    VEC_VRGATHER    = 6'h24,
+    VEC_VCOMPRESS   = 6'h25,
+    VEC_VFADD       = 6'h26,
+    VEC_VFSUB       = 6'h27,
+    VEC_VFMUL       = 6'h28,
+    VEC_VFDIV       = 6'h29,
+    VEC_VFMACC      = 6'h2A,
+    VEC_VFREDUSUM   = 6'h2B,
+    VEC_VFREDOSUM   = 6'h2C,
+    VEC_VLD_UNIT    = 6'h30,
+    VEC_VLD_STRIDE  = 6'h31,
+    VEC_VLD_INDEX   = 6'h32,
+    VEC_VLD_FF      = 6'h33,
+    VEC_VST_UNIT    = 6'h34,
+    VEC_VST_STRIDE  = 6'h35,
+    VEC_VST_INDEX   = 6'h36,
+    VEC_VSETVL      = 6'h3C,
+    VEC_VSETVLI     = 6'h3D,
+    VEC_VSETIVLI    = 6'h3E
+  } vec_op_e;
+
+  // --- Tensor / AI (codes equal funct6 of MOP_TENSOR) ------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    TNS_CFG         = 6'h00,
+    TNS_ZERO        = 6'h01,
+    TNS_LOAD        = 6'h02,
+    TNS_STORE       = 6'h03,
+    TNS_MOVE        = 6'h04,
+    TNS_TRANSPOSE   = 6'h05,
+    TNS_SYNC        = 6'h06,
+    TNS_RELEASE     = 6'h07,
+    TNS_MMA_I8      = 6'h10,
+    TNS_MMA_U8      = 6'h11,
+    TNS_MMA_I4      = 6'h12,
+    TNS_MMA_FP8E4   = 6'h13,
+    TNS_MMA_FP8E5   = 6'h14,
+    TNS_MMA_FP16    = 6'h15,
+    TNS_MMA_BF16    = 6'h16,
+    TNS_MMA_TF32    = 6'h17,
+    TNS_ADD         = 6'h20,
+    TNS_MUL         = 6'h21,
+    TNS_RELU        = 6'h22,
+    TNS_GELU        = 6'h23,
+    TNS_SILU        = 6'h24,
+    TNS_EXP         = 6'h25,
+    TNS_RSUM        = 6'h26,
+    TNS_RMAX        = 6'h27,
+    TNS_QUANT       = 6'h28,
+    TNS_DEQUANT     = 6'h29
+  } tensor_op_e;
+
+  // --- CSR Access (codes mirror funct3) --------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    CSR_RW          = 6'h01,
+    CSR_RS          = 6'h02,
+    CSR_RC          = 6'h03,
+    CSR_RWI         = 6'h05,
+    CSR_RSI         = 6'h06,
+    CSR_RCI         = 6'h07
+  } csr_op_e;
+
+  // --- System / Privileged ---------------------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    SYS_ECALL       = 6'h00,
+    SYS_EBREAK      = 6'h01,
+    SYS_SRET        = 6'h02,
+    SYS_MRET        = 6'h03,
+    SYS_DRET        = 6'h04,
+    SYS_WFI         = 6'h05,
+    SYS_WRS_NTO     = 6'h06,
+    SYS_WRS_STO     = 6'h07
+  } sys_op_e;
+
+  // --- Accelerator Control (MOP_ACCEL) ---------------------------------------
+  typedef enum logic [UOP_FUNC_W-1:0] {
+    CST_ACCEL_CMD   = 6'h00,
+    CST_ACCEL_POLL  = 6'h01,
+    CST_ACCEL_SYNC  = 6'h02,
+    CST_PERF_MARK   = 6'h03,
+    CST_TRACE_EMIT  = 6'h04
+  } cust_op_e;
+
+  // --- Domain-Polymorphic Function Code --------------------------------------
+  typedef union packed {
+    alu_op_e                arith;
+    logic_op_e              lgc;
+    shift_op_e              shift;
+    muldiv_op_e             muldiv;
+    branch_op_e             branch;
+    lsu_func_t              lsu;
+    amo_op_e                amo;
+    fence_op_e              fence;
+    fp_op_e                 fp;
+    vec_op_e                vec;
+    tensor_op_e             tensor;
+    csr_op_e                csr;
+    sys_op_e                sys;
+    cust_op_e               cust;
+    logic [UOP_FUNC_W-1:0]  raw;
+  } uop_func_u;
+
+  // ===========================================================================
+  // 6. Execution Resources and Pipeline Topology
+  // ===========================================================================
+
+  typedef enum logic [2:0] {
+    RF_NONE         = 3'd0,
+    RF_INT          = 3'd1,
+    RF_FP           = 3'd2,
+    RF_VEC          = 3'd3,
+    RF_TILE         = 3'd4
+  } rf_class_e;
+
+  typedef enum logic [3:0] {
+    FU_NONE         = 4'h0,
+    FU_ALU          = 4'h1,
+    FU_BRU          = 4'h2,
+    FU_MUL          = 4'h3,
+    FU_DIV          = 4'h4,
+    FU_LDU          = 4'h5,
+    FU_STU          = 4'h6,
+    FU_FMA          = 4'h7,
+    FU_FDIV         = 4'h8,
+    FU_FCVT         = 4'h9,
+    FU_VALU         = 4'hA,
+    FU_VMUL         = 4'hB,
+    FU_VPERM        = 4'hC,
+    FU_VLSU         = 4'hD,
+    FU_TMMA         = 4'hE,
+    FU_CSR          = 4'hF
+  } fu_type_e;
+
+  localparam int unsigned NUM_FU_TYPES = 16;
+  typedef logic [NUM_FU_TYPES-1:0] fu_mask_t;
+
+  typedef enum logic [2:0] {
+    EXU_INT         = 3'd0,
+    EXU_MEM         = 3'd1,
+    EXU_FP          = 3'd2,
+    EXU_VEC         = 3'd3,
+    EXU_TNS         = 3'd4,     // decoupled; dispatched non-speculatively
+    EXU_SYS         = 3'd5
+  } exu_cluster_e;
+
+  typedef enum logic [3:0] {
+    PS_PCGEN        = 4'd0,
+    PS_ICACHE       = 4'd1,
+    PS_PREDECODE    = 4'd2,
+    PS_FBUF         = 4'd3,
+    PS_DECODE       = 4'd4,
+    PS_RENAME       = 4'd5,
+    PS_DISPATCH     = 4'd6,
+    PS_ISSUE        = 4'd7,
+    PS_REGREAD      = 4'd8,
+    PS_EXECUTE      = 4'd9,
+    PS_MEMORY       = 4'd10,
+    PS_WRITEBACK    = 4'd11,
+    PS_COMMIT       = 4'd12
+  } pipe_stage_e;
+
+  typedef enum logic [1:0] {
+    OPA_RS1         = 2'd0,
+    OPA_PC          = 2'd1,
+    OPA_ZERO        = 2'd2
+  } opa_sel_e;
+
+  typedef enum logic [1:0] {
+    OPB_RS2         = 2'd0,
+    OPB_IMM         = 2'd1,
+    OPB_ZERO        = 2'd2,
+    OPB_ILEN        = 2'd3      // link value: PC + ILEN_BYTES
+  } opb_sel_e;
+
+  typedef enum logic [2:0] {
+    IMM_NONE        = 3'd0,
+    IMM_I           = 3'd1,
+    IMM_S           = 3'd2,
+    IMM_B           = 3'd3,
+    IMM_U           = 3'd4,
+    IMM_J           = 3'd5,
+    IMM_Z           = 3'd6,     // zero-extended rs1 field (CSR uimm)
+    IMM_V           = 3'd7      // sign-extended vs1 field (vector simm5)
+  } imm_fmt_e;
+
+  typedef enum logic [1:0] {
+    LAT_SINGLE      = 2'd0,     // back-to-back wakeup
+    LAT_FIXED       = 2'd1,     // deterministic, scheduled from lat field
+    LAT_VARIABLE    = 2'd2      // completion-signalled wakeup
+  } lat_class_e;
+
+  // ===========================================================================
+  // 7. Floating-Point, Vector and Tensor Configuration
+  // ===========================================================================
+
+  typedef enum logic [1:0] {
+    FMT_S           = 2'b00,
+    FMT_D           = 2'b01,
+    FMT_H           = 2'b10,
+    FMT_BF16        = 2'b11     // quad not implemented; code point reassigned
+  } fp_fmt_e;
+
+  typedef enum logic [2:0] {
+    RM_RNE          = 3'b000,
+    RM_RTZ          = 3'b001,
+    RM_RDN          = 3'b010,
+    RM_RUP          = 3'b011,
+    RM_RMM          = 3'b100,
+    RM_DYN          = 3'b111
+  } fp_rm_e;
+
+  typedef struct packed {
+    logic                   nv;
+    logic                   dz;
+    logic                   of;
+    logic                   uf;
+    logic                   nx;
+  } fflags_t;
+
+  typedef enum logic [2:0] {
+    SEW_8           = 3'b000,
+    SEW_16          = 3'b001,
+    SEW_32          = 3'b010,
+    SEW_64          = 3'b011
+  } vsew_e;
+
+  typedef enum logic [2:0] {
+    LMUL_1          = 3'b000,
+    LMUL_2          = 3'b001,
+    LMUL_4          = 3'b010,
+    LMUL_8          = 3'b011,
+    LMUL_F8         = 3'b101,
+    LMUL_F4         = 3'b110,
+    LMUL_F2         = 3'b111
+  } vlmul_e;
+
+  typedef struct packed {
+    logic                   vill;
+    logic                   vma;
+    logic                   vta;
+    vsew_e                  vsew;
+    vlmul_e                 vlmul;
+  } vtype_t;
+
+  typedef struct packed {
+    vtype_t                 vtype;
+    logic [VL_W-1:0]        vl;
+  } vcfg_t;
+
+  typedef logic [VEC_LANES-1:0] vlane_mask_t;
+  typedef logic [VLENB-1:0]     vbyte_mask_t;
+  typedef logic [VLEN-1:0]      vreg_t;
+
+  typedef enum logic [3:0] {
+    TDT_INT8        = 4'h0,
+    TDT_UINT8       = 4'h1,
+    TDT_INT4        = 4'h2,
+    TDT_FP8_E4M3    = 4'h3,
+    TDT_FP8_E5M2    = 4'h4,
+    TDT_FP16        = 4'h5,
+    TDT_BF16        = 4'h6,
+    TDT_TF32        = 4'h7,
+    TDT_FP32        = 4'h8,
+    TDT_INT32       = 4'h9
+  } tensor_dtype_e;
+
+  typedef struct packed {
+    tensor_dtype_e          dtype;
+    logic [TILE_ROW_W-1:0]  rows;
+    logic [TILE_COLB_W-1:0] colsb;
+  } tile_cfg_t;
+
+  // ===========================================================================
+  // 8. Privilege and Control/Status Registers
+  // ===========================================================================
+
+  typedef enum logic [1:0] {
+    PRIV_U          = 2'b00,
+    PRIV_S          = 2'b01,
+    PRIV_M          = 2'b11
+  } priv_lvl_e;
+
+  typedef struct packed {
+    logic                   dbg;        // debug mode
+    logic                   virt;       // V=1 : VS/VU
+    priv_lvl_e              lvl;
+  } priv_mode_t;
+
+  typedef enum logic [3:0] {
+    SATP_BARE       = 4'd0,
+    SATP_SV39       = 4'd8,
+    SATP_SV48       = 4'd9
+  } satp_mode_e;
+
+  typedef struct packed {
+    satp_mode_e             mode;
+    logic [ASID_W-1:0]      asid;
+    logic [PPN_W-1:0]       ppn;
+  } satp_t;
+
+  typedef enum logic [1:0] {
+    PMP_OFF         = 2'b00,
+    PMP_TOR         = 2'b01,
+    PMP_NA4         = 2'b10,
+    PMP_NAPOT       = 2'b11
+  } pmp_amode_e;
+
+  typedef struct packed {
+    logic                   lock;
+    logic [1:0]             reserved;
+    pmp_amode_e             amode;
+    logic                   x;
+    logic                   w;
+    logic                   r;
+  } pmp_cfg_t;
+
+  typedef enum logic [CSR_ADDR_W-1:0] {
+    // Unprivileged
+    CSR_FFLAGS      = 12'h001,
+    CSR_FRM         = 12'h002,
+    CSR_FCSR        = 12'h003,
+    CSR_VSTART      = 12'h008,
+    CSR_VXSAT       = 12'h009,
+    CSR_VXRM        = 12'h00A,
+    CSR_VCSR        = 12'h00F,
+    CSR_CYCLE       = 12'hC00,
+    CSR_TIME        = 12'hC01,
+    CSR_INSTRET     = 12'hC02,
+    CSR_VL          = 12'hC20,
+    CSR_VTYPE       = 12'hC21,
+    CSR_VLENB       = 12'hC22,
+    // Supervisor
+    CSR_SSTATUS     = 12'h100,
+    CSR_SIE         = 12'h104,
+    CSR_STVEC       = 12'h105,
+    CSR_SCOUNTEREN  = 12'h106,
+    CSR_SENVCFG     = 12'h10A,
+    CSR_SSCRATCH    = 12'h140,
+    CSR_SEPC        = 12'h141,
+    CSR_SCAUSE      = 12'h142,
+    CSR_STVAL       = 12'h143,
+    CSR_SIP         = 12'h144,
+    CSR_SATP        = 12'h180,
+    // Hypervisor / Virtual Supervisor
+    CSR_VSSTATUS    = 12'h200,
+    CSR_VSATP       = 12'h280,
+    CSR_HSTATUS     = 12'h600,
+    CSR_HEDELEG     = 12'h602,
+    CSR_HIDELEG     = 12'h603,
+    CSR_HGATP       = 12'h680,
+    // Machine
+    CSR_MSTATUS     = 12'h300,
+    CSR_MISA        = 12'h301,
+    CSR_MEDELEG     = 12'h302,
+    CSR_MIDELEG     = 12'h303,
+    CSR_MIE         = 12'h304,
+    CSR_MTVEC       = 12'h305,
+    CSR_MCOUNTEREN  = 12'h306,
+    CSR_MENVCFG     = 12'h30A,
+    CSR_MSCRATCH    = 12'h340,
+    CSR_MEPC        = 12'h341,
+    CSR_MCAUSE      = 12'h342,
+    CSR_MTVAL       = 12'h343,
+    CSR_MIP         = 12'h344,
+    CSR_MTINST      = 12'h34A,
+    CSR_MTVAL2      = 12'h34B,
+    CSR_PMPCFG0     = 12'h3A0,
+    CSR_PMPADDR0    = 12'h3B0,
+    CSR_MCYCLE      = 12'hB00,
+    CSR_MINSTRET    = 12'hB02,
+    CSR_MVENDORID   = 12'hF11,
+    CSR_MARCHID     = 12'hF12,
+    CSR_MIMPID      = 12'hF13,
+    CSR_MHARTID     = 12'hF14,
+    // Debug
+    CSR_DCSR        = 12'h7B0,
+    CSR_DPC         = 12'h7B1,
+    CSR_DSCRATCH0   = 12'h7B2,
+    // Silica Flux implementation-defined
+    CSR_SF_FEATURE  = 12'h7C0,
+    CSR_SF_CHICKEN  = 12'h7C1,
+    CSR_SF_BPCTRL   = 12'h7C2,
+    CSR_SF_TSTATUS  = 12'h7C3,
+    CSR_SF_RASCTRL  = 12'h7C4,
+    CSR_SF_BUILDID  = 12'hFC0
+  } csr_addr_e;
+
+  // MXL=64 | Extensions: A D F H I M S U V X
+  //                                ZYXWVUTSRQPONMLKJIHGFEDCBA
+  localparam logic [XLEN-1:0] SF_MISA = {2'b10, {(XLEN-28){1'b0}},
+                                         26'b00101101000001000110101001};
+
+  // ===========================================================================
+  // 9. Exceptions, Interrupts and Traps
+  // ===========================================================================
+
+  typedef enum logic [CAUSE_W-1:0] {
+    EXC_IADDR_MISALIGNED    = 6'd0,
+    EXC_IACCESS_FAULT       = 6'd1,
+    EXC_ILLEGAL_INSTR       = 6'd2,
+    EXC_BREAKPOINT          = 6'd3,
+    EXC_LADDR_MISALIGNED    = 6'd4,
+    EXC_LACCESS_FAULT       = 6'd5,
+    EXC_SADDR_MISALIGNED    = 6'd6,
+    EXC_SACCESS_FAULT       = 6'd7,
+    EXC_ECALL_U             = 6'd8,
+    EXC_ECALL_S             = 6'd9,
+    EXC_ECALL_VS            = 6'd10,
+    EXC_ECALL_M             = 6'd11,
+    EXC_IPAGE_FAULT         = 6'd12,
+    EXC_LPAGE_FAULT         = 6'd13,
+    EXC_SPAGE_FAULT         = 6'd15,
+    EXC_SW_CHECK            = 6'd18,
+    EXC_HW_ERROR            = 6'd19,
+    EXC_IGUEST_PAGE_FAULT   = 6'd20,
+    EXC_LGUEST_PAGE_FAULT   = 6'd21,
+    EXC_VIRTUAL_INSTR       = 6'd22,
+    EXC_SGUEST_PAGE_FAULT   = 6'd23,
+    EXC_TENSOR_FAULT        = 6'd24,    // implementation-defined
+    EXC_ACCEL_FAULT         = 6'd25     // implementation-defined
+  } exc_cause_e;
+
+  typedef enum logic [CAUSE_W-1:0] {
+    IRQ_SSI                 = 6'd1,
+    IRQ_VSSI                = 6'd2,
+    IRQ_MSI                 = 6'd3,
+    IRQ_STI                 = 6'd5,
+    IRQ_VSTI                = 6'd6,
+    IRQ_MTI                 = 6'd7,
+    IRQ_SEI                 = 6'd9,
+    IRQ_VSEI                = 6'd10,
+    IRQ_MEI                 = 6'd11,
+    IRQ_SGEI                = 6'd12,
+    IRQ_LCOFI               = 6'd13,
+    IRQ_TENSOR_DONE         = 6'd16,    // platform-local
+    IRQ_RAS_CE              = 6'd17,    // platform-local
+    IRQ_RAS_UE              = 6'd18     // platform-local
+  } irq_cause_e;
+
+  typedef enum logic [3:0] {
+    FLT_NONE        = 4'd0,
+    FLT_ALIGN       = 4'd1,
+    FLT_ACCESS      = 4'd2,
+    FLT_PAGE        = 4'd3,
+    FLT_GUEST_PAGE  = 4'd4,
+    FLT_ILLEGAL     = 4'd5,
+    FLT_VIRT_INSTR  = 4'd6,
+    FLT_PRIV        = 4'd7,
+    FLT_ECC_CORR    = 4'd8,
+    FLT_ECC_UNCORR  = 4'd9,
+    FLT_BUS_ERR     = 4'd10,
+    FLT_TIMEOUT     = 4'd11,
+    FLT_DEBUG       = 4'd12,
+    FLT_SW_CHECK    = 4'd13
+  } fault_class_e;
+
+  typedef enum logic [2:0] {
+    ACC_FETCH       = 3'd0,
+    ACC_LOAD        = 3'd1,
+    ACC_STORE       = 3'd2,
+    ACC_AMO         = 3'd3,
+    ACC_PTW         = 3'd4,
+    ACC_VLOAD       = 3'd5,
+    ACC_VSTORE      = 3'd6,
+    ACC_TENSOR      = 3'd7
+  } access_type_e;
+
+  typedef enum logic [1:0] {
+    ECC_OK          = 2'd0,
+    ECC_CORRECTED   = 2'd1,
+    ECC_UNCORR      = 2'd2,
+    ECC_POISON      = 2'd3
+  } ecc_status_e;
+
+  typedef union packed {
+    exc_cause_e             exc;
+    irq_cause_e             irq;
+    logic [CAUSE_W-1:0]     raw;
+  } trap_cause_u;
+
+  // Compact form travelling with in-flight uops; tval held in ROB side-table.
+  typedef struct packed {
+    logic                   valid;
+    exc_cause_e             cause;
+    fault_class_e           fclass;
+  } exc_meta_t;
+
+  // Full architectural trap record presented to the trap / CSR unit.
+  typedef struct packed {
+    logic                   valid;
+    logic                   is_irq;
+    trap_cause_u            cause;
+    fault_class_e           fclass;
+    priv_mode_t             target;
+    vaddr_t                 epc;
+    xlen_t                  tval;
+    xlen_t                  tval2;      // guest physical address >> 2
+    logic [ILEN-1:0]        tinst;
+  } trap_info_t;
+
+  typedef logic [IRQ_VEC_W-1:0] irq_vec_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   nmi;
+    irq_cause_e             cause;
+    priv_mode_t             target;
+    logic [IRQ_PRIO_W-1:0]  prio;
+  } irq_req_t;
+
+  typedef enum logic [1:0] {
+    TVEC_DIRECT     = 2'b00,
+    TVEC_VECTORED   = 2'b01
+  } tvec_mode_e;
+
+  // ===========================================================================
+  // 10. Branch Prediction Metadata
+  // ===========================================================================
+
+  typedef enum logic [2:0] {
+    BR_NONE         = 3'd0,
+    BR_COND         = 3'd1,
+    BR_JUMP         = 3'd2,
+    BR_CALL         = 3'd3,
+    BR_RET          = 3'd4,
+    BR_IND          = 3'd5,
+    BR_IND_CALL     = 3'd6,
+    BR_CORET        = 3'd7      // pop then push
+  } branch_type_e;
+
+  typedef enum logic [1:0] {
+    CONF_NONE       = 2'd0,
+    CONF_LOW        = 2'd1,
+    CONF_MED        = 2'd2,
+    CONF_HIGH       = 2'd3
+  } bp_conf_e;
+
+  typedef struct packed {
+    bp_conf_e                 level;
+    logic [BP_CONF_CTR_W-1:0] ctr;
+  } pred_conf_t;
+
+  // Checkpoint captured at prediction; returned to predictor at update.
+  typedef struct packed {
+    branch_type_e             br_type;
+    logic                     taken;
+    logic                     btb_hit;
+    logic [BTB_WAY_W-1:0]     btb_way;
+    logic [TAGE_PROV_W-1:0]   provider;     // 0 : base bimodal
+    logic [TAGE_PROV_W-1:0]   alt_provider;
+    logic [BP_CTR_W-1:0]      provider_ctr;
+    logic                     alt_taken;
+    logic                     sc_override;
+    logic                     loop_hit;
+    pred_conf_t               conf;
+    logic [GHIST_PTR_W-1:0]   ghist_ptr;
+    logic [RAS_PTR_W-1:0]     ras_ptr;
+  } bp_meta_t;
+
+  // Per-uop prediction view carried through the back end.
+  typedef struct packed {
+    branch_type_e             br_type;
+    logic                     taken;
+    bp_conf_e                 conf;
+  } bp_slot_pred_t;
+
+  typedef struct packed {
+    logic                     valid;
+    vaddr_t                   pc;
+    branch_type_e             br_type;
+    logic                     taken;
+    logic                     mispredict;
+    vaddr_t                   target;
+    bp_meta_t                 meta;
+  } bp_update_t;
+
+  // ===========================================================================
+  // 11. Decode and Control Structures
+  // ===========================================================================
+
+  typedef struct packed {
+    rf_class_e              rf;
+    logic [AREG_W-1:0]      idx;
+  } areg_t;
+
+  typedef struct packed {
+    rf_class_e              rf;
+    logic [PREG_W-1:0]      idx;
+  } preg_t;
+
+  // Execution-time control: the minimal set forwarded past dispatch.
+  typedef struct packed {
+    op_class_e              op_class;
+    uop_func_u              func;
+    fu_type_e               fu;
+    opa_sel_e               opa_sel;
+    opb_sel_e               opb_sel;
+    fp_fmt_e                fp_fmt;
+    fp_rm_e                 fp_rm;
+    logic                   is_word;
+  } exec_ctrl_t;
+
+  // Pre-decoded attributes; removes class re-decode from critical paths.
+  typedef struct packed {
+    logic                   is_br;
+    logic                   is_jal;
+    logic                   is_jalr;
+    logic                   is_load;
+    logic                   is_store;
+    logic                   is_amo;
+    logic                   is_fence;
+    logic                   is_csr;
+    logic                   is_vec;
+    logic                   is_tensor;
+    logic                   serialize;      // drain ROB before dispatch
+    logic                   flush_after;    // refetch after commit
+    logic                   non_spec;       // execute only at ROB head
+    logic                   wr_fflags;
+    logic                   rd_vcfg;
+    logic                   wr_vcfg;
+  } uop_flags_t;
+
+  typedef struct packed {
+    exec_ctrl_t             exe;
+    exu_cluster_e           cluster;
+    imm_fmt_e               imm_fmt;
+    lat_class_e             lat_class;
+    logic [LAT_W-1:0]       lat;
+    branch_type_e           br_type;
+    uop_flags_t             flags;
+  } uop_ctrl_t;
+
+  // ===========================================================================
+  // 12. Pipeline Transaction Packets
+  // ===========================================================================
+
+  // --- Dependency / Scheduling Metadata --------------------------------------
+  typedef struct packed {
+    logic [NUM_SRC-1:0]     src_rdy;
+    logic [NUM_SRC-1:0]     src_ld_spec;    // woken by speculative load hit
+    ld_spec_mask_t          ld_dep;
+    logic                   ssid_valid;
+    logic [SSID_W-1:0]      ssid;
+    logic                   wait_store;
+    stq_id_t                wait_stq;
+  } dep_meta_t;
+
+  // --- Fetch -----------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic [ILEN-1:0]        instr;
+    branch_type_e           pd_br_type;     // predecode classification
+  } fetch_slot_t;
+
+  typedef struct packed {
+    logic                               valid;
+    vaddr_t                             pc;           // fetch-block base
+    logic [FTQ_IDX_W-1:0]               ftq_idx;
+    fetch_slot_t [FETCH_WIDTH-1:0]      slot;
+    logic                               pred_taken;
+    logic [FETCH_SLOT_W-1:0]            pred_slot;
+    vaddr_t                             pred_target;
+    bp_meta_t                           bp_meta;
+    exc_meta_t                          exc;
+  } fetch_pkt_t;
+
+  // --- Decode ----------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    vaddr_t                 pc;
+    instr_t                 instr;
+    ftq_ref_t               ftq;
+    uop_ctrl_t              ctrl;
+    areg_t                  rs1;
+    areg_t                  rs2;
+    areg_t                  rs3;
+    areg_t                  rd;
+    imm_t                   imm;
+    bp_slot_pred_t          pred;
+    exc_meta_t              exc;
+  } decode_pkt_t;
+
+  // --- Rename ----------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    ftq_ref_t               ftq;
+    uop_ctrl_t              ctrl;
+    areg_t                  ard;
+    preg_t                  prs1;
+    preg_t                  prs2;
+    preg_t                  prs3;
+    preg_t                  prd;
+    preg_t                  stale_prd;
+    dep_meta_t              dep;
+    rob_id_t                rob_id;
+    ldq_id_t                ldq_id;
+    stq_id_t                stq_id;
+    br_tag_t                br_tag;
+    br_mask_t               br_mask;
+    imm_t                   imm;
+    bp_slot_pred_t          pred;
+    vcfg_t                  vcfg;
+    exc_meta_t              exc;
+  } rename_pkt_t;
+
+  // --- Issue -----------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    exec_ctrl_t             ctrl;
+    lat_class_e             lat_class;
+    logic [LAT_W-1:0]       lat;
+    preg_t                  prs1;
+    preg_t                  prs2;
+    preg_t                  prs3;
+    preg_t                  prd;
+    dep_meta_t              dep;
+    rob_id_t                rob_id;
+    ldq_id_t                ldq_id;
+    stq_id_t                stq_id;
+    br_tag_t                br_tag;
+    br_mask_t               br_mask;
+    imm_t                   imm;
+    ftq_ref_t               ftq;
+    bp_slot_pred_t          pred;
+    vcfg_t                  vcfg;
+  } issue_pkt_t;
+
+  // --- Execute (post register read / bypass) ---------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   spec;           // dependent on unconfirmed load
+    exec_ctrl_t             ctrl;
+    vaddr_t                 pc;
+    xlen_t                  rs1_data;
+    xlen_t                  rs2_data;
+    xlen_t                  rs3_data;
+    imm_t                   imm;
+    preg_t                  prd;
+    rob_id_t                rob_id;
+    ldq_id_t                ldq_id;
+    stq_id_t                stq_id;
+    br_tag_t                br_tag;
+    br_mask_t               br_mask;
+    ftq_ref_t               ftq;
+    bp_slot_pred_t          pred;
+    vcfg_t                  vcfg;
+  } exec_pkt_t;
+
+  // --- Writeback -------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   rd_en;
+    logic                   spec;
+    logic                   replay;
+    preg_t                  prd;
+    xlen_t                  data;
+    rob_id_t                rob_id;
+    br_mask_t               br_mask;
+    fflags_t                fflags;
+    logic                   fflags_en;
+    exc_meta_t              exc;
+    xlen_t                  tval;
+  } wb_pkt_t;
+
+  // --- Branch Resolution -----------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   mispredict;
+    logic                   taken;
+    branch_type_e           br_type;
+    br_tag_t                br_tag;
+    br_mask_t               br_mask;
+    rob_id_t                rob_id;
+    ftq_ref_t               ftq;
+    vaddr_t                 target;
+  } br_resolve_t;
+
+  // --- Front-End Redirect ----------------------------------------------------
+  typedef enum logic [2:0] {
+    RDR_NONE        = 3'd0,
+    RDR_BR_MISPRED  = 3'd1,
+    RDR_EXCEPTION   = 3'd2,
+    RDR_INTERRUPT   = 3'd3,
+    RDR_XRET        = 3'd4,
+    RDR_FENCE_I     = 3'd5,
+    RDR_MEM_ORDER   = 3'd6,
+    RDR_SERIALIZE   = 3'd7
+  } redirect_src_e;
+
+  typedef struct packed {
+    logic                   valid;
+    redirect_src_e          src;
+    vaddr_t                 target;
+    ftq_ref_t               ftq;
+    rob_id_t                rob_id;
+    br_mask_t               kill_mask;
+  } redirect_t;
+
+  // --- Reorder Buffer --------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   done;
+    logic                   rd_en;
+    areg_t                  ard;
+    preg_t                  prd;
+    preg_t                  stale_prd;
+    ftq_ref_t               ftq;
+    uop_flags_t             flags;
+    branch_type_e           br_type;
+    logic                   br_taken;
+    fflags_t                fflags;
+    exc_meta_t              exc;
+  } rob_entry_t;
+
+  // --- Commit ----------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   rd_en;
+    rob_id_t                rob_id;
+    ftq_ref_t               ftq;
+    areg_t                  ard;
+    preg_t                  prd;
+    preg_t                  stale_prd;
+    logic                   is_load;
+    logic                   is_store;
+    branch_type_e           br_type;
+    logic                   br_taken;
+    fflags_t                fflags;
+    logic                   fflags_en;
+  } commit_slot_t;
+
+  typedef struct packed {
+    commit_slot_t [COMMIT_WIDTH-1:0] slot;
+    trap_info_t                      trap;
+  } commit_pkt_t;
+
+  // --- Tensor Command (issued from ROB head, non-speculative) ----------------
+  typedef struct packed {
+    logic                   valid;
+    tensor_op_e             op;
+    tns_form_e              form;
+    tensor_dtype_e          dtype;
+    logic                   acc;
+    logic [TILE_IDX_W-1:0]  td;
+    logic [TILE_IDX_W-1:0]  ts1;
+    logic [TILE_IDX_W-1:0]  ts2;
+    xlen_t                  base;
+    xlen_t                  stride;
+    rob_id_t                rob_id;
+    priv_mode_t             priv;
+    logic [ASID_W-1:0]      asid;
+  } tensor_cmd_t;
+
+  // ===========================================================================
+  // 13. Memory Subsystem
+  // ===========================================================================
+
+  // --- L1 Operation Codes ----------------------------------------------------
+  typedef enum logic [3:0] {
+    COP_LOAD        = 4'd0,
+    COP_STORE       = 4'd1,
+    COP_AMO         = 4'd2,
+    COP_LR          = 4'd3,
+    COP_SC          = 4'd4,
+    COP_PREF_R      = 4'd5,
+    COP_PREF_W      = 4'd6,
+    COP_CBO_CLEAN   = 4'd7,
+    COP_CBO_FLUSH   = 4'd8,
+    COP_CBO_INVAL   = 4'd9,
+    COP_CBO_ZERO    = 4'd10
+  } cache_op_e;
+
+  typedef enum logic [1:0] {
+    DCS_HIT         = 2'd0,
+    DCS_MISS        = 2'd1,     // MSHR allocated; wakeup on refill
+    DCS_NACK        = 2'd2,     // bank / MSHR conflict; replay required
+    DCS_ERR         = 2'd3
+  } dcache_status_e;
+
+  typedef enum logic [1:0] {
+    PBMT_PMA        = 2'd0,
+    PBMT_NC         = 2'd1,
+    PBMT_IO         = 2'd2
+  } pbmt_e;
+
+  typedef struct packed {
+    logic                   is_store;
+    logic [LSQ_IDX_W-1:0]   idx;
+  } lsq_tag_t;
+
+  // --- Instruction Cache -----------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    vaddr_t                 vaddr;
+    logic [FTQ_IDX_W-1:0]   ftq_idx;
+    priv_mode_t             priv;
+  } icache_req_t;
+
+  typedef struct packed {
+    logic                       valid;
+    logic [FTQ_IDX_W-1:0]       ftq_idx;
+    logic [FETCH_BYTES*8-1:0]   data;
+    ecc_status_e                ecc;
+    exc_meta_t                  exc;
+  } icache_rsp_t;
+
+  // --- Data Cache ------------------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   spec;
+    cache_op_e              op;
+    mem_size_e              size;
+    amo_op_e                amo;
+    paddr_t                 paddr;          // index bits identical to VA
+    xlen_t                  data;
+    logic [XLEN_BYTES-1:0]  be;
+    lsq_tag_t               tag;
+    rob_id_t                rob_id;
+    pbmt_e                  pbmt;
+    priv_mode_t             priv;
+  } dcache_req_t;
+
+  typedef struct packed {
+    logic                   valid;
+    dcache_status_e         status;
+    lsq_tag_t               tag;
+    xlen_t                  data;
+    logic [MSHR_IDX_W-1:0]  mshr_idx;
+    ecc_status_e            ecc;
+  } dcache_rsp_t;
+
+  // --- Coherence (MOESI, directory-backed L2) --------------------------------
+  typedef enum logic [2:0] {
+    COH_I           = 3'd0,
+    COH_S           = 3'd1,
+    COH_E           = 3'd2,
+    COH_O           = 3'd3,
+    COH_M           = 3'd4
+  } coh_state_e;
+
+  typedef enum logic [2:0] {
+    CREQ_GET_S      = 3'd0,
+    CREQ_GET_M      = 3'd1,
+    CREQ_UPGRADE    = 3'd2,
+    CREQ_PUT_S      = 3'd3,
+    CREQ_PUT_E      = 3'd4,
+    CREQ_PUT_O      = 3'd5,
+    CREQ_PUT_M      = 3'd6
+  } coh_req_e;
+
+  typedef enum logic [2:0] {
+    CGNT_S          = 3'd0,
+    CGNT_E          = 3'd1,
+    CGNT_M          = 3'd2,
+    CGNT_UPGRADE    = 3'd3,     // ownership without data
+    CGNT_PUT_ACK    = 3'd4
+  } coh_grant_e;
+
+  typedef enum logic [1:0] {
+    SNP_TO_S        = 2'd0,
+    SNP_TO_I        = 2'd1,
+    SNP_CLEAN       = 2'd2,
+    SNP_PEEK        = 2'd3
+  } snp_op_e;
+
+  typedef enum logic [TXN_SRC_W-1:0] {
+    TSRC_ICACHE     = 2'd0,
+    TSRC_DCACHE     = 2'd1,
+    TSRC_PTW        = 2'd2,
+    TSRC_ACCEL      = 2'd3
+  } txn_src_e;
+
+  typedef struct packed {
+    logic [CORE_ID_W-1:0]   core;
+    txn_src_e               src;
+    logic [MSHR_IDX_W-1:0]  slot;
+  } txn_id_t;
+
+  typedef struct packed {
+    coh_state_e             state;
+    logic [NUM_CORES-1:0]   sharers;
+    logic                   owner_valid;
+    logic [CORE_ID_W-1:0]   owner;
+  } coh_meta_t;
+
+  typedef struct packed {
+    logic                   valid;
+    txn_id_t                txn_id;
+    coh_req_e               op;
+    line_addr_t             line_addr;
+    logic                   has_data;
+    cl_data_t               data;
+  } cl_req_t;
+
+  typedef struct packed {
+    logic                   valid;
+    txn_id_t                txn_id;
+    coh_grant_e             grant;
+    logic                   has_data;
+    cl_data_t               data;
+    ecc_status_e            ecc;
+    logic                   err;
+  } cl_rsp_t;
+
+  typedef struct packed {
+    logic                   valid;
+    txn_id_t                txn_id;
+    snp_op_e                op;
+    line_addr_t             line_addr;
+  } snoop_req_t;
+
+  typedef struct packed {
+    logic                   valid;
+    txn_id_t                txn_id;
+    logic                   hit;
+    logic                   dirty;
+    coh_state_e             final_state;
+    cl_data_t               data;
+  } snoop_rsp_t;
+
+  typedef struct packed {
+    logic                   valid;
+    line_addr_t             line_addr;
+    coh_req_e               req;
+    coh_state_e             tgt_state;
+    logic                   refill_done;
+    logic                   wb_pending;
+    logic [LDQ_DEPTH-1:0]   ld_waiters;
+  } mshr_entry_t;
+
+  // --- Translation -----------------------------------------------------------
+  typedef enum logic [1:0] {
+    PG_4K           = 2'd0,
+    PG_2M           = 2'd1,
+    PG_1G           = 2'd2,
+    PG_512G         = 2'd3
+  } pg_size_e;
+
+  typedef struct packed {
+    logic                   n;
+    pbmt_e                  pbmt;
+    logic [6:0]             reserved;
+    logic [PPN_W-1:0]       ppn;
+    logic [1:0]             rsw;
+    logic                   d;
+    logic                   a;
+    logic                   g;
+    logic                   u;
+    logic                   x;
+    logic                   w;
+    logic                   r;
+    logic                   v;
+  } pte_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   virt;
+    logic [VPN_W-1:0]       vpn;
+    logic [PPN_W-1:0]       ppn;
+    logic [ASID_W-1:0]      asid;
+    logic [VMID_W-1:0]      vmid;
+    pg_size_e               pg_size;
+    pbmt_e                  pbmt;
+    logic                   g;
+    logic                   u;
+    logic                   x;
+    logic                   w;
+    logic                   r;
+    logic                   a;
+    logic                   d;
+  } tlb_entry_t;
+
+  typedef struct packed {
+    logic                   valid;
+    vaddr_t                 vaddr;
+    access_type_e           acc;
+    priv_mode_t             priv;
+    logic                   sum;
+    logic                   mxr;
+    logic [ASID_W-1:0]      asid;
+    logic [VMID_W-1:0]      vmid;
+  } tlb_req_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   hit;
+    paddr_t                 paddr;
+    pbmt_e                  pbmt;
+    logic                   cacheable;
+    exc_meta_t              exc;
+  } tlb_rsp_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   g_stage;
+    logic [VPN_W-1:0]       vpn;
+    access_type_e           acc;
+    logic [ASID_W-1:0]      asid;
+    logic [VMID_W-1:0]      vmid;
+  } ptw_req_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   g_stage;
+    pte_t                   pte;
+    pg_size_e               pg_size;
+    logic [GPADDR_W-1:0]    gpa;
+    exc_meta_t              exc;
+  } ptw_rsp_t;
+
+  // --- Load / Store Queues ---------------------------------------------------
+  typedef struct packed {
+    logic                   valid;
+    logic                   addr_valid;
+    logic                   addr_virt;      // translation outstanding
+    paddr_t                 paddr;
+    mem_size_e              size;
+    logic                   sext;
+    logic                   is_fp;
+    rob_id_t                rob_id;
+    preg_t                  prd;
+    br_mask_t               br_mask;
+    stq_id_t                stq_snap;       // youngest older store at dispatch
+    logic                   executed;
+    logic                   succeeded;
+    logic                   fwd_valid;
+    stq_id_t                fwd_stq;
+    logic                   order_fail;
+    logic                   observed;       // snoop hit after execution
+    exc_meta_t              exc;
+  } ldq_entry_t;
+
+  typedef struct packed {
+    logic                   valid;
+    logic                   addr_valid;
+    logic                   addr_virt;
+    paddr_t                 paddr;
+    mem_size_e              size;
+    logic                   data_valid;
+    xlen_t                  data;
+    rob_id_t                rob_id;
+    br_mask_t               br_mask;
+    logic                   committed;
+    logic                   succeeded;
+    logic                   is_amo;
+    amo_op_e                amo;
+    logic                   is_fence;
+    exc_meta_t              exc;
+  } stq_entry_t;
+
+  // --- System Interconnect (AXI4) --------------------------------------------
+  typedef enum logic [1:0] {
+    AXI_BURST_FIXED = 2'b00,
+    AXI_BURST_INCR  = 2'b01,
+    AXI_BURST_WRAP  = 2'b10
+  } axi_burst_e;
+
+  typedef enum logic [1:0] {
+    AXI_RESP_OKAY   = 2'b00,
+    AXI_RESP_EXOKAY = 2'b01,
+    AXI_RESP_SLVERR = 2'b10,
+    AXI_RESP_DECERR = 2'b11
+  } axi_resp_e;
+
+  typedef struct packed {
+    logic [AXI_ID_W-1:0]     id;
+    logic [AXI_ADDR_W-1:0]   addr;
+    logic [AXI_LEN_W-1:0]    len;
+    logic [AXI_SIZE_W-1:0]   size;
+    axi_burst_e              burst;
+    logic                    lock;
+    logic [AXI_CACHE_W-1:0]  cache;
+    logic [AXI_PROT_W-1:0]   prot;
+    logic [AXI_QOS_W-1:0]    qos;
+    logic [AXI_REGION_W-1:0] region;
+    logic [AXI_USER_W-1:0]   user;
+  } axi_ax_t;
+
+  typedef struct packed {
+    logic [AXI_DATA_W-1:0]   data;
+    logic [AXI_STRB_W-1:0]   strb;
+    logic                    last;
+    logic [AXI_USER_W-1:0]   user;
+  } axi_w_t;
+
+  typedef struct packed {
+    logic [AXI_ID_W-1:0]     id;
+    axi_resp_e               resp;
+    logic [AXI_USER_W-1:0]   user;
+  } axi_b_t;
+
+  typedef struct packed {
+    logic [AXI_ID_W-1:0]     id;
+    logic [AXI_DATA_W-1:0]   data;
+    axi_resp_e               resp;
+    logic                    last;
+    logic [AXI_USER_W-1:0]   user;
+  } axi_r_t;
+
+  typedef struct packed {
+    axi_ax_t                 aw;
+    logic                    aw_valid;
+    axi_w_t                  w;
+    logic                    w_valid;
+    logic                    b_ready;
+    axi_ax_t                 ar;
+    logic                    ar_valid;
+    logic                    r_ready;
+  } axi_req_t;
+
+  typedef struct packed {
+    logic                    aw_ready;
+    logic                    w_ready;
+    axi_b_t                  b;
+    logic                    b_valid;
+    logic                    ar_ready;
+    axi_r_t                  r;
+    logic                    r_valid;
+  } axi_rsp_t;
+
+  // ===========================================================================
+  // 14. Utility Types
+  // ===========================================================================
+
+  typedef logic [PRF_INT_REGS-1:0] sb_int_t;
+  typedef logic [PRF_FP_REGS-1:0]  sb_fp_t;
+  typedef logic [PRF_VEC_REGS-1:0] sb_vec_t;
+  typedef logic [TILE_REGS-1:0]    sb_tile_t;
+  typedef logic [ROB_DEPTH-1:0]    rob_mask_t;
+  typedef logic [ISSUE_WIDTH-1:0]  issue_mask_t;
+  typedef logic [COMMIT_WIDTH-1:0] commit_mask_t;
+
+  // Stall / hazard reason vector; also the source of front/back-end PMU events.
+  typedef struct packed {
+    logic                   raw;
+    logic                   waw;
+    logic                   war;
+    logic                   structural;
+    logic                   mem_order;
+    logic                   store_set;
+    logic                   serialize;
+    logic                   csr;
+    logic                   fence;
+    logic                   rob_full;
+    logic                   iq_full;
+    logic                   ldq_full;
+    logic                   stq_full;
+    logic                   prf_empty;
+    logic                   br_tag_empty;
+    logic                   redirect;
+  } hazard_t;
+
+  // ===========================================================================
+  // 15. Utility Constants and Functions
+  // ===========================================================================
+
+  localparam logic [ILEN-1:0] SF_INSTR_NOP     = 32'h0000_0013;   // addi x0,x0,0
+  localparam logic [ILEN-1:0] SF_INSTR_ILLEGAL = 32'h0000_0000;
+  localparam vaddr_t          SF_RESET_PC      = 48'h0000_8000_0000;
+  localparam vaddr_t          SF_NMI_VECTOR    = 48'h0000_0000_1000;
+  localparam vaddr_t          SF_DEBUG_ROM     = 48'h0000_0000_0800;
+
+  localparam br_mask_t        BR_MASK_NONE     = '0;
+  localparam exc_meta_t       EXC_META_NONE    = '{valid:  1'b0,
+                                                   cause:  EXC_IADDR_MISALIGNED,
+                                                   fclass: FLT_NONE};
+  localparam preg_t           PREG_NONE        = '{rf: RF_NONE, idx: '0};
+  localparam areg_t           AREG_NONE        = '{rf: RF_NONE, idx: '0};
+
+  // a strictly older than b in program order.
+  function automatic logic rob_older(input rob_id_t a, input rob_id_t b);
+    return (a.wrap == b.wrap) ? (a.idx < b.idx) : (a.idx > b.idx);
+  endfunction
+
+  function automatic logic stq_older(input stq_id_t a, input stq_id_t b);
+    return (a.wrap == b.wrap) ? (a.idx < b.idx) : (a.idx > b.idx);
+  endfunction
+
+  function automatic logic ldq_older(input ldq_id_t a, input ldq_id_t b);
+    return (a.wrap == b.wrap) ? (a.idx < b.idx) : (a.idx > b.idx);
+  endfunction
+
+  function automatic br_mask_t br_tag_to_mask(input br_tag_t tag);
+    return br_mask_t'(1) << tag;
+  endfunction
+
+  function automatic logic br_killed(input br_mask_t mask, input br_mask_t kill);
+    return |(mask & kill);
+  endfunction
+
+  function automatic br_mask_t br_resolve(input br_mask_t mask, input br_mask_t clr);
+    return mask & ~clr;
+  endfunction
+
+  function automatic vaddr_t slot_pc(input vaddr_t                  block_pc,
+                                     input logic [FETCH_SLOT_W-1:0] slot);
+    return {block_pc[VADDR_W-1:FETCH_OFF_W], slot, {INSTR_OFF_W{1'b0}}};
+  endfunction
+
+  function automatic logic [XLEN_BYTES-1:0] mem_byte_en(
+      input logic [XLEN_OFF_W-1:0] off,
+      input mem_size_e             size);
+    logic [XLEN_BYTES-1:0] base;
+    case (size)
+      MSZ_B:   base = XLEN_BYTES'({1{1'b1}});
+      MSZ_H:   base = XLEN_BYTES'({2{1'b1}});
+      MSZ_W:   base = XLEN_BYTES'({4{1'b1}});
+      default: base = '1;
+    endcase
+    return base << off;
+  endfunction
+
+  function automatic logic mem_misaligned(input logic [CL_OFFSET_W-1:0] off,
+                                          input mem_size_e              size);
+    logic [CL_OFFSET_W-1:0] mask;
+    mask = (CL_OFFSET_W'(1'b1) << size) - CL_OFFSET_W'(1'b1);
+    return |(off & mask);
+  endfunction
+
+  function automatic imm_t imm_gen(input instr_t instr, input imm_fmt_e fmt);
+    imm_t imm;
+    case (fmt)
+      IMM_I:   imm = {{(IMM_W-IMM_I_W){instr.i.imm[IMM_I_W-1]}}, instr.i.imm};
+      IMM_S:   imm = {{(IMM_W-IMM_I_W){instr.s.imm_hi[6]}},
+                      instr.s.imm_hi, instr.s.imm_lo};
+      IMM_B:   imm = {{(IMM_W-13){instr.b.imm12}}, instr.b.imm12, instr.b.imm11,
+                      instr.b.imm10_5, instr.b.imm4_1, 1'b0};
+      IMM_U:   imm = {instr.u.imm, {(IMM_W-IMM_U_W){1'b0}}};
+      IMM_J:   imm = {{(IMM_W-21){instr.j.imm20}}, instr.j.imm20, instr.j.imm19_12,
+                      instr.j.imm11, instr.j.imm10_1, 1'b0};
+      IMM_Z:   imm = {{(IMM_W-AREG_W){1'b0}}, instr.i.rs1};
+      IMM_V:   imm = {{(IMM_W-AREG_W){instr.v.vs1[AREG_W-1]}}, instr.v.vs1};
+      default: imm = '0;
+    endcase
+    return imm;
+  endfunction
+
+  function automatic xlen_t mcause_encode(input trap_info_t trap);
+    return {trap.is_irq, {(XLEN-1-CAUSE_W){1'b0}}, trap.cause.raw};
+  endfunction
+
+  function automatic logic is_xret(input uop_ctrl_t ctrl);
+    return (ctrl.exe.op_class == OPC_SYSTEM) &&
+           ((ctrl.exe.func.sys == SYS_SRET) ||
+            (ctrl.exe.func.sys == SYS_MRET) ||
+            (ctrl.exe.func.sys == SYS_DRET));
+  endfunction
+
+endpackage : silicaflux_pkg
