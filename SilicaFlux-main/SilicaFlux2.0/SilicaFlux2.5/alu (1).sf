@@ -1,0 +1,662 @@
+// =============================================================================
+//  SilicaFlux :: Scalar Integer ALU Execution Unit
+//  File     : alu.sf
+//  Language : Silica Flux-2017
+//
+//  One integer execution port of the SilicaFlux out-of-order backend.
+//    - 1-cycle   : ADD SUB SLT AND OR XOR SHL SHR SAR
+//    - N-cycle   : MUL (chunked partial-product pipeline, N = MUL_STAGES)
+//    - Registered writeback/ROB-completion port with valid/ready
+//    - Same-cycle early bypass for 1-cycle results
+//    - ROB-age selective kill and full flush at every pipeline stage
+//
+//  silicaflux_pkg integration contract:
+//    XLEN       : architectural integer width (power of two)
+//    rob_tag_t  : packed ROB tag laid out as {wrap, index}
+// =============================================================================
+
+package sf_alu_pkg;
+
+  // ---------------------------------------------------------------------------
+  // Architectural widths
+  // ---------------------------------------------------------------------------
+  localparam int unsigned ALU_XLEN           = unsigned'(silicaflux_pkg::XLEN);
+  localparam int unsigned ALU_MSB            = ALU_XLEN - 1;
+  localparam int unsigned ALU_SHAMT_W        = $clog2(ALU_XLEN);
+  localparam int unsigned ALU_TAG_W          = $bits(silicaflux_pkg::rob_tag_t);
+  localparam int unsigned ALU_OP_W           = 4;
+  localparam int unsigned ALU_NUM_OPS        = 10;
+  localparam int unsigned ALU_MUL_STAGES_MAX = 8;
+
+  typedef logic [ALU_XLEN-1:0]      alu_data_t;
+  typedef logic [ALU_XLEN:0]        alu_add_t;     // sum with carry-out
+  typedef logic [ALU_SHAMT_W-1:0]   alu_shamt_t;
+  typedef silicaflux_pkg::rob_tag_t alu_tag_t;
+  typedef logic [ALU_TAG_W-1:0]     alu_tag_vec_t;
+
+  localparam alu_data_t ALU_ZERO = '0;
+  localparam alu_data_t ALU_ONES = '1;
+
+  // ---------------------------------------------------------------------------
+  // Opcode space: bits [3:2] select the execution class
+  // ---------------------------------------------------------------------------
+  typedef enum logic [ALU_OP_W-1:0] {
+    // 2'b00 : adder class
+    ALU_ADD = 4'b0000,
+    ALU_SUB = 4'b0001,
+    ALU_SLT = 4'b0010,
+    // 2'b01 : logic class
+    ALU_AND = 4'b0100,
+    ALU_OR  = 4'b0101,
+    ALU_XOR = 4'b0110,
+    // 2'b10 : shift class
+    ALU_SHL = 4'b1000,
+    ALU_SHR = 4'b1001,
+    ALU_SAR = 4'b1010,
+    // 2'b11 : multiply class
+    ALU_MUL = 4'b1100
+  } alu_op_e;
+
+  localparam alu_op_e ALU_OP_LIST [ALU_NUM_OPS] = '{
+    ALU_ADD, ALU_SUB, ALU_SLT,
+    ALU_AND, ALU_OR,  ALU_XOR,
+    ALU_SHL, ALU_SHR, ALU_SAR,
+    ALU_MUL
+  };
+
+  // ---------------------------------------------------------------------------
+  // Extension hooks (architected, reserved)
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    ALU_ELEM_FULL    = 2'b00,   // XLEN scalar             (implemented)
+    ALU_ELEM_HALF    = 2'b01,   // 2 lanes of XLEN/2        (reserved)
+    ALU_ELEM_QUARTER = 2'b10,   // 4 lanes of XLEN/4        (reserved)
+    ALU_ELEM_EIGHTH  = 2'b11    // 8 lanes of XLEN/8        (reserved)
+  } alu_elem_e;
+
+  typedef struct packed {
+    logic      sat;             // saturating arithmetic   (reserved)
+    alu_elem_e elem;            // lane partitioning        (reserved)
+  } alu_ext_t;
+
+  localparam alu_ext_t ALU_EXT_BASE = '{sat: 1'b0, elem: ALU_ELEM_FULL};
+
+  // ---------------------------------------------------------------------------
+  // Status flags (extend by appending fields)
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic n;                    // result MSB
+    logic z;                    // result == 0
+    logic c;                    // adder carry-out (SUB/SLT: 1 = no borrow)
+    logic v;                    // signed overflow
+  } alu_flags_t;
+
+  // ---------------------------------------------------------------------------
+  // Decoded control (one-hot fields)
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic mul;
+    logic shf;
+    logic lgc;
+    logic slt;
+    logic add;
+  } alu_unit_t;
+
+  typedef struct packed {
+    logic lxor;
+    logic lor;
+    logic land;
+  } alu_lfn_t;
+
+  typedef struct packed {
+    logic sra;
+    logic srl;
+    logic sll;
+  } alu_sfn_t;
+
+  typedef struct packed {
+    alu_unit_t unit;
+    logic      add_sub;         // invert B, carry-in = 1
+    alu_lfn_t  lfn;
+    alu_sfn_t  sfn;
+    logic      illegal;
+  } alu_ctrl_t;
+
+  // ---------------------------------------------------------------------------
+  // Pipeline payloads
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    alu_op_e   op;
+    alu_ext_t  ext;
+    alu_data_t src_a;
+    alu_data_t src_b;
+    alu_tag_t  tag;
+  } alu_req_t;
+
+  typedef struct packed {
+    alu_ctrl_t ctrl;
+    alu_data_t src_a;
+    alu_data_t src_b;
+    alu_tag_t  tag;
+  } alu_ex_pkt_t;
+
+  typedef struct packed {
+    alu_data_t  result;
+    alu_flags_t flags;
+    logic       illegal;
+    alu_tag_t   tag;
+  } alu_resp_t;
+
+  typedef struct packed {
+    alu_data_t data;
+    alu_tag_t  tag;
+  } alu_byp_t;
+
+  // ---------------------------------------------------------------------------
+  // Functions
+  // ---------------------------------------------------------------------------
+  function automatic logic alu_ext_supported(input alu_ext_t ext);
+    return (ext.sat == 1'b0) && (ext.elem == ALU_ELEM_FULL);
+  endfunction
+
+  function automatic alu_ctrl_t alu_decode(input alu_op_e op, input alu_ext_t ext);
+    alu_ctrl_t ctrl;
+    ctrl = '0;
+    case (op)
+      ALU_ADD: begin ctrl.unit.add = 1'b1;                          end
+      ALU_SUB: begin ctrl.unit.add = 1'b1; ctrl.add_sub  = 1'b1;    end
+      ALU_SLT: begin ctrl.unit.slt = 1'b1; ctrl.add_sub  = 1'b1;    end
+      ALU_AND: begin ctrl.unit.lgc = 1'b1; ctrl.lfn.land = 1'b1;    end
+      ALU_OR : begin ctrl.unit.lgc = 1'b1; ctrl.lfn.lor  = 1'b1;    end
+      ALU_XOR: begin ctrl.unit.lgc = 1'b1; ctrl.lfn.lxor = 1'b1;    end
+      ALU_SHL: begin ctrl.unit.shf = 1'b1; ctrl.sfn.sll  = 1'b1;    end
+      ALU_SHR: begin ctrl.unit.shf = 1'b1; ctrl.sfn.srl  = 1'b1;    end
+      ALU_SAR: begin ctrl.unit.shf = 1'b1; ctrl.sfn.sra  = 1'b1;    end
+      ALU_MUL: begin ctrl.unit.mul = 1'b1;                          end
+      default: begin ctrl.illegal  = 1'b1;                          end
+    endcase
+    if (!alu_ext_supported(ext)) begin
+      ctrl         = '0;
+      ctrl.illegal = 1'b1;
+    end
+    return ctrl;
+  endfunction
+
+  // a strictly younger than b under {wrap, index} ROB ordering
+  function automatic logic alu_tag_younger(input alu_tag_t a, input alu_tag_t b);
+    alu_tag_vec_t av;
+    alu_tag_vec_t bv;
+    av = alu_tag_vec_t'(a);
+    bv = alu_tag_vec_t'(b);
+    return (av[ALU_TAG_W-1] == bv[ALU_TAG_W-1]) ? (av[ALU_TAG_W-2:0] > bv[ALU_TAG_W-2:0])
+                                                : (av[ALU_TAG_W-2:0] < bv[ALU_TAG_W-2:0]);
+  endfunction
+
+  function automatic logic alu_kill_hit(input alu_tag_t tag,
+                                        input logic     flush,
+                                        input logic     kill_valid,
+                                        input alu_tag_t kill_tag);
+    return flush | (kill_valid & alu_tag_younger(tag, kill_tag));
+  endfunction
+
+  function automatic alu_flags_t alu_flags_zn(input alu_data_t r);
+    alu_flags_t f;
+    f   = '0;
+    f.n = r[ALU_MSB];
+    f.z = (r == ALU_ZERO);
+    return f;
+  endfunction
+
+endpackage : sf_alu_pkg
+
+
+module sf_alu
+  import sf_alu_pkg::*;
+#(
+  parameter int unsigned MUL_STAGES = 3,      // MUL latency in cycles; 1 = in-core
+  parameter bit          IN_REG     = 1'b0,   // issue -> execute pipeline register
+  parameter bit          FLAGS_EN   = 1'b1    // N/Z/C/V generation
+) (
+  input  logic        clk_i,
+  input  logic        rst_ni,
+
+  // Issue
+  input  logic        req_valid_i,
+  output logic        req_ready_o,
+  input  alu_req_t    req_i,
+
+  // Flush / branch-recovery kill (kills strictly younger than kill_tag_i)
+  input  logic        flush_i,
+  input  logic        kill_valid_i,
+  input  alu_tag_t    kill_tag_i,
+
+  // Early bypass (same cycle, 1-cycle class only)
+  output logic        byp_valid_o,
+  output alu_byp_t    byp_o,
+
+  // Writeback / ROB completion
+  output logic        resp_valid_o,
+  input  logic        resp_ready_i,
+  output alu_resp_t   resp_o,
+
+  // Scheduler hints
+  output logic        wb_slot_busy_o,         // 1-cycle issue would collide with MUL drain
+  output logic        busy_o                  // any operation in flight
+);
+
+  // ===========================================================================
+  // Configuration
+  // ===========================================================================
+  localparam int unsigned MUL_STAGES_C = (MUL_STAGES == 0) ? 1 : MUL_STAGES;
+  localparam int unsigned MUL_CW       = (ALU_XLEN + MUL_STAGES_C - 1) / MUL_STAGES_C;
+  localparam int unsigned MUL_BPAD_W   = MUL_CW * MUL_STAGES_C;
+  localparam bit          MUL_IN_FAST  = (MUL_STAGES_C == 1);
+
+  if ((MUL_STAGES < 1) || (MUL_STAGES > ALU_MUL_STAGES_MAX)) begin : g_err_mul_stages
+    $error("sf_alu: MUL_STAGES must be within [1, ALU_MUL_STAGES_MAX]");
+  end
+  if (((MUL_STAGES_C - 1) * MUL_CW) >= ALU_XLEN) begin : g_err_mul_chunk
+    $error("sf_alu: MUL_STAGES leaves an empty partial-product chunk");
+  end
+  if ((2 ** ALU_SHAMT_W) != ALU_XLEN) begin : g_err_xlen
+    $error("sf_alu: XLEN must be a power of two");
+  end
+  if (ALU_TAG_W < 2) begin : g_err_tag
+    $error("sf_alu: rob_tag_t must carry a wrap bit and at least one index bit");
+  end
+
+  typedef logic [MUL_CW-1:0]     mul_chunk_t;
+  typedef logic [MUL_BPAD_W-1:0] mul_bpad_t;
+
+  typedef struct packed {
+    alu_tag_t  tag;
+    alu_data_t a;
+    mul_bpad_t b;
+    alu_data_t acc;
+  } mul_stage_t;
+
+  // Low-XLEN contribution of A x B[chunk k], aligned to its weight
+  function automatic alu_data_t mul_partial(input alu_data_t   a,
+                                            input mul_bpad_t   b,
+                                            input int unsigned k);
+    mul_chunk_t c;
+    c = b[k*MUL_CW +: MUL_CW];
+    return (a * alu_data_t'(c)) << (k * MUL_CW);
+  endfunction
+
+  // ===========================================================================
+  // Signals
+  // ===========================================================================
+  // Decode
+  alu_ctrl_t    dec_ctrl;
+  alu_ex_pkt_t  dec_pkt;
+
+  // Execute stage
+  logic         ex_valid;
+  alu_ex_pkt_t  ex_pkt;
+  logic         ex_kill;
+  logic         ex_block;
+  logic         ex_fire;
+  logic         ex_is_mpipe;
+  logic         fast_fire;
+  logic         mul_fire;
+  logic         s0_busy;
+
+  // Datapath
+  alu_data_t    op_a;
+  alu_data_t    op_b;
+  alu_data_t    add_b;
+  alu_add_t     add_full;
+  alu_data_t    add_sum;
+  logic         add_co;
+  logic         add_ovf;
+  logic         slt_lt;
+  alu_data_t    slt_res;
+  alu_data_t    lgc_res;
+  alu_shamt_t   shamt;
+  alu_data_t    shr_res;
+  alu_data_t    sra_fill;
+  alu_data_t    shf_res;
+  alu_data_t    mul1_res;
+  alu_data_t    fast_result;
+  alu_flags_t   fast_flags;
+  alu_resp_t    fast_resp;
+
+  // Multiply pipeline
+  logic         mul_last_fire;
+  alu_resp_t    mul_last_resp;
+  logic         wb_slot_busy;
+  logic         mul_busy;
+
+  // Writeback
+  logic         pipe_adv;
+  logic         out_valid_q;
+  logic         out_valid_d;
+  logic         out_kill;
+  logic         out_load;
+  alu_resp_t    out_q;
+  alu_resp_t    out_d;
+
+  // ===========================================================================
+  // Decode
+  // ===========================================================================
+  always_comb begin : p_decode
+    dec_ctrl      = alu_decode(req_i.op, req_i.ext);
+    dec_pkt.ctrl  = dec_ctrl;
+    dec_pkt.src_a = req_i.src_a;
+    dec_pkt.src_b = req_i.src_b;
+    dec_pkt.tag   = req_i.tag;
+  end
+
+  // ===========================================================================
+  // Issue -> Execute boundary
+  // ===========================================================================
+  if (IN_REG) begin : g_in_reg
+
+    logic        s0_valid_q;
+    logic        s0_valid_d;
+    logic        s0_vacate;
+    logic        req_kill;
+    alu_ex_pkt_t s0_pkt_q;
+
+    always_comb begin : p_s0_ctrl
+      req_kill   = alu_kill_hit(req_i.tag, flush_i, kill_valid_i, kill_tag_i);
+      s0_vacate  = ~s0_valid_q | ~ex_block;
+      s0_valid_d = s0_vacate ? (req_valid_i & ~req_kill)
+                             : (s0_valid_q  & ~ex_kill);
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_s0_valid
+      if (!rst_ni) s0_valid_q <= 1'b0;
+      else         s0_valid_q <= s0_valid_d;
+    end
+
+    always_ff @(posedge clk_i) begin : p_s0_data
+      if (s0_vacate && req_valid_i) s0_pkt_q <= dec_pkt;
+    end
+
+    assign ex_valid    = s0_valid_q;
+    assign ex_pkt      = s0_pkt_q;
+    assign req_ready_o = s0_vacate;
+    assign s0_busy     = s0_valid_q;
+
+  end else begin : g_no_in_reg
+
+    assign ex_valid    = req_valid_i;
+    assign ex_pkt      = dec_pkt;
+    assign req_ready_o = ~ex_block;
+    assign s0_busy     = 1'b0;
+
+  end
+
+  // ===========================================================================
+  // Execute issue control
+  // ===========================================================================
+  always_comb begin : p_ex_ctrl
+    ex_is_mpipe = ex_valid & ex_pkt.ctrl.unit.mul & ~MUL_IN_FAST;
+    ex_kill     = ex_valid & alu_kill_hit(ex_pkt.tag, flush_i, kill_valid_i, kill_tag_i);
+    ex_block    = ~pipe_adv | (wb_slot_busy & ~ex_is_mpipe);
+    ex_fire     = ex_valid & ~ex_block & ~ex_kill;
+    fast_fire   = ex_fire & ~ex_is_mpipe;
+    mul_fire    = ex_fire &  ex_is_mpipe;
+  end
+
+  // ===========================================================================
+  // Execute datapath : 1-cycle class
+  // ===========================================================================
+  assign op_a = ex_pkt.src_a;
+  assign op_b = ex_pkt.src_b;
+
+  // Shared adder: ADD / SUB / SLT
+  always_comb begin : p_exec_adder
+    add_b    = ex_pkt.ctrl.add_sub ? ~op_b : op_b;
+    add_full = alu_add_t'(op_a) + alu_add_t'(add_b) + alu_add_t'(ex_pkt.ctrl.add_sub);
+    add_sum  = add_full[ALU_XLEN-1:0];
+    add_co   = add_full[ALU_XLEN];
+    add_ovf  = (op_a[ALU_MSB] == add_b[ALU_MSB]) & (add_sum[ALU_MSB] != op_a[ALU_MSB]);
+    slt_lt   = add_sum[ALU_MSB] ^ add_ovf;
+    slt_res  = alu_data_t'(slt_lt);
+  end
+
+  // Bitwise logic
+  always_comb begin : p_exec_logic
+    lgc_res = ({ALU_XLEN{ex_pkt.ctrl.lfn.land}} & (op_a & op_b))
+            | ({ALU_XLEN{ex_pkt.ctrl.lfn.lor }} & (op_a | op_b))
+            | ({ALU_XLEN{ex_pkt.ctrl.lfn.lxor}} & (op_a ^ op_b));
+  end
+
+  // Shifter: shared logical right path, sign fill for SAR
+  always_comb begin : p_exec_shift
+    shamt    = op_b[ALU_SHAMT_W-1:0];
+    shr_res  = op_a >> shamt;
+    sra_fill = ~(ALU_ONES >> shamt) & {ALU_XLEN{op_a[ALU_MSB]}};
+    shf_res  = ({ALU_XLEN{ex_pkt.ctrl.sfn.sll}} & (op_a << shamt))
+             | ({ALU_XLEN{ex_pkt.ctrl.sfn.srl}} & shr_res)
+             | ({ALU_XLEN{ex_pkt.ctrl.sfn.sra}} & (shr_res | sra_fill));
+  end
+
+  // In-core multiply (MUL_STAGES == 1)
+  if (MUL_IN_FAST) begin : g_mul_fast
+    always_comb begin : p_exec_mul
+      mul1_res = op_a * op_b;
+    end
+  end else begin : g_mul_fast_off
+    assign mul1_res = ALU_ZERO;
+  end
+
+  // One-hot AND-OR result select, flags, response packaging
+  always_comb begin : p_exec_result
+    fast_result = ({ALU_XLEN{ex_pkt.ctrl.unit.add}} & add_sum)
+                | ({ALU_XLEN{ex_pkt.ctrl.unit.slt}} & slt_res)
+                | ({ALU_XLEN{ex_pkt.ctrl.unit.lgc}} & lgc_res)
+                | ({ALU_XLEN{ex_pkt.ctrl.unit.shf}} & shf_res)
+                | ({ALU_XLEN{ex_pkt.ctrl.unit.mul}} & mul1_res);
+
+    fast_flags = '0;
+    if (FLAGS_EN && !ex_pkt.ctrl.illegal) begin
+      if (ex_pkt.ctrl.unit.add | ex_pkt.ctrl.unit.slt) begin
+        fast_flags.n = add_sum[ALU_MSB];
+        fast_flags.z = (add_sum == ALU_ZERO);
+        fast_flags.c = add_co;
+        fast_flags.v = add_ovf;
+      end else begin
+        fast_flags = alu_flags_zn(fast_result);
+      end
+    end
+
+    fast_resp.result  = fast_result;
+    fast_resp.flags   = fast_flags;
+    fast_resp.illegal = ex_pkt.ctrl.illegal;
+    fast_resp.tag     = ex_pkt.tag;
+  end
+
+  // ===========================================================================
+  // Execute datapath : multiply pipeline (MUL_STAGES > 1)
+  //   stage 0 (EX) : chunk 0           -> mstg[1]
+  //   stage k      : chunk k accumulate -> mstg[k+1]
+  //   stage S-1    : final chunk        -> writeback register
+  // ===========================================================================
+  if (!MUL_IN_FAST) begin : g_mul_pipe
+
+    logic       [MUL_STAGES_C-1:1] mvld_q;
+    logic       [MUL_STAGES_C-1:1] mvld_d;
+    logic       [MUL_STAGES_C-1:1] mkill;
+    mul_stage_t                    mstg_q [MUL_STAGES_C-1:1];
+    mul_stage_t                    mstg_d [MUL_STAGES_C-1:1];
+    alu_data_t                     mul_final;
+
+    always_comb begin : p_mul_next
+      mstg_d[1].tag = ex_pkt.tag;
+      mstg_d[1].a   = op_a;
+      mstg_d[1].b   = mul_bpad_t'(op_b);
+      mstg_d[1].acc = mul_partial(op_a, mul_bpad_t'(op_b), unsigned'(0));
+      for (int unsigned k = 1; k < MUL_STAGES_C - 1; k++) begin
+        mstg_d[k+1]     = mstg_q[k];
+        mstg_d[k+1].acc = mstg_q[k].acc + mul_partial(mstg_q[k].a, mstg_q[k].b, k);
+      end
+      mul_final = mstg_q[MUL_STAGES_C-1].acc
+                + mul_partial(mstg_q[MUL_STAGES_C-1].a, mstg_q[MUL_STAGES_C-1].b, MUL_STAGES_C - 1);
+    end
+
+    always_comb begin : p_mul_ctrl
+      for (int unsigned k = 1; k < MUL_STAGES_C; k++) begin
+        mkill[k] = mvld_q[k] & alu_kill_hit(mstg_q[k].tag, flush_i, kill_valid_i, kill_tag_i);
+      end
+      mvld_d[1] = pipe_adv ? mul_fire : (mvld_q[1] & ~mkill[1]);
+      for (int unsigned k = 1; k < MUL_STAGES_C - 1; k++) begin
+        mvld_d[k+1] = pipe_adv ? (mvld_q[k]   & ~mkill[k])
+                               : (mvld_q[k+1] & ~mkill[k+1]);
+      end
+      mul_last_fire = pipe_adv & mvld_q[MUL_STAGES_C-1] & ~mkill[MUL_STAGES_C-1];
+      wb_slot_busy  = mvld_q[MUL_STAGES_C-1];
+      mul_busy      = |mvld_q;
+    end
+
+    always_comb begin : p_mul_resp
+      mul_last_resp.result  = mul_final;
+      mul_last_resp.flags   = '0;
+      if (FLAGS_EN) begin
+        mul_last_resp.flags = alu_flags_zn(mul_final);
+      end
+      mul_last_resp.illegal = 1'b0;
+      mul_last_resp.tag     = mstg_q[MUL_STAGES_C-1].tag;
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_mul_valid
+      if (!rst_ni) mvld_q <= '0;
+      else         mvld_q <= mvld_d;
+    end
+
+    always_ff @(posedge clk_i) begin : p_mul_data
+      if (mul_fire) mstg_q[1] <= mstg_d[1];
+      for (int unsigned k = 1; k < MUL_STAGES_C - 1; k++) begin
+        if (pipe_adv && mvld_q[k]) mstg_q[k+1] <= mstg_d[k+1];
+      end
+    end
+
+  end else begin : g_mul_pipe_off
+
+    assign mul_last_fire = 1'b0;
+    assign mul_last_resp = '0;
+    assign wb_slot_busy  = 1'b0;
+    assign mul_busy      = 1'b0;
+
+  end
+
+  // ===========================================================================
+  // Writeback register (ROB completion / late bypass)
+  // ===========================================================================
+  always_comb begin : p_wb_ctrl
+    out_kill     = out_valid_q & alu_kill_hit(out_q.tag, flush_i, kill_valid_i, kill_tag_i);
+    resp_valid_o = out_valid_q & ~out_kill;
+    pipe_adv     = ~resp_valid_o | resp_ready_i;
+  end
+
+  always_comb begin : p_wb_next
+    out_load    = fast_fire | mul_last_fire;
+    out_valid_d = pipe_adv ? out_load : resp_valid_o;
+    out_d       = mul_last_fire ? mul_last_resp : fast_resp;
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_wb_valid
+    if (!rst_ni) out_valid_q <= 1'b0;
+    else         out_valid_q <= out_valid_d;
+  end
+
+  always_ff @(posedge clk_i) begin : p_wb_data
+    if (out_load) out_q <= out_d;
+  end
+
+  assign resp_o = out_q;
+
+  // ===========================================================================
+  // Bypass and scheduler hints
+  // ===========================================================================
+  always_comb begin : p_bypass
+    byp_valid_o = fast_fire & ~ex_pkt.ctrl.illegal;
+    byp_o.data  = fast_result;
+    byp_o.tag   = ex_pkt.tag;
+  end
+
+  assign wb_slot_busy_o = wb_slot_busy;
+  assign busy_o         = s0_busy | mul_busy | out_valid_q;
+
+  // ===========================================================================
+  // Assertions and coverage
+  // ===========================================================================
+`ifndef SYNTHESIS
+
+  default clocking cb_alu @(posedge clk_i); endclocking
+
+  // Opcode space completeness: every enumerated op decodes to exactly one unit
+  initial begin : p_opcode_completeness
+    alu_op_e   op;
+    alu_ctrl_t ctrl;
+    op = op.first();
+    for (int unsigned i = 0; i < unsigned'(op.num()); i++) begin
+      ctrl = alu_decode(op, ALU_EXT_BASE);
+      if (ctrl.illegal || !$onehot(ctrl.unit) || !$onehot0(ctrl.lfn) || !$onehot0(ctrl.sfn) ||
+          (ctrl.add_sub && !(ctrl.unit.add || ctrl.unit.slt))) begin
+        $fatal(1, "sf_alu: opcode %s has no execution unit", op.name());
+      end
+      op = op.next();
+    end
+    if (unsigned'(op.num()) != ALU_NUM_OPS) begin
+      $fatal(1, "sf_alu: ALU_NUM_OPS does not match alu_op_e");
+    end
+  end
+
+  // X discipline
+  a_ctrl_known : assert property (disable iff (!rst_ni) !$isunknown({req_valid_i, resp_ready_i, flush_i, kill_valid_i}))
+    else $error("sf_alu: unknown control input");
+  a_req_known  : assert property (disable iff (!rst_ni) req_valid_i |-> !$isunknown(req_i))
+    else $error("sf_alu: unknown request payload");
+  a_kill_known : assert property (disable iff (!rst_ni) kill_valid_i |-> !$isunknown(kill_tag_i))
+    else $error("sf_alu: unknown kill tag");
+  a_ready_known: assert property (disable iff (!rst_ni) !$isunknown({req_ready_o, resp_valid_o, byp_valid_o, busy_o, wb_slot_busy_o}))
+    else $error("sf_alu: unknown control output");
+  a_resp_known : assert property (disable iff (!rst_ni) resp_valid_o |-> !$isunknown(resp_o))
+    else $error("sf_alu: unknown writeback payload");
+  a_byp_known  : assert property (disable iff (!rst_ni) byp_valid_o |-> !$isunknown(byp_o))
+    else $error("sf_alu: unknown bypass payload");
+
+  // Decode safety
+  a_dec_unit   : assert property (disable iff (!rst_ni) req_valid_i |-> (dec_ctrl.illegal ? (dec_ctrl.unit == '0)
+                                                                    : $onehot(dec_ctrl.unit)))
+    else $error("sf_alu: decoded unit select not one-hot");
+  a_dec_lfn    : assert property (disable iff (!rst_ni) (req_valid_i && dec_ctrl.unit.lgc) |-> $onehot(dec_ctrl.lfn))
+    else $error("sf_alu: logic function select not one-hot");
+  a_dec_sfn    : assert property (disable iff (!rst_ni) (req_valid_i && dec_ctrl.unit.shf) |-> $onehot(dec_ctrl.sfn))
+    else $error("sf_alu: shift function select not one-hot");
+  a_illegal_zero: assert property (disable iff (!rst_ni) (resp_valid_o && resp_o.illegal) |-> ((resp_o.result == ALU_ZERO) && (resp_o.flags == '0)))
+    else $error("sf_alu: illegal op produced non-canonical response");
+
+  // Pipeline safety
+  a_wb_onehot  : assert property (disable iff (!rst_ni) !(fast_fire && mul_last_fire))
+    else $error("sf_alu: writeback port collision");
+  a_slot_rsv   : assert property (disable iff (!rst_ni) wb_slot_busy_o |-> !fast_fire)
+    else $error("sf_alu: 1-cycle op issued into reserved writeback slot");
+  a_resp_hold  : assert property (disable iff (!rst_ni) (resp_valid_o && !resp_ready_i)
+                                  |=> (flush_i || kill_valid_i || (resp_valid_o && $stable(resp_o))))
+    else $error("sf_alu: writeback payload changed under backpressure");
+  a_flush_drain: assert property (disable iff (!rst_ni) flush_i |=> !busy_o)
+    else $error("sf_alu: state survived flush");
+  if (!FLAGS_EN) begin : g_chk_flags_off
+    a_flags_off: assert property (disable iff (!rst_ni) resp_valid_o |-> (resp_o.flags == '0))
+      else $error("sf_alu: flags generated with FLAGS_EN = 0");
+  end
+
+  // Coverage
+  for (genvar i = 0; i < ALU_NUM_OPS; i++) begin : g_cov_op
+    c_op_issued: cover property (disable iff (!rst_ni) req_valid_i && req_ready_o && (req_i.op == ALU_OP_LIST[i]));
+  end
+  c_illegal_op   : cover property (disable iff (!rst_ni) req_valid_i && req_ready_o && dec_ctrl.illegal);
+  c_slot_stall   : cover property (disable iff (!rst_ni) ex_valid && wb_slot_busy_o && !ex_is_mpipe);
+  c_backpressure : cover property (disable iff (!rst_ni) resp_valid_o && !resp_ready_i);
+  c_kill_inflight: cover property (disable iff (!rst_ni) kill_valid_i && busy_o);
+  c_add_overflow : cover property (disable iff (!rst_ni) fast_fire && ex_pkt.ctrl.unit.add && add_ovf);
+  c_sar_negative : cover property (disable iff (!rst_ni) fast_fire && ex_pkt.ctrl.sfn.sra && op_a[ALU_MSB]);
+
+`endif
+
+endmodule : sf_alu
