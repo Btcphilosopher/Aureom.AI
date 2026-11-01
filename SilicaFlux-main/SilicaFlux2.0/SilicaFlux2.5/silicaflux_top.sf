@@ -1,0 +1,2013 @@
+// ============================================================================
+//  SilicaFlux Compute Cluster - Top-Level Integration
+// ----------------------------------------------------------------------------
+//  File        : silicaflux_top.sf
+//  Language    : Silica Flux-2017
+//  Hierarchy   : silicaflux_top
+//                 |- u_rst_ctrl / u_clk_ctrl / u_pwr_ctrl     control plane
+//                 |- g_cplx[*].g_core[*].u_core               superscalar cores
+//                 |- g_cplx[*].u_l2 / u_sched / u_vpu         complex L2 + dispatch
+//                 |- u_tlb_subsys                             shared L2 TLB + PTW
+//                 |- u_coh_xbar / g_llc[*].u_llc_bank         coherent fabric + LLC
+//                 |- u_coh_mgr                                snoop filter / domains
+//                 |- u_mem_fabric / g_mem[*]                  memory edge + CDC
+//                 |- g_dma[*]                                 IO-coherent DMA ingress
+//                 |- u_csr / u_irq_ctrl / u_dbg / u_trace     control + observability
+//                 |- u_pmu / u_fault_ctrl                     telemetry
+//
+//  Clock domains
+//    clk_core_i  : cores (gated), coherent fabric, LLC, control plane
+//    clk_mem_i   : memory AXI master edge, DMA AXI slave edge
+//    clk_host_i  : host APB control interface
+//    clk_rtc_i   : architectural timer reference
+//    jtag_tck_i  : debug transport
+//
+//  All crossings are owned by dedicated CDC primitives (sf_sync, sf_rst_sync,
+//  sf_axi_cdc, sf_apb_cdc). Straps are quasi-static and captured in reset.
+// ============================================================================
+
+module silicaflux_top
+  import silicaflux_pkg::*;
+#(
+  // ------------------------------------------------------------ geometry
+  parameter int unsigned NUM_CPLX               = 2,
+  parameter int unsigned CORES_PER_CPLX         = 4,
+  parameter int unsigned NUM_LLC_BANKS          = 8,
+  parameter int unsigned NUM_MEM_PORTS          = 2,
+  parameter int unsigned NUM_DMA_PORTS          = 2,
+  parameter int unsigned NUM_COH_DOMAINS        = 1,
+  parameter int unsigned NUM_EXT_IRQ            = 128,
+  parameter int unsigned CLUSTER_ID_W           = 8,
+  // ------------------------------------------------------------ features
+  parameter bit          EN_VECTOR              = 1'b1,
+  parameter bit          EN_TENSOR              = 1'b1,
+  parameter bit          EN_TRACE               = 1'b1,
+  parameter bit          EN_PMU                 = 1'b1,
+  parameter bit          EN_ECC                 = 1'b1,
+  parameter bit          EN_DBG_SBA             = 1'b1,
+  parameter bit          EN_FABRIC_SLICES       = 1'b1,
+  // ------------------------------------------------------------ sizing
+  parameter int unsigned L2_SIZE_KB             = 2048,
+  parameter int unsigned L2_WAYS                = 16,
+  parameter int unsigned LLC_BANK_SIZE_KB       = 4096,
+  parameter int unsigned LLC_WAYS               = 16,
+  parameter int unsigned SNOOP_FILTER_ENTRIES   = 65536,
+  parameter int unsigned TLB_L2_ENTRIES         = 2048,
+  parameter int unsigned NUM_PTW                = 4,
+  parameter int unsigned TNS_CMD_DEPTH          = 32,
+  parameter int unsigned DISPATCH_MAX_INFLIGHT  = 16,
+  parameter int unsigned MAX_OUTSTANDING        = 64,
+  parameter int unsigned MEM_MAX_TXN            = 128,
+  parameter int unsigned AXI_CDC_DEPTH          = 16,
+  parameter int unsigned APB_CDC_DEPTH          = 2,
+  parameter int unsigned TRACE_FIFO_DEPTH       = 256,
+  parameter int unsigned PMU_NUM_COUNTERS       = 16,
+  parameter int unsigned LLC_HASH_FOLDS         = 4,
+  // ------------------------------------------------------------ sequencing
+  parameter int unsigned SYNC_STAGES            = 3,
+  parameter int unsigned RST_STRETCH_CYC        = 64,
+  parameter int unsigned CORE_STAGGER_CYC       = 16,
+  parameter int unsigned INIT_TIMEOUT_CYC       = 262144,
+  parameter int unsigned QUIESCE_TIMEOUT_CYC    = 65536,
+  parameter int unsigned TXN_TIMEOUT_CYC        = 1048576,
+  parameter logic [SF_ADDR_W-1:0] BOOT_ADDR_DEFAULT = SF_BOOT_ADDR_RESET
+) (
+  // ------------------------------------------------------------ clocks
+  input  logic                                    clk_core_i,
+  input  logic                                    clk_mem_i,
+  input  logic                                    clk_host_i,
+  input  logic                                    clk_rtc_i,
+  // ------------------------------------------------------------ resets
+  input  logic                                    por_rst_ni,
+  input  logic                                    sys_rst_ni,
+  // ------------------------------------------------------------ DFT
+  input  logic                                    test_mode_i,
+  input  logic                                    scan_en_i,
+  // ------------------------------------------------------------ straps (quasi-static)
+  input  logic [CLUSTER_ID_W-1:0]                 cluster_id_i,
+  input  logic [NUM_CPLX*CORES_PER_CPLX-1:0]      boot_core_mask_i,
+  input  logic [SF_ADDR_W-1:0]                    boot_addr_i,
+  input  logic                                    boot_addr_ovr_i,
+  input  logic                                    cluster_en_i,
+  // ------------------------------------------------------------ memory AXI master (clk_mem_i)
+  output sf_axi_req_t [NUM_MEM_PORTS-1:0]         mem_axi_req_o,
+  input  sf_axi_rsp_t [NUM_MEM_PORTS-1:0]         mem_axi_rsp_i,
+  // ------------------------------------------------------------ DMA AXI slave (clk_mem_i)
+  input  sf_axi_req_t [NUM_DMA_PORTS-1:0]         dma_axi_req_i,
+  output sf_axi_rsp_t [NUM_DMA_PORTS-1:0]         dma_axi_rsp_o,
+  // ------------------------------------------------------------ host control APB (clk_host_i)
+  input  sf_apb_req_t                             host_apb_req_i,
+  output sf_apb_rsp_t                             host_apb_rsp_o,
+  // ------------------------------------------------------------ interrupts
+  input  logic [NUM_EXT_IRQ-1:0]                  ext_irq_i,
+  output logic                                    host_irq_o,
+  output logic                                    fault_irq_o,
+  // ------------------------------------------------------------ debug ingress / egress
+  input  logic                                    jtag_tck_i,
+  input  logic                                    jtag_trst_ni,
+  input  logic                                    jtag_tms_i,
+  input  logic                                    jtag_tdi_i,
+  output logic                                    jtag_tdo_o,
+  output logic                                    jtag_tdo_oe_o,
+  input  logic                                    dbg_ext_halt_i,
+  output logic                                    dbg_halted_o,
+  // ------------------------------------------------------------ trace egress (clk_core_i)
+  output logic                                    trace_valid_o,
+  input  logic                                    trace_ready_i,
+  output sf_trace_pkt_t                           trace_pkt_o,
+  // ------------------------------------------------------------ status / telemetry (clk_core_i)
+  output sf_fault_status_t                        fault_status_o,
+  output logic                                    cluster_ready_o,
+  output logic                                    cluster_quiesced_o,
+  output logic                                    cluster_contained_o,
+  output logic [NUM_CPLX*CORES_PER_CPLX-1:0]      core_active_o
+);
+
+  // ==========================================================================
+  //  Derived Architecture Constants
+  // ==========================================================================
+
+  localparam int unsigned NUM_CORES       = NUM_CPLX * CORES_PER_CPLX;
+  localparam int unsigned CORE_IDX_W      = (NUM_CORES > 1) ? $clog2(NUM_CORES) : 1;
+
+  // Coherent requester map: [complex L2s | PTW | DMA | tensor | debug SBA]
+  localparam int unsigned NUM_TNS_REQ     = EN_TENSOR  ? 1 : 0;
+  localparam int unsigned NUM_SBA_REQ     = EN_DBG_SBA ? 1 : 0;
+  localparam int unsigned REQ_CPLX_BASE   = 0;
+  localparam int unsigned REQ_PTW         = REQ_CPLX_BASE + NUM_CPLX;
+  localparam int unsigned REQ_DMA_BASE    = REQ_PTW + 1;
+  localparam int unsigned REQ_TNS         = REQ_DMA_BASE + NUM_DMA_PORTS;
+  localparam int unsigned REQ_SBA         = REQ_TNS + NUM_TNS_REQ;
+  localparam int unsigned NUM_COH_REQ     = REQ_SBA + NUM_SBA_REQ;
+  localparam int unsigned COH_REQ_IDX_W   = (NUM_COH_REQ > 1) ? $clog2(NUM_COH_REQ) : 1;
+
+  localparam int unsigned BANK_SEL_W      = (NUM_LLC_BANKS > 1) ? $clog2(NUM_LLC_BANKS) : 1;
+  localparam int unsigned LINE_OFS_W      = $clog2(SF_LINE_BYTES);
+  localparam int unsigned DOM_IDX_W       = (NUM_COH_DOMAINS > 1) ? $clog2(NUM_COH_DOMAINS) : 1;
+
+  localparam int unsigned OST_CNT_W       = $clog2(MAX_OUTSTANDING + 1);
+  localparam int unsigned TXN_AGE_W       = $clog2(TXN_TIMEOUT_CYC + 1);
+
+  localparam int unsigned SEQ_CNT_MAX_A   = (INIT_TIMEOUT_CYC > QUIESCE_TIMEOUT_CYC) ? INIT_TIMEOUT_CYC : QUIESCE_TIMEOUT_CYC;
+  localparam int unsigned SEQ_CNT_MAX_B   = (RST_STRETCH_CYC  > CORE_STAGGER_CYC)    ? RST_STRETCH_CYC  : CORE_STAGGER_CYC;
+  localparam int unsigned SEQ_CNT_MAX     = (SEQ_CNT_MAX_A    > SEQ_CNT_MAX_B)       ? SEQ_CNT_MAX_A    : SEQ_CNT_MAX_B;
+  localparam int unsigned SEQ_CNT_W       = $clog2(SEQ_CNT_MAX + 1);
+
+  // Fault source map
+  localparam int unsigned FLT_CORE_BASE   = 0;
+  localparam int unsigned FLT_L2_BASE     = FLT_CORE_BASE + NUM_CORES;
+  localparam int unsigned FLT_LLC_BASE    = FLT_L2_BASE   + NUM_CPLX;
+  localparam int unsigned FLT_MEM_BASE    = FLT_LLC_BASE  + NUM_LLC_BANKS;
+  localparam int unsigned FLT_DMA_BASE    = FLT_MEM_BASE  + NUM_MEM_PORTS;
+  localparam int unsigned FLT_COH         = FLT_DMA_BASE  + NUM_DMA_PORTS;
+  localparam int unsigned FLT_TLB         = FLT_COH + 1;
+  localparam int unsigned FLT_TNS         = FLT_TLB + 1;
+  localparam int unsigned FLT_TOP_SEQ     = FLT_TNS + 1;
+  localparam int unsigned FLT_TOP_TXN     = FLT_TOP_SEQ + 1;
+  localparam int unsigned FLT_TOP_APB     = FLT_TOP_TXN + 1;
+  localparam int unsigned NUM_FAULT_SRC   = FLT_TOP_APB + 1;
+
+  // Internal interrupt source map (appended above external sources)
+  localparam int unsigned INT_IRQ_FLT_CORR  = 0;
+  localparam int unsigned INT_IRQ_FLT_FATAL = 1;
+  localparam int unsigned INT_IRQ_PMU_OVF   = 2;
+  localparam int unsigned INT_IRQ_TRC_OVF   = 3;
+  localparam int unsigned INT_IRQ_SEQ_EVT   = 4;
+  localparam int unsigned NUM_INT_IRQ       = 5;
+  localparam int unsigned NUM_IRQ_SRC       = NUM_EXT_IRQ + NUM_INT_IRQ;
+
+  // ==========================================================================
+  //  Local Types
+  // ==========================================================================
+
+  typedef enum logic [SF_SEQ_STATE_W-1:0] {
+    SEQ_RESET      = SF_SEQ_STATE_W'(0),
+    SEQ_UNCORE_REL = SF_SEQ_STATE_W'(1),
+    SEQ_INIT       = SF_SEQ_STATE_W'(2),
+    SEQ_CORE_REL   = SF_SEQ_STATE_W'(3),
+    SEQ_RUN        = SF_SEQ_STATE_W'(4),
+    SEQ_QUIESCE    = SF_SEQ_STATE_W'(5),
+    SEQ_QUIESCED   = SF_SEQ_STATE_W'(6),
+    SEQ_CONTAIN    = SF_SEQ_STATE_W'(7)
+  } seq_state_e;
+
+  typedef enum logic [1:0] {
+    APB_ARB_IDLE,
+    APB_ARB_SETUP,
+    APB_ARB_ACCESS
+  } apb_arb_state_e;
+
+  typedef enum logic {
+    APB_OWN_HOST,
+    APB_OWN_DBG
+  } apb_owner_e;
+
+  typedef enum logic [SF_APB_TGT_IDX_W-1:0] {
+    APB_TGT_CSR,
+    APB_TGT_IRQ,
+    APB_TGT_PMU,
+    APB_TGT_TRACE,
+    APB_TGT_FAULT,
+    APB_TGT_TLB
+  } apb_tgt_e;
+
+  localparam int unsigned NUM_APB_TGT = int'(APB_TGT_TLB) + 1;
+
+  typedef enum logic [3:0] {
+    TOP_FLT_NONE            = 4'h0,
+    TOP_FLT_INIT_TIMEOUT    = 4'h1,
+    TOP_FLT_QUIESCE_TIMEOUT = 4'h2,
+    TOP_FLT_TXN_TIMEOUT     = 4'h3,
+    TOP_FLT_TXN_UNDERFLOW   = 4'h4,
+    TOP_FLT_APB_DECODE      = 4'h5
+  } top_flt_code_e;
+
+  typedef struct packed {
+    sf_coh_req_t             req;
+    logic [BANK_SEL_W-1:0]   tgt;
+  } coh_req_routed_t;
+
+  typedef logic [NUM_CPLX-1:0][DOM_IDX_W-1:0] cplx_dom_map_t;
+
+  typedef struct packed {
+    logic [NUM_COH_REQ-1:0]   coh_req_issue;
+    logic [NUM_COH_REQ-1:0]   coh_req_stall;
+    logic [NUM_COH_REQ-1:0]   coh_ost_limit;
+    logic [NUM_LLC_BANKS-1:0] llc_hit;
+    logic [NUM_LLC_BANKS-1:0] llc_miss;
+    logic [NUM_LLC_BANKS-1:0] llc_evict;
+    logic [NUM_MEM_PORTS-1:0] mem_rd_issue;
+    logic [NUM_MEM_PORTS-1:0] mem_wr_issue;
+    logic [NUM_CPLX-1:0]      snp_issue;
+  } unc_evt_t;
+
+  localparam int unsigned NUM_UNC_EVT = $bits(unc_evt_t);
+
+  localparam sf_core_status_t CORE_STATUS_ISO = '{wfi: 1'b1, l1_idle: 1'b1, default: '0};
+
+  // ==========================================================================
+  //  Elaboration-Time Functions
+  // ==========================================================================
+
+  function automatic cplx_dom_map_t gen_cplx_dom_map();
+    cplx_dom_map_t m;
+    for (int unsigned c = 0; c < NUM_CPLX; c++) begin
+      m[c] = DOM_IDX_W'((c * NUM_COH_DOMAINS) / NUM_CPLX);
+    end
+    return m;
+  endfunction
+
+  function automatic logic [NUM_COH_REQ-1:0] gen_blk_exempt();
+    logic [NUM_COH_REQ-1:0] m;
+    for (int unsigned r = 0; r < NUM_COH_REQ; r++) begin
+      m[r] = EN_DBG_SBA && (r == REQ_SBA);
+    end
+    return m;
+  endfunction
+
+  function automatic logic [SF_QOS_W-1:0] req_qos_class(input int unsigned r);
+    if (r == REQ_PTW)                                              return SF_QOS_PTW;
+    if ((r >= REQ_DMA_BASE) && (r < REQ_DMA_BASE + NUM_DMA_PORTS)) return SF_QOS_DMA;
+    if (EN_TENSOR  && (r == REQ_TNS))                              return SF_QOS_BULK;
+    if (EN_DBG_SBA && (r == REQ_SBA))                              return SF_QOS_DEBUG;
+    return SF_QOS_CORE;
+  endfunction
+
+  function automatic logic is_dma_req(input int unsigned r);
+    return (r >= REQ_DMA_BASE) && (r < REQ_DMA_BASE + NUM_DMA_PORTS);
+  endfunction
+
+  function automatic logic [BANK_SEL_W-1:0] llc_bank_hash(input logic [SF_ADDR_W-1:0] addr);
+    logic [BANK_SEL_W-1:0] h;
+    h = '0;
+    if (NUM_LLC_BANKS > 1) begin
+      for (int unsigned f = 0; f < LLC_HASH_FOLDS; f++) begin
+        if (LINE_OFS_W + (f + 1) * BANK_SEL_W <= SF_ADDR_W) begin
+          h ^= addr[LINE_OFS_W + f * BANK_SEL_W +: BANK_SEL_W];
+        end
+      end
+    end
+    return h;
+  endfunction
+
+  localparam cplx_dom_map_t          CPLX_DOM_MAP = gen_cplx_dom_map();
+  localparam logic [NUM_COH_REQ-1:0] BLK_EXEMPT   = gen_blk_exempt();
+
+  // ==========================================================================
+  //  Global Signal Fabric
+  // ==========================================================================
+
+  // ------------------------------------------------------------ reset domains
+  logic                                 rst_core_n;
+  logic                                 rst_mem_n;
+  logic                                 rst_host_n;
+  logic                                 rst_rtc_n;
+  logic                                 rst_dbg_n;
+  logic                                 rst_uncore_n;
+  logic                                 rst_memedge_n;
+  logic                                 memedge_rst_src_n;
+  logic                                 memedge_up_sync;
+  sf_rst_cause_t                        rst_cause;
+  logic                                 ndmreset_req;
+
+  logic                                 uncore_rel_q;
+  logic                                 uncore_rst_n_q;
+  logic                                 uncore_clk_en_q;
+
+  // ------------------------------------------------------------ clocks
+  logic [NUM_CORES-1:0]                 clk_core_gated;
+  logic [NUM_CPLX-1:0]                  clk_vpu_gated;
+  logic [NUM_LLC_BANKS-1:0]             clk_llc_gated;
+  logic                                 clk_tns_gated;
+  logic [NUM_CORES-1:0]                 core_clk_en;
+  logic [NUM_CPLX-1:0]                  vpu_clk_en;
+  logic [NUM_LLC_BANKS-1:0]             llc_clk_en;
+  logic                                 tns_clk_en_q;
+
+  // ------------------------------------------------------------ synchronized inputs
+  logic [NUM_EXT_IRQ-1:0]               ext_irq_sync;
+  logic                                 cluster_en_sync;
+  logic                                 dbg_ext_halt_sync;
+
+  // ------------------------------------------------------------ straps
+  logic [NUM_CORES-1:0]                 boot_core_mask_qs;
+  logic [SF_ADDR_W-1:0]                 boot_addr_qs;
+  logic                                 boot_addr_ovr_qs;
+  logic [CLUSTER_ID_W-1:0]              cluster_id_qs;
+
+  // ------------------------------------------------------------ sequencer
+  seq_state_e                           seq_state_q,     seq_state_d;
+  logic [SEQ_CNT_W-1:0]                 seq_cnt_q,       seq_cnt_d;
+  logic [CORE_IDX_W-1:0]                core_rel_idx_q,  core_rel_idx_d;
+  logic [NUM_CORES-1:0]                 core_rel_q,      core_rel_d;
+  logic                                 contain_q,       contain_d;
+  logic                                 seq_init_timeout;
+  logic                                 seq_quiesce_timeout;
+  logic                                 uncore_init_done;
+  logic                                 cluster_drained;
+  logic                                 contain_trigger;
+  logic                                 ingress_block_q;
+  logic                                 mem_isolate_q;
+  logic                                 core_stall_q;
+  logic [NUM_CORES-1:0]                 core_run_mask;
+  logic [NUM_CORES-1:0]                 core_run_req;
+  logic [SF_ADDR_W-1:0]                 boot_addr_eff;
+  logic [SF_TS_W-1:0]                   cluster_ts_q;
+
+  // ------------------------------------------------------------ control plane
+  sf_csr2hw_t                           csr2hw;
+  sf_hw2csr_t                           hw2csr;
+  sf_apb_req_t                          host_apb_req;
+  sf_apb_rsp_t                          host_apb_rsp;
+  sf_apb_req_t                          dbg_apb_req;
+  sf_apb_rsp_t                          dbg_apb_rsp;
+  sf_apb_req_t                          apb_req;
+  sf_apb_rsp_t                          apb_rsp;
+  sf_apb_req_t [NUM_APB_TGT-1:0]        apb_tgt_req;
+  sf_apb_rsp_t [NUM_APB_TGT-1:0]        apb_tgt_rsp;
+  apb_arb_state_e                       apb_arb_state_q, apb_arb_state_d;
+  apb_owner_e                           apb_owner_q,     apb_owner_d;
+  logic [SF_APB_TGT_IDX_W-1:0]          apb_tgt_idx;
+  logic                                 apb_tgt_hit;
+  logic                                 apb_decode_err;
+
+  // ------------------------------------------------------------ power
+  sf_pwr_ctrl_t [NUM_CORES-1:0]         core_pwr_ctrl;
+  logic [NUM_CORES-1:0]                 core_pwr_on;
+  logic [NUM_CORES-1:0]                 core_clk_on;
+  logic [NUM_CORES-1:0]                 core_idle;
+  logic [NUM_CORES-1:0]                 core_wake;
+  logic [NUM_CORES-1:0]                 core_rst_n_q;
+  logic [NUM_CORES-1:0]                 core_rst_n;
+
+  // ------------------------------------------------------------ per-core fabric
+  sf_core_cfg_t     [NUM_CORES-1:0]     core_cfg_q;
+  sf_core_irq_t     [NUM_CORES-1:0]     core_irq;
+  logic             [NUM_CORES-1:0]     core_irq_pending;
+  sf_dbg_core_req_t [NUM_CORES-1:0]     core_dbg_req;
+  sf_dbg_core_rsp_t [NUM_CORES-1:0]     core_dbg_rsp_raw,      core_dbg_rsp;
+  logic             [NUM_CORES-1:0]     core_dbg_wake;
+
+  logic             [NUM_CORES-1:0]     core_l1_req_valid_raw, core_l1_req_valid,   core_l1_req_ready;
+  sf_l1_req_t       [NUM_CORES-1:0]     core_l1_req;
+  logic             [NUM_CORES-1:0]     core_l1_rsp_valid,     core_l1_rsp_ready_raw, core_l1_rsp_ready;
+  sf_l1_rsp_t       [NUM_CORES-1:0]     core_l1_rsp;
+  logic             [NUM_CORES-1:0]     core_snp_valid,        core_snp_ready_raw,  core_snp_ready;
+  sf_snp_req_t      [NUM_CORES-1:0]     core_snp;
+  logic             [NUM_CORES-1:0]     core_snp_rsp_valid_raw, core_snp_rsp_valid, core_snp_rsp_ready;
+  sf_snp_rsp_t      [NUM_CORES-1:0]     core_snp_rsp;
+
+  logic             [NUM_CORES-1:0]     core_ptw_valid_raw,    core_ptw_valid,      core_ptw_ready;
+  sf_ptw_req_t      [NUM_CORES-1:0]     core_ptw_req;
+  logic             [NUM_CORES-1:0]     core_ptw_rsp_valid,    core_ptw_rsp_ready_raw, core_ptw_rsp_ready;
+  sf_ptw_rsp_t      [NUM_CORES-1:0]     core_ptw_rsp;
+  logic             [NUM_CORES-1:0]     core_sdn_valid_raw,    core_sdn_valid,      core_sdn_ready;
+  sf_sdn_req_t      [NUM_CORES-1:0]     core_sdn_req;
+  logic             [NUM_CORES-1:0]     core_sdn_ack_raw,      core_sdn_ack;
+  logic                                 tlb_sdn_bcast_valid;
+  sf_sdn_req_t                          tlb_sdn_bcast;
+
+  logic             [NUM_CORES-1:0]     core_vx_valid_raw,     core_vx_valid,       core_vx_ready;
+  sf_vx_req_t       [NUM_CORES-1:0]     core_vx_req;
+  logic             [NUM_CORES-1:0]     core_vx_rsp_valid,     core_vx_rsp_ready_raw, core_vx_rsp_ready;
+  sf_vx_rsp_t       [NUM_CORES-1:0]     core_vx_rsp;
+
+  logic             [NUM_CORES-1:0]     core_trace_valid_raw,  core_trace_valid;
+  sf_trace_core_t   [NUM_CORES-1:0]     core_trace;
+  sf_pmu_evt_core_t [NUM_CORES-1:0]     core_pmu_evt_raw,      core_pmu_evt;
+  sf_core_status_t  [NUM_CORES-1:0]     core_status_raw,       core_status;
+  sf_fault_t        [NUM_CORES-1:0]     core_fault_raw,        core_fault;
+  logic             [NUM_CORES-1:0]     core_wfi;
+  logic             [NUM_CORES-1:0]     core_halted;
+
+  // ------------------------------------------------------------ complex fabric
+  logic             [NUM_CPLX-1:0]      l2_init_done;
+  logic             [NUM_CPLX-1:0]      l2_idle;
+  sf_fault_t        [NUM_CPLX-1:0]      l2_fault;
+  logic             [NUM_CPLX-1:0]      cplx_snp_en;
+  logic             [NUM_CPLX-1:0]      sched_idle;
+
+  logic             [NUM_CPLX-1:0]      cplx_snp_valid,        cplx_snp_ready;
+  sf_snp_req_t      [NUM_CPLX-1:0]      cplx_snp;
+  logic             [NUM_CPLX-1:0]      cplx_snp_rsp_valid,    cplx_snp_rsp_ready;
+  sf_snp_rsp_t      [NUM_CPLX-1:0]      cplx_snp_rsp;
+  logic             [NUM_CPLX-1:0]      l2_snp_valid,          l2_snp_ready;
+  sf_snp_req_t      [NUM_CPLX-1:0]      l2_snp;
+
+  logic             [NUM_CPLX-1:0]      cplx_tns_valid,        cplx_tns_ready;
+  sf_vx_req_t       [NUM_CPLX-1:0]      cplx_tns_req;
+  logic             [NUM_CPLX-1:0]      cplx_tns_rsp_valid,    cplx_tns_rsp_ready;
+  sf_vx_rsp_t       [NUM_CPLX-1:0]      cplx_tns_rsp;
+
+  // ------------------------------------------------------------ coherent requesters
+  logic             [NUM_COH_REQ-1:0]   coh_src_valid,         coh_src_ready;
+  sf_coh_req_t      [NUM_COH_REQ-1:0]   coh_src_req;
+  logic             [NUM_COH_REQ-1:0]   coh_src_rsp_valid,     coh_src_rsp_ready;
+  sf_coh_rsp_t      [NUM_COH_REQ-1:0]   coh_src_rsp;
+
+  logic             [NUM_COH_REQ-1:0]   coh_ing_valid,         coh_ing_ready;
+  coh_req_routed_t  [NUM_COH_REQ-1:0]   coh_ing_req;
+  logic             [NUM_COH_REQ-1:0]   xbar_req_valid,        xbar_req_ready;
+  coh_req_routed_t  [NUM_COH_REQ-1:0]   xbar_req;
+  sf_coh_req_t      [NUM_COH_REQ-1:0]   xbar_req_payload;
+  logic [NUM_COH_REQ-1:0][BANK_SEL_W-1:0] xbar_req_tgt;
+  logic [NUM_COH_REQ-1:0][SF_QOS_W-1:0]   xbar_req_qos;
+  logic             [NUM_COH_REQ-1:0]   xbar_rsp_valid,        xbar_rsp_ready;
+  sf_coh_rsp_t      [NUM_COH_REQ-1:0]   xbar_rsp;
+
+  logic [NUM_COH_REQ-1:0][OST_CNT_W-1:0] ost_cnt_q;
+  logic [OST_CNT_W-1:0]                 ost_limit_q;
+  logic             [NUM_COH_REQ-1:0]   ost_at_limit;
+  logic             [NUM_COH_REQ-1:0]   ost_busy;
+  logic             [NUM_COH_REQ-1:0]   txn_timeout_evt;
+  logic             [NUM_COH_REQ-1:0]   txn_underflow_evt;
+  logic             [NUM_COH_REQ-1:0]   coh_ing_hs;
+
+  // ------------------------------------------------------------ LLC / home nodes
+  logic             [NUM_LLC_BANKS-1:0] llc_req_valid,         llc_req_ready;
+  sf_coh_req_t      [NUM_LLC_BANKS-1:0] llc_req;
+  logic             [NUM_LLC_BANKS-1:0] llc_rsp_valid,         llc_rsp_ready;
+  sf_coh_rsp_t      [NUM_LLC_BANKS-1:0] llc_rsp;
+  logic             [NUM_LLC_BANKS-1:0] llc_snp_valid,         llc_snp_ready;
+  sf_snp_req_t      [NUM_LLC_BANKS-1:0] llc_snp;
+  logic             [NUM_LLC_BANKS-1:0] llc_snp_rsp_valid,     llc_snp_rsp_ready;
+  sf_snp_rsp_t      [NUM_LLC_BANKS-1:0] llc_snp_rsp;
+  logic             [NUM_LLC_BANKS-1:0] llc_mem_valid,         llc_mem_ready;
+  sf_mem_req_t      [NUM_LLC_BANKS-1:0] llc_mem_req;
+  logic             [NUM_LLC_BANKS-1:0] llc_mem_rsp_valid,     llc_mem_rsp_ready;
+  sf_mem_rsp_t      [NUM_LLC_BANKS-1:0] llc_mem_rsp;
+  logic             [NUM_LLC_BANKS-1:0] llc_init_done;
+  logic             [NUM_LLC_BANKS-1:0] llc_idle;
+  logic             [NUM_LLC_BANKS-1:0] llc_pmu_hit,           llc_pmu_miss,        llc_pmu_evict;
+  sf_fault_t        [NUM_LLC_BANKS-1:0] llc_fault;
+
+  logic                                 coh_mgr_init_done;
+  logic                                 coh_mgr_idle;
+  sf_fault_t                            coh_mgr_fault;
+  logic                                 xbar_idle;
+
+  // ------------------------------------------------------------ memory edge
+  logic             [NUM_MEM_PORTS-1:0] mport_valid,           mport_ready;
+  sf_mem_req_t      [NUM_MEM_PORTS-1:0] mport_req;
+  logic             [NUM_MEM_PORTS-1:0] mport_rsp_valid,       mport_rsp_ready;
+  sf_mem_rsp_t      [NUM_MEM_PORTS-1:0] mport_rsp;
+  sf_axi_req_t      [NUM_MEM_PORTS-1:0] edge_axi_req;
+  sf_axi_rsp_t      [NUM_MEM_PORTS-1:0] edge_axi_rsp;
+  logic             [NUM_MEM_PORTS-1:0] edge_idle;
+  sf_fault_t        [NUM_MEM_PORTS-1:0] edge_fault;
+  logic                                 mem_fabric_idle;
+
+  // ------------------------------------------------------------ DMA ingress
+  sf_axi_req_t      [NUM_DMA_PORTS-1:0] dma_core_req;
+  sf_axi_rsp_t      [NUM_DMA_PORTS-1:0] dma_core_rsp;
+  logic             [NUM_DMA_PORTS-1:0] dma_idle;
+  sf_fault_t        [NUM_DMA_PORTS-1:0] dma_fault;
+
+  // ------------------------------------------------------------ TLB subsystem
+  logic                                 tlb_init_done;
+  logic                                 tlb_idle;
+  sf_fault_t                            tlb_fault;
+
+  // ------------------------------------------------------------ tensor
+  logic                                 tns_idle;
+  logic                                 dispatch_idle;
+  sf_fault_t                            tns_fault;
+
+  // ------------------------------------------------------------ debug
+  logic                                 dbg_sba_valid,         dbg_sba_ready;
+  sf_coh_req_t                          dbg_sba_req;
+  logic                                 dbg_sba_rsp_valid,     dbg_sba_rsp_ready;
+  sf_coh_rsp_t                          dbg_sba_rsp;
+
+  // ------------------------------------------------------------ observability
+  sf_fault_t        [NUM_FAULT_SRC-1:0] fault_src;
+  sf_fault_t                            top_seq_fault;
+  sf_fault_t                            top_txn_fault;
+  sf_fault_t                            top_apb_fault;
+  logic                                 fault_fatal;
+  logic                                 fault_corr_irq;
+  logic                                 fault_fatal_irq;
+  sf_fault_status_t                     fault_status;
+  logic [NUM_INT_IRQ-1:0]               int_irq;
+  logic [NUM_IRQ_SRC-1:0]               irq_src;
+  logic                                 host_irq;
+  logic                                 pmu_ovf_irq;
+  logic                                 trace_ovf;
+  unc_evt_t                             unc_evt_d,             unc_evt_q;
+
+  // ==========================================================================
+  //  Clock / Reset Distribution
+  // ==========================================================================
+
+  sf_rst_ctrl #(
+    .SYNC_STAGES    (SYNC_STAGES),
+    .STRETCH_CYC    (RST_STRETCH_CYC)
+  ) u_rst_ctrl (
+    .por_rst_ni     (por_rst_ni),
+    .sys_rst_ni     (sys_rst_ni),
+    .sw_rst_req_i   (csr2hw.sw_rst_req),
+    .ndm_rst_req_i  (ndmreset_req),
+    .test_mode_i    (test_mode_i),
+    .clk_core_i     (clk_core_i),
+    .clk_mem_i      (clk_mem_i),
+    .clk_host_i     (clk_host_i),
+    .clk_rtc_i      (clk_rtc_i),
+    .rst_core_no    (rst_core_n),
+    .rst_mem_no     (rst_mem_n),
+    .rst_host_no    (rst_host_n),
+    .rst_rtc_no     (rst_rtc_n),
+    .rst_dbg_no     (rst_dbg_n),
+    .rst_cause_o    (rst_cause)
+  );
+
+  // Uncore reset: sequencer-owned, glitch-free, DFT controllable
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      uncore_rst_n_q  <= 1'b0;
+      uncore_clk_en_q <= 1'b0;
+    end else begin
+      uncore_rst_n_q  <= uncore_rel_q;
+      uncore_clk_en_q <= (seq_state_d != SEQ_RESET);
+    end
+  end
+
+  assign rst_uncore_n = test_mode_i ? rst_core_n : uncore_rst_n_q;
+
+  // Memory-edge reset: released in clk_mem_i after uncore release
+  assign memedge_rst_src_n = rst_mem_n & uncore_rst_n_q;
+
+  sf_rst_sync #(
+    .STAGES         (SYNC_STAGES)
+  ) u_memedge_rst_sync (
+    .clk_i          (clk_mem_i),
+    .rst_ni         (memedge_rst_src_n),
+    .test_mode_i    (test_mode_i),
+    .test_rst_ni    (rst_mem_n),
+    .rst_no         (rst_memedge_n)
+  );
+
+  sf_sync #(
+    .WIDTH          (1),
+    .STAGES         (SYNC_STAGES)
+  ) u_memedge_ack_sync (
+    .clk_i          (clk_core_i),
+    .rst_ni         (rst_core_n),
+    .d_i            (rst_memedge_n),
+    .q_o            (memedge_up_sync)
+  );
+
+  // Clock gating
+  always_comb begin
+    for (int unsigned i = 0; i < NUM_CORES; i++) begin
+      core_clk_en[i] = core_pwr_ctrl[i].clk_en;
+    end
+    for (int unsigned c = 0; c < NUM_CPLX; c++) begin
+      vpu_clk_en[c] = EN_VECTOR && (|core_clk_en[c*CORES_PER_CPLX +: CORES_PER_CPLX]);
+    end
+    llc_clk_en = {NUM_LLC_BANKS{uncore_clk_en_q}};
+  end
+
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      tns_clk_en_q <= 1'b0;
+    end else begin
+      tns_clk_en_q <= EN_TENSOR && uncore_clk_en_q && csr2hw.tns_en;
+    end
+  end
+
+  sf_clk_ctrl #(
+    .NUM_CORE_CLK   (NUM_CORES),
+    .NUM_VPU_CLK    (NUM_CPLX),
+    .NUM_LLC_CLK    (NUM_LLC_BANKS)
+  ) u_clk_ctrl (
+    .clk_i          (clk_core_i),
+    .rst_ni         (rst_core_n),
+    .test_mode_i    (test_mode_i),
+    .scan_en_i      (scan_en_i),
+    .core_clk_en_i  (core_clk_en),
+    .vpu_clk_en_i   (vpu_clk_en),
+    .llc_clk_en_i   (llc_clk_en),
+    .tns_clk_en_i   (tns_clk_en_q),
+    .core_clk_o     (clk_core_gated),
+    .vpu_clk_o      (clk_vpu_gated),
+    .llc_clk_o      (clk_llc_gated),
+    .tns_clk_o      (clk_tns_gated)
+  );
+
+  // Asynchronous input synchronization
+  sf_sync #(
+    .WIDTH          (NUM_EXT_IRQ),
+    .STAGES         (SYNC_STAGES)
+  ) u_ext_irq_sync (
+    .clk_i          (clk_core_i),
+    .rst_ni         (rst_core_n),
+    .d_i            (ext_irq_i),
+    .q_o            (ext_irq_sync)
+  );
+
+  sf_sync #(
+    .WIDTH          (2),
+    .STAGES         (SYNC_STAGES)
+  ) u_ctrl_in_sync (
+    .clk_i          (clk_core_i),
+    .rst_ni         (rst_core_n),
+    .d_i            ({cluster_en_i,    dbg_ext_halt_i}),
+    .q_o            ({cluster_en_sync, dbg_ext_halt_sync})
+  );
+
+  // ==========================================================================
+  //  Top-Level Sequencing
+  // ==========================================================================
+
+  // Strap capture while the cluster is held in sequencer reset
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      boot_core_mask_qs <= '0;
+      boot_addr_qs      <= BOOT_ADDR_DEFAULT;
+      boot_addr_ovr_qs  <= 1'b0;
+      cluster_id_qs     <= '0;
+    end else if (seq_state_q == SEQ_RESET) begin
+      boot_core_mask_qs <= boot_core_mask_i;
+      boot_addr_qs      <= boot_addr_i;
+      boot_addr_ovr_qs  <= boot_addr_ovr_i;
+      cluster_id_qs     <= cluster_id_i;
+    end
+  end
+
+  assign uncore_init_done = (&l2_init_done) & (&llc_init_done) & coh_mgr_init_done
+                          & tlb_init_done & memedge_up_sync;
+
+  assign cluster_drained  = ~(|ost_busy) & xbar_idle & coh_mgr_idle & mem_fabric_idle
+                          & (&llc_idle) & (&edge_idle) & (&dma_idle) & tlb_idle
+                          & dispatch_idle & tns_idle & (&sched_idle);
+
+  assign contain_trigger  = fault_fatal & csr2hw.contain_en;
+
+  assign core_run_mask    = csr2hw.core_en_ovr ? csr2hw.core_en[NUM_CORES-1:0] : boot_core_mask_qs;
+
+  always_comb begin
+    seq_state_d         = seq_state_q;
+    seq_cnt_d           = seq_cnt_q;
+    core_rel_idx_d      = core_rel_idx_q;
+    core_rel_d          = core_rel_q;
+    contain_d           = contain_q;
+    seq_init_timeout    = 1'b0;
+    seq_quiesce_timeout = 1'b0;
+
+    case (seq_state_q)
+      SEQ_RESET: begin
+        seq_cnt_d = '0;
+        if (cluster_en_sync) begin
+          seq_state_d = SEQ_UNCORE_REL;
+        end
+      end
+
+      SEQ_UNCORE_REL: begin
+        seq_cnt_d = seq_cnt_q + 1'b1;
+        if (seq_cnt_q == SEQ_CNT_W'(RST_STRETCH_CYC)) begin
+          seq_cnt_d   = '0;
+          seq_state_d = SEQ_INIT;
+        end
+      end
+
+      SEQ_INIT: begin
+        seq_cnt_d = seq_cnt_q + 1'b1;
+        if (contain_trigger) begin
+          contain_d   = 1'b1;
+          seq_state_d = SEQ_CONTAIN;
+        end else if (uncore_init_done) begin
+          seq_cnt_d      = '0;
+          core_rel_idx_d = '0;
+          seq_state_d    = SEQ_CORE_REL;
+        end else if (seq_cnt_q == SEQ_CNT_W'(INIT_TIMEOUT_CYC)) begin
+          seq_init_timeout = 1'b1;
+          contain_d        = 1'b1;
+          seq_state_d      = SEQ_CONTAIN;
+        end
+      end
+
+      SEQ_CORE_REL: begin
+        seq_cnt_d = seq_cnt_q + 1'b1;
+        if (contain_trigger) begin
+          contain_d   = 1'b1;
+          seq_cnt_d   = '0;
+          seq_state_d = SEQ_QUIESCE;
+        end else if (seq_cnt_q == SEQ_CNT_W'(CORE_STAGGER_CYC)) begin
+          seq_cnt_d                  = '0;
+          core_rel_d[core_rel_idx_q] = 1'b1;
+          if (core_rel_idx_q == CORE_IDX_W'(NUM_CORES - 1)) begin
+            seq_state_d = SEQ_RUN;
+          end else begin
+            core_rel_idx_d = core_rel_idx_q + 1'b1;
+          end
+        end
+      end
+
+      SEQ_RUN: begin
+        seq_cnt_d = '0;
+        if (contain_trigger) begin
+          contain_d   = 1'b1;
+          seq_state_d = SEQ_QUIESCE;
+        end else if (csr2hw.quiesce_req) begin
+          seq_state_d = SEQ_QUIESCE;
+        end
+      end
+
+      SEQ_QUIESCE: begin
+        seq_cnt_d = seq_cnt_q + 1'b1;
+        if (contain_trigger) begin
+          contain_d = 1'b1;
+        end
+        if (cluster_drained) begin
+          seq_cnt_d   = '0;
+          seq_state_d = (contain_q || contain_trigger) ? SEQ_CONTAIN : SEQ_QUIESCED;
+        end else if (seq_cnt_q == SEQ_CNT_W'(QUIESCE_TIMEOUT_CYC)) begin
+          seq_quiesce_timeout = 1'b1;
+          contain_d           = 1'b1;
+          seq_state_d         = SEQ_CONTAIN;
+        end
+      end
+
+      SEQ_QUIESCED: begin
+        seq_cnt_d = '0;
+        if (contain_trigger) begin
+          contain_d   = 1'b1;
+          seq_state_d = SEQ_CONTAIN;
+        end else if (csr2hw.resume_req) begin
+          seq_state_d = SEQ_RUN;
+        end
+      end
+
+      SEQ_CONTAIN: begin
+        seq_cnt_d = '0;
+        contain_d = 1'b1;
+      end
+
+      default: begin
+        contain_d   = 1'b1;
+        seq_state_d = SEQ_CONTAIN;
+      end
+    endcase
+  end
+
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      seq_state_q     <= SEQ_RESET;
+      seq_cnt_q       <= '0;
+      core_rel_idx_q  <= '0;
+      core_rel_q      <= '0;
+      contain_q       <= 1'b0;
+      uncore_rel_q    <= 1'b0;
+      ingress_block_q <= 1'b1;
+      mem_isolate_q   <= 1'b0;
+      core_stall_q    <= 1'b0;
+    end else begin
+      seq_state_q     <= seq_state_d;
+      seq_cnt_q       <= seq_cnt_d;
+      core_rel_idx_q  <= core_rel_idx_d;
+      core_rel_q      <= core_rel_d;
+      contain_q       <= contain_d;
+      uncore_rel_q    <= uncore_rel_q | (seq_state_q == SEQ_UNCORE_REL);
+      ingress_block_q <= !((seq_state_d == SEQ_CORE_REL) || (seq_state_d == SEQ_RUN));
+      mem_isolate_q   <= (seq_state_d == SEQ_CONTAIN);
+      core_stall_q    <= contain_d;
+    end
+  end
+
+  assign core_run_req  = core_rel_q & core_run_mask;
+  assign boot_addr_eff = csr2hw.boot_addr_vld ? csr2hw.boot_addr
+                       : (boot_addr_ovr_qs     ? boot_addr_qs : BOOT_ADDR_DEFAULT);
+
+  // Cluster timestamp
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      cluster_ts_q <= '0;
+    end else begin
+      cluster_ts_q <= cluster_ts_q + 1'b1;
+    end
+  end
+
+  // ==========================================================================
+  //  Power / Enable Domains
+  // ==========================================================================
+
+  sf_pwr_ctrl #(
+    .NUM_DOMAINS    (NUM_CORES)
+  ) u_pwr_ctrl (
+    .clk_i          (clk_core_i),
+    .rst_ni         (rst_uncore_n),
+    .dom_en_req_i   (core_run_req),
+    .dom_idle_i     (core_idle),
+    .dom_wake_i     (core_wake),
+    .dom_ctrl_o     (core_pwr_ctrl),
+    .dom_on_o       (core_pwr_on)
+  );
+
+  for (genvar i = 0; i < NUM_CORES; i++) begin : g_core_pwr
+    assign core_clk_on[i] = core_pwr_ctrl[i].clk_en;
+    assign core_idle[i]   = core_status[i].wfi & core_status[i].l1_idle;
+    assign core_wake[i]   = core_l1_rsp_valid[i] | core_snp_valid[i] | core_ptw_rsp_valid[i]
+                          | core_vx_rsp_valid[i] | tlb_sdn_bcast_valid  | core_irq_pending[i]
+                          | core_dbg_wake[i];
+
+    always_ff @(posedge clk_core_i or negedge rst_uncore_n) begin
+      if (!rst_uncore_n) begin
+        core_rst_n_q[i] <= 1'b0;
+      end else begin
+        core_rst_n_q[i] <= ~core_pwr_ctrl[i].rst_req;
+      end
+    end
+
+    assign core_rst_n[i] = test_mode_i ? rst_uncore_n : core_rst_n_q[i];
+
+    always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+      if (!rst_core_n) begin
+        core_cfg_q[i] <= '0;
+      end else begin
+        core_cfg_q[i].hart_id   <= SF_HART_ID_W'({cluster_id_qs, CORE_IDX_W'(i)});
+        core_cfg_q[i].boot_addr <= boot_addr_eff;
+        core_cfg_q[i].vec_en    <= EN_VECTOR;
+        core_cfg_q[i].tns_en    <= EN_TENSOR && csr2hw.tns_en;
+        core_cfg_q[i].spec_ctrl <= csr2hw.spec_ctrl;
+      end
+    end
+  end
+
+  // ==========================================================================
+  //  Compute Complexes
+  // ==========================================================================
+
+  for (genvar c = 0; c < NUM_CPLX; c++) begin : g_cplx
+
+    localparam int unsigned CB = c * CORES_PER_CPLX;
+
+    // ---------------------------------------------------------------- cores
+    for (genvar k = 0; k < CORES_PER_CPLX; k++) begin : g_core
+
+      localparam int unsigned CI = CB + k;
+
+      sf_core #(
+        .CORE_IDX         (CI),
+        .EN_VECTOR        (EN_VECTOR),
+        .EN_TENSOR        (EN_TENSOR),
+        .EN_ECC           (EN_ECC)
+      ) u_core (
+        .clk_i            (clk_core_gated[CI]),
+        .rst_ni           (core_rst_n[CI]),
+        .cfg_i            (core_cfg_q[CI]),
+        .stall_i          (core_stall_q),
+        .irq_i            (core_irq[CI]),
+        .dbg_req_i        (core_dbg_req[CI]),
+        .dbg_rsp_o        (core_dbg_rsp_raw[CI]),
+        // L1 miss path
+        .l1_req_valid_o   (core_l1_req_valid_raw[CI]),
+        .l1_req_ready_i   (core_l1_req_ready[CI]),
+        .l1_req_o         (core_l1_req[CI]),
+        .l1_rsp_valid_i   (core_l1_rsp_valid[CI]),
+        .l1_rsp_ready_o   (core_l1_rsp_ready_raw[CI]),
+        .l1_rsp_i         (core_l1_rsp[CI]),
+        // L1 back-invalidation
+        .snp_valid_i      (core_snp_valid[CI]),
+        .snp_ready_o      (core_snp_ready_raw[CI]),
+        .snp_i            (core_snp[CI]),
+        .snp_rsp_valid_o  (core_snp_rsp_valid_raw[CI]),
+        .snp_rsp_ready_i  (core_snp_rsp_ready[CI]),
+        .snp_rsp_o        (core_snp_rsp[CI]),
+        // Translation
+        .ptw_valid_o      (core_ptw_valid_raw[CI]),
+        .ptw_ready_i      (core_ptw_ready[CI]),
+        .ptw_req_o        (core_ptw_req[CI]),
+        .ptw_rsp_valid_i  (core_ptw_rsp_valid[CI]),
+        .ptw_rsp_ready_o  (core_ptw_rsp_ready_raw[CI]),
+        .ptw_rsp_i        (core_ptw_rsp[CI]),
+        .sdn_valid_o      (core_sdn_valid_raw[CI]),
+        .sdn_ready_i      (core_sdn_ready[CI]),
+        .sdn_req_o        (core_sdn_req[CI]),
+        .sdn_bcast_valid_i(tlb_sdn_bcast_valid),
+        .sdn_bcast_i      (tlb_sdn_bcast),
+        .sdn_ack_o        (core_sdn_ack_raw[CI]),
+        // Vector / tensor dispatch
+        .vx_valid_o       (core_vx_valid_raw[CI]),
+        .vx_ready_i       (core_vx_ready[CI]),
+        .vx_req_o         (core_vx_req[CI]),
+        .vx_rsp_valid_i   (core_vx_rsp_valid[CI]),
+        .vx_rsp_ready_o   (core_vx_rsp_ready_raw[CI]),
+        .vx_rsp_i         (core_vx_rsp[CI]),
+        // Observability
+        .trace_valid_o    (core_trace_valid_raw[CI]),
+        .trace_o          (core_trace[CI]),
+        .pmu_evt_o        (core_pmu_evt_raw[CI]),
+        .status_o         (core_status_raw[CI]),
+        .fault_o          (core_fault_raw[CI])
+      );
+
+      // Gated-clock handshake guard: no transfer completes on a stopped clock
+      assign core_l1_req_valid[CI]  = core_l1_req_valid_raw[CI]  & core_clk_on[CI];
+      assign core_l1_rsp_ready[CI]  = core_l1_rsp_ready_raw[CI]  & core_clk_on[CI];
+      assign core_snp_ready[CI]     = core_snp_ready_raw[CI]     & core_clk_on[CI];
+      assign core_snp_rsp_valid[CI] = core_snp_rsp_valid_raw[CI] & core_clk_on[CI];
+      assign core_ptw_valid[CI]     = core_ptw_valid_raw[CI]     & core_clk_on[CI];
+      assign core_ptw_rsp_ready[CI] = core_ptw_rsp_ready_raw[CI] & core_clk_on[CI];
+      assign core_sdn_valid[CI]     = core_sdn_valid_raw[CI]     & core_clk_on[CI];
+      assign core_vx_valid[CI]      = core_vx_valid_raw[CI]      & core_clk_on[CI];
+      assign core_vx_rsp_ready[CI]  = core_vx_rsp_ready_raw[CI]  & core_clk_on[CI];
+      assign core_sdn_ack[CI]       = core_pwr_on[CI] ? (core_sdn_ack_raw[CI] & core_clk_on[CI]) : 1'b1;
+
+      // Power-domain isolation clamps
+      assign core_trace_valid[CI]   = core_trace_valid_raw[CI] & ~core_pwr_ctrl[CI].iso_en;
+      assign core_pmu_evt[CI]       = core_pwr_ctrl[CI].iso_en ? '0              : core_pmu_evt_raw[CI];
+      assign core_status[CI]        = core_pwr_ctrl[CI].iso_en ? CORE_STATUS_ISO : core_status_raw[CI];
+      assign core_fault[CI]         = core_pwr_ctrl[CI].iso_en ? '0              : core_fault_raw[CI];
+      assign core_dbg_rsp[CI]       = core_pwr_ctrl[CI].iso_en ? '0              : core_dbg_rsp_raw[CI];
+      assign core_wfi[CI]           = core_status[CI].wfi;
+      assign core_halted[CI]        = core_status[CI].halted;
+    end
+
+    // ---------------------------------------------------------------- complex L2
+    sf_l2_cache #(
+      .NUM_PORTS          (CORES_PER_CPLX),
+      .SIZE_KB            (L2_SIZE_KB),
+      .WAYS               (L2_WAYS),
+      .EN_ECC             (EN_ECC)
+    ) u_l2 (
+      .clk_i              (clk_core_i),
+      .rst_ni             (rst_uncore_n),
+      // core-facing
+      .core_req_valid_i   (core_l1_req_valid [CB +: CORES_PER_CPLX]),
+      .core_req_ready_o   (core_l1_req_ready [CB +: CORES_PER_CPLX]),
+      .core_req_i         (core_l1_req       [CB +: CORES_PER_CPLX]),
+      .core_rsp_valid_o   (core_l1_rsp_valid [CB +: CORES_PER_CPLX]),
+      .core_rsp_ready_i   (core_l1_rsp_ready [CB +: CORES_PER_CPLX]),
+      .core_rsp_o         (core_l1_rsp       [CB +: CORES_PER_CPLX]),
+      .core_snp_valid_o   (core_snp_valid    [CB +: CORES_PER_CPLX]),
+      .core_snp_ready_i   (core_snp_ready    [CB +: CORES_PER_CPLX]),
+      .core_snp_o         (core_snp          [CB +: CORES_PER_CPLX]),
+      .core_snp_rsp_valid_i(core_snp_rsp_valid[CB +: CORES_PER_CPLX]),
+      .core_snp_rsp_ready_o(core_snp_rsp_ready[CB +: CORES_PER_CPLX]),
+      .core_snp_rsp_i     (core_snp_rsp      [CB +: CORES_PER_CPLX]),
+      .core_on_i          (core_pwr_on       [CB +: CORES_PER_CPLX]),
+      // fabric-facing
+      .coh_req_valid_o    (coh_src_valid     [REQ_CPLX_BASE + c]),
+      .coh_req_ready_i    (coh_src_ready     [REQ_CPLX_BASE + c]),
+      .coh_req_o          (coh_src_req       [REQ_CPLX_BASE + c]),
+      .coh_rsp_valid_i    (coh_src_rsp_valid [REQ_CPLX_BASE + c]),
+      .coh_rsp_ready_o    (coh_src_rsp_ready [REQ_CPLX_BASE + c]),
+      .coh_rsp_i          (coh_src_rsp       [REQ_CPLX_BASE + c]),
+      .snp_valid_i        (l2_snp_valid[c]),
+      .snp_ready_o        (l2_snp_ready[c]),
+      .snp_i              (l2_snp[c]),
+      .snp_rsp_valid_o    (cplx_snp_rsp_valid[c]),
+      .snp_rsp_ready_i    (cplx_snp_rsp_ready[c]),
+      .snp_rsp_o          (cplx_snp_rsp[c]),
+      .init_done_o        (l2_init_done[c]),
+      .idle_o             (l2_idle[c]),
+      .fault_o            (l2_fault[c])
+    );
+
+    // Long-haul snoop delivery slice
+    sf_reg_slice #(
+      .T                  (sf_snp_req_t),
+      .BYPASS             (!EN_FABRIC_SLICES)
+    ) u_snp_slice (
+      .clk_i              (clk_core_i),
+      .rst_ni             (rst_uncore_n),
+      .valid_i            (cplx_snp_valid[c]),
+      .ready_o            (cplx_snp_ready[c]),
+      .data_i             (cplx_snp[c]),
+      .valid_o            (l2_snp_valid[c]),
+      .ready_i            (l2_snp_ready[c]),
+      .data_o             (l2_snp[c])
+    );
+
+    assign cplx_snp_en[c] = csr2hw.cplx_snp_en[c] & uncore_rst_n_q;
+
+    // ---------------------------------------------------------------- dispatch domain
+    if (EN_VECTOR || EN_TENSOR) begin : g_sched
+
+      logic       vpu_valid,     vpu_ready;
+      sf_vx_req_t vpu_req;
+      logic       vpu_rsp_valid, vpu_rsp_ready;
+      sf_vx_rsp_t vpu_rsp;
+
+      sf_sched_domain #(
+        .NUM_CORES          (CORES_PER_CPLX),
+        .EN_VECTOR          (EN_VECTOR),
+        .EN_TENSOR          (EN_TENSOR)
+      ) u_sched (
+        .clk_i              (clk_core_i),
+        .rst_ni             (rst_uncore_n),
+        .core_vx_valid_i    (core_vx_valid     [CB +: CORES_PER_CPLX]),
+        .core_vx_ready_o    (core_vx_ready     [CB +: CORES_PER_CPLX]),
+        .core_vx_req_i      (core_vx_req       [CB +: CORES_PER_CPLX]),
+        .core_vx_rsp_valid_o(core_vx_rsp_valid [CB +: CORES_PER_CPLX]),
+        .core_vx_rsp_ready_i(core_vx_rsp_ready [CB +: CORES_PER_CPLX]),
+        .core_vx_rsp_o      (core_vx_rsp       [CB +: CORES_PER_CPLX]),
+        .vpu_valid_o        (vpu_valid),
+        .vpu_ready_i        (vpu_ready),
+        .vpu_req_o          (vpu_req),
+        .vpu_rsp_valid_i    (vpu_rsp_valid),
+        .vpu_rsp_ready_o    (vpu_rsp_ready),
+        .vpu_rsp_i          (vpu_rsp),
+        .tns_valid_o        (cplx_tns_valid[c]),
+        .tns_ready_i        (cplx_tns_ready[c]),
+        .tns_req_o          (cplx_tns_req[c]),
+        .tns_rsp_valid_i    (cplx_tns_rsp_valid[c]),
+        .tns_rsp_ready_o    (cplx_tns_rsp_ready[c]),
+        .tns_rsp_i          (cplx_tns_rsp[c]),
+        .idle_o             (sched_idle[c])
+      );
+
+      if (EN_VECTOR) begin : g_vpu
+        sf_vector_unit #(
+          .NUM_LANES        (SF_DATA_W / SF_XLEN),
+          .EN_ECC           (EN_ECC)
+        ) u_vpu (
+          .clk_i            (clk_vpu_gated[c]),
+          .rst_ni           (rst_uncore_n),
+          .req_valid_i      (vpu_valid & vpu_clk_en[c]),
+          .req_ready_o      (vpu_ready),
+          .req_i            (vpu_req),
+          .rsp_valid_o      (vpu_rsp_valid),
+          .rsp_ready_i      (vpu_rsp_ready & vpu_clk_en[c]),
+          .rsp_o            (vpu_rsp)
+        );
+      end else begin : g_no_vpu
+        assign vpu_ready     = 1'b0;
+        assign vpu_rsp_valid = 1'b0;
+        assign vpu_rsp       = '0;
+      end
+
+    end else begin : g_no_sched
+      assign core_vx_ready    [CB +: CORES_PER_CPLX] = '0;
+      assign core_vx_rsp_valid[CB +: CORES_PER_CPLX] = '0;
+      assign core_vx_rsp      [CB +: CORES_PER_CPLX] = '0;
+      assign cplx_tns_valid[c]     = 1'b0;
+      assign cplx_tns_req[c]       = '0;
+      assign cplx_tns_rsp_ready[c] = 1'b0;
+      assign sched_idle[c]         = 1'b1;
+    end
+  end
+
+  // ==========================================================================
+  //  TLB Subsystem
+  // ==========================================================================
+
+  sf_tlb_subsys #(
+    .NUM_CLIENTS        (NUM_CORES),
+    .L2_ENTRIES         (TLB_L2_ENTRIES),
+    .NUM_PTW            (NUM_PTW),
+    .EN_ECC             (EN_ECC)
+  ) u_tlb_subsys (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_uncore_n),
+    .apb_req_i          (apb_tgt_req[APB_TGT_TLB]),
+    .apb_rsp_o          (apb_tgt_rsp[APB_TGT_TLB]),
+    .ptw_valid_i        (core_ptw_valid),
+    .ptw_ready_o        (core_ptw_ready),
+    .ptw_req_i          (core_ptw_req),
+    .ptw_rsp_valid_o    (core_ptw_rsp_valid),
+    .ptw_rsp_ready_i    (core_ptw_rsp_ready),
+    .ptw_rsp_o          (core_ptw_rsp),
+    .sdn_valid_i        (core_sdn_valid),
+    .sdn_ready_o        (core_sdn_ready),
+    .sdn_req_i          (core_sdn_req),
+    .sdn_bcast_valid_o  (tlb_sdn_bcast_valid),
+    .sdn_bcast_o        (tlb_sdn_bcast),
+    .sdn_ack_i          (core_sdn_ack),
+    .mem_valid_o        (coh_src_valid    [REQ_PTW]),
+    .mem_ready_i        (coh_src_ready    [REQ_PTW]),
+    .mem_req_o          (coh_src_req      [REQ_PTW]),
+    .mem_rsp_valid_i    (coh_src_rsp_valid[REQ_PTW]),
+    .mem_rsp_ready_o    (coh_src_rsp_ready[REQ_PTW]),
+    .mem_rsp_i          (coh_src_rsp      [REQ_PTW]),
+    .init_done_o        (tlb_init_done),
+    .idle_o             (tlb_idle),
+    .fault_o            (tlb_fault)
+  );
+
+  // ==========================================================================
+  //  Tensor Dispatch Fabric
+  // ==========================================================================
+
+  if (EN_TENSOR) begin : g_tensor
+
+    logic       tns_cmd_valid,     tns_cmd_ready;
+    sf_vx_req_t tns_cmd;
+    logic       tns_cmd_rsp_valid, tns_cmd_rsp_ready;
+    sf_vx_rsp_t tns_cmd_rsp;
+    logic       tns_mem_valid_raw, tns_mem_rsp_ready_raw;
+
+    sf_dispatch_fabric #(
+      .NUM_SRC          (NUM_CPLX),
+      .MAX_INFLIGHT     (DISPATCH_MAX_INFLIGHT)
+    ) u_dispatch (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .src_valid_i      (cplx_tns_valid),
+      .src_ready_o      (cplx_tns_ready),
+      .src_req_i        (cplx_tns_req),
+      .src_rsp_valid_o  (cplx_tns_rsp_valid),
+      .src_rsp_ready_i  (cplx_tns_rsp_ready),
+      .src_rsp_o        (cplx_tns_rsp),
+      .dst_valid_o      (tns_cmd_valid),
+      .dst_ready_i      (tns_cmd_ready & tns_clk_en_q),
+      .dst_req_o        (tns_cmd),
+      .dst_rsp_valid_i  (tns_cmd_rsp_valid & tns_clk_en_q),
+      .dst_rsp_ready_o  (tns_cmd_rsp_ready),
+      .dst_rsp_i        (tns_cmd_rsp),
+      .idle_o           (dispatch_idle)
+    );
+
+    sf_tensor_engine #(
+      .CMD_DEPTH        (TNS_CMD_DEPTH),
+      .EN_ECC           (EN_ECC)
+    ) u_tensor (
+      .clk_i            (clk_tns_gated),
+      .rst_ni           (rst_uncore_n),
+      .cmd_valid_i      (tns_cmd_valid & tns_clk_en_q),
+      .cmd_ready_o      (tns_cmd_ready),
+      .cmd_i            (tns_cmd),
+      .rsp_valid_o      (tns_cmd_rsp_valid),
+      .rsp_ready_i      (tns_cmd_rsp_ready & tns_clk_en_q),
+      .rsp_o            (tns_cmd_rsp),
+      .mem_valid_o      (tns_mem_valid_raw),
+      .mem_ready_i      (coh_src_ready    [REQ_TNS]),
+      .mem_req_o        (coh_src_req      [REQ_TNS]),
+      .mem_rsp_valid_i  (coh_src_rsp_valid[REQ_TNS]),
+      .mem_rsp_ready_o  (tns_mem_rsp_ready_raw),
+      .mem_rsp_i        (coh_src_rsp      [REQ_TNS]),
+      .idle_o           (tns_idle),
+      .fault_o          (tns_fault)
+    );
+
+    assign coh_src_valid    [REQ_TNS] = tns_mem_valid_raw     & tns_clk_en_q;
+    assign coh_src_rsp_ready[REQ_TNS] = tns_mem_rsp_ready_raw & tns_clk_en_q;
+
+  end else begin : g_no_tensor
+    assign cplx_tns_ready     = '0;
+    assign cplx_tns_rsp_valid = '0;
+    assign cplx_tns_rsp       = '0;
+    assign dispatch_idle      = 1'b1;
+    assign tns_idle           = 1'b1;
+    assign tns_fault          = '0;
+  end
+
+  // ==========================================================================
+  //  DMA Ingress (IO-Coherent)
+  // ==========================================================================
+
+  for (genvar d = 0; d < NUM_DMA_PORTS; d++) begin : g_dma
+
+    sf_axi_cdc #(
+      .DEPTH            (AXI_CDC_DEPTH),
+      .SYNC_STAGES      (SYNC_STAGES)
+    ) u_dma_cdc (
+      .src_clk_i        (clk_mem_i),
+      .src_rst_ni       (rst_memedge_n),
+      .src_req_i        (dma_axi_req_i[d]),
+      .src_rsp_o        (dma_axi_rsp_o[d]),
+      .dst_clk_i        (clk_core_i),
+      .dst_rst_ni       (rst_uncore_n),
+      .dst_req_o        (dma_core_req[d]),
+      .dst_rsp_i        (dma_core_rsp[d])
+    );
+
+    sf_dma_bridge #(
+      .MAX_TXN          (MAX_OUTSTANDING),
+      .EN_ECC           (EN_ECC)
+    ) u_dma_bridge (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .axi_req_i        (dma_core_req[d]),
+      .axi_rsp_o        (dma_core_rsp[d]),
+      .coh_valid_o      (coh_src_valid    [REQ_DMA_BASE + d]),
+      .coh_ready_i      (coh_src_ready    [REQ_DMA_BASE + d]),
+      .coh_req_o        (coh_src_req      [REQ_DMA_BASE + d]),
+      .coh_rsp_valid_i  (coh_src_rsp_valid[REQ_DMA_BASE + d]),
+      .coh_rsp_ready_o  (coh_src_rsp_ready[REQ_DMA_BASE + d]),
+      .coh_rsp_i        (coh_src_rsp      [REQ_DMA_BASE + d]),
+      .idle_o           (dma_idle[d]),
+      .fault_o          (dma_fault[d])
+    );
+  end
+
+  // ==========================================================================
+  //  Debug Infrastructure
+  // ==========================================================================
+
+  sf_dbg_module #(
+    .NUM_HARTS          (NUM_CORES),
+    .EN_SBA             (EN_DBG_SBA),
+    .SYNC_STAGES        (SYNC_STAGES)
+  ) u_dbg (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_dbg_n),
+    .test_mode_i        (test_mode_i),
+    .tck_i              (jtag_tck_i),
+    .trst_ni            (jtag_trst_ni),
+    .tms_i              (jtag_tms_i),
+    .tdi_i              (jtag_tdi_i),
+    .tdo_o              (jtag_tdo_o),
+    .tdo_oe_o           (jtag_tdo_oe_o),
+    .ext_halt_i         (dbg_ext_halt_sync),
+    .hart_req_o         (core_dbg_req),
+    .hart_rsp_i         (core_dbg_rsp),
+    .hart_unavail_i     (~core_pwr_on),
+    .hart_wake_o        (core_dbg_wake),
+    .ndmreset_o         (ndmreset_req),
+    .apb_req_o          (dbg_apb_req),
+    .apb_rsp_i          (dbg_apb_rsp),
+    .sba_valid_o        (dbg_sba_valid),
+    .sba_ready_i        (dbg_sba_ready),
+    .sba_req_o          (dbg_sba_req),
+    .sba_rsp_valid_i    (dbg_sba_rsp_valid),
+    .sba_rsp_ready_o    (dbg_sba_rsp_ready),
+    .sba_rsp_i          (dbg_sba_rsp)
+  );
+
+  if (EN_DBG_SBA) begin : g_sba
+    assign coh_src_valid    [REQ_SBA] = dbg_sba_valid;
+    assign coh_src_req      [REQ_SBA] = dbg_sba_req;
+    assign coh_src_rsp_ready[REQ_SBA] = dbg_sba_rsp_ready;
+    assign dbg_sba_ready              = coh_src_ready    [REQ_SBA];
+    assign dbg_sba_rsp_valid          = coh_src_rsp_valid[REQ_SBA];
+    assign dbg_sba_rsp                = coh_src_rsp      [REQ_SBA];
+  end else begin : g_no_sba
+    assign dbg_sba_ready              = 1'b0;
+    assign dbg_sba_rsp_valid          = 1'b0;
+    assign dbg_sba_rsp                = '0;
+  end
+
+  // ==========================================================================
+  //  Coherent Ingress: Tagging, Routing, Admission, Transaction Tracking
+  // ==========================================================================
+
+  always_ff @(posedge clk_core_i or negedge rst_uncore_n) begin
+    if (!rst_uncore_n) begin
+      ost_limit_q <= OST_CNT_W'(MAX_OUTSTANDING);
+    end else if ((csr2hw.ost_limit == '0) || (csr2hw.ost_limit > MAX_OUTSTANDING)) begin
+      ost_limit_q <= OST_CNT_W'(MAX_OUTSTANDING);
+    end else begin
+      ost_limit_q <= OST_CNT_W'(csr2hw.ost_limit);
+    end
+  end
+
+  for (genvar r = 0; r < NUM_COH_REQ; r++) begin : g_coh_ing
+
+    logic                 blk;
+    logic                 rsp_hs;
+    logic [TXN_AGE_W-1:0] age_q;
+    logic                 age_sat;
+    logic                 age_sat_q;
+
+    // Source tagging and home-bank routing
+    always_comb begin
+      coh_ing_req[r]            = '0;
+      coh_ing_req[r].req        = coh_src_req[r];
+      coh_ing_req[r].req.src_id = SF_SRC_ID_W'(r);
+      coh_ing_req[r].tgt        = llc_bank_hash(coh_src_req[r].addr);
+    end
+
+    // Admission control: sequencer gating and outstanding-limit backpressure
+    assign ost_at_limit[r]  = (ost_cnt_q[r] >= ost_limit_q);
+    assign blk              = (ingress_block_q & ~BLK_EXEMPT[r]) | ost_at_limit[r] | ~uncore_rst_n_q;
+    assign coh_ing_valid[r] = coh_src_valid[r] & ~blk;
+    assign coh_src_ready[r] = coh_ing_ready[r] & ~blk;
+    assign coh_ing_hs[r]    = coh_ing_valid[r] & coh_ing_ready[r];
+    assign rsp_hs           = coh_src_rsp_valid[r] & coh_src_rsp_ready[r];
+
+    sf_reg_slice #(
+      .T                (coh_req_routed_t),
+      .BYPASS           (!EN_FABRIC_SLICES)
+    ) u_req_slice (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .valid_i          (coh_ing_valid[r]),
+      .ready_o          (coh_ing_ready[r]),
+      .data_i           (coh_ing_req[r]),
+      .valid_o          (xbar_req_valid[r]),
+      .ready_i          (xbar_req_ready[r]),
+      .data_o           (xbar_req[r])
+    );
+
+    sf_reg_slice #(
+      .T                (sf_coh_rsp_t),
+      .BYPASS           (!EN_FABRIC_SLICES)
+    ) u_rsp_slice (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .valid_i          (xbar_rsp_valid[r]),
+      .ready_o          (xbar_rsp_ready[r]),
+      .data_i           (xbar_rsp[r]),
+      .valid_o          (coh_src_rsp_valid[r]),
+      .ready_i          (coh_src_rsp_ready[r]),
+      .data_o           (coh_src_rsp[r])
+    );
+
+    assign xbar_req_payload[r] = xbar_req[r].req;
+    assign xbar_req_tgt[r]     = xbar_req[r].tgt;
+    assign xbar_req_qos[r]     = (is_dma_req(r) && csr2hw.dma_qos_ovr) ? csr2hw.dma_qos : req_qos_class(r);
+
+    // Outstanding transaction tracking (one completion per request)
+    always_ff @(posedge clk_core_i or negedge rst_uncore_n) begin
+      if (!rst_uncore_n) begin
+        ost_cnt_q[r] <= '0;
+      end else if (coh_ing_hs[r] && !rsp_hs) begin
+        ost_cnt_q[r] <= ost_cnt_q[r] + 1'b1;
+      end else if (!coh_ing_hs[r] && rsp_hs && (ost_cnt_q[r] != '0)) begin
+        ost_cnt_q[r] <= ost_cnt_q[r] - 1'b1;
+      end
+    end
+
+    assign ost_busy[r]          = (ost_cnt_q[r] != '0);
+    assign txn_underflow_evt[r] = rsp_hs & ~coh_ing_hs[r] & (ost_cnt_q[r] == '0);
+
+    // Completion watchdog
+    assign age_sat = (age_q == TXN_AGE_W'(TXN_TIMEOUT_CYC));
+
+    always_ff @(posedge clk_core_i or negedge rst_uncore_n) begin
+      if (!rst_uncore_n) begin
+        age_q     <= '0;
+        age_sat_q <= 1'b0;
+      end else begin
+        age_sat_q <= age_sat;
+        if (rsp_hs || !ost_busy[r]) begin
+          age_q <= '0;
+        end else if (!age_sat) begin
+          age_q <= age_q + 1'b1;
+        end
+      end
+    end
+
+    assign txn_timeout_evt[r] = age_sat & ~age_sat_q;
+  end
+
+  // ==========================================================================
+  //  Coherent Interconnect
+  // ==========================================================================
+
+  sf_coh_xbar #(
+    .NUM_REQ            (NUM_COH_REQ),
+    .NUM_TGT            (NUM_LLC_BANKS),
+    .QOS_W              (SF_QOS_W),
+    .MAX_OUTSTANDING    (MAX_OUTSTANDING)
+  ) u_coh_xbar (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_uncore_n),
+    .req_valid_i        (xbar_req_valid),
+    .req_ready_o        (xbar_req_ready),
+    .req_i              (xbar_req_payload),
+    .req_tgt_i          (xbar_req_tgt),
+    .req_qos_i          (xbar_req_qos),
+    .rsp_valid_o        (xbar_rsp_valid),
+    .rsp_ready_i        (xbar_rsp_ready),
+    .rsp_o              (xbar_rsp),
+    .tgt_req_valid_o    (llc_req_valid),
+    .tgt_req_ready_i    (llc_req_ready),
+    .tgt_req_o          (llc_req),
+    .tgt_rsp_valid_i    (llc_rsp_valid),
+    .tgt_rsp_ready_o    (llc_rsp_ready),
+    .tgt_rsp_i          (llc_rsp),
+    .idle_o             (xbar_idle)
+  );
+
+  // ==========================================================================
+  //  Shared Last-Level Cache / Home Nodes
+  // ==========================================================================
+
+  for (genvar b = 0; b < NUM_LLC_BANKS; b++) begin : g_llc
+    sf_llc_bank #(
+      .BANK_ID          (b),
+      .NUM_BANKS        (NUM_LLC_BANKS),
+      .SIZE_KB          (LLC_BANK_SIZE_KB),
+      .WAYS             (LLC_WAYS),
+      .NUM_REQ          (NUM_COH_REQ),
+      .EN_ECC           (EN_ECC)
+    ) u_llc_bank (
+      .clk_i            (clk_llc_gated[b]),
+      .rst_ni           (rst_uncore_n),
+      .cfg_i            (csr2hw.llc_cfg),
+      .req_valid_i      (llc_req_valid[b]),
+      .req_ready_o      (llc_req_ready[b]),
+      .req_i            (llc_req[b]),
+      .rsp_valid_o      (llc_rsp_valid[b]),
+      .rsp_ready_i      (llc_rsp_ready[b]),
+      .rsp_o            (llc_rsp[b]),
+      .snp_valid_o      (llc_snp_valid[b]),
+      .snp_ready_i      (llc_snp_ready[b]),
+      .snp_o            (llc_snp[b]),
+      .snp_rsp_valid_i  (llc_snp_rsp_valid[b]),
+      .snp_rsp_ready_o  (llc_snp_rsp_ready[b]),
+      .snp_rsp_i        (llc_snp_rsp[b]),
+      .mem_valid_o      (llc_mem_valid[b]),
+      .mem_ready_i      (llc_mem_ready[b]),
+      .mem_req_o        (llc_mem_req[b]),
+      .mem_rsp_valid_i  (llc_mem_rsp_valid[b]),
+      .mem_rsp_ready_o  (llc_mem_rsp_ready[b]),
+      .mem_rsp_i        (llc_mem_rsp[b]),
+      .init_done_o      (llc_init_done[b]),
+      .idle_o           (llc_idle[b]),
+      .pmu_hit_o        (llc_pmu_hit[b]),
+      .pmu_miss_o       (llc_pmu_miss[b]),
+      .pmu_evict_o      (llc_pmu_evict[b]),
+      .fault_o          (llc_fault[b])
+    );
+  end
+
+  // ==========================================================================
+  //  Coherence Manager (Snoop Filter, Domain Routing)
+  // ==========================================================================
+
+  sf_coh_mgr #(
+    .NUM_HOME           (NUM_LLC_BANKS),
+    .NUM_AGENT          (NUM_CPLX),
+    .NUM_DOMAINS        (NUM_COH_DOMAINS),
+    .DOM_IDX_W          (DOM_IDX_W),
+    .DOMAIN_MAP         (CPLX_DOM_MAP),
+    .SF_ENTRIES         (SNOOP_FILTER_ENTRIES),
+    .EN_ECC             (EN_ECC)
+  ) u_coh_mgr (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_uncore_n),
+    .agent_en_i         (cplx_snp_en),
+    .home_snp_valid_i   (llc_snp_valid),
+    .home_snp_ready_o   (llc_snp_ready),
+    .home_snp_i         (llc_snp),
+    .home_snp_rsp_valid_o(llc_snp_rsp_valid),
+    .home_snp_rsp_ready_i(llc_snp_rsp_ready),
+    .home_snp_rsp_o     (llc_snp_rsp),
+    .agent_snp_valid_o  (cplx_snp_valid),
+    .agent_snp_ready_i  (cplx_snp_ready),
+    .agent_snp_o        (cplx_snp),
+    .agent_snp_rsp_valid_i(cplx_snp_rsp_valid),
+    .agent_snp_rsp_ready_o(cplx_snp_rsp_ready),
+    .agent_snp_rsp_i    (cplx_snp_rsp),
+    .init_done_o        (coh_mgr_init_done),
+    .idle_o             (coh_mgr_idle),
+    .fault_o            (coh_mgr_fault)
+  );
+
+  // ==========================================================================
+  //  Memory Fabric and AXI Edge
+  // ==========================================================================
+
+  sf_mem_fabric #(
+    .NUM_SRC            (NUM_LLC_BANKS),
+    .NUM_DST            (NUM_MEM_PORTS),
+    .INTERLEAVE_LSB     (LINE_OFS_W + BANK_SEL_W)
+  ) u_mem_fabric (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_uncore_n),
+    .src_valid_i        (llc_mem_valid),
+    .src_ready_o        (llc_mem_ready),
+    .src_req_i          (llc_mem_req),
+    .src_rsp_valid_o    (llc_mem_rsp_valid),
+    .src_rsp_ready_i    (llc_mem_rsp_ready),
+    .src_rsp_o          (llc_mem_rsp),
+    .dst_valid_o        (mport_valid),
+    .dst_ready_i        (mport_ready),
+    .dst_req_o          (mport_req),
+    .dst_rsp_valid_i    (mport_rsp_valid),
+    .dst_rsp_ready_o    (mport_rsp_ready),
+    .dst_rsp_i          (mport_rsp),
+    .idle_o             (mem_fabric_idle)
+  );
+
+  for (genvar p = 0; p < NUM_MEM_PORTS; p++) begin : g_mem
+
+    sf_axi_edge #(
+      .PORT_ID          (p),
+      .MAX_TXN          (MEM_MAX_TXN),
+      .EN_ECC           (EN_ECC)
+    ) u_axi_edge (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .isolate_i        (mem_isolate_q),
+      .mem_valid_i      (mport_valid[p]),
+      .mem_ready_o      (mport_ready[p]),
+      .mem_req_i        (mport_req[p]),
+      .mem_rsp_valid_o  (mport_rsp_valid[p]),
+      .mem_rsp_ready_i  (mport_rsp_ready[p]),
+      .mem_rsp_o        (mport_rsp[p]),
+      .axi_req_o        (edge_axi_req[p]),
+      .axi_rsp_i        (edge_axi_rsp[p]),
+      .idle_o           (edge_idle[p]),
+      .fault_o          (edge_fault[p])
+    );
+
+    sf_axi_cdc #(
+      .DEPTH            (AXI_CDC_DEPTH),
+      .SYNC_STAGES      (SYNC_STAGES)
+    ) u_mem_cdc (
+      .src_clk_i        (clk_core_i),
+      .src_rst_ni       (rst_uncore_n),
+      .src_req_i        (edge_axi_req[p]),
+      .src_rsp_o        (edge_axi_rsp[p]),
+      .dst_clk_i        (clk_mem_i),
+      .dst_rst_ni       (rst_memedge_n),
+      .dst_req_o        (mem_axi_req_o[p]),
+      .dst_rsp_i        (mem_axi_rsp_i[p])
+    );
+  end
+
+  // ==========================================================================
+  //  Control Plane: Host / Debug APB Arbitration and Decode
+  // ==========================================================================
+
+  sf_apb_cdc #(
+    .DEPTH              (APB_CDC_DEPTH),
+    .SYNC_STAGES        (SYNC_STAGES)
+  ) u_host_apb_cdc (
+    .src_clk_i          (clk_host_i),
+    .src_rst_ni         (rst_host_n),
+    .src_req_i          (host_apb_req_i),
+    .src_rsp_o          (host_apb_rsp_o),
+    .dst_clk_i          (clk_core_i),
+    .dst_rst_ni         (rst_core_n),
+    .dst_req_o          (host_apb_req),
+    .dst_rsp_i          (host_apb_rsp)
+  );
+
+  // Two-master arbiter: regenerates a compliant setup/access sequence
+  always_comb begin
+    apb_arb_state_d = apb_arb_state_q;
+    apb_owner_d     = apb_owner_q;
+
+    case (apb_arb_state_q)
+      APB_ARB_IDLE: begin
+        if (dbg_apb_req.psel) begin
+          apb_owner_d     = APB_OWN_DBG;
+          apb_arb_state_d = APB_ARB_SETUP;
+        end else if (host_apb_req.psel) begin
+          apb_owner_d     = APB_OWN_HOST;
+          apb_arb_state_d = APB_ARB_SETUP;
+        end
+      end
+      APB_ARB_SETUP: begin
+        apb_arb_state_d = APB_ARB_ACCESS;
+      end
+      APB_ARB_ACCESS: begin
+        if (apb_rsp.pready) begin
+          apb_arb_state_d = APB_ARB_IDLE;
+        end
+      end
+      default: begin
+        apb_arb_state_d = APB_ARB_IDLE;
+      end
+    endcase
+  end
+
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      apb_arb_state_q <= APB_ARB_IDLE;
+      apb_owner_q     <= APB_OWN_HOST;
+    end else begin
+      apb_arb_state_q <= apb_arb_state_d;
+      apb_owner_q     <= apb_owner_d;
+    end
+  end
+
+  always_comb begin
+    apb_req         = (apb_owner_q == APB_OWN_DBG) ? dbg_apb_req : host_apb_req;
+    apb_req.psel    = (apb_arb_state_q == APB_ARB_SETUP) || (apb_arb_state_q == APB_ARB_ACCESS);
+    apb_req.penable = (apb_arb_state_q == APB_ARB_ACCESS);
+
+    host_apb_rsp         = apb_rsp;
+    host_apb_rsp.pready  = (apb_arb_state_q == APB_ARB_ACCESS) && (apb_owner_q == APB_OWN_HOST) && apb_rsp.pready;
+    dbg_apb_rsp          = apb_rsp;
+    dbg_apb_rsp.pready   = (apb_arb_state_q == APB_ARB_ACCESS) && (apb_owner_q == APB_OWN_DBG)  && apb_rsp.pready;
+  end
+
+  // Region decode
+  assign apb_tgt_idx = apb_req.paddr[SF_APB_REGION_LSB +: SF_APB_TGT_IDX_W];
+  assign apb_tgt_hit = (apb_tgt_idx < NUM_APB_TGT);
+
+  always_comb begin
+    for (int unsigned t = 0; t < NUM_APB_TGT; t++) begin
+      apb_tgt_req[t]      = apb_req;
+      apb_tgt_req[t].psel = apb_req.psel && apb_tgt_hit && (apb_tgt_idx == SF_APB_TGT_IDX_W'(t));
+    end
+    apb_rsp = '{prdata: '0, pready: 1'b1, pslverr: 1'b1};
+    for (int unsigned t = 0; t < NUM_APB_TGT; t++) begin
+      if (apb_tgt_hit && (apb_tgt_idx == SF_APB_TGT_IDX_W'(t))) begin
+        apb_rsp = apb_tgt_rsp[t];
+      end
+    end
+  end
+
+  assign apb_decode_err = apb_req.psel & apb_req.penable & ~apb_tgt_hit;
+
+  // ==========================================================================
+  //  CSR Integration
+  // ==========================================================================
+
+  always_comb begin
+    hw2csr                         = '0;
+    hw2csr.seq_state               = seq_state_q;
+    hw2csr.init_done               = uncore_init_done;
+    hw2csr.quiesced                = (seq_state_q == SEQ_QUIESCED);
+    hw2csr.contained               = contain_q;
+    hw2csr.core_pwr_on             = SF_MAX_CORES'(core_pwr_on);
+    hw2csr.core_wfi                = SF_MAX_CORES'(core_wfi);
+    hw2csr.core_halted             = SF_MAX_CORES'(core_halted);
+    hw2csr.ost_busy                = SF_MAX_COH_REQ'(ost_busy);
+    hw2csr.rst_cause               = rst_cause;
+    hw2csr.cluster_id              = $bits(hw2csr.cluster_id)'(cluster_id_qs);
+    hw2csr.hw_cfg.num_cores        = sf_cfg_cnt_t'(NUM_CORES);
+    hw2csr.hw_cfg.num_cplx         = sf_cfg_cnt_t'(NUM_CPLX);
+    hw2csr.hw_cfg.num_llc_banks    = sf_cfg_cnt_t'(NUM_LLC_BANKS);
+    hw2csr.hw_cfg.num_mem_ports    = sf_cfg_cnt_t'(NUM_MEM_PORTS);
+    hw2csr.hw_cfg.num_dma_ports    = sf_cfg_cnt_t'(NUM_DMA_PORTS);
+    hw2csr.hw_cfg.num_coh_domains  = sf_cfg_cnt_t'(NUM_COH_DOMAINS);
+    hw2csr.hw_cfg.en_vector        = EN_VECTOR;
+    hw2csr.hw_cfg.en_tensor        = EN_TENSOR;
+    hw2csr.hw_cfg.en_trace         = EN_TRACE;
+    hw2csr.hw_cfg.en_pmu           = EN_PMU;
+    hw2csr.hw_cfg.en_ecc           = EN_ECC;
+    hw2csr.hw_cfg.en_dbg_sba       = EN_DBG_SBA;
+  end
+
+  sf_cluster_csr u_csr (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_core_n),
+    .apb_req_i          (apb_tgt_req[APB_TGT_CSR]),
+    .apb_rsp_o          (apb_tgt_rsp[APB_TGT_CSR]),
+    .hw2csr_i           (hw2csr),
+    .csr2hw_o           (csr2hw)
+  );
+
+  // ==========================================================================
+  //  Interrupt Routing
+  // ==========================================================================
+
+  assign int_irq[INT_IRQ_FLT_CORR]  = fault_corr_irq;
+  assign int_irq[INT_IRQ_FLT_FATAL] = fault_fatal_irq;
+  assign int_irq[INT_IRQ_PMU_OVF]   = pmu_ovf_irq;
+  assign int_irq[INT_IRQ_TRC_OVF]   = trace_ovf;
+  assign int_irq[INT_IRQ_SEQ_EVT]   = (seq_state_q == SEQ_QUIESCED) | (seq_state_q == SEQ_CONTAIN);
+
+  assign irq_src = {int_irq, ext_irq_sync};
+
+  sf_irq_ctrl #(
+    .NUM_SRC            (NUM_IRQ_SRC),
+    .NUM_HART           (NUM_CORES),
+    .SYNC_STAGES        (SYNC_STAGES)
+  ) u_irq_ctrl (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_core_n),
+    .clk_rtc_i          (clk_rtc_i),
+    .rst_rtc_ni         (rst_rtc_n),
+    .apb_req_i          (apb_tgt_req[APB_TGT_IRQ]),
+    .apb_rsp_o          (apb_tgt_rsp[APB_TGT_IRQ]),
+    .irq_src_i          (irq_src),
+    .hart_irq_o         (core_irq),
+    .hart_pending_o     (core_irq_pending),
+    .host_irq_o         (host_irq)
+  );
+
+  // ==========================================================================
+  //  Trace Aggregation
+  // ==========================================================================
+
+  if (EN_TRACE) begin : g_trace
+    sf_trace_agg #(
+      .NUM_SRC          (NUM_CORES),
+      .FIFO_DEPTH       (TRACE_FIFO_DEPTH)
+    ) u_trace (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .apb_req_i        (apb_tgt_req[APB_TGT_TRACE]),
+      .apb_rsp_o        (apb_tgt_rsp[APB_TGT_TRACE]),
+      .en_i             (csr2hw.trace_en),
+      .timestamp_i      (cluster_ts_q),
+      .src_valid_i      (core_trace_valid),
+      .src_i            (core_trace),
+      .pkt_valid_o      (trace_valid_o),
+      .pkt_ready_i      (trace_ready_i),
+      .pkt_o            (trace_pkt_o),
+      .overflow_o       (trace_ovf)
+    );
+  end else begin : g_no_trace
+    assign apb_tgt_rsp[APB_TGT_TRACE] = '{prdata: '0, pready: 1'b1, pslverr: 1'b1};
+    assign trace_valid_o              = 1'b0;
+    assign trace_pkt_o                = '0;
+    assign trace_ovf                  = 1'b0;
+  end
+
+  // ==========================================================================
+  //  Performance Monitor Routing
+  // ==========================================================================
+
+  always_comb begin
+    unc_evt_d               = '0;
+    unc_evt_d.coh_req_issue = xbar_req_valid & xbar_req_ready;
+    unc_evt_d.coh_req_stall = xbar_req_valid & ~xbar_req_ready;
+    unc_evt_d.coh_ost_limit = ost_at_limit;
+    unc_evt_d.llc_hit       = llc_pmu_hit;
+    unc_evt_d.llc_miss      = llc_pmu_miss;
+    unc_evt_d.llc_evict     = llc_pmu_evict;
+    unc_evt_d.snp_issue     = cplx_snp_valid & cplx_snp_ready;
+    for (int unsigned p = 0; p < NUM_MEM_PORTS; p++) begin
+      unc_evt_d.mem_rd_issue[p] = edge_axi_req[p].ar_valid & edge_axi_rsp[p].ar_ready;
+      unc_evt_d.mem_wr_issue[p] = edge_axi_req[p].aw_valid & edge_axi_rsp[p].aw_ready;
+    end
+  end
+
+  always_ff @(posedge clk_core_i or negedge rst_uncore_n) begin
+    if (!rst_uncore_n) begin
+      unc_evt_q <= '0;
+    end else begin
+      unc_evt_q <= unc_evt_d;
+    end
+  end
+
+  if (EN_PMU) begin : g_pmu
+    sf_pmu #(
+      .NUM_CORES        (NUM_CORES),
+      .NUM_UNC_EVT      (NUM_UNC_EVT),
+      .NUM_COUNTERS     (PMU_NUM_COUNTERS)
+    ) u_pmu (
+      .clk_i            (clk_core_i),
+      .rst_ni           (rst_uncore_n),
+      .apb_req_i        (apb_tgt_req[APB_TGT_PMU]),
+      .apb_rsp_o        (apb_tgt_rsp[APB_TGT_PMU]),
+      .timestamp_i      (cluster_ts_q),
+      .core_evt_i       (core_pmu_evt),
+      .unc_evt_i        (unc_evt_q),
+      .ovf_irq_o        (pmu_ovf_irq)
+    );
+  end else begin : g_no_pmu
+    assign apb_tgt_rsp[APB_TGT_PMU] = '{prdata: '0, pready: 1'b1, pslverr: 1'b1};
+    assign pmu_ovf_irq              = 1'b0;
+  end
+
+  // ==========================================================================
+  //  Fault Telemetry and Containment Hooks
+  // ==========================================================================
+
+  always_comb begin
+    top_seq_fault          = '0;
+    top_seq_fault.valid    = seq_init_timeout | seq_quiesce_timeout;
+    top_seq_fault.fatal    = 1'b1;
+    top_seq_fault.cls      = seq_init_timeout ? SF_FAULT_INIT : SF_FAULT_TIMEOUT;
+    top_seq_fault.syndrome = SF_FAULT_SYN_W'(seq_init_timeout ? TOP_FLT_INIT_TIMEOUT : TOP_FLT_QUIESCE_TIMEOUT);
+
+    top_txn_fault          = '0;
+    top_txn_fault.valid    = (|txn_timeout_evt) | (|txn_underflow_evt);
+    top_txn_fault.fatal    = 1'b1;
+    top_txn_fault.cls      = (|txn_underflow_evt) ? SF_FAULT_PROTOCOL : SF_FAULT_TIMEOUT;
+    for (int r = NUM_COH_REQ - 1; r >= 0; r--) begin
+      if (txn_timeout_evt[r] || txn_underflow_evt[r]) begin
+        top_txn_fault.syndrome = SF_FAULT_SYN_W'({
+          (txn_underflow_evt[r] ? TOP_FLT_TXN_UNDERFLOW : TOP_FLT_TXN_TIMEOUT),
+          COH_REQ_IDX_W'(r)
+        });
+      end
+    end
+
+    top_apb_fault          = '0;
+    top_apb_fault.valid    = apb_decode_err;
+    top_apb_fault.fatal    = 1'b0;
+    top_apb_fault.cls      = SF_FAULT_DECODE;
+    top_apb_fault.syndrome = SF_FAULT_SYN_W'({TOP_FLT_APB_DECODE, apb_tgt_idx});
+  end
+
+  always_comb begin
+    fault_src = '0;
+    for (int unsigned i = 0; i < NUM_CORES; i++)     fault_src[FLT_CORE_BASE + i] = core_fault[i];
+    for (int unsigned c = 0; c < NUM_CPLX; c++)      fault_src[FLT_L2_BASE   + c] = l2_fault[c];
+    for (int unsigned b = 0; b < NUM_LLC_BANKS; b++) fault_src[FLT_LLC_BASE  + b] = llc_fault[b];
+    for (int unsigned p = 0; p < NUM_MEM_PORTS; p++) fault_src[FLT_MEM_BASE  + p] = edge_fault[p];
+    for (int unsigned d = 0; d < NUM_DMA_PORTS; d++) fault_src[FLT_DMA_BASE  + d] = dma_fault[d];
+    fault_src[FLT_COH]     = coh_mgr_fault;
+    fault_src[FLT_TLB]     = tlb_fault;
+    fault_src[FLT_TNS]     = tns_fault;
+    fault_src[FLT_TOP_SEQ] = top_seq_fault;
+    fault_src[FLT_TOP_TXN] = top_txn_fault;
+    fault_src[FLT_TOP_APB] = top_apb_fault;
+  end
+
+  sf_fault_ctrl #(
+    .NUM_SRC            (NUM_FAULT_SRC)
+  ) u_fault_ctrl (
+    .clk_i              (clk_core_i),
+    .rst_ni             (rst_core_n),
+    .apb_req_i          (apb_tgt_req[APB_TGT_FAULT]),
+    .apb_rsp_o          (apb_tgt_rsp[APB_TGT_FAULT]),
+    .timestamp_i        (cluster_ts_q),
+    .fault_i            (fault_src),
+    .fatal_o            (fault_fatal),
+    .corr_irq_o         (fault_corr_irq),
+    .fatal_irq_o        (fault_fatal_irq),
+    .status_o           (fault_status)
+  );
+
+  // ==========================================================================
+  //  Registered Top-Level Outputs
+  // ==========================================================================
+
+  always_ff @(posedge clk_core_i or negedge rst_core_n) begin
+    if (!rst_core_n) begin
+      host_irq_o          <= 1'b0;
+      fault_irq_o         <= 1'b0;
+      dbg_halted_o        <= 1'b0;
+      fault_status_o      <= '0;
+      cluster_ready_o     <= 1'b0;
+      cluster_quiesced_o  <= 1'b0;
+      cluster_contained_o <= 1'b0;
+      core_active_o       <= '0;
+    end else begin
+      host_irq_o          <= host_irq;
+      fault_irq_o         <= fault_fatal_irq;
+      dbg_halted_o        <= |core_halted;
+      fault_status_o      <= fault_status;
+      cluster_ready_o     <= (seq_state_q == SEQ_RUN);
+      cluster_quiesced_o  <= (seq_state_q == SEQ_QUIESCED);
+      cluster_contained_o <= (seq_state_q == SEQ_CONTAIN);
+      core_active_o       <= core_pwr_on & ~core_wfi;
+    end
+  end
+
+  // ==========================================================================
+  //  Elaboration Guards (synthesis-safe)
+  // ==========================================================================
+
+  if (NUM_CORES > SF_MAX_CORES) begin : g_err_num_cores
+    $error("silicaflux_top: NUM_CORES (%0d) exceeds SF_MAX_CORES (%0d)", NUM_CORES, SF_MAX_CORES);
+  end
+  if (NUM_CPLX > SF_MAX_CPLX) begin : g_err_num_cplx
+    $error("silicaflux_top: NUM_CPLX (%0d) exceeds SF_MAX_CPLX (%0d)", NUM_CPLX, SF_MAX_CPLX);
+  end
+  if (NUM_COH_REQ > SF_MAX_COH_REQ) begin : g_err_num_req
+    $error("silicaflux_top: NUM_COH_REQ (%0d) exceeds SF_MAX_COH_REQ (%0d)", NUM_COH_REQ, SF_MAX_COH_REQ);
+  end
+  if ((1 << SF_SRC_ID_W) < NUM_COH_REQ) begin : g_err_src_id
+    $error("silicaflux_top: SF_SRC_ID_W too narrow for %0d coherent requesters", NUM_COH_REQ);
+  end
+  if ((NUM_LLC_BANKS & (NUM_LLC_BANKS - 1)) != 0) begin : g_err_llc_pow2
+    $error("silicaflux_top: NUM_LLC_BANKS must be a power of two");
+  end
+  if ((NUM_MEM_PORTS & (NUM_MEM_PORTS - 1)) != 0) begin : g_err_mem_pow2
+    $error("silicaflux_top: NUM_MEM_PORTS must be a power of two");
+  end
+  if ((NUM_COH_DOMAINS == 0) || (NUM_COH_DOMAINS > NUM_CPLX)) begin : g_err_domains
+    $error("silicaflux_top: NUM_COH_DOMAINS must be in [1, NUM_CPLX]");
+  end
+  if (SF_HART_ID_W < CLUSTER_ID_W + CORE_IDX_W) begin : g_err_hart_id
+    $error("silicaflux_top: SF_HART_ID_W cannot encode cluster and core index");
+  end
+  if (SYNC_STAGES < 2) begin : g_err_sync
+    $error("silicaflux_top: SYNC_STAGES must be >= 2");
+  end
+  if ((MAX_OUTSTANDING == 0) || (MAX_OUTSTANDING >= (1 << SF_OST_LIMIT_W) * 2)) begin : g_err_ost
+    $error("silicaflux_top: MAX_OUTSTANDING out of supported range");
+  end
+  if (NUM_APB_TGT > (1 << SF_APB_TGT_IDX_W)) begin : g_err_apb_map
+    $error("silicaflux_top: APB target map exceeds region index space");
+  end
+  if (LINE_OFS_W + BANK_SEL_W > SF_ADDR_W) begin : g_err_hash
+    $error("silicaflux_top: LLC bank hash exceeds address width");
+  end
+
+  // ==========================================================================
+  //  Architectural Assertions
+  // ==========================================================================
+
+`ifndef SYNTHESIS
+  default clocking cb_core @(posedge clk_core_i); endclocking
+  default disable iff (!rst_core_n);
+
+  a_seq_state_legal: assert property (
+    seq_state_q inside {SEQ_RESET, SEQ_UNCORE_REL, SEQ_INIT, SEQ_CORE_REL,
+                        SEQ_RUN, SEQ_QUIESCE, SEQ_QUIESCED, SEQ_CONTAIN})
+    else $error("sequencer entered illegal state");
+
+  a_contain_sticky: assert property (
+    (seq_state_q == SEQ_CONTAIN) |=> (seq_state_q == SEQ_CONTAIN))
+    else $error("containment exited without reset");
+
+  a_cores_after_init: assert property (
+    (|core_rel_q) |-> (uncore_init_done || contain_q || $past(|core_rel_q)))
+    else $error("core released before uncore initialization");
+
+  a_uncore_rst_order: assert property (
+    uncore_rst_n_q |-> uncore_clk_en_q)
+    else $error("uncore reset released without clock enable");
+
+  a_apb_penable_psel: assert property (
+    apb_req.penable |-> apb_req.psel)
+    else $error("APB penable without psel");
+
+  a_apb_setup_access: assert property (
+    (apb_arb_state_q == APB_ARB_SETUP) |=> (apb_arb_state_q == APB_ARB_ACCESS))
+    else $error("APB setup phase not followed by access");
+
+  if (!(EN_VECTOR || EN_TENSOR)) begin : g_vx_sva
+    a_vx_disabled: assert property (
+      core_vx_valid == '0)
+      else $error("vector/tensor dispatch issued with feature disabled");
+  end
+
+  a_tns_gate_idle: assert property (
+    disable iff (!rst_uncore_n)
+    $fell(tns_clk_en_q) |-> (tns_idle && dispatch_idle))
+    else $error("tensor clock gated while busy");
+
+  for (genvar r = 0; r < NUM_COH_REQ; r++) begin : g_coh_sva
+
+    a_ing_valid_stable: assert property (
+      disable iff (!rst_uncore_n)
+      (xbar_req_valid[r] && !xbar_req_ready[r]) |=> (xbar_req_valid[r] && $stable(xbar_req[r])))
+      else $error("coherent request %0d dropped or mutated under backpressure", r);
+
+    a_ing_blocked: assert property (
+      disable iff (!rst_uncore_n)
+      (ingress_block_q && !BLK_EXEMPT[r]) |-> !coh_ing_hs[r])
+      else $error("coherent request %0d admitted while ingress blocked", r);
+
+    a_ost_bound: assert property (
+      disable iff (!rst_uncore_n)
+      ost_cnt_q[r] <= OST_CNT_W'(MAX_OUTSTANDING))
+      else $error("outstanding tracker %0d exceeded MAX_OUTSTANDING", r);
+
+    a_ost_no_underflow: assert property (
+      disable iff (!rst_uncore_n)
+      !txn_underflow_evt[r])
+      else $error("completion without outstanding request on requester %0d", r);
+
+    a_rsp_routed: assert property (
+      disable iff (!rst_uncore_n)
+      xbar_rsp_valid[r] |-> (xbar_rsp[r].src_id == SF_SRC_ID_W'(unsigned'(r))))
+      else $error("response misrouted to requester %0d", r);
+  end
+
+  for (genvar i = 0; i < NUM_CORES; i++) begin : g_core_sva
+
+    a_iso_clk_off: assert property (
+      disable iff (!rst_uncore_n)
+      core_pwr_ctrl[i].iso_en |-> !core_pwr_ctrl[i].clk_en || test_mode_i)
+      else $error("core %0d clock running under isolation", i);
+
+    a_no_xfer_gated: assert property (
+      disable iff (!rst_uncore_n)
+      !core_clk_on[i] |-> !(core_l1_req_valid[i] || core_ptw_valid[i] || core_vx_valid[i] || core_snp_rsp_valid[i]))
+      else $error("core %0d transfer while clock gated", i);
+  end
+
+  for (genvar p = 0; p < NUM_MEM_PORTS; p++) begin : g_axi_sva
+
+    a_axi_aw_stable: assert property (
+      @(posedge clk_mem_i) disable iff (!rst_memedge_n)
+      (mem_axi_req_o[p].aw_valid && !mem_axi_rsp_i[p].aw_ready)
+        |=> (mem_axi_req_o[p].aw_valid && $stable(mem_axi_req_o[p].aw)))
+      else $error("AXI AW unstable on memory port %0d", p);
+
+    a_axi_ar_stable: assert property (
+      @(posedge clk_mem_i) disable iff (!rst_memedge_n)
+      (mem_axi_req_o[p].ar_valid && !mem_axi_rsp_i[p].ar_ready)
+        |=> (mem_axi_req_o[p].ar_valid && $stable(mem_axi_req_o[p].ar)))
+      else $error("AXI AR unstable on memory port %0d", p);
+  end
+`endif
+
+endmodule : silicaflux_top
