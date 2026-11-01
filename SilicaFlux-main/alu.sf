@@ -1,0 +1,674 @@
+// =============================================================================
+//  SilicaFlux :: sf_alu
+//  Scalar integer ALU execution unit
+// -----------------------------------------------------------------------------
+//  Fast path : ADD SUB AND OR XOR SHL SHR SAR SLT  (+ MUL when MUL_STAGES == 0)
+//  Long path : MUL, MUL_STAGES-deep pipeline, shares the single result port
+//
+//  Latency   : fast = OUT_REG          (0 = pass-through, 1 = registered)
+//              mul  = OUT_REG + MUL_STAGES
+//  Ordering  : completion may be out of program order; ROB tag travels with uop
+//  Kill      : global flush + branch-mask kill/resolve, applied at every stage
+//  Port arb  : long-path tail has priority; fast issue blocked while tail valid
+//  Flags     : [3]=N [2]=Z [1]=C [0]=V ; C on SUB = NOT borrow
+// =============================================================================
+
+module sf_alu
+  import silicaflux_pkg::*;
+#(
+  parameter  int unsigned XLEN       = 64,
+  parameter  int unsigned ROB_TAG_W  = 7,
+  parameter  int unsigned PREG_W     = 8,
+  parameter  int unsigned BR_MASK_W  = 12,
+  parameter  int unsigned MUL_STAGES = 2,
+  parameter  bit          OUT_REG    = 1'b1,
+  parameter  bit          FLAGS_EN   = 1'b1,
+  parameter  bit          SAT_EN     = 1'b0,
+  localparam int unsigned ALU_OP_W   = 4,
+  localparam int unsigned FLAG_W     = 4
+) (
+  input  logic                 clk_i,
+  input  logic                 rst_ni,
+
+  // ---------------------------------------------------------------------------
+  // Pipeline control
+  // ---------------------------------------------------------------------------
+  input  logic                 flush_i,
+  input  logic [BR_MASK_W-1:0] br_kill_mask_i,
+  input  logic [BR_MASK_W-1:0] br_resolve_mask_i,
+
+  // ---------------------------------------------------------------------------
+  // Issue / register-read interface
+  // ---------------------------------------------------------------------------
+  input  logic                 req_valid_i,
+  output logic                 req_ready_o,
+  output logic                 fast_ready_o,
+  output logic                 mul_ready_o,
+  input  logic [ALU_OP_W-1:0]  req_op_i,
+  input  logic                 req_sat_i,
+  input  logic [XLEN-1:0]      req_src_a_i,
+  input  logic [XLEN-1:0]      req_src_b_i,
+  input  logic [ROB_TAG_W-1:0] req_rob_tag_i,
+  input  logic [PREG_W-1:0]    req_pdst_i,
+  input  logic                 req_rd_we_i,
+  input  logic [BR_MASK_W-1:0] req_br_mask_i,
+
+  // ---------------------------------------------------------------------------
+  // Writeback / bypass interface
+  // ---------------------------------------------------------------------------
+  output logic                 res_valid_o,
+  input  logic                 res_ready_i,
+  output logic [XLEN-1:0]      res_data_o,
+  output logic [ROB_TAG_W-1:0] res_rob_tag_o,
+  output logic [PREG_W-1:0]    res_pdst_o,
+  output logic                 res_rd_we_o,
+  output logic [BR_MASK_W-1:0] res_br_mask_o,
+  output logic                 res_illegal_o,
+  output logic [FLAG_W-1:0]    res_flags_o,
+  output logic [FLAG_W-1:0]    res_flags_we_o
+);
+
+  // ===========================================================================
+  // Local parameters
+  // ===========================================================================
+  localparam int unsigned MSB          = XLEN - 1;
+  localparam int unsigned SHAMT_W      = $clog2(XLEN);
+  localparam int unsigned MUL_LO_W     = XLEN / 2;
+  localparam int unsigned MUL_HI_W     = XLEN - MUL_LO_W;
+  localparam bit          MUL_LONG     = (MUL_STAGES != 0);
+  localparam int unsigned MUL_Q_N      = MUL_LONG ? MUL_STAGES : 1;
+  localparam int unsigned MUL_PP_N     = (MUL_STAGES > 1) ? (MUL_STAGES - 1) : 1;
+  localparam int unsigned FAST_LATENCY = OUT_REG ? 1 : 0;
+  localparam int unsigned MUL_LATENCY  = FAST_LATENCY + MUL_STAGES;
+
+  localparam int unsigned FLAG_V       = 0;
+  localparam int unsigned FLAG_C       = 1;
+  localparam int unsigned FLAG_Z       = 2;
+  localparam int unsigned FLAG_N       = 3;
+
+  localparam logic [XLEN-1:0] SAT_POS  = {1'b0, {(XLEN-1){1'b1}}};
+  localparam logic [XLEN-1:0] SAT_NEG  = {1'b1, {(XLEN-1){1'b0}}};
+
+  // ===========================================================================
+  // Types
+  // ===========================================================================
+  typedef enum logic [ALU_OP_W-1:0] {
+    ALU_OP_ADD = 4'h0,
+    ALU_OP_SUB = 4'h1,
+    ALU_OP_MUL = 4'h2,
+    ALU_OP_AND = 4'h3,
+    ALU_OP_OR  = 4'h4,
+    ALU_OP_XOR = 4'h5,
+    ALU_OP_SHL = 4'h6,
+    ALU_OP_SHR = 4'h7,
+    ALU_OP_SAR = 4'h8,
+    ALU_OP_SLT = 4'h9
+  } alu_op_e;
+
+  localparam int unsigned ALU_OP_COUNT = 10;
+
+  typedef enum logic [1:0] {
+    BITWISE_AND = 2'b00,
+    BITWISE_OR  = 2'b01,
+    BITWISE_XOR = 2'b10
+  } alu_bitwise_fn_e;
+
+  typedef enum logic [1:0] {
+    SHIFT_SLL = 2'b00,
+    SHIFT_SRL = 2'b01,
+    SHIFT_SRA = 2'b10
+  } alu_shift_fn_e;
+
+  // One-hot fast-path result select
+  typedef struct packed {
+    logic add;
+    logic slt;
+    logic bitwise;
+    logic shift;
+    logic mul;
+  } alu_sel_t;
+
+  typedef struct packed {
+    logic            legal;
+    logic            long_op;
+    alu_sel_t        sel;
+    logic            sub;
+    logic            arith;
+    logic            sat;
+    alu_bitwise_fn_e bitwise_fn;
+    alu_shift_fn_e   shift_fn;
+  } alu_dec_t;
+
+  typedef struct packed {
+    logic                 valid;
+    logic [ROB_TAG_W-1:0] rob_tag;
+    logic [PREG_W-1:0]    pdst;
+    logic                 rd_we;
+    logic [BR_MASK_W-1:0] br_mask;
+  } uop_meta_t;
+
+  typedef struct packed {
+    logic            illegal;
+    logic            arith;
+    logic            carry;
+    logic            ovf;
+    logic [XLEN-1:0] data;
+  } alu_payload_t;
+
+  typedef struct packed {
+    uop_meta_t    meta;
+    alu_payload_t pl;
+  } alu_res_t;
+
+  typedef struct packed {
+    logic [XLEN-1:0]     lo;
+    logic [MUL_HI_W-1:0] hi;
+  } mul_pp_t;
+
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+  function automatic uop_meta_t meta_step(
+    input uop_meta_t            m,
+    input logic                 flush,
+    input logic [BR_MASK_W-1:0] kill_mask,
+    input logic [BR_MASK_W-1:0] resolve_mask
+  );
+    uop_meta_t r;
+    r         = m;
+    r.valid   = m.valid & ~flush & ~(|(m.br_mask & kill_mask));
+    r.br_mask = m.br_mask & ~resolve_mask;
+    return r;
+  endfunction
+
+  function automatic logic [XLEN-1:0] bit_reverse(input logic [XLEN-1:0] v);
+    logic [XLEN-1:0] r;
+    for (int unsigned i = 0; i < XLEN; i++) begin
+      r[i] = v[MSB-i];
+    end
+    return r;
+  endfunction
+
+  // ===========================================================================
+  // Decode  (opcode-only, off the operand critical path)
+  // ===========================================================================
+  alu_op_e  req_op;
+  alu_dec_t dec;
+
+  assign req_op = alu_op_e'(req_op_i);
+
+  always_comb begin
+    dec            = '0;
+    dec.bitwise_fn = BITWISE_AND;
+    dec.shift_fn   = SHIFT_SLL;
+
+    unique case (req_op)
+      ALU_OP_ADD: begin
+        dec.legal   = 1'b1;
+        dec.sel.add = 1'b1;
+        dec.arith   = 1'b1;
+        dec.sat     = req_sat_i & SAT_EN;
+      end
+      ALU_OP_SUB: begin
+        dec.legal   = 1'b1;
+        dec.sel.add = 1'b1;
+        dec.sub     = 1'b1;
+        dec.arith   = 1'b1;
+        dec.sat     = req_sat_i & SAT_EN;
+      end
+      ALU_OP_SLT: begin
+        dec.legal   = 1'b1;
+        dec.sel.slt = 1'b1;
+        dec.sub     = 1'b1;
+      end
+      ALU_OP_MUL: begin
+        dec.legal   = 1'b1;
+        dec.long_op = MUL_LONG;
+        dec.sel.mul = ~MUL_LONG;
+      end
+      ALU_OP_AND: begin
+        dec.legal       = 1'b1;
+        dec.sel.bitwise = 1'b1;
+        dec.bitwise_fn  = BITWISE_AND;
+      end
+      ALU_OP_OR: begin
+        dec.legal       = 1'b1;
+        dec.sel.bitwise = 1'b1;
+        dec.bitwise_fn  = BITWISE_OR;
+      end
+      ALU_OP_XOR: begin
+        dec.legal       = 1'b1;
+        dec.sel.bitwise = 1'b1;
+        dec.bitwise_fn  = BITWISE_XOR;
+      end
+      ALU_OP_SHL: begin
+        dec.legal     = 1'b1;
+        dec.sel.shift = 1'b1;
+        dec.shift_fn  = SHIFT_SLL;
+      end
+      ALU_OP_SHR: begin
+        dec.legal     = 1'b1;
+        dec.sel.shift = 1'b1;
+        dec.shift_fn  = SHIFT_SRL;
+      end
+      ALU_OP_SAR: begin
+        dec.legal     = 1'b1;
+        dec.sel.shift = 1'b1;
+        dec.shift_fn  = SHIFT_SRA;
+      end
+      default: begin
+        dec.legal = 1'b0;
+      end
+    endcase
+  end
+
+  // ===========================================================================
+  // Request metadata
+  // ===========================================================================
+  uop_meta_t req_meta;
+  uop_meta_t mul_meta_in;
+
+  always_comb begin
+    req_meta.valid   = req_valid_i;
+    req_meta.rob_tag = req_rob_tag_i;
+    req_meta.pdst    = req_pdst_i;
+    req_meta.rd_we   = req_rd_we_i;
+    req_meta.br_mask = req_br_mask_i;
+
+    mul_meta_in       = req_meta;
+    mul_meta_in.valid = req_valid_i & dec.long_op;
+  end
+
+  // ===========================================================================
+  // Fast datapath  (lane-replicable: every unit is a pure function of a/b/dec)
+  // ===========================================================================
+  logic [XLEN-1:0]    opa;
+  logic [XLEN-1:0]    opb;
+
+  assign opa = req_src_a_i;
+  assign opb = req_src_b_i;
+
+  // ---- Adder : ADD / SUB / SLT ----------------------------------------------
+  logic [XLEN-1:0]    add_b;
+  logic [XLEN:0]      add_sum_ext;
+  logic [XLEN-1:0]    add_sum;
+  logic               add_carry;
+  logic               add_ovf;
+  logic [XLEN-1:0]    add_res;
+  logic               slt_bit;
+
+  always_comb begin
+    add_b       = opb ^ {XLEN{dec.sub}};
+    add_sum_ext = {1'b0, opa} + {1'b0, add_b} + {{XLEN{1'b0}}, dec.sub};
+    add_sum     = add_sum_ext[XLEN-1:0];
+    add_carry   = add_sum_ext[XLEN];
+    add_ovf     = (opa[MSB] ~^ add_b[MSB]) & (add_sum[MSB] ^ opa[MSB]);
+    slt_bit     = (opa[MSB] ^ opb[MSB]) ? opa[MSB] : add_sum[MSB];
+  end
+
+  // ---- Saturation stage (signed clamp on overflow, SAT_EN-gated) ------------
+  generate
+    if (SAT_EN) begin : g_sat
+      always_comb begin
+        add_res = (dec.sat & add_ovf) ? (opa[MSB] ? SAT_NEG : SAT_POS) : add_sum;
+      end
+    end else begin : g_nosat
+      assign add_res = add_sum;
+    end
+  endgenerate
+
+  // ---- Bitwise : AND / OR / XOR ---------------------------------------------
+  logic [XLEN-1:0]    bitwise_res;
+
+  always_comb begin
+    unique case (dec.bitwise_fn)
+      BITWISE_AND: bitwise_res = opa & opb;
+      BITWISE_OR:  bitwise_res = opa | opb;
+      BITWISE_XOR: bitwise_res = opa ^ opb;
+      default:     bitwise_res = '0;
+    endcase
+  end
+
+  // ---- Shifter : single right funnel, SLL via bit reversal ------------------
+  logic [SHAMT_W-1:0] shamt;
+  logic [XLEN-1:0]    sh_src;
+  logic [XLEN-1:0]    sh_fill;
+  logic [2*XLEN-1:0]  sh_wide;
+  logic [XLEN-1:0]    sh_lo;
+  logic [XLEN-1:0]    shift_res;
+  logic               sh_left;
+
+  always_comb begin
+    sh_left   = (dec.shift_fn == SHIFT_SLL);
+    shamt     = opb[SHAMT_W-1:0];
+    sh_src    = sh_left ? bit_reverse(opa) : opa;
+    sh_fill   = (dec.shift_fn == SHIFT_SRA) ? {XLEN{opa[MSB]}} : {XLEN{1'b0}};
+    sh_wide   = {sh_fill, sh_src} >> shamt;
+    sh_lo     = sh_wide[XLEN-1:0];
+    shift_res = sh_left ? bit_reverse(sh_lo) : sh_lo;
+  end
+
+  // ---- Combinational multiply (MUL_STAGES == 0 only) ------------------------
+  logic [XLEN-1:0]    mul_fast_res;
+
+  generate
+    if (!MUL_LONG) begin : g_mul_fast
+      assign mul_fast_res = opa * opb;
+    end else begin : g_mul_fast_off
+      assign mul_fast_res = {XLEN{1'b0}};
+    end
+  endgenerate
+
+  // ---- Result select (AND-OR, one-hot) --------------------------------------
+  logic [XLEN-1:0]    fast_data;
+
+  always_comb begin
+    fast_data = ({XLEN{dec.sel.add}}     & add_res)
+              | ({XLEN{dec.sel.slt}}     & {{(XLEN-1){1'b0}}, slt_bit})
+              | ({XLEN{dec.sel.bitwise}} & bitwise_res)
+              | ({XLEN{dec.sel.shift}}   & shift_res)
+              | ({XLEN{dec.sel.mul}}     & mul_fast_res);
+  end
+
+  // ===========================================================================
+  // Port arbitration / handshake
+  // ===========================================================================
+  logic            out_adv;
+  logic            mul_adv;
+  logic            mul_tail_valid;
+  uop_meta_t       mul_tail_meta;
+  logic [XLEN-1:0] mul_tail_data;
+  alu_res_t        out_q;
+
+  generate
+    if (OUT_REG) begin : g_adv_reg
+      assign out_adv = ~out_q.meta.valid | res_ready_i;
+    end else begin : g_adv_comb
+      assign out_adv = res_ready_i;
+    end
+  endgenerate
+
+  assign mul_adv      = out_adv | ~mul_tail_valid;
+  assign fast_ready_o = out_adv & ~mul_tail_valid;
+  assign mul_ready_o  = MUL_LONG ? mul_adv : fast_ready_o;
+  assign req_ready_o  = dec.long_op ? mul_ready_o : fast_ready_o;
+
+  // ===========================================================================
+  // Long path : pipelined multiplier
+  //   S0        : operand capture (isolates bypass network from multiplier)
+  //   S1        : partial products  A*B[lo] , A[lo]*B[hi]   (MUL_STAGES >= 2)
+  //   S2..SN-1  : retiming registers
+  //   tail      : final merge add -> result port
+  // ===========================================================================
+  generate
+    if (MUL_LONG) begin : g_mul_long
+      uop_meta_t       mul_meta_q [MUL_Q_N];
+      logic [XLEN-1:0] mul_a_q;
+      logic [XLEN-1:0] mul_b_q;
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          for (int unsigned s = 0; s < MUL_Q_N; s++) begin
+            mul_meta_q[s] <= '0;
+          end
+        end else if (mul_adv) begin
+          mul_meta_q[0] <= meta_step(mul_meta_in, flush_i, br_kill_mask_i, br_resolve_mask_i);
+          for (int unsigned s = 1; s < MUL_Q_N; s++) begin
+            mul_meta_q[s] <= meta_step(mul_meta_q[s-1], flush_i, br_kill_mask_i, br_resolve_mask_i);
+          end
+        end else begin
+          for (int unsigned s = 0; s < MUL_Q_N; s++) begin
+            mul_meta_q[s] <= meta_step(mul_meta_q[s], flush_i, br_kill_mask_i, br_resolve_mask_i);
+          end
+        end
+      end
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          mul_a_q <= '0;
+          mul_b_q <= '0;
+        end else if (mul_adv && mul_meta_in.valid) begin
+          mul_a_q <= req_src_a_i;
+          mul_b_q <= req_src_b_i;
+        end
+      end
+
+      if (MUL_STAGES == 1) begin : g_mul_s1
+        assign mul_tail_data = mul_a_q * mul_b_q;
+      end else begin : g_mul_sn
+        mul_pp_t mul_pp_d;
+        mul_pp_t mul_pp_q [MUL_PP_N];
+
+        always_comb begin
+          mul_pp_d.lo = mul_a_q * {{MUL_HI_W{1'b0}}, mul_b_q[MUL_LO_W-1:0]};
+          mul_pp_d.hi = mul_a_q[MUL_HI_W-1:0] * mul_b_q[XLEN-1:MUL_LO_W];
+        end
+
+        always_ff @(posedge clk_i or negedge rst_ni) begin
+          if (!rst_ni) begin
+            for (int unsigned k = 0; k < MUL_PP_N; k++) begin
+              mul_pp_q[k] <= '0;
+            end
+          end else if (mul_adv) begin
+            if (mul_meta_q[0].valid) begin
+              mul_pp_q[0] <= mul_pp_d;
+            end
+            for (int unsigned k = 1; k < MUL_PP_N; k++) begin
+              if (mul_meta_q[k].valid) begin
+                mul_pp_q[k] <= mul_pp_q[k-1];
+              end
+            end
+          end
+        end
+
+        assign mul_tail_data = mul_pp_q[MUL_PP_N-1].lo
+                             + {mul_pp_q[MUL_PP_N-1].hi, {MUL_LO_W{1'b0}}};
+      end
+
+      assign mul_tail_meta  = mul_meta_q[MUL_Q_N-1];
+      assign mul_tail_valid = mul_meta_q[MUL_Q_N-1].valid;
+    end else begin : g_mul_none
+      assign mul_tail_meta  = '0;
+      assign mul_tail_valid = 1'b0;
+      assign mul_tail_data  = {XLEN{1'b0}};
+    end
+  endgenerate
+
+  // ===========================================================================
+  // Execute-stage merge
+  // ===========================================================================
+  alu_res_t fast_res;
+  alu_res_t tail_res;
+  alu_res_t exec_res;
+
+  always_comb begin
+    fast_res            = '0;
+    fast_res.meta       = req_meta;
+    fast_res.meta.valid = req_valid_i & ~dec.long_op & ~mul_tail_valid;
+    fast_res.pl.illegal = ~dec.legal;
+    fast_res.pl.arith   = dec.arith;
+    fast_res.pl.carry   = add_carry & dec.arith;
+    fast_res.pl.ovf     = add_ovf   & dec.arith;
+    fast_res.pl.data    = fast_data;
+
+    tail_res            = '0;
+    tail_res.meta       = mul_tail_meta;
+    tail_res.pl.data    = mul_tail_data;
+
+    exec_res            = mul_tail_valid ? tail_res : fast_res;
+  end
+
+  // ===========================================================================
+  // Output stage  (registered or pass-through)
+  // ===========================================================================
+  alu_res_t out_res;
+
+  generate
+    if (OUT_REG) begin : g_out_reg
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          out_q.meta <= '0;
+        end else if (out_adv) begin
+          out_q.meta <= meta_step(exec_res.meta, flush_i, br_kill_mask_i, br_resolve_mask_i);
+        end else begin
+          out_q.meta <= meta_step(out_q.meta, flush_i, br_kill_mask_i, br_resolve_mask_i);
+        end
+      end
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          out_q.pl <= '0;
+        end else if (out_adv && exec_res.meta.valid) begin
+          out_q.pl <= exec_res.pl;
+        end
+      end
+
+      assign out_res = out_q;
+    end else begin : g_out_comb
+      assign out_q   = '0;
+      assign out_res = exec_res;
+    end
+  endgenerate
+
+  // ===========================================================================
+  // Writeback / bypass drive
+  // ===========================================================================
+  logic out_live;
+
+  assign out_live      = out_res.meta.valid
+                       & ~flush_i
+                       & ~(|(out_res.meta.br_mask & br_kill_mask_i));
+
+  assign res_valid_o   = out_live;
+  assign res_data_o    = out_res.pl.data;
+  assign res_rob_tag_o = out_res.meta.rob_tag;
+  assign res_pdst_o    = out_res.meta.pdst;
+  assign res_rd_we_o   = out_res.meta.rd_we & ~out_res.pl.illegal;
+  assign res_br_mask_o = out_res.meta.br_mask & ~br_resolve_mask_i;
+  assign res_illegal_o = out_res.pl.illegal;
+
+  // ---- Flags (Z/N from result, C/V from adder) ------------------------------
+  generate
+    if (FLAGS_EN) begin : g_flags
+      always_comb begin
+        res_flags_o             = '0;
+        res_flags_o[FLAG_N]     = out_res.pl.data[MSB];
+        res_flags_o[FLAG_Z]     = ~(|out_res.pl.data);
+        res_flags_o[FLAG_C]     = out_res.pl.carry;
+        res_flags_o[FLAG_V]     = out_res.pl.ovf;
+
+        res_flags_we_o          = '0;
+        if (out_live && !out_res.pl.illegal) begin
+          res_flags_we_o[FLAG_N] = 1'b1;
+          res_flags_we_o[FLAG_Z] = 1'b1;
+          res_flags_we_o[FLAG_C] = out_res.pl.arith;
+          res_flags_we_o[FLAG_V] = out_res.pl.arith;
+        end
+      end
+    end else begin : g_noflags
+      assign res_flags_o    = '0;
+      assign res_flags_we_o = '0;
+    end
+  endgenerate
+
+  // ===========================================================================
+  // Assertions / coverage  (simulation and formal only)
+  // ===========================================================================
+`ifndef SYNTHESIS
+`ifndef SF_ASSERT_OFF
+
+  logic req_fire;
+  logic fast_fire;
+  logic tail_fire;
+
+  assign req_fire  = req_valid_i & req_ready_o;
+  assign fast_fire = req_fire & ~dec.long_op;
+  assign tail_fire = mul_tail_valid & out_adv;
+
+  initial begin : p_param_check
+    if (XLEN < 8 || (XLEN & (XLEN - 1)) != 0) begin
+      $fatal(1, "%m: XLEN=%0d must be a power of two >= 8", XLEN);
+    end
+    if (ROB_TAG_W == 0 || PREG_W == 0 || BR_MASK_W == 0) begin
+      $fatal(1, "%m: tag and mask widths must be non-zero");
+    end
+  end
+
+  default clocking cb @(posedge clk_i); endclocking
+
+  // ---- X-discipline ---------------------------------------------------------
+  a_ctrl_known: assert property (disable iff (!rst_ni)
+    !$isunknown({req_valid_i, res_ready_i, flush_i, br_kill_mask_i, br_resolve_mask_i}))
+    else $error("%m: X on pipeline control");
+
+  a_req_known: assert property (disable iff (!rst_ni)
+    req_valid_i |-> !$isunknown({req_op_i, req_sat_i, req_rob_tag_i,
+                                 req_pdst_i, req_rd_we_i, req_br_mask_i,
+                                 req_src_a_i, req_src_b_i}))
+    else $error("%m: X on valid request payload");
+
+  a_res_known: assert property (disable iff (!rst_ni)
+    res_valid_o |-> !$isunknown({res_data_o, res_rob_tag_o, res_pdst_o,
+                                 res_rd_we_o, res_br_mask_o, res_illegal_o,
+                                 res_flags_o, res_flags_we_o}))
+    else $error("%m: X on valid result");
+
+  // ---- Decode completeness --------------------------------------------------
+  a_op_legal: assert property (disable iff (!rst_ni) req_valid_i |-> dec.legal)
+    else $error("%m: illegal ALU opcode 0x%0h issued", req_op_i);
+
+  a_sel_onehot: assert property (disable iff (!rst_ni)
+    (req_valid_i && dec.legal && !dec.long_op) |-> $onehot(dec.sel))
+    else $error("%m: fast-path select not one-hot");
+
+  a_sel_none_illegal: assert property (disable iff (!rst_ni)
+    (req_valid_i && !dec.legal) |-> (dec.sel == '0 && !dec.long_op))
+    else $error("%m: illegal opcode drove a functional unit");
+
+  a_sat_scope: assert property (disable iff (!rst_ni)
+    (req_valid_i && req_sat_i) |-> (SAT_EN && (req_op inside {ALU_OP_ADD, ALU_OP_SUB})))
+    else $error("%m: saturation requested on unsupported op or configuration");
+
+  // ---- Result port / pipeline invariants ------------------------------------
+  a_wb_exclusive: assert property (disable iff (!rst_ni) !(fast_fire && tail_fire))
+    else $error("%m: fast and long path collided on result port");
+
+  a_slt_canonical: assert property (disable iff (!rst_ni)
+    (fast_fire && dec.sel.slt) |-> (fast_data[XLEN-1:1] == '0))
+    else $error("%m: SLT result not canonical 0/1");
+
+  a_flush_quiet: assert property (disable iff (!rst_ni) flush_i |-> !res_valid_o)
+    else $error("%m: result emitted during flush");
+
+  a_kill_quiet: assert property (disable iff (!rst_ni)
+    res_valid_o |-> ((res_br_mask_o & br_kill_mask_i) == '0))
+    else $error("%m: result emitted for killed branch path");
+
+  a_resolved_clear: assert property (disable iff (!rst_ni)
+    res_valid_o |-> ((res_br_mask_o & br_resolve_mask_i) == '0))
+    else $error("%m: resolved branch bit still set on result");
+
+  if (OUT_REG) begin : g_a_hold
+    a_res_hold: assert property (disable iff (!rst_ni)
+      (res_valid_o && !res_ready_i) |=>
+        (!res_valid_o || ($stable(res_data_o) && $stable(res_rob_tag_o) && $stable(res_pdst_o))))
+      else $error("%m: stalled result changed before acceptance");
+  end
+
+  // ---- Coverage -------------------------------------------------------------
+  for (genvar g = 0; g < ALU_OP_COUNT; g++) begin : g_cov_op
+    c_op_issue: cover property (disable iff (!rst_ni) req_fire && req_op_i == ALU_OP_W'(g));
+  end
+
+  c_fast_blocked_by_tail: cover property (disable iff (!rst_ni) req_valid_i && !dec.long_op && mul_tail_valid);
+  c_res_backpressure:     cover property (disable iff (!rst_ni) res_valid_o && !res_ready_i);
+  c_flush_inflight:       cover property (disable iff (!rst_ni) flush_i && mul_tail_valid);
+  c_br_kill_result:       cover property (disable iff (!rst_ni) out_res.meta.valid && |(out_res.meta.br_mask & br_kill_mask_i));
+  c_add_carry:            cover property (disable iff (!rst_ni) fast_fire && dec.sel.add && add_carry);
+  c_add_overflow:         cover property (disable iff (!rst_ni) fast_fire && dec.sel.add && add_ovf);
+  c_shift_max:            cover property (disable iff (!rst_ni) fast_fire && dec.sel.shift && shamt == {SHAMT_W{1'b1}});
+
+`endif
+`endif
+
+endmodule : sf_alu
