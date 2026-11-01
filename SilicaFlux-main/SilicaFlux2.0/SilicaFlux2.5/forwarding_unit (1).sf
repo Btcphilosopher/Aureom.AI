@@ -1,0 +1,546 @@
+// =============================================================================
+// forwarding_unit.sf
+// SilicaFlux execute-stage RAW hazard resolution and operand bypass network.
+//
+// Priority : EX (lowest port first) > MEM > WB > register file.
+// Timing   : tag match -> parallel-prefix priority -> one-hot AND-OR mux.
+//            Producer readiness, load poison and consumer kill steer only the
+//            stall / replay control and never sit on the data-mux select path.
+//
+// silicaflux_pkg contract
+//   param  : SRC_PER_UOP
+//   types  : xlen_t, preg_idx_t, rob_idx_t, spec_mask_t, fwd_port_t
+//   enum   : fwd_sel_e   { FWD_SEL_RF, FWD_SEL_WB, FWD_SEL_MEM, FWD_SEL_EX }
+//   struct : src_tag_t   { valid, preg }
+//            issue_pkt_t { valid, rob_idx, spec_mask, src[SRC_PER_UOP] }
+//            exec_pkt_t  { valid, rd_we, rd_preg, rob_idx, spec_mask,
+//                          res_valid, result }
+//            mem_pkt_t   { valid, rd_we, rd_preg, rob_idx, spec_mask,
+//                          is_load, ld_data_valid, ld_poison, result }
+//            wb_pkt_t    { valid, rd_we, rd_preg, rob_idx, spec_mask, result }
+//            fwd_dep_t   { raw_hit, bypass_en, stall, replay, src_port, src_rob }
+// =============================================================================
+
+module forwarding_unit
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned NUM_CONS            = 4,
+  parameter int unsigned NUM_EX              = 3,
+  parameter int unsigned NUM_MEM             = 2,
+  parameter int unsigned NUM_WB              = 4,
+  parameter bit          ZERO_PREG_HARDWIRED = 1'b1
+) (
+  // Consumers: µops at the EX operand-capture point
+  input  issue_pkt_t [NUM_CONS-1:0]                  issue_pkt_i,
+  input  xlen_t      [NUM_CONS-1:0][SRC_PER_UOP-1:0] rf_rdata_i,
+  input  logic       [NUM_CONS-1:0][SRC_PER_UOP-1:0] sb_busy_i,
+
+  // Producers
+  input  exec_pkt_t  [NUM_EX-1:0]                    ex_pkt_i,
+  input  mem_pkt_t   [NUM_MEM-1:0]                   mem_pkt_i,
+  input  wb_pkt_t    [NUM_WB-1:0]                    wb_pkt_i,
+
+  // Speculation recovery
+  input  logic                                       flush_i,
+  input  logic                                       kill_valid_i,
+  input  spec_mask_t                                 kill_mask_i,
+
+  // Operand selection
+  output fwd_sel_e   [NUM_CONS-1:0]                  operand_a_select_o,
+  output fwd_sel_e   [NUM_CONS-1:0]                  operand_b_select_o,
+  output fwd_dep_t   [NUM_CONS-1:0]                  operand_a_dep_o,
+  output fwd_dep_t   [NUM_CONS-1:0]                  operand_b_dep_o,
+  output xlen_t      [NUM_CONS-1:0]                  operand_a_o,
+  output xlen_t      [NUM_CONS-1:0]                  operand_b_o,
+
+  // Issue control
+  output logic       [NUM_CONS-1:0]                  operands_ready_o,
+  output logic       [NUM_CONS-1:0]                  stall_o,
+  output logic       [NUM_CONS-1:0]                  replay_o,
+  output logic       [NUM_CONS-1:0]                  fwd_ambiguous_o
+);
+
+  // ---------------------------------------------------------------------------
+  // Topology
+  // ---------------------------------------------------------------------------
+  localparam int unsigned NUM_OPND        = 2;
+  localparam int unsigned OPND_A          = 0;
+  localparam int unsigned OPND_B          = 1;
+
+  localparam int unsigned NUM_BYP         = NUM_EX + NUM_MEM + NUM_WB;
+  localparam int unsigned EX_BASE         = 0;
+  localparam int unsigned MEM_BASE        = EX_BASE + NUM_EX;
+  localparam int unsigned WB_BASE         = MEM_BASE + NUM_MEM;
+
+  localparam int unsigned XLEN_W          = $bits(xlen_t);
+  localparam int unsigned ROB_W           = $bits(rob_idx_t);
+  localparam int unsigned SPEC_W          = $bits(spec_mask_t);
+  localparam int unsigned PORT_W          = $bits(fwd_port_t);
+  localparam int unsigned MAX_STAGE_PORTS = 1 << PORT_W;
+
+  localparam preg_idx_t   PREG_ZERO       = '0;
+
+  // ---------------------------------------------------------------------------
+  // Elaboration checks
+  // ---------------------------------------------------------------------------
+  if (SRC_PER_UOP != NUM_OPND) begin : g_chk_src
+    $error("forwarding_unit: SRC_PER_UOP=%0d, expected %0d", SRC_PER_UOP, NUM_OPND);
+  end
+  if (NUM_CONS == 0) begin : g_chk_cons
+    $error("forwarding_unit: NUM_CONS must be non-zero");
+  end
+  if ((NUM_EX == 0) || (NUM_EX > MAX_STAGE_PORTS)) begin : g_chk_ex
+    $error("forwarding_unit: NUM_EX=%0d outside [1:%0d]", NUM_EX, MAX_STAGE_PORTS);
+  end
+  if ((NUM_MEM == 0) || (NUM_MEM > MAX_STAGE_PORTS)) begin : g_chk_mem
+    $error("forwarding_unit: NUM_MEM=%0d outside [1:%0d]", NUM_MEM, MAX_STAGE_PORTS);
+  end
+  if ((NUM_WB == 0) || (NUM_WB > MAX_STAGE_PORTS)) begin : g_chk_wb
+    $error("forwarding_unit: NUM_WB=%0d outside [1:%0d]", NUM_WB, MAX_STAGE_PORTS);
+  end
+
+  // ---------------------------------------------------------------------------
+  // Local types
+  // ---------------------------------------------------------------------------
+  // Bypass source vector; bit index order is the forwarding priority order.
+  typedef logic [NUM_BYP-1:0] byp_vec_t;
+
+  typedef struct packed {
+    logic ex;
+    logic mem;
+    logic wb;
+  } stage_hit_t;
+
+  typedef logic [$bits(stage_hit_t)-1:0] stage_code_t;
+
+  typedef enum logic [1:0] {
+    OPND_RES_RF     = 2'b00,
+    OPND_RES_BYPASS = 2'b01,
+    OPND_RES_STALL  = 2'b10,
+    OPND_RES_REPLAY = 2'b11
+  } opnd_res_e;
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  function automatic logic preg_is_zero(input preg_idx_t preg);
+    return ZERO_PREG_HARDWIRED && (preg == PREG_ZERO);
+  endfunction
+
+  function automatic logic spec_overlap(input spec_mask_t a, input spec_mask_t b);
+    return |(a & b);
+  endfunction
+
+  function automatic byp_vec_t prio_above(input int unsigned idx);
+    byp_vec_t mask;
+    for (int unsigned k = 0; k < NUM_BYP; k++) begin
+      mask[k] = (k < idx);
+    end
+    return mask;
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // Signals
+  // ---------------------------------------------------------------------------
+  spec_mask_t                              kill_mask_eff;
+
+  byp_vec_t                                byp_wr;
+  byp_vec_t                                byp_kill;
+  byp_vec_t                                byp_live;
+  byp_vec_t                                byp_rdy;
+  byp_vec_t                                byp_poison;
+  preg_idx_t  [NUM_BYP-1:0]                byp_preg;
+  rob_idx_t   [NUM_BYP-1:0]                byp_rob;
+  spec_mask_t [NUM_BYP-1:0]                byp_spec;
+  fwd_port_t  [NUM_BYP-1:0]                byp_port;
+  xlen_t      [NUM_BYP-1:0]                byp_data;
+
+  logic       [NUM_CONS-1:0]               cons_live;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] src_req;
+  preg_idx_t  [NUM_CONS-1:0][NUM_OPND-1:0] src_preg;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] src_sb_busy;
+
+  byp_vec_t   [NUM_CONS-1:0][NUM_OPND-1:0] tag_eq;
+  byp_vec_t   [NUM_CONS-1:0][NUM_OPND-1:0] raw_hit;
+  byp_vec_t   [NUM_CONS-1:0][NUM_OPND-1:0] hit_above;
+  byp_vec_t   [NUM_CONS-1:0][NUM_OPND-1:0] hit_first;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] hit_any;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] hit_multi;
+  stage_hit_t [NUM_CONS-1:0][NUM_OPND-1:0] stage_hit;
+
+  fwd_sel_e   [NUM_CONS-1:0][NUM_OPND-1:0] stage_sel;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] sel_rdy;
+  logic       [NUM_CONS-1:0][NUM_OPND-1:0] sel_poison;
+  opnd_res_e  [NUM_CONS-1:0][NUM_OPND-1:0] opnd_res;
+  fwd_dep_t   [NUM_CONS-1:0][NUM_OPND-1:0] opnd_dep;
+  xlen_t      [NUM_CONS-1:0][NUM_OPND-1:0] opnd_data;
+
+  // ---------------------------------------------------------------------------
+  // Speculation recovery context
+  // ---------------------------------------------------------------------------
+  always_comb begin : speculation_kill
+    kill_mask_eff = {SPEC_W{kill_valid_i}} & kill_mask_i;
+  end
+
+  // ---------------------------------------------------------------------------
+  // Producer normalization: EX / MEM / WB packets onto one priority-ordered bus
+  // ---------------------------------------------------------------------------
+  always_comb begin : producer_normalize
+    byp_wr     = '0;
+    byp_kill   = '0;
+    byp_rdy    = '0;
+    byp_poison = '0;
+    byp_preg   = '0;
+    byp_rob    = '0;
+    byp_spec   = '0;
+    byp_port   = '0;
+    byp_data   = '0;
+
+    for (int unsigned p = 0; p < NUM_EX; p++) begin
+      byp_wr    [EX_BASE + p] = ex_pkt_i[p].valid
+                              & ex_pkt_i[p].rd_we
+                              & ~preg_is_zero(ex_pkt_i[p].rd_preg);
+      byp_kill  [EX_BASE + p] = flush_i | spec_overlap(ex_pkt_i[p].spec_mask, kill_mask_eff);
+      byp_rdy   [EX_BASE + p] = ex_pkt_i[p].res_valid;
+      byp_poison[EX_BASE + p] = 1'b0;
+      byp_preg  [EX_BASE + p] = ex_pkt_i[p].rd_preg;
+      byp_rob   [EX_BASE + p] = ex_pkt_i[p].rob_idx;
+      byp_spec  [EX_BASE + p] = ex_pkt_i[p].spec_mask;
+      byp_port  [EX_BASE + p] = fwd_port_t'(p);
+      byp_data  [EX_BASE + p] = ex_pkt_i[p].result;
+    end
+
+    for (int unsigned p = 0; p < NUM_MEM; p++) begin
+      byp_wr    [MEM_BASE + p] = mem_pkt_i[p].valid
+                               & mem_pkt_i[p].rd_we
+                               & ~preg_is_zero(mem_pkt_i[p].rd_preg);
+      byp_kill  [MEM_BASE + p] = flush_i | spec_overlap(mem_pkt_i[p].spec_mask, kill_mask_eff);
+      byp_rdy   [MEM_BASE + p] = ~mem_pkt_i[p].is_load | mem_pkt_i[p].ld_data_valid;
+      byp_poison[MEM_BASE + p] = mem_pkt_i[p].is_load & mem_pkt_i[p].ld_poison;
+      byp_preg  [MEM_BASE + p] = mem_pkt_i[p].rd_preg;
+      byp_rob   [MEM_BASE + p] = mem_pkt_i[p].rob_idx;
+      byp_spec  [MEM_BASE + p] = mem_pkt_i[p].spec_mask;
+      byp_port  [MEM_BASE + p] = fwd_port_t'(p);
+      byp_data  [MEM_BASE + p] = mem_pkt_i[p].result;
+    end
+
+    for (int unsigned p = 0; p < NUM_WB; p++) begin
+      byp_wr    [WB_BASE + p] = wb_pkt_i[p].valid
+                              & wb_pkt_i[p].rd_we
+                              & ~preg_is_zero(wb_pkt_i[p].rd_preg);
+      byp_kill  [WB_BASE + p] = flush_i | spec_overlap(wb_pkt_i[p].spec_mask, kill_mask_eff);
+      byp_rdy   [WB_BASE + p] = 1'b1;
+      byp_poison[WB_BASE + p] = 1'b0;
+      byp_preg  [WB_BASE + p] = wb_pkt_i[p].rd_preg;
+      byp_rob   [WB_BASE + p] = wb_pkt_i[p].rob_idx;
+      byp_spec  [WB_BASE + p] = wb_pkt_i[p].spec_mask;
+      byp_port  [WB_BASE + p] = fwd_port_t'(p);
+      byp_data  [WB_BASE + p] = wb_pkt_i[p].result;
+    end
+
+    byp_live = byp_wr & ~byp_kill;
+  end
+
+  // ---------------------------------------------------------------------------
+  // Consumer normalization
+  // ---------------------------------------------------------------------------
+  always_comb begin : consumer_normalize
+    cons_live   = '0;
+    src_req     = '0;
+    src_preg    = '0;
+    src_sb_busy = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      cons_live[c] = issue_pkt_i[c].valid
+                   & ~flush_i
+                   & ~spec_overlap(issue_pkt_i[c].spec_mask, kill_mask_eff);
+
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        src_preg[c][s]    = issue_pkt_i[c].src[s].preg;
+        src_req[c][s]     = issue_pkt_i[c].valid
+                          & issue_pkt_i[c].src[s].valid
+                          & ~preg_is_zero(issue_pkt_i[c].src[s].preg);
+        src_sb_busy[c][s] = src_req[c][s] & sb_busy_i[c][s];
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // RAW dependency matrix: every source operand against every live producer
+  // ---------------------------------------------------------------------------
+  always_comb begin : dependency_match
+    tag_eq  = '0;
+    raw_hit = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        for (int unsigned i = 0; i < NUM_BYP; i++) begin
+          tag_eq[c][s][i] = src_req[c][s]
+                          & byp_wr[i]
+                          & (src_preg[c][s] == byp_preg[i]);
+        end
+        raw_hit[c][s] = tag_eq[c][s] & byp_live;
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Priority resolution: parallel prefix over the priority-ordered hit vector
+  // ---------------------------------------------------------------------------
+  always_comb begin : priority_resolve
+    hit_above = '0;
+    hit_first = '0;
+    hit_any   = '0;
+    hit_multi = '0;
+    stage_hit = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        for (int unsigned i = 0; i < NUM_BYP; i++) begin
+          hit_above[c][s][i] = |(raw_hit[c][s] & prio_above(i));
+        end
+
+        hit_first[c][s]     = raw_hit[c][s] & ~hit_above[c][s];
+        hit_any[c][s]       = |raw_hit[c][s];
+        hit_multi[c][s]     = |(raw_hit[c][s] & hit_above[c][s]);
+
+        stage_hit[c][s].ex  = |raw_hit[c][s][EX_BASE  +: NUM_EX];
+        stage_hit[c][s].mem = |raw_hit[c][s][MEM_BASE +: NUM_MEM];
+        stage_hit[c][s].wb  = |raw_hit[c][s][WB_BASE  +: NUM_WB];
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Stage select encode: EX > MEM > WB > RF
+  // ---------------------------------------------------------------------------
+  always_comb begin : stage_encode
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        casez (stage_code_t'(stage_hit[c][s]))
+          3'b1??:  stage_sel[c][s] = FWD_SEL_EX;
+          3'b01?:  stage_sel[c][s] = FWD_SEL_MEM;
+          3'b001:  stage_sel[c][s] = FWD_SEL_WB;
+          3'b000:  stage_sel[c][s] = FWD_SEL_RF;
+          default: stage_sel[c][s] = FWD_SEL_RF;
+        endcase
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Operand hazard resolution
+  // ---------------------------------------------------------------------------
+  always_comb begin : operand_resolve
+    sel_rdy    = '0;
+    sel_poison = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        sel_rdy[c][s]    = |(hit_first[c][s] & byp_rdy);
+        sel_poison[c][s] = |(hit_first[c][s] & byp_poison);
+
+        case (stage_sel[c][s])
+          FWD_SEL_EX,
+          FWD_SEL_MEM,
+          FWD_SEL_WB: begin
+            if (sel_poison[c][s]) begin
+              opnd_res[c][s] = OPND_RES_REPLAY;
+            end else if (sel_rdy[c][s]) begin
+              opnd_res[c][s] = OPND_RES_BYPASS;
+            end else begin
+              opnd_res[c][s] = OPND_RES_STALL;
+            end
+          end
+          FWD_SEL_RF: begin
+            opnd_res[c][s] = src_sb_busy[c][s] ? OPND_RES_STALL : OPND_RES_RF;
+          end
+          default: begin
+            opnd_res[c][s] = OPND_RES_STALL;
+          end
+        endcase
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Dependency metadata (scoreboard / replay hooks)
+  // ---------------------------------------------------------------------------
+  always_comb begin : dependency_meta
+    opnd_dep = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        opnd_dep[c][s].raw_hit   = cons_live[c] & hit_any[c][s];
+        opnd_dep[c][s].bypass_en = cons_live[c] & (opnd_res[c][s] == OPND_RES_BYPASS);
+        opnd_dep[c][s].stall     = cons_live[c] & (opnd_res[c][s] == OPND_RES_STALL);
+        opnd_dep[c][s].replay    = cons_live[c] & (opnd_res[c][s] == OPND_RES_REPLAY);
+
+        for (int unsigned i = 0; i < NUM_BYP; i++) begin
+          opnd_dep[c][s].src_port |= {PORT_W{hit_first[c][s][i]}} & byp_port[i];
+          opnd_dep[c][s].src_rob  |= {ROB_W{hit_first[c][s][i]}}  & byp_rob[i];
+        end
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Bypass data network: single-level one-hot AND-OR mux
+  // ---------------------------------------------------------------------------
+  always_comb begin : operand_mux
+    opnd_data = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        opnd_data[c][s] = {XLEN_W{~hit_any[c][s]}} & rf_rdata_i[c][s];
+
+        for (int unsigned i = 0; i < NUM_BYP; i++) begin
+          opnd_data[c][s] |= {XLEN_W{hit_first[c][s][i]}} & byp_data[i];
+        end
+      end
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Issue control: replay dominates stall; outputs are mutually exclusive
+  // ---------------------------------------------------------------------------
+  always_comb begin : issue_control
+    stall_o          = '0;
+    replay_o         = '0;
+    operands_ready_o = '0;
+    fwd_ambiguous_o  = '0;
+
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      for (int unsigned s = 0; s < NUM_OPND; s++) begin
+        stall_o[c]         |= opnd_dep[c][s].stall;
+        replay_o[c]        |= opnd_dep[c][s].replay;
+        fwd_ambiguous_o[c] |= cons_live[c] & hit_multi[c][s];
+      end
+
+      stall_o[c]          &= ~replay_o[c];
+      operands_ready_o[c]  = cons_live[c] & ~stall_o[c] & ~replay_o[c];
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Operand port map
+  // ---------------------------------------------------------------------------
+  always_comb begin : operand_port_map
+    for (int unsigned c = 0; c < NUM_CONS; c++) begin
+      operand_a_select_o[c] = stage_sel[c][OPND_A];
+      operand_b_select_o[c] = stage_sel[c][OPND_B];
+      operand_a_dep_o[c]    = opnd_dep[c][OPND_A];
+      operand_b_dep_o[c]    = opnd_dep[c][OPND_B];
+      operand_a_o[c]        = opnd_data[c][OPND_A];
+      operand_b_o[c]        = opnd_data[c][OPND_B];
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Assertions and coverage (deferred: evaluated on settled values only)
+  // ---------------------------------------------------------------------------
+`ifndef SYNTHESIS
+
+  for (genvar c = 0; c < NUM_CONS; c++) begin : g_dv_cons
+
+    for (genvar s = 0; s < NUM_OPND; s++) begin : g_dv_opnd
+
+      always_comb begin : opnd_invariants
+        a_first_onehot0 : assert final ($onehot0(hit_first[c][s]))
+          else $error("forwarding_unit: non-unique priority grant c%0d s%0d", c, s);
+
+        a_mux_complete : assert final ($onehot({~hit_any[c][s], hit_first[c][s]}))
+          else $error("forwarding_unit: operand mux select not one-hot c%0d s%0d", c, s);
+
+        a_stage_consistent : assert final (
+             ((stage_sel[c][s] == FWD_SEL_EX)  == (|hit_first[c][s][EX_BASE  +: NUM_EX]))
+          && ((stage_sel[c][s] == FWD_SEL_MEM) == (|hit_first[c][s][MEM_BASE +: NUM_MEM]))
+          && ((stage_sel[c][s] == FWD_SEL_WB)  == (|hit_first[c][s][WB_BASE  +: NUM_WB])))
+          else $error("forwarding_unit: stage select disagrees with grant c%0d s%0d", c, s);
+
+        a_res_exclusive : assert final ($onehot0({opnd_dep[c][s].bypass_en,
+                                                  opnd_dep[c][s].stall,
+                                                  opnd_dep[c][s].replay}))
+          else $error("forwarding_unit: conflicting resolution c%0d s%0d", c, s);
+
+        a_bypass_sourced : assert final (!opnd_dep[c][s].bypass_en
+                                         || (stage_sel[c][s] != FWD_SEL_RF))
+          else $error("forwarding_unit: bypass enable without source c%0d s%0d", c, s);
+
+        a_no_ambiguity : assert final (!cons_live[c] || !hit_multi[c][s])
+          else $error("forwarding_unit: multi-source RAW ambiguity c%0d s%0d", c, s);
+
+        a_no_killed_src : assert final (!cons_live[c] || ((tag_eq[c][s] & byp_kill) == '0))
+          else $error("forwarding_unit: live consumer depends on killed producer c%0d s%0d", c, s);
+
+        a_sel_known : assert final (!cons_live[c] || !$isunknown(stage_sel[c][s]))
+          else $error("forwarding_unit: unknown operand select c%0d s%0d", c, s);
+
+        c_rf_read  : cover final (cons_live[c] && (opnd_res[c][s] == OPND_RES_RF));
+        c_sb_stall : cover final (opnd_dep[c][s].stall && (stage_sel[c][s] == FWD_SEL_RF));
+      end
+
+      for (genvar i = 0; i < NUM_BYP; i++) begin : g_dv_src
+
+        always_comb begin : src_paths
+          a_spec_order : assert final (!(cons_live[c] && hit_first[c][s][i])
+                                       || ((byp_spec[i] & ~issue_pkt_i[c].spec_mask) == '0))
+            else $error("forwarding_unit: producer %0d off consumer path c%0d s%0d", i, c, s);
+
+          c_bypass : cover final (opnd_dep[c][s].bypass_en && hit_first[c][s][i]);
+        end
+
+        if (i < WB_BASE) begin : g_wait
+          always_comb begin : src_wait
+            c_wait : cover final (opnd_dep[c][s].stall && hit_first[c][s][i]);
+          end
+        end
+
+        if ((i >= MEM_BASE) && (i < WB_BASE)) begin : g_replay
+          always_comb begin : src_replay
+            c_replay : cover final (opnd_dep[c][s].replay && hit_first[c][s][i]);
+          end
+        end
+
+      end
+    end
+
+    always_comb begin : cons_invariants
+      a_ctrl_exclusive : assert final ($onehot0({operands_ready_o[c], stall_o[c], replay_o[c]}))
+        else $error("forwarding_unit: conflicting issue control c%0d", c);
+
+      a_ctrl_live : assert final (cons_live[c]
+                                  || !(operands_ready_o[c] || stall_o[c] || replay_o[c]))
+        else $error("forwarding_unit: issue control on dead consumer c%0d", c);
+
+      c_dual_bypass_split : cover final (opnd_dep[c][OPND_A].bypass_en
+                                         && opnd_dep[c][OPND_B].bypass_en
+                                         && (stage_sel[c][OPND_A] != stage_sel[c][OPND_B]));
+
+      c_dual_bypass_same : cover final (opnd_dep[c][OPND_A].bypass_en
+                                        && opnd_dep[c][OPND_B].bypass_en
+                                        && (hit_first[c][OPND_A] == hit_first[c][OPND_B]));
+
+      c_kill_squash : cover final (issue_pkt_i[c].valid && !cons_live[c] && (|hit_any[c]));
+    end
+
+  end
+
+  for (genvar i = 0; i < NUM_BYP; i++) begin : g_dv_prod_i
+    for (genvar j = i + 1; j < NUM_BYP; j++) begin : g_dv_prod_j
+      always_comb begin : dest_unique
+        a_dest_unique : assert final (!(byp_live[i] && byp_live[j])
+                                      || (byp_preg[i] != byp_preg[j]))
+          else $error("forwarding_unit: producers %0d and %0d share live destination", i, j);
+      end
+    end
+  end
+
+  always_comb begin : recovery_paths
+    c_flush_gate : cover final (flush_i && (|tag_eq));
+    c_kill_gate  : cover final (!flush_i && kill_valid_i && (|(byp_wr & byp_kill)));
+  end
+
+`endif
+
+endmodule : forwarding_unit

@@ -1,0 +1,512 @@
+// =============================================================================
+// forwarding_unit.sf
+// SilicaFlux out-of-order backend :: execute-stage RAW hazard resolution and
+// operand bypass network.
+//
+// Language : Silica Flux-2017
+// Class    : purely combinational, timing-critical
+//
+// silicaflux_pkg contract (symbols referenced by this unit)
+//   types      : xlen_t, preg_t, br_mask_t
+//   params     : NUM_SRC_OPS (>= 2), PREG_ZERO
+//   src_dep_t  : used, preg
+//   exec_pkt_t : valid, br_mask, is_load, rd_wen, pdst, src[NUM_SRC_OPS]
+//   wb_pkt_t   : valid, br_mask, rd_wen, pdst, data
+//   fwd_src_e  : FWD_SRC_NONE, FWD_SRC_RF, FWD_SRC_WB, FWD_SRC_MEM, FWD_SRC_EX
+//
+// Resolution per source operand, strictly by tag match:
+//   EX  >  MEM  >  WB  >  RF
+// Within a stage the lowest port index wins; more than one hit inside a stage
+// violates physical-register uniqueness and raises ambig_err_o.
+// A tag match commits the operand to that stage even when its result is not
+// yet valid: the operand stalls instead of falling through to a stale copy.
+// Select generation is tag-only; result data enters solely at the final
+// one-hot AND-OR level.
+// =============================================================================
+
+module forwarding_unit
+  import silicaflux_pkg::*;
+#(
+  parameter  int unsigned NUM_ISS             = 4,     // consumer issue ports
+  parameter  int unsigned NUM_EX              = 3,     // EX producers  (ALU0, ALU1, MUL/DIV)
+  parameter  int unsigned NUM_MEM             = 2,     // MEM producers (LD0/AGU0, LD1/AGU1)
+  parameter  int unsigned NUM_WB              = 4,     // writeback ports
+  parameter  bit          LD_EARLY_FWD_EN     = 1'b1,  // forward load data out of MEM when present
+  parameter  bit          ZERO_PREG_EN        = 1'b1,  // PREG_ZERO is hardwired zero, never matched
+  parameter  bit          XSTAGE_MULTIHIT_ERR = 1'b0,  // flag cross-stage multi-hit as ambiguity
+  localparam int unsigned NUM_SRC             = NUM_SRC_OPS,
+  localparam int unsigned XLEN_W              = $bits(xlen_t),
+  localparam int unsigned MAX_PORTS           = (NUM_EX >= NUM_MEM)
+                                                  ? ((NUM_EX  >= NUM_WB) ? NUM_EX  : NUM_WB)
+                                                  : ((NUM_MEM >= NUM_WB) ? NUM_MEM : NUM_WB),
+  localparam int unsigned PORT_IDX_W          = (MAX_PORTS > 1) ? $clog2(MAX_PORTS) : 1
+) (
+  // ---------------------------------------------------------------- kill / flush
+  input  logic                                                  flush_i,
+  input  br_mask_t                                              br_kill_i,
+
+  // ------------------------------------- consumers (operand-select stage)
+  input  exec_pkt_t [NUM_ISS-1:0]                               iss_pkt_i,
+  input  xlen_t     [NUM_ISS-1:0][NUM_SRC-1:0]                  rf_rdata_i,
+  input  logic      [NUM_ISS-1:0][NUM_SRC-1:0]                  sb_rdy_i,
+
+  // ------------------------------------------------------- EX producers
+  input  exec_pkt_t [NUM_EX-1:0]                                ex_pkt_i,
+  input  logic      [NUM_EX-1:0]                                ex_res_vld_i,
+  input  xlen_t     [NUM_EX-1:0]                                ex_res_i,
+
+  // ------------------------------------------------------ MEM producers
+  input  exec_pkt_t [NUM_MEM-1:0]                               mem_pkt_i,
+  input  logic      [NUM_MEM-1:0]                               mem_res_vld_i,
+  input  xlen_t     [NUM_MEM-1:0]                               mem_res_i,
+
+  // ---------------------------------------------------------- writeback
+  input  wb_pkt_t   [NUM_WB-1:0]                                wb_pkt_i,
+
+  // --------------------------------------------------- operand delivery
+  output xlen_t     [NUM_ISS-1:0][NUM_SRC-1:0]                  opnd_data_o,
+  output fwd_src_e  [NUM_ISS-1:0][NUM_SRC-1:0]                  opnd_sel_o,
+  output logic      [NUM_ISS-1:0][NUM_SRC-1:0][PORT_IDX_W-1:0]  opnd_port_o,
+  output logic      [NUM_ISS-1:0][NUM_SRC-1:0]                  opnd_byp_o,
+  output logic      [NUM_ISS-1:0][NUM_SRC-1:0]                  opnd_rdy_o,
+  output fwd_src_e  [NUM_ISS-1:0]                               operand_a_select_o,
+  output fwd_src_e  [NUM_ISS-1:0]                               operand_b_select_o,
+
+  // ----------------------------------------- hazard / scoreboard hooks
+  output logic      [NUM_ISS-1:0][NUM_SRC-1:0]                  raw_hzd_o,
+  output logic      [NUM_ISS-1:0][NUM_SRC-1:0]                  sb_wait_o,
+  output logic      [NUM_ISS-1:0]                               ld_use_o,
+  output logic      [NUM_ISS-1:0]                               stall_o,
+  output logic                                                  ambig_err_o
+);
+
+  // ===========================================================================
+  // Local types and constants
+  // ===========================================================================
+  localparam int unsigned OPND_A = 0;
+  localparam int unsigned OPND_B = 1;
+
+  typedef logic [MAX_PORTS-1:0]  port_vec_t;
+  typedef logic [PORT_IDX_W-1:0] port_idx_t;
+
+  typedef enum logic [2:0] {
+    HZD_NONE     = 3'd0,  // operand resolvable this cycle
+    HZD_EX_BUSY  = 3'd1,  // EX producer matched, multi-cycle result outstanding
+    HZD_MEM_BUSY = 3'd2,  // MEM producer matched, non-load result outstanding
+    HZD_LOAD_USE = 3'd3,  // load producer matched inside load-use window
+    HZD_SB_WAIT  = 3'd4   // no in-flight match, scoreboard reports tag busy
+  } opnd_hzd_e;
+
+  // ===========================================================================
+  // Elaboration-time configuration checks
+  // ===========================================================================
+  if (NUM_SRC < 2) begin : gen_cfg_nsrc_err
+    $error("forwarding_unit: NUM_SRC_OPS must be >= 2 (operand A/B)");
+  end
+
+  if ((NUM_ISS == 0) || (NUM_EX == 0) || (NUM_MEM == 0) || (NUM_WB == 0)) begin : gen_cfg_port_err
+    $error("forwarding_unit: every port class requires at least one port");
+  end
+
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+  function automatic logic is_killed(input br_mask_t mask,
+                                     input br_mask_t kill,
+                                     input logic     flush);
+    return flush | (|(mask & kill));
+  endfunction
+
+  // Fixed-priority isolate: lowest set bit survives.
+  function automatic port_vec_t lsb_onehot(input port_vec_t vec);
+    port_vec_t oh;
+    logic      seen;
+    oh   = '0;
+    seen = 1'b0;
+    for (int unsigned k = 0; k < MAX_PORTS; k++) begin
+      oh[k] = vec[k] & ~seen;
+      seen  = seen | vec[k];
+    end
+    return oh;
+  endfunction
+
+  // OR-based encoder; valid for one-hot or all-zero input.
+  function automatic port_idx_t onehot_to_idx(input port_vec_t oh);
+    port_idx_t idx;
+    idx = '0;
+    for (int unsigned k = 0; k < MAX_PORTS; k++) begin
+      idx = idx | ({PORT_IDX_W{oh[k]}} & port_idx_t'(k));
+    end
+    return idx;
+  endfunction
+
+  // ===========================================================================
+  // Internal state
+  // ===========================================================================
+  // Producer qualification (bits at or above a stage's port count stay low)
+  port_vec_t                             ex_live;
+  port_vec_t                             ex_rdy;
+  port_vec_t                             ex_ld;
+  port_vec_t                             mem_live;
+  port_vec_t                             mem_rdy;
+  port_vec_t                             mem_ld;
+  port_vec_t                             wb_live;
+  logic      [NUM_ISS-1:0]               iss_live;
+
+  // Per-operand dependency and resolution state
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  src_use;     // live consumer reads a register
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  src_en;      // src_use, hardwired-zero excluded
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  ex_hit;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  mem_hit;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  wb_hit;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  ex_oh;       // intra-stage winner
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  mem_oh;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  wb_oh;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  ex_sel;      // global winner (one-hot0 across all)
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  mem_sel;
+  port_vec_t [NUM_ISS-1:0][NUM_SRC-1:0]  wb_sel;
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  rf_sel;
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  ex_any;
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  mem_any;
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  wb_any;
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  multi_hit;   // >1 producer inside one stage
+  logic      [NUM_ISS-1:0][NUM_SRC-1:0]  xstage_hit;  // producers in >1 stage
+  fwd_src_e  [NUM_ISS-1:0][NUM_SRC-1:0]  opnd_sel;
+  opnd_hzd_e [NUM_ISS-1:0][NUM_SRC-1:0]  opnd_hzd;
+
+  // ===========================================================================
+  // Stage 0 :: producer / consumer qualification (kill, flush, write-enable)
+  // ===========================================================================
+  always_comb begin : p_qualify
+    ex_live  = '0;
+    ex_rdy   = '0;
+    ex_ld    = '0;
+    mem_live = '0;
+    mem_rdy  = '0;
+    mem_ld   = '0;
+    wb_live  = '0;
+    iss_live = '0;
+
+    for (int unsigned p = 0; p < NUM_EX; p++) begin
+      ex_live[p] = ex_pkt_i[p].valid
+                 & ex_pkt_i[p].rd_wen
+                 & ~is_killed(ex_pkt_i[p].br_mask, br_kill_i, flush_i);
+      ex_ld[p]   = ex_pkt_i[p].is_load;
+      ex_rdy[p]  = ex_res_vld_i[p] & ~ex_pkt_i[p].is_load;
+    end
+
+    for (int unsigned p = 0; p < NUM_MEM; p++) begin
+      mem_live[p] = mem_pkt_i[p].valid
+                  & mem_pkt_i[p].rd_wen
+                  & ~is_killed(mem_pkt_i[p].br_mask, br_kill_i, flush_i);
+      mem_ld[p]   = mem_pkt_i[p].is_load;
+      mem_rdy[p]  = mem_res_vld_i[p] & (LD_EARLY_FWD_EN | ~mem_pkt_i[p].is_load);
+    end
+
+    for (int unsigned p = 0; p < NUM_WB; p++) begin
+      wb_live[p] = wb_pkt_i[p].valid
+                 & wb_pkt_i[p].rd_wen
+                 & ~is_killed(wb_pkt_i[p].br_mask, br_kill_i, flush_i);
+    end
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      iss_live[i] = iss_pkt_i[i].valid
+                  & ~is_killed(iss_pkt_i[i].br_mask, br_kill_i, flush_i);
+    end
+  end
+
+  // ===========================================================================
+  // Stage 1 :: RAW detection — source tags against in-flight destination tags
+  // ===========================================================================
+  always_comb begin : p_raw_detect
+    src_use = '0;
+    src_en  = '0;
+    ex_hit  = '0;
+    mem_hit = '0;
+    wb_hit  = '0;
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        src_use[i][s] = iss_live[i] & iss_pkt_i[i].src[s].used;
+        src_en[i][s]  = src_use[i][s]
+                      & ~(ZERO_PREG_EN & (iss_pkt_i[i].src[s].preg == PREG_ZERO));
+
+        for (int unsigned p = 0; p < NUM_EX; p++) begin
+          ex_hit[i][s][p]  = src_en[i][s] & ex_live[p]
+                           & (ex_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg);
+        end
+
+        for (int unsigned p = 0; p < NUM_MEM; p++) begin
+          mem_hit[i][s][p] = src_en[i][s] & mem_live[p]
+                           & (mem_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg);
+        end
+
+        for (int unsigned p = 0; p < NUM_WB; p++) begin
+          wb_hit[i][s][p]  = src_en[i][s] & wb_live[p]
+                           & (wb_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg);
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Stage 2 :: priority resolution — EX > MEM > WB > RF, lowest port in stage
+  // ===========================================================================
+  always_comb begin : p_priority
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        ex_oh[i][s]   = lsb_onehot(ex_hit[i][s]);
+        mem_oh[i][s]  = lsb_onehot(mem_hit[i][s]);
+        wb_oh[i][s]   = lsb_onehot(wb_hit[i][s]);
+
+        ex_any[i][s]  = |ex_hit[i][s];
+        mem_any[i][s] = |mem_hit[i][s];
+        wb_any[i][s]  = |wb_hit[i][s];
+
+        ex_sel[i][s]  = ex_oh[i][s];
+        mem_sel[i][s] = mem_oh[i][s] & {MAX_PORTS{~ex_any[i][s]}};
+        wb_sel[i][s]  = wb_oh[i][s]  & {MAX_PORTS{~(ex_any[i][s] | mem_any[i][s])}};
+        rf_sel[i][s]  = src_use[i][s] & ~(ex_any[i][s] | mem_any[i][s] | wb_any[i][s]);
+
+        multi_hit[i][s]  = (|(ex_hit[i][s]  & ~ex_oh[i][s]))
+                         | (|(mem_hit[i][s] & ~mem_oh[i][s]))
+                         | (|(wb_hit[i][s]  & ~wb_oh[i][s]));
+
+        xstage_hit[i][s] = (ex_any[i][s]  & mem_any[i][s])
+                         | (ex_any[i][s]  & wb_any[i][s])
+                         | (mem_any[i][s] & wb_any[i][s]);
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Stage 3a :: forwarding source encode
+  // ===========================================================================
+  always_comb begin : p_encode
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        casez ({ex_any[i][s], mem_any[i][s], wb_any[i][s], rf_sel[i][s]})
+          4'b1???: opnd_sel[i][s] = FWD_SRC_EX;
+          4'b01??: opnd_sel[i][s] = FWD_SRC_MEM;
+          4'b001?: opnd_sel[i][s] = FWD_SRC_WB;
+          4'b0001: opnd_sel[i][s] = FWD_SRC_RF;
+          4'b0000: opnd_sel[i][s] = FWD_SRC_NONE;
+          default: opnd_sel[i][s] = FWD_SRC_NONE;
+        endcase
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Stage 3b :: hazard classification against the selected producer
+  // ===========================================================================
+  always_comb begin : p_hazard
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        casez ({ex_any[i][s], mem_any[i][s], wb_any[i][s]})
+          3'b1??: begin
+            if (|(ex_sel[i][s] & ex_rdy)) begin
+              opnd_hzd[i][s] = HZD_NONE;
+            end else if (|(ex_sel[i][s] & ex_ld)) begin
+              opnd_hzd[i][s] = HZD_LOAD_USE;
+            end else begin
+              opnd_hzd[i][s] = HZD_EX_BUSY;
+            end
+          end
+          3'b01?: begin
+            if (|(mem_sel[i][s] & mem_rdy)) begin
+              opnd_hzd[i][s] = HZD_NONE;
+            end else if (|(mem_sel[i][s] & mem_ld)) begin
+              opnd_hzd[i][s] = HZD_LOAD_USE;
+            end else begin
+              opnd_hzd[i][s] = HZD_MEM_BUSY;
+            end
+          end
+          3'b001: begin
+            opnd_hzd[i][s] = HZD_NONE;
+          end
+          3'b000: begin
+            opnd_hzd[i][s] = (src_en[i][s] & ~sb_rdy_i[i][s]) ? HZD_SB_WAIT : HZD_NONE;
+          end
+          default: begin
+            opnd_hzd[i][s] = HZD_SB_WAIT;
+          end
+        endcase
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Stage 4 :: bypass datapath — single-level one-hot AND-OR operand mux
+  // ===========================================================================
+  always_comb begin : p_datapath
+    opnd_data_o = '0;
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        for (int unsigned p = 0; p < NUM_EX; p++) begin
+          opnd_data_o[i][s] = opnd_data_o[i][s]
+                            | (ex_res_i[p] & {XLEN_W{ex_sel[i][s][p]}});
+        end
+
+        for (int unsigned p = 0; p < NUM_MEM; p++) begin
+          opnd_data_o[i][s] = opnd_data_o[i][s]
+                            | (mem_res_i[p] & {XLEN_W{mem_sel[i][s][p]}});
+        end
+
+        for (int unsigned p = 0; p < NUM_WB; p++) begin
+          opnd_data_o[i][s] = opnd_data_o[i][s]
+                            | (wb_pkt_i[p].data & {XLEN_W{wb_sel[i][s][p]}});
+        end
+
+        opnd_data_o[i][s] = opnd_data_o[i][s]
+                          | (rf_rdata_i[i][s] & {XLEN_W{rf_sel[i][s]}});
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Stage 5 :: operand selection control, stall and scoreboard hooks
+  // ===========================================================================
+  always_comb begin : p_control
+    opnd_sel_o         = opnd_sel;
+    opnd_port_o        = '0;
+    opnd_byp_o         = '0;
+    opnd_rdy_o         = '0;
+    raw_hzd_o          = '0;
+    sb_wait_o          = '0;
+    ld_use_o           = '0;
+    stall_o            = '0;
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        opnd_port_o[i][s] = onehot_to_idx(ex_sel[i][s] | mem_sel[i][s] | wb_sel[i][s]);
+        opnd_byp_o[i][s]  = ex_any[i][s] | mem_any[i][s] | wb_any[i][s];
+        opnd_rdy_o[i][s]  = (opnd_hzd[i][s] == HZD_NONE);
+        sb_wait_o[i][s]   = (opnd_hzd[i][s] == HZD_SB_WAIT);
+        raw_hzd_o[i][s]   = ex_any[i][s] | mem_any[i][s] | wb_any[i][s]
+                          | (opnd_hzd[i][s] == HZD_SB_WAIT);
+
+        ld_use_o[i] = ld_use_o[i] | (opnd_hzd[i][s] == HZD_LOAD_USE);
+        stall_o[i]  = stall_o[i]  | (opnd_hzd[i][s] != HZD_NONE);
+      end
+
+      operand_a_select_o[i] = opnd_sel[i][OPND_A];
+      operand_b_select_o[i] = opnd_sel[i][OPND_B];
+    end
+  end
+
+  // ===========================================================================
+  // Stage 6 :: synthesizable ambiguity detector (RAS / debug visibility)
+  // ===========================================================================
+  always_comb begin : p_ambiguity
+    ambig_err_o = 1'b0;
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        ambig_err_o = ambig_err_o
+                    | multi_hit[i][s]
+                    | (XSTAGE_MULTIHIT_ERR & xstage_hit[i][s]);
+      end
+    end
+  end
+
+`ifndef SYNTHESIS
+  // ===========================================================================
+  // Invariants and path coverage (deferred immediate, evaluated post-settle)
+  // ===========================================================================
+  always_comb begin : p_assert
+    a_ctrl_known : assert final (!$isunknown({flush_i, br_kill_i}))
+      else $error("forwarding_unit: X on flush/kill control");
+
+    for (int unsigned p = 0; p < NUM_EX; p++) begin
+      a_ex_ld_window : assert final (!(ex_pkt_i[p].valid && ex_pkt_i[p].is_load && ex_res_vld_i[p]))
+        else $error("forwarding_unit: EX%0d returns load data inside load-use window", p);
+      a_ex_zero_wr : assert final (!(ZERO_PREG_EN && ex_live[p] && (ex_pkt_i[p].pdst == PREG_ZERO)))
+        else $error("forwarding_unit: EX%0d writes hardwired-zero preg", p);
+    end
+
+    for (int unsigned p = 0; p < NUM_MEM; p++) begin
+      a_mem_zero_wr : assert final (!(ZERO_PREG_EN && mem_live[p] && (mem_pkt_i[p].pdst == PREG_ZERO)))
+        else $error("forwarding_unit: MEM%0d writes hardwired-zero preg", p);
+    end
+
+    for (int unsigned p = 0; p < NUM_WB; p++) begin
+      a_wb_zero_wr : assert final (!(ZERO_PREG_EN && wb_live[p] && (wb_pkt_i[p].pdst == PREG_ZERO)))
+        else $error("forwarding_unit: WB%0d writes hardwired-zero preg", p);
+    end
+
+    for (int unsigned i = 0; i < NUM_ISS; i++) begin
+      a_kill_no_stall : assert final (iss_live[i] || !stall_o[i])
+        else $error("forwarding_unit: killed consumer iss%0d drives stall", i);
+
+      for (int unsigned s = 0; s < NUM_SRC; s++) begin
+        a_sel_onehot0 : assert final ($onehot0({ex_sel[i][s], mem_sel[i][s], wb_sel[i][s], rf_sel[i][s]}))
+          else $error("forwarding_unit: non-exclusive select iss%0d src%0d", i, s);
+
+        a_sel_encode : assert final (((opnd_sel[i][s] == FWD_SRC_EX)  == (|ex_sel[i][s]))
+                                  && ((opnd_sel[i][s] == FWD_SRC_MEM) == (|mem_sel[i][s]))
+                                  && ((opnd_sel[i][s] == FWD_SRC_WB)  == (|wb_sel[i][s]))
+                                  && ((opnd_sel[i][s] == FWD_SRC_RF)  == rf_sel[i][s]))
+          else $error("forwarding_unit: encode/datapath select divergence iss%0d src%0d", i, s);
+
+        a_unique_producer : assert final (!multi_hit[i][s])
+          else $error("forwarding_unit: multiple same-stage producers for iss%0d src%0d", i, s);
+
+        a_xstage_strict : assert final (!(XSTAGE_MULTIHIT_ERR && xstage_hit[i][s]))
+          else $error("forwarding_unit: cross-stage multi-hit iss%0d src%0d", i, s);
+
+        a_kill_quiet : assert final (iss_live[i]
+                                  || ((opnd_sel[i][s] == FWD_SRC_NONE) && (opnd_hzd[i][s] == HZD_NONE)))
+          else $error("forwarding_unit: killed consumer iss%0d src%0d still routed", i, s);
+
+        a_self_dep : assert final (!(src_en[i][s] && iss_pkt_i[i].rd_wen
+                                     && (iss_pkt_i[i].src[s].preg == iss_pkt_i[i].pdst)))
+          else $error("forwarding_unit: iss%0d src%0d sources its own destination", i, s);
+
+        for (int unsigned j = 0; j < NUM_ISS; j++) begin
+          a_group_raw : assert final (!((j != i) && src_en[i][s] && iss_live[j] && iss_pkt_i[j].rd_wen
+                                        && (iss_pkt_i[j].pdst == iss_pkt_i[i].src[s].preg)))
+            else $error("forwarding_unit: iss%0d src%0d depends on co-issued iss%0d", i, s, j);
+        end
+
+        for (int unsigned p = 0; p < NUM_EX; p++) begin
+          c_ex_path : cover final (ex_sel[i][s][p] && (opnd_hzd[i][s] == HZD_NONE));
+          c_ex_kill : cover final (iss_live[i] && iss_pkt_i[i].src[s].used
+                                   && ex_pkt_i[p].valid && ex_pkt_i[p].rd_wen
+                                   && (ex_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg)
+                                   && !ex_live[p]);
+        end
+
+        for (int unsigned p = 0; p < NUM_MEM; p++) begin
+          c_mem_path : cover final (mem_sel[i][s][p] && (opnd_hzd[i][s] == HZD_NONE));
+          c_mem_kill : cover final (iss_live[i] && iss_pkt_i[i].src[s].used
+                                    && mem_pkt_i[p].valid && mem_pkt_i[p].rd_wen
+                                    && (mem_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg)
+                                    && !mem_live[p]);
+        end
+
+        for (int unsigned p = 0; p < NUM_WB; p++) begin
+          c_wb_path : cover final (wb_sel[i][s][p]);
+          c_wb_kill : cover final (iss_live[i] && iss_pkt_i[i].src[s].used
+                                   && wb_pkt_i[p].valid && wb_pkt_i[p].rd_wen
+                                   && (wb_pkt_i[p].pdst == iss_pkt_i[i].src[s].preg)
+                                   && !wb_live[p]);
+        end
+
+        c_rf_path      : cover final (rf_sel[i][s] && src_en[i][s] && sb_rdy_i[i][s]);
+        c_zero_path    : cover final (rf_sel[i][s] && !src_en[i][s]);
+        c_hzd_ld_use   : cover final (opnd_hzd[i][s] == HZD_LOAD_USE);
+        c_hzd_ex_busy  : cover final (opnd_hzd[i][s] == HZD_EX_BUSY);
+        c_hzd_mem_busy : cover final (opnd_hzd[i][s] == HZD_MEM_BUSY);
+        c_hzd_sb_wait  : cover final (opnd_hzd[i][s] == HZD_SB_WAIT);
+        c_prio_ex_mem  : cover final (ex_any[i][s] && mem_any[i][s]);
+        c_prio_ex_wb   : cover final (ex_any[i][s] && wb_any[i][s]);
+        c_prio_mem_wb  : cover final (mem_any[i][s] && wb_any[i][s] && !ex_any[i][s]);
+        c_prio_all     : cover final (ex_any[i][s] && mem_any[i][s] && wb_any[i][s]);
+      end
+    end
+  end
+`endif
+
+endmodule : forwarding_unit
