@@ -1,0 +1,2889 @@
+// =============================================================================
+//  SilicaFlux Architecture
+//  Instruction Decode Subsystem
+// -----------------------------------------------------------------------------
+//  File      : decoder.sf
+//  Standard  : Silica Flux-2017
+//  Units     : sf_decode_pkg   ISA encoding map, decode vocabulary, packet types
+//              sf_decoder      N-wide speculative decode stage
+// -----------------------------------------------------------------------------
+//  Primary encoding
+//    inst[6:5]  format   00 R | 01 I | 10 M | 11 X
+//    inst[4:0]  major    majors 0 and 31 permanently reserved in every format
+//                        (all-zeros and all-ones words always trap)
+//
+//    R   | funct7 [31:25] | rs2 [24:20] | rs1 [19:15] | f3 [14:12] | rd  [11:7] | op |
+//    I   | imm12  [31:20]               | rs1 [19:15] | f3 [14:12] | rd  [11:7] | op |
+//    Iu  | imm20  [31:12]                                          | rd  [11:7] | op |
+//    M   | f5 [31:27] | ord [26:25] | rs2 [24:20] | rs1 | sz [14:12] | rd/dlo   | op |
+//    X   | f4 [31:28] | sel [27:25] | rs2 [24:20] | rs1 | f3 [14:12] | rd       | op |
+//    X4  | rs3/f5 [31:27] | prec [26:25] | rs2    | rs1 | rm [14:12] | rd       | op |
+//
+//  Branch and jump offsets are encoded in instruction granules.
+//  M-type store displacements are scaled by access size.
+// =============================================================================
+
+package sf_decode_pkg;
+
+  // ===========================================================================
+  // Architectural parameters
+  // ===========================================================================
+  localparam int unsigned XLEN           = 64;
+  localparam int unsigned ILEN           = 32;
+  localparam int unsigned AREG_W         = 5;
+  localparam int unsigned NREG_W         = 3;     // narrow files: tile, predicate
+  localparam int unsigned CSR_ADDR_W     = 12;
+  localparam int unsigned FTQ_IDX_W      = 6;
+  localparam int unsigned BP_META_W      = 24;
+  localparam int unsigned NUM_ACCEL      = 4;
+  localparam int unsigned ACCEL_ID_W     = $clog2(NUM_ACCEL);
+  localparam int unsigned INST_ALIGN_LSB = 2;
+  localparam int unsigned SHAMT_W        = $clog2(XLEN);
+  localparam int unsigned SHAMT32_W      = 5;
+
+  typedef logic [ILEN-1:0]       inst_t;
+  typedef logic [XLEN-1:0]       xlen_t;
+  typedef logic [AREG_W-1:0]     areg_t;
+  typedef logic [NREG_W-1:0]     nreg_t;
+  typedef logic [CSR_ADDR_W-1:0] csr_addr_t;
+  typedef logic [FTQ_IDX_W-1:0]  ftq_idx_t;
+  typedef logic [BP_META_W-1:0]  bp_meta_t;
+  typedef logic [4:0]            major_t;
+  typedef logic [3:0]            fence_set_t;     // {I, O, R, W}
+
+  typedef logic [1:0]            priv_lvl_t;
+
+  // CSR address partition: {access tag, minimum privilege, index}
+  typedef struct packed {
+    logic [1:0] rw_tag;
+    priv_lvl_t  priv_lvl;
+    logic [7:0] index;
+  } csr_addr_fields_t;
+
+  localparam areg_t      AREG_ZERO     = 5'd0;
+  localparam areg_t      AREG_LINK     = 5'd1;
+  localparam areg_t      AREG_LINK_ALT = 5'd5;
+  localparam csr_addr_t  CSR_SATP      = 12'h180;
+  localparam logic [1:0] CSR_RO_TAG    = 2'b11;
+  localparam priv_lvl_t  PRIV_LVL_RSVD = 2'b10;
+  localparam int unsigned INST_BYTES_N = ILEN / 8;
+  localparam xlen_t      INST_BYTES    = xlen_t'(INST_BYTES_N);
+
+  // ===========================================================================
+  // Privilege and architectural context
+  // ===========================================================================
+  typedef enum logic [1:0] {
+    PRIV_U = 2'b00,
+    PRIV_S = 2'b01,
+    PRIV_M = 2'b11
+  } priv_e;
+
+  typedef struct packed {
+    priv_e                priv;
+    logic                 fp_en;        // FP register state enabled
+    logic                 vec_en;       // vector state enabled
+    logic                 tns_en;       // tensor tile state enabled
+    logic [NUM_ACCEL-1:0] accel_en;     // custom accelerator slots enabled
+    logic                 tvm;          // trap VM management in S
+    logic                 tw;           // trap WFI below M
+    logic                 tsr;          // trap SRET in S
+  } dec_ctx_t;
+
+  // ===========================================================================
+  // Encoding map: format and major opcodes
+  // ===========================================================================
+  typedef enum logic [1:0] {
+    FMT_R = 2'b00,
+    FMT_I = 2'b01,
+    FMT_M = 2'b10,
+    FMT_X = 2'b11
+  } fmt_e;
+
+  typedef struct packed {
+    fmt_e   fmt;
+    major_t major;
+  } opcode_t;
+
+  typedef enum logic [4:0] {
+    R_ALU    = 5'd1,
+    R_ALUW   = 5'd2,
+    R_BITU   = 5'd3
+  } r_major_e;
+
+  typedef enum logic [4:0] {
+    I_ALU    = 5'd1,
+    I_ALUW   = 5'd2,
+    I_LUI    = 5'd3,
+    I_AUIPC  = 5'd4,
+    I_LOAD   = 5'd5,
+    I_BRANCH = 5'd6,
+    I_JAL    = 5'd7,
+    I_JALR   = 5'd8,
+    I_SYSTEM = 5'd9,
+    I_FLOAD  = 5'd10
+  } i_major_e;
+
+  typedef enum logic [4:0] {
+    M_STORE    = 5'd1,
+    M_FSTORE   = 5'd2,
+    M_LOADX    = 5'd3,
+    M_STOREX   = 5'd4,
+    M_AMO      = 5'd5,
+    M_FENCE    = 5'd6,
+    M_PREFETCH = 5'd7,
+    M_CBO      = 5'd8
+  } m_major_e;
+
+  typedef enum logic [4:0] {
+    X_FP     = 5'd1,
+    X_FMADD  = 5'd2,
+    X_FMSUB  = 5'd3,
+    X_FNMSUB = 5'd4,
+    X_FNMADD = 5'd5,
+    X_VEC    = 5'd6,
+    X_VMEM   = 5'd7,
+    X_VCFG   = 5'd8,
+    X_TNS    = 5'd9,
+    X_SYNC   = 5'd10,
+    X_CUST0  = 5'd24,
+    X_CUST1  = 5'd25,
+    X_CUST2  = 5'd26,
+    X_CUST3  = 5'd27
+  } x_major_e;
+
+  // ===========================================================================
+  // Encoding map: function fields
+  // ===========================================================================
+  typedef enum logic [6:0] {
+    F7_BASE   = 7'b000_0000,
+    F7_MDU    = 7'b000_0001,
+    F7_MINMAX = 7'b000_0101,
+    F7_ALT    = 7'b010_0000,
+    F7_ROT    = 7'b011_0000
+  } funct7_e;
+
+  typedef enum logic [2:0] {
+    F3_ADD  = 3'd0,
+    F3_SLL  = 3'd1,
+    F3_SLT  = 3'd2,
+    F3_SLTU = 3'd3,
+    F3_XOR  = 3'd4,
+    F3_SRL  = 3'd5,
+    F3_OR   = 3'd6,
+    F3_AND  = 3'd7
+  } f3_base_e;
+
+  typedef enum logic [2:0] {
+    F3_SUB  = 3'd0,
+    F3_XNOR = 3'd4,
+    F3_SRA  = 3'd5,
+    F3_ORN  = 3'd6,
+    F3_ANDN = 3'd7
+  } f3_alt_e;
+
+  typedef enum logic [2:0] {
+    F3_MIN  = 3'd4,
+    F3_MINU = 3'd5,
+    F3_MAX  = 3'd6,
+    F3_MAXU = 3'd7
+  } f3_minmax_e;
+
+  typedef enum logic [2:0] {
+    F3_ROL  = 3'd1,
+    F3_ROR  = 3'd5
+  } f3_rot_e;
+
+  typedef enum logic [4:0] {
+    BU_CLZ   = 5'd0,
+    BU_CTZ   = 5'd1,
+    BU_CPOP  = 5'd2,
+    BU_SEXTB = 5'd4,
+    BU_SEXTH = 5'd5,
+    BU_ZEXTH = 5'd6,
+    BU_REV8  = 5'd8,
+    BU_ORCB  = 5'd9
+  } bitu_e;
+
+  typedef enum logic [5:0] {
+    SHF_LOGIC = 6'b00_0000,
+    SHF_ARITH = 6'b01_0000,
+    SHF_ROT   = 6'b01_1000
+  } shf_e;
+
+  typedef enum logic [2:0] {
+    LDF_B  = 3'd0,
+    LDF_H  = 3'd1,
+    LDF_W  = 3'd2,
+    LDF_D  = 3'd3,
+    LDF_BU = 3'd4,
+    LDF_HU = 3'd5,
+    LDF_WU = 3'd6
+  } ldf_e;
+
+  typedef enum logic [2:0] {
+    FMF_H = 3'd1,
+    FMF_W = 3'd2,
+    FMF_D = 3'd3
+  } fmf_e;
+
+  typedef enum logic [2:0] {
+    SYSF_PRIV   = 3'd0,
+    SYSF_CSRRW  = 3'd1,
+    SYSF_CSRRS  = 3'd2,
+    SYSF_CSRRC  = 3'd3,
+    SYSF_CSRRWI = 3'd5,
+    SYSF_CSRRSI = 3'd6,
+    SYSF_CSRRCI = 3'd7
+  } sysf_e;
+
+  typedef enum logic [11:0] {
+    SYSI_ECALL  = 12'h000,
+    SYSI_EBREAK = 12'h001,
+    SYSI_SRET   = 12'h102,
+    SYSI_WFI    = 12'h105,
+    SYSI_MRET   = 12'h302
+  } sysi_e;
+
+  typedef enum logic [4:0] {
+    AMOF_ADD  = 5'b00000,
+    AMOF_SWAP = 5'b00001,
+    AMOF_LR   = 5'b00010,
+    AMOF_SC   = 5'b00011,
+    AMOF_XOR  = 5'b00100,
+    AMOF_CAS  = 5'b00101,
+    AMOF_OR   = 5'b01000,
+    AMOF_AND  = 5'b01100,
+    AMOF_MIN  = 5'b10000,
+    AMOF_MAX  = 5'b10100,
+    AMOF_MINU = 5'b11000,
+    AMOF_MAXU = 5'b11100
+  } amof_e;
+
+  typedef enum logic [2:0] {
+    AMOW_W = 3'd2,
+    AMOW_D = 3'd3
+  } amow_e;
+
+  typedef enum logic [2:0] {
+    FNC_FENCE      = 3'd0,
+    FNC_FENCE_I    = 3'd1,
+    FNC_SFENCE_VMA = 3'd2
+  } fnc_e;
+
+  typedef enum logic [4:0] {
+    FF5_ADD     = 5'b00000,
+    FF5_SUB     = 5'b00001,
+    FF5_MUL     = 5'b00010,
+    FF5_DIV     = 5'b00011,
+    FF5_SGNJ    = 5'b00100,
+    FF5_MINMAX  = 5'b00101,
+    FF5_CVT_F2F = 5'b01000,
+    FF5_SQRT    = 5'b01011,
+    FF5_CMP     = 5'b10100,
+    FF5_CVT_F2I = 5'b11000,
+    FF5_CVT_I2F = 5'b11010,
+    FF5_MV_F2X  = 5'b11100,
+    FF5_MV_X2F  = 5'b11110
+  } ff5_e;
+
+  typedef enum logic [2:0] { FSG_J   = 3'd0, FSG_JN  = 3'd1, FSG_JX  = 3'd2 } fsgnj_e;
+  typedef enum logic [2:0] { FMM_MIN = 3'd0, FMM_MAX = 3'd1                } fminmax_e;
+  typedef enum logic [2:0] { FCM_LE  = 3'd0, FCM_LT  = 3'd1, FCM_EQ  = 3'd2 } fcmp_e;
+  typedef enum logic [2:0] { FMV_MV  = 3'd0, FMV_CLS = 3'd1                } fmv_e;
+
+  typedef enum logic [2:0] {
+    SYF_PAUSE   = 3'd0,
+    SYF_WFE     = 3'd1,
+    SYF_SEV     = 3'd2,
+    SYF_BARRIER = 3'd3,
+    SYF_CLREX   = 3'd4
+  } syf_e;
+
+  // ===========================================================================
+  // Instruction field overlays
+  // ===========================================================================
+  typedef struct packed {
+    logic [6:0]  funct7;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  funct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } r_inst_t;
+
+  typedef struct packed {
+    logic [11:0] imm12;
+    areg_t       rs1;
+    logic [2:0]  funct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } i_inst_t;
+
+  typedef struct packed {
+    logic [5:0]  shf;
+    logic [5:0]  shamt;
+    areg_t       rs1;
+    logic [2:0]  funct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } ish_inst_t;
+
+  typedef struct packed {
+    logic [19:0] imm20;
+    areg_t       rd;
+    opcode_t     opcode;
+  } u_inst_t;
+
+  typedef struct packed {
+    logic [4:0]  mfunct5;
+    logic [1:0]  ord;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  msize;
+    areg_t       rd_dlo;
+    opcode_t     opcode;
+  } m_inst_t;
+
+  typedef struct packed {
+    logic [1:0]  scale;
+    logic [2:0]  rsvd;
+    logic [1:0]  ord;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  msize;
+    areg_t       rd_rs3;
+    opcode_t     opcode;
+  } mx_inst_t;
+
+  typedef struct packed {
+    fence_set_t  pred;
+    fence_set_t  succ;
+    logic [8:0]  rsvd;
+    logic [2:0]  funct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } fence_inst_t;
+
+  typedef struct packed {
+    logic [3:0]  xfunct4;
+    logic [2:0]  xsel;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  xfunct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } x_inst_t;
+
+  typedef struct packed {
+    logic [4:0]  ffunct5;
+    logic [1:0]  fprec;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  rm;
+    areg_t       rd;
+    opcode_t     opcode;
+  } xf_inst_t;
+
+  typedef struct packed {
+    areg_t       rs3;
+    logic [1:0]  fprec;
+    areg_t       rs2;
+    areg_t       rs1;
+    logic [2:0]  rm;
+    areg_t       rd;
+    opcode_t     opcode;
+  } x4_inst_t;
+
+  typedef struct packed {
+    logic        vma;
+    logic        vta;
+    logic [2:0]  vsew;
+    logic [2:0]  vlmul;
+  } vtype_t;
+
+  localparam int unsigned VTYPE_W = $bits(vtype_t);
+
+  typedef struct packed {
+    logic [3:0]  cfg;
+    vtype_t      vtypei;
+    areg_t       rs1;
+    logic [2:0]  funct3;
+    areg_t       rd;
+    opcode_t     opcode;
+  } vcfg_inst_t;
+
+  typedef union packed {
+    inst_t       raw;
+    r_inst_t     r;
+    i_inst_t     i;
+    ish_inst_t   ish;
+    u_inst_t     u;
+    m_inst_t     m;
+    mx_inst_t    mx;
+    fence_inst_t fn;
+    x_inst_t     x;
+    xf_inst_t    xf;
+    x4_inst_t    x4;
+    vcfg_inst_t  vc;
+  } inst_u;
+
+  // ===========================================================================
+  // Decode vocabulary: classification and routing
+  // ===========================================================================
+  typedef enum logic [4:0] {
+    IC_TRAP      = 5'd0,
+    IC_ARITH     = 5'd1,
+    IC_LOGIC     = 5'd2,
+    IC_SHIFT     = 5'd3,
+    IC_BITMANIP  = 5'd4,
+    IC_MUL       = 5'd5,
+    IC_DIV       = 5'd6,
+    IC_BRANCH    = 5'd7,
+    IC_JUMP      = 5'd8,
+    IC_LOAD      = 5'd9,
+    IC_STORE     = 5'd10,
+    IC_AMO       = 5'd11,
+    IC_FENCE     = 5'd12,
+    IC_PREFETCH  = 5'd13,
+    IC_CACHE     = 5'd14,
+    IC_CSR       = 5'd15,
+    IC_SYSTEM    = 5'd16,
+    IC_SYNC      = 5'd17,
+    IC_FP        = 5'd18,
+    IC_FP_DIV    = 5'd19,
+    IC_FP_MEM    = 5'd20,
+    IC_VEC       = 5'd21,
+    IC_VEC_MEM   = 5'd22,
+    IC_VEC_CFG   = 5'd23,
+    IC_TENSOR    = 5'd24,
+    IC_ACCEL     = 5'd25
+  } inst_class_e;
+
+  typedef enum logic [3:0] {
+    FU_NONE  = 4'd0,
+    FU_ALU   = 4'd1,
+    FU_MUL   = 4'd2,
+    FU_DIV   = 4'd3,
+    FU_BRU   = 4'd4,
+    FU_LDU   = 4'd5,
+    FU_STU   = 4'd6,
+    FU_AMO   = 4'd7,
+    FU_CSR   = 4'd8,
+    FU_SYS   = 4'd9,
+    FU_FPU   = 4'd10,
+    FU_FDIV  = 4'd11,
+    FU_VALU  = 4'd12,
+    FU_VLSU  = 4'd13,
+    FU_TMU   = 4'd14,
+    FU_ACCEL = 4'd15
+  } fu_e;
+
+  typedef enum logic [2:0] {
+    IQ_NONE = 3'd0,
+    IQ_INT  = 3'd1,
+    IQ_MEM  = 3'd2,
+    IQ_FP   = 3'd3,
+    IQ_VEC  = 3'd4,
+    IQ_ACC  = 3'd5
+  } iq_e;
+
+  typedef enum logic [2:0] {
+    LAT_NONE   = 3'd0,
+    LAT_SINGLE = 3'd1,    // single-cycle, back-to-back wakeup
+    LAT_FIXED  = 3'd2,    // fixed-latency pipelined
+    LAT_ITER   = 3'd3,    // iterative, unit busy
+    LAT_VAR    = 3'd4,    // variable, completion-signalled
+    LAT_SERIAL = 3'd5     // executes at ROB head
+  } lat_class_e;
+
+  typedef enum logic [1:0] {
+    OPA_RS1  = 2'd0,
+    OPA_PC   = 2'd1,
+    OPA_ZERO = 2'd2
+  } opa_sel_e;
+
+  typedef enum logic [1:0] {
+    OPB_NONE = 2'd0,
+    OPB_RS2  = 2'd1,
+    OPB_IMM  = 2'd2
+  } opb_sel_e;
+
+  typedef enum logic [2:0] {
+    RC_NONE = 3'd0,
+    RC_INT  = 3'd1,
+    RC_FP   = 3'd2,
+    RC_VEC  = 3'd3,
+    RC_TILE = 3'd4,
+    RC_PRED = 3'd5
+  } reg_class_e;
+
+  // alu_op[4:3] encodes the operation class: arith | logic | shift | bitmanip
+  typedef enum logic [4:0] {
+    ALU_ADD   = 5'b00_000,
+    ALU_SUB   = 5'b00_001,
+    ALU_SLT   = 5'b00_010,
+    ALU_SLTU  = 5'b00_011,
+    ALU_MIN   = 5'b00_100,
+    ALU_MAX   = 5'b00_101,
+    ALU_MINU  = 5'b00_110,
+    ALU_MAXU  = 5'b00_111,
+    ALU_AND   = 5'b01_000,
+    ALU_OR    = 5'b01_001,
+    ALU_XOR   = 5'b01_010,
+    ALU_ANDN  = 5'b01_011,
+    ALU_ORN   = 5'b01_100,
+    ALU_XNOR  = 5'b01_101,
+    ALU_SLL   = 5'b10_000,
+    ALU_SRL   = 5'b10_001,
+    ALU_SRA   = 5'b10_010,
+    ALU_ROL   = 5'b10_011,
+    ALU_ROR   = 5'b10_100,
+    ALU_CLZ   = 5'b11_000,
+    ALU_CTZ   = 5'b11_001,
+    ALU_CPOP  = 5'b11_010,
+    ALU_SEXTB = 5'b11_011,
+    ALU_SEXTH = 5'b11_100,
+    ALU_ZEXTH = 5'b11_101,
+    ALU_REV8  = 5'b11_110,
+    ALU_ORCB  = 5'b11_111
+  } alu_op_e;
+
+  // mdu_op[2] selects the divide pipe; encoding matches R-type funct3
+  typedef enum logic [2:0] {
+    MDU_MUL    = 3'd0,
+    MDU_MULH   = 3'd1,
+    MDU_MULHSU = 3'd2,
+    MDU_MULHU  = 3'd3,
+    MDU_DIV    = 3'd4,
+    MDU_DIVU   = 3'd5,
+    MDU_REM    = 3'd6,
+    MDU_REMU   = 3'd7
+  } mdu_op_e;
+
+  typedef enum logic [1:0] {
+    BR_NONE = 2'd0,
+    BR_COND = 2'd1,
+    BR_JAL  = 2'd2,
+    BR_JALR = 2'd3
+  } br_kind_e;
+
+  // Encoding matches I-type branch funct3
+  typedef enum logic [2:0] {
+    BC_EQ  = 3'd0,
+    BC_NE  = 3'd1,
+    BC_LT  = 3'd4,
+    BC_GE  = 3'd5,
+    BC_LTU = 3'd6,
+    BC_GEU = 3'd7
+  } br_cond_e;
+
+  typedef enum logic [1:0] {
+    RAS_NONE    = 2'd0,
+    RAS_PUSH    = 2'd1,
+    RAS_POP     = 2'd2,
+    RAS_POPPUSH = 2'd3
+  } ras_op_e;
+
+  typedef enum logic [3:0] {
+    MEM_NONE     = 4'd0,
+    MEM_LOAD     = 4'd1,
+    MEM_STORE    = 4'd2,
+    MEM_AMO      = 4'd3,
+    MEM_LR       = 4'd4,
+    MEM_SC       = 4'd5,
+    MEM_PREFETCH = 4'd6,
+    MEM_FENCE    = 4'd7,
+    MEM_FENCE_I  = 4'd8,
+    MEM_SFENCE   = 4'd9,
+    MEM_CBO      = 4'd10,
+    MEM_VLOAD    = 4'd11,
+    MEM_VSTORE   = 4'd12,
+    MEM_TLOAD    = 4'd13,
+    MEM_TSTORE   = 4'd14
+  } mem_op_e;
+
+  typedef enum logic [1:0] {
+    SZ_B = 2'd0,
+    SZ_H = 2'd1,
+    SZ_W = 2'd2,
+    SZ_D = 2'd3
+  } mem_size_e;
+
+  // Encoding matches M-type ord field
+  typedef enum logic [1:0] {
+    ORD_RLX = 2'd0,
+    ORD_ACQ = 2'd1,
+    ORD_REL = 2'd2,
+    ORD_SC  = 2'd3
+  } mem_ord_e;
+
+  typedef enum logic [1:0] {
+    AM_NONE        = 2'd0,
+    AM_BASE_DISP   = 2'd1,
+    AM_BASE_INDEX  = 2'd2,
+    AM_BASE_STRIDE = 2'd3
+  } addr_mode_e;
+
+  typedef enum logic [3:0] {
+    AMO_ADD  = 4'd0,
+    AMO_SWAP = 4'd1,
+    AMO_XOR  = 4'd2,
+    AMO_OR   = 4'd3,
+    AMO_AND  = 4'd4,
+    AMO_MIN  = 4'd5,
+    AMO_MAX  = 4'd6,
+    AMO_MINU = 4'd7,
+    AMO_MAXU = 4'd8,
+    AMO_CAS  = 4'd9,
+    AMO_LR   = 4'd10,
+    AMO_SC   = 4'd11
+  } amo_op_e;
+
+  typedef enum logic [1:0] {
+    PF_READ  = 2'd0,
+    PF_WRITE = 2'd1,
+    PF_INST  = 2'd2,
+    PF_NTA   = 2'd3
+  } pf_hint_e;
+
+  typedef enum logic [1:0] {
+    CBO_CLEAN = 2'd0,
+    CBO_FLUSH = 2'd1,
+    CBO_INVAL = 2'd2,
+    CBO_ZERO  = 2'd3
+  } cbo_op_e;
+
+  // Encoding matches funct3[1:0] of CSR instructions
+  typedef enum logic [1:0] {
+    CSR_NONE = 2'd0,
+    CSR_RW   = 2'd1,
+    CSR_RS   = 2'd2,
+    CSR_RC   = 2'd3
+  } csr_op_e;
+
+  typedef enum logic [3:0] {
+    SYS_NONE       = 4'd0,
+    SYS_ECALL      = 4'd1,
+    SYS_EBREAK     = 4'd2,
+    SYS_SRET       = 4'd3,
+    SYS_MRET       = 4'd4,
+    SYS_WFI        = 4'd5,
+    SYS_FENCE_I    = 4'd6,
+    SYS_SFENCE_VMA = 4'd7,
+    SYS_PAUSE      = 4'd8,
+    SYS_WFE        = 4'd9,
+    SYS_SEV        = 4'd10,
+    SYS_BARRIER    = 4'd11,
+    SYS_CLREX      = 4'd12
+  } sys_op_e;
+
+  typedef enum logic [4:0] {
+    FP_NONE    = 5'd0,
+    FP_ADD     = 5'd1,
+    FP_SUB     = 5'd2,
+    FP_MUL     = 5'd3,
+    FP_DIV     = 5'd4,
+    FP_SQRT    = 5'd5,
+    FP_SGNJ    = 5'd6,
+    FP_SGNJN   = 5'd7,
+    FP_SGNJX   = 5'd8,
+    FP_MIN     = 5'd9,
+    FP_MAX     = 5'd10,
+    FP_LE      = 5'd11,
+    FP_LT      = 5'd12,
+    FP_EQ      = 5'd13,
+    FP_CVT_F2I = 5'd14,
+    FP_CVT_I2F = 5'd15,
+    FP_CVT_F2F = 5'd16,
+    FP_MV_F2X  = 5'd17,
+    FP_CLASS   = 5'd18,
+    FP_MV_X2F  = 5'd19,
+    FP_MADD    = 5'd20,
+    FP_MSUB    = 5'd21,
+    FP_NMSUB   = 5'd22,
+    FP_NMADD   = 5'd23,
+    FP_LOAD    = 5'd24,
+    FP_STORE   = 5'd25
+  } fp_op_e;
+
+  typedef enum logic [1:0] {
+    FPP_S    = 2'd0,
+    FPP_D    = 2'd1,
+    FPP_H    = 2'd2,
+    FPP_BF16 = 2'd3
+  } fp_prec_e;
+
+  typedef enum logic [2:0] {
+    RM_RNE = 3'd0,
+    RM_RTZ = 3'd1,
+    RM_RDN = 3'd2,
+    RM_RUP = 3'd3,
+    RM_RMM = 3'd4,
+    RM_DYN = 3'd7
+  } fp_rm_e;
+
+  typedef enum logic [1:0] {
+    FPI_W  = 2'd0,
+    FPI_WU = 2'd1,
+    FPI_L  = 2'd2,
+    FPI_LU = 2'd3
+  } fp_int_e;
+
+  typedef enum logic [3:0] {
+    VOP_ADD   = 4'd0,
+    VOP_SUB   = 4'd1,
+    VOP_MUL   = 4'd2,
+    VOP_AND   = 4'd3,
+    VOP_OR    = 4'd4,
+    VOP_XOR   = 4'd5,
+    VOP_SLL   = 4'd6,
+    VOP_SRL   = 4'd7,
+    VOP_SRA   = 4'd8,
+    VOP_MIN   = 4'd9,
+    VOP_MAX   = 4'd10,
+    VOP_MACC  = 4'd11,
+    VOP_CMPEQ = 4'd12,
+    VOP_CMPLT = 4'd13,
+    VOP_MERGE = 4'd14,
+    VOP_MV    = 4'd15
+  } vec_op_e;
+
+  typedef enum logic [2:0] {
+    VFM_VV  = 3'd0,
+    VFM_VX  = 3'd1,
+    VFM_VI  = 3'd2,
+    VFM_VF  = 3'd3,
+    VFM_RED = 3'd4
+  } vec_form_e;
+
+  // vmop[2] = store, vmop[1:0] = addressing mode
+  typedef enum logic [3:0] {
+    VMO_LE  = 4'd0,
+    VMO_LSE = 4'd1,
+    VMO_LXE = 4'd2,
+    VMO_SE  = 4'd4,
+    VMO_SSE = 4'd5,
+    VMO_SXE = 4'd6
+  } vmem_op_e;
+
+  typedef enum logic [1:0] {
+    VMA_UNIT    = 2'd0,
+    VMA_STRIDED = 2'd1,
+    VMA_INDEXED = 2'd2
+  } vmem_mode_e;
+
+  typedef enum logic [1:0] {
+    EEW_8  = 2'd0,
+    EEW_16 = 2'd1,
+    EEW_32 = 2'd2,
+    EEW_64 = 2'd3
+  } vec_eew_e;
+
+  typedef enum logic [3:0] {
+    VCF_SETVLI  = 4'd0,
+    VCF_SETIVLI = 4'd1,
+    VCF_SETVL   = 4'd2
+  } vcfg_op_e;
+
+  localparam logic [2:0] VSEW_MAX       = 3'd3;
+  localparam logic [2:0] VLMUL_RESERVED = 3'b100;
+
+  typedef enum logic [3:0] {
+    TOP_ZERO  = 4'd0,
+    TOP_LOAD  = 4'd1,
+    TOP_STORE = 4'd2,
+    TOP_MMA   = 4'd3,
+    TOP_MMAZ  = 4'd4,
+    TOP_CFG   = 4'd5
+  } tns_op_e;
+
+  typedef enum logic [2:0] {
+    TDT_INT8 = 3'd0,
+    TDT_FP8  = 3'd1,
+    TDT_BF16 = 3'd2,
+    TDT_FP16 = 3'd3,
+    TDT_FP32 = 3'd4
+  } tns_dtype_e;
+
+  typedef struct packed {
+    logic sat;
+    logic trans_b;
+    logic trans_a;
+  } tns_flags_t;
+
+  typedef enum logic [3:0] {
+    IMM_NONE  = 4'd0,
+    IMM_I12   = 4'd1,
+    IMM_U20   = 4'd2,
+    IMM_B12   = 4'd3,
+    IMM_J20   = 4'd4,
+    IMM_MDISP = 4'd5,
+    IMM_M12   = 4'd6,
+    IMM_SHAMT = 4'd7,
+    IMM_UIMM5 = 4'd8,
+    IMM_SIMM5 = 4'd9,
+    IMM_VTYPE = 4'd10
+  } imm_kind_e;
+
+  typedef enum logic [4:0] {
+    EXC_INST_MISALIGNED = 5'd0,
+    EXC_INST_ACCESS     = 5'd1,
+    EXC_ILLEGAL_INST    = 5'd2,
+    EXC_BREAKPOINT      = 5'd3,
+    EXC_ECALL_U         = 5'd8,
+    EXC_ECALL_S         = 5'd9,
+    EXC_ECALL_M         = 5'd11,
+    EXC_INST_PAGE_FAULT = 5'd12
+  } exc_cause_e;
+
+  typedef enum logic [1:0] {
+    FETCH_OK           = 2'd0,
+    FETCH_ACCESS_FAULT = 2'd1,
+    FETCH_PAGE_FAULT   = 2'd2
+  } fetch_fault_e;
+
+  typedef enum logic [1:0] {
+    RDR_NONE        = 2'd0,
+    RDR_JAL         = 2'd1,    // direct jump unpredicted or mistargeted
+    RDR_BR_TARGET   = 2'd2,    // predicted-taken branch with wrong target
+    RDR_FALSE_TAKEN = 2'd3     // non-CTI predicted taken (BTB alias)
+  } redirect_reason_e;
+
+  // ===========================================================================
+  // Decode packet components
+  // ===========================================================================
+  typedef struct packed {
+    logic        valid;
+    reg_class_e  rclass;
+    areg_t       idx;
+    logic        zero;          // hardwired-zero source / discarded destination
+  } opnd_t;
+
+  typedef struct packed {
+    mem_op_e     op;
+    mem_size_e   size;
+    logic        sign_ext;
+    mem_ord_e    ord;
+    addr_mode_e  amode;
+    logic [1:0]  idx_scale;
+    logic        fp_data;
+    amo_op_e     amo_op;
+    pf_hint_e    pf_hint;
+    cbo_op_e     cbo_op;
+    fence_set_t  fence_pred;
+    fence_set_t  fence_succ;
+  } mem_meta_t;
+
+  typedef struct packed {
+    csr_op_e     op;
+    logic        imm_src;
+    logic        rd_en;
+    logic        wr_en;
+    csr_addr_t   addr;
+  } csr_meta_t;
+
+  typedef struct packed {
+    fp_op_e      op;
+    fp_prec_e    prec;
+    fp_prec_e    src_prec;
+    fp_rm_e      rm;
+    fp_int_e     cvt_int;
+  } fp_meta_t;
+
+  typedef struct packed {
+    vec_op_e     op;
+    vec_form_e   form;
+    vmem_op_e    vmop;
+    vec_eew_e    eew;
+    vcfg_op_e    cfg;
+    vtype_t      vtypei;
+    logic        pred_en;
+    nreg_t       pred_idx;
+  } vec_meta_t;
+
+  typedef struct packed {
+    tns_op_e     op;
+    tns_dtype_e  dtype;
+    tns_flags_t  flags;
+  } tns_meta_t;
+
+  typedef struct packed {
+    logic [ACCEL_ID_W-1:0] id;
+    logic [6:0]            funct7;
+    logic                  xd;
+    logic                  xs1;
+    logic                  xs2;
+  } accel_meta_t;
+
+  typedef struct packed {
+    inst_class_e iclass;
+    fu_e         fu;
+    iq_e         iq;
+    lat_class_e  lat;
+    priv_e       min_priv;
+    opa_sel_e    opa_sel;
+    opb_sel_e    opb_sel;
+    logic        word_op;       // 32-bit operation, result sign-extended
+    alu_op_e     alu_op;
+    mdu_op_e     mdu_op;
+    sys_op_e     sys_op;
+    mem_meta_t   mem;
+    csr_meta_t   csr;
+    fp_meta_t    fp;
+    vec_meta_t   vec;
+    tns_meta_t   tns;
+    accel_meta_t accel;
+  } ctrl_t;
+
+  typedef struct packed {
+    opnd_t       rs1;
+    opnd_t       rs2;
+    opnd_t       rs3;
+    opnd_t       ps;            // predicate / mask source
+    opnd_t       rd;
+    logic [3:0]  src_wakeup;    // {ps, rs3, rs2, rs1} rename-tag wakeup required
+    logic [3:0]  src_sb;        // {ps, rs3, rs2, rs1} scoreboard-tracked source
+    logic        dst_rename;
+    logic        dst_sb;
+    logic        rd_is_src;     // destination also read (accumulate / CAS)
+    logic        reads_vtype;
+    logic        writes_vtype;
+    logic        reads_frm;
+    logic        writes_fflags;
+    logic        reads_tcfg;
+    logic        writes_tcfg;
+  } dep_meta_t;
+
+  typedef struct packed {
+    logic        ctrl_spec;          // opens a control speculation window
+    logic        needs_checkpoint;   // rename map checkpoint required
+    logic        nonspec_exec;       // execute only at ROB head
+    logic        serialize_before;   // dispatch after all older retire
+    logic        flush_after;        // younger instructions refetched on retire
+    logic        mem_order_strict;   // bypass memory-dependence speculation
+    logic        may_fault;          // may raise a precise data-side exception
+  } spec_meta_t;
+
+  typedef struct packed {
+    br_kind_e    kind;
+    br_cond_e    cond;
+    ras_op_e     ras;
+    logic        target_valid;
+    xlen_t       target;
+    logic        pred_taken;
+    xlen_t       pred_target;
+    bp_meta_t    bp_meta;
+    ftq_idx_t    ftq_idx;
+  } br_meta_t;
+
+  typedef struct packed {
+    logic        illegal_opcode;     // unassigned major opcode
+    logic        reserved_enc;       // reserved function-field encoding
+    logic        malformed;          // must-be-zero field or operand constraint violated
+    logic        priv_violation;     // insufficient privilege or trapped by context
+    logic        feature_off;        // extension state disabled
+  } dec_fault_t;
+
+  typedef struct packed {
+    logic        valid;
+    exc_cause_e  cause;
+    xlen_t       tval;
+    dec_fault_t  diag;
+  } exc_meta_t;
+
+  typedef struct packed {
+    ctrl_t       ctrl;
+    dep_meta_t   dep;
+    spec_meta_t  spec;
+    br_meta_t    br;
+    xlen_t       imm;
+    imm_kind_e   imm_kind;
+    dec_fault_t  fault;
+  } dec_core_t;
+
+  // ===========================================================================
+  // Stage interfaces
+  // ===========================================================================
+  typedef struct packed {
+    logic         valid;
+    xlen_t        pc;
+    inst_t        inst;
+    fetch_fault_e fault;
+    logic         pred_taken;
+    xlen_t        pred_target;
+    bp_meta_t     bp_meta;
+    ftq_idx_t     ftq_idx;
+    logic         replay;       // refetched after memory-ordering replay
+  } fetch_lane_t;
+
+  typedef struct packed {
+    logic        valid;
+    xlen_t       pc;
+    inst_t       inst;
+    fmt_e        fmt;
+    ctrl_t       ctrl;
+    xlen_t       imm;
+    imm_kind_e   imm_kind;
+    dep_meta_t   dep;
+    spec_meta_t  spec;
+    br_meta_t    br;
+    exc_meta_t   exc;
+    logic        fuse_next;     // macro-fusion candidate with next lane
+    logic        replay;
+  } dec_packet_t;
+
+  typedef struct packed {
+    logic             valid;
+    redirect_reason_e reason;
+    br_kind_e         br_kind;
+    ras_op_e          ras;
+    xlen_t            pc;
+    xlen_t            target;
+    ftq_idx_t         ftq_idx;
+    bp_meta_t         bp_meta;
+  } redirect_t;
+
+endpackage : sf_decode_pkg
+
+
+// =============================================================================
+//  sf_decoder
+// -----------------------------------------------------------------------------
+//  DECODE_WIDTH-lane decode stage between fetch and rename.
+//    * Combinational per-lane decode, single registered output stage.
+//    * In-bundle kill of lanes younger than an excepting or redirecting lane.
+//    * Decode-time frontend correction for direct jumps, branch targets and
+//      BTB aliasing; the bundle following a redirect is dropped as wrong-path.
+//    * Valid/ready handshake on both sides; flush clears all stage state.
+// =============================================================================
+module sf_decoder
+  import sf_decode_pkg::*;
+#(
+  parameter  int unsigned DECODE_WIDTH = 4,
+  localparam int unsigned CNT_W        = $clog2(DECODE_WIDTH + 1)
+) (
+  input  logic                            clk_i,
+  input  logic                            rst_ni,
+
+  // Fetch frontend
+  input  logic                            fe_valid_i,
+  input  fetch_lane_t [DECODE_WIDTH-1:0]  fe_lane_i,
+  output logic                            fe_ready_o,
+
+  // Architectural context
+  input  dec_ctx_t                        ctx_i,
+
+  // Backend flush
+  input  logic                            flush_i,
+
+  // Rename
+  output logic                            rn_valid_o,
+  output dec_packet_t [DECODE_WIDTH-1:0]  rn_pkt_o,
+  input  logic                            rn_ready_i,
+
+  // Frontend correction
+  output redirect_t                       dec_redirect_o,
+
+  // Performance events
+  output logic        [CNT_W-1:0]         perf_lanes_o,
+  output logic                            perf_illegal_o,
+  output logic                            perf_redirect_o,
+  output logic                            perf_backpressure_o,
+  output logic                            perf_wrongpath_o
+);
+
+  // ===========================================================================
+  // Operand and immediate primitives
+  // ===========================================================================
+  function automatic opnd_t opnd (input reg_class_e rc, input areg_t idx);
+    opnd_t o;
+    o.valid  = 1'b1;
+    o.rclass = rc;
+    o.idx    = idx;
+    o.zero   = (rc == RC_INT) && (idx == AREG_ZERO);
+    return o;
+  endfunction
+
+  function automatic logic nreg_ok (input areg_t f);
+    return (f[AREG_W-1:NREG_W] == '0);
+  endfunction
+
+  function automatic areg_t nreg (input areg_t f);
+    return areg_t'(f[NREG_W-1:0]);
+  endfunction
+
+  function automatic logic is_link_reg (input areg_t r);
+    return (r == AREG_LINK) || (r == AREG_LINK_ALT);
+  endfunction
+
+  function automatic xlen_t imm_i12 (input inst_u in);
+    return {{(XLEN-12){in.i.imm12[11]}}, in.i.imm12};
+  endfunction
+
+  function automatic xlen_t imm_u20 (input inst_u in);
+    return {{(XLEN-32){in.u.imm20[19]}}, in.u.imm20, 12'h000};
+  endfunction
+
+  function automatic xlen_t imm_b12 (input inst_u in);
+    return {{(XLEN-12-INST_ALIGN_LSB){in.i.imm12[11]}}, in.i.imm12, {INST_ALIGN_LSB{1'b0}}};
+  endfunction
+
+  function automatic xlen_t imm_j20 (input inst_u in);
+    return {{(XLEN-20-INST_ALIGN_LSB){in.u.imm20[19]}}, in.u.imm20, {INST_ALIGN_LSB{1'b0}}};
+  endfunction
+
+  function automatic xlen_t imm_mdisp (input inst_u in, input mem_size_e sz);
+    xlen_t      disp;
+    logic [1:0] scale;
+    disp  = {{(XLEN-10){in.m.mfunct5[4]}}, in.m.mfunct5, in.m.rd_dlo};
+    scale = sz;
+    return disp << scale;
+  endfunction
+
+  function automatic xlen_t imm_m12 (input inst_u in);
+    return {{(XLEN-12){in.m.mfunct5[4]}}, in.m.mfunct5, in.m.ord, in.m.rd_dlo};
+  endfunction
+
+  function automatic xlen_t imm_shamt (input inst_u in, input logic word);
+    logic [SHAMT_W-1:0] sh;
+    sh = word ? SHAMT_W'(in.ish.shamt[SHAMT32_W-1:0]) : in.ish.shamt;
+    return {{(XLEN-SHAMT_W){1'b0}}, sh};
+  endfunction
+
+  function automatic xlen_t imm_uimm5 (input areg_t f);
+    return {{(XLEN-AREG_W){1'b0}}, f};
+  endfunction
+
+  function automatic xlen_t imm_simm5 (input areg_t f);
+    return {{(XLEN-AREG_W){f[AREG_W-1]}}, f};
+  endfunction
+
+  // ===========================================================================
+  // Classification primitives
+  // ===========================================================================
+  function automatic inst_class_e alu_class (input alu_op_e op);
+    logic [4:0] enc;
+    enc = op;
+    unique case (enc[4:3])
+      2'b00:   return IC_ARITH;
+      2'b01:   return IC_LOGIC;
+      2'b10:   return IC_SHIFT;
+      default: return IC_BITMANIP;
+    endcase
+  endfunction
+
+  function automatic logic mdu_is_div (input mdu_op_e op);
+    logic [2:0] enc;
+    enc = op;
+    return enc[2];
+  endfunction
+
+  function automatic logic alu_word_legal (input alu_op_e op);
+    return op inside {ALU_ADD, ALU_SUB, ALU_SLL, ALU_SRL, ALU_SRA, ALU_ROL, ALU_ROR};
+  endfunction
+
+  function automatic logic mdu_word_legal (input mdu_op_e op);
+    return op inside {MDU_MUL, MDU_DIV, MDU_DIVU, MDU_REM, MDU_REMU};
+  endfunction
+
+  function automatic logic rm_legal (input logic [2:0] rm);
+    return (rm <= RM_RMM) || (rm == RM_DYN);
+  endfunction
+
+  function automatic logic store_ord_legal (input logic [1:0] ord);
+    return (ord != ORD_ACQ);
+  endfunction
+
+  function automatic logic load_ord_legal (input logic [1:0] ord);
+    return (ord != ORD_REL);
+  endfunction
+
+  function automatic logic vtype_legal (input vtype_t vt);
+    return (vt.vsew <= VSEW_MAX) && (vt.vlmul != VLMUL_RESERVED);
+  endfunction
+
+  function automatic logic tdtype_legal (input logic [2:0] dt);
+    return (dt <= TDT_FP32);
+  endfunction
+
+  function automatic logic csr_access_ok (input csr_addr_t addr, input logic wr,
+                                          input dec_ctx_t ctx);
+    csr_addr_fields_t f;
+    logic             ro;
+    logic             lvl_ok;
+    logic             tvm_trap;
+    f        = csr_addr_fields_t'(addr);
+    ro       = (f.rw_tag == CSR_RO_TAG);
+    lvl_ok   = (priv_lvl_t'(ctx.priv) >= f.priv_lvl);
+    tvm_trap = (addr == CSR_SATP) && (ctx.priv == PRIV_S) && ctx.tvm;
+    return !(wr && ro) && lvl_ok && !tvm_trap;
+  endfunction
+
+  function automatic dec_core_t core_init ();
+    dec_core_t c;
+    c               = '0;
+    c.ctrl.iclass   = IC_TRAP;
+    c.ctrl.fu       = FU_NONE;
+    c.ctrl.iq       = IQ_NONE;
+    c.ctrl.lat      = LAT_NONE;
+    c.ctrl.min_priv = PRIV_U;
+    c.imm_kind      = IMM_NONE;
+    c.br.kind       = BR_NONE;
+    c.br.ras        = RAS_NONE;
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // R-type decode: register-register integer
+  // ===========================================================================
+  function automatic dec_core_t decode_r (input inst_u in);
+    dec_core_t c;
+    alu_op_e   alu;
+    mdu_op_e   mdu;
+    logic      is_mdu;
+    logic      enc_ok;
+    logic      word;
+
+    c      = core_init();
+    alu    = ALU_ADD;
+    mdu    = MDU_MUL;
+    is_mdu = 1'b0;
+    enc_ok = 1'b1;
+    word   = (in.r.opcode.major == R_ALUW);
+
+    unique case (r_major_e'(in.r.opcode.major))
+      R_ALU, R_ALUW: begin
+        unique case (funct7_e'(in.r.funct7))
+          F7_BASE: begin
+            unique case (f3_base_e'(in.r.funct3))
+              F3_ADD : alu = ALU_ADD;
+              F3_SLL : alu = ALU_SLL;
+              F3_SLT : alu = ALU_SLT;
+              F3_SLTU: alu = ALU_SLTU;
+              F3_XOR : alu = ALU_XOR;
+              F3_SRL : alu = ALU_SRL;
+              F3_OR  : alu = ALU_OR;
+              F3_AND : alu = ALU_AND;
+              default: enc_ok = 1'b0;
+            endcase
+          end
+          F7_ALT: begin
+            unique case (f3_alt_e'(in.r.funct3))
+              F3_SUB : alu = ALU_SUB;
+              F3_XNOR: alu = ALU_XNOR;
+              F3_SRA : alu = ALU_SRA;
+              F3_ORN : alu = ALU_ORN;
+              F3_ANDN: alu = ALU_ANDN;
+              default: enc_ok = 1'b0;
+            endcase
+          end
+          F7_MINMAX: begin
+            unique case (f3_minmax_e'(in.r.funct3))
+              F3_MIN : alu = ALU_MIN;
+              F3_MINU: alu = ALU_MINU;
+              F3_MAX : alu = ALU_MAX;
+              F3_MAXU: alu = ALU_MAXU;
+              default: enc_ok = 1'b0;
+            endcase
+          end
+          F7_ROT: begin
+            unique case (f3_rot_e'(in.r.funct3))
+              F3_ROL : alu = ALU_ROL;
+              F3_ROR : alu = ALU_ROR;
+              default: enc_ok = 1'b0;
+            endcase
+          end
+          F7_MDU: begin
+            is_mdu = 1'b1;
+            mdu    = mdu_op_e'(in.r.funct3);
+          end
+          default: enc_ok = 1'b0;
+        endcase
+
+        if (word) begin
+          enc_ok = enc_ok && (is_mdu ? mdu_word_legal(mdu) : alu_word_legal(alu));
+        end
+
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.opa_sel = OPA_RS1;
+        c.ctrl.opb_sel = OPB_RS2;
+        c.ctrl.word_op = word;
+        c.dep.rs1      = opnd(RC_INT, in.r.rs1);
+        c.dep.rs2      = opnd(RC_INT, in.r.rs2);
+        c.dep.rd       = opnd(RC_INT, in.r.rd);
+
+        if (is_mdu) begin
+          c.ctrl.mdu_op = mdu;
+          c.ctrl.iclass = mdu_is_div(mdu) ? IC_DIV   : IC_MUL;
+          c.ctrl.fu     = mdu_is_div(mdu) ? FU_DIV   : FU_MUL;
+          c.ctrl.lat    = mdu_is_div(mdu) ? LAT_ITER : LAT_FIXED;
+        end else begin
+          c.ctrl.alu_op = alu;
+          c.ctrl.iclass = alu_class(alu);
+          c.ctrl.fu     = FU_ALU;
+          c.ctrl.lat    = LAT_SINGLE;
+        end
+
+        c.fault.reserved_enc = !enc_ok;
+      end
+
+      R_BITU: begin
+        c.ctrl.iclass  = IC_BITMANIP;
+        c.ctrl.fu      = FU_ALU;
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.lat     = LAT_SINGLE;
+        c.ctrl.opa_sel = OPA_RS1;
+        c.ctrl.opb_sel = OPB_NONE;
+        c.dep.rs1      = opnd(RC_INT, in.r.rs1);
+        c.dep.rd       = opnd(RC_INT, in.r.rd);
+
+        unique case (bitu_e'(in.r.rs2))
+          BU_CLZ  : c.ctrl.alu_op = ALU_CLZ;
+          BU_CTZ  : c.ctrl.alu_op = ALU_CTZ;
+          BU_CPOP : c.ctrl.alu_op = ALU_CPOP;
+          BU_SEXTB: c.ctrl.alu_op = ALU_SEXTB;
+          BU_SEXTH: c.ctrl.alu_op = ALU_SEXTH;
+          BU_ZEXTH: c.ctrl.alu_op = ALU_ZEXTH;
+          BU_REV8 : c.ctrl.alu_op = ALU_REV8;
+          BU_ORCB : c.ctrl.alu_op = ALU_ORCB;
+          default : c.fault.reserved_enc = 1'b1;
+        endcase
+
+        c.fault.malformed = (in.r.funct7 != '0) || (in.r.funct3 != '0);
+      end
+
+      default: c.fault.illegal_opcode = 1'b1;
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // I-type decode: immediate ALU, loads, control transfer, system, CSR
+  // ===========================================================================
+  function automatic dec_core_t decode_i (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+    logic      word;
+    logic      rd_link;
+    logic      rs1_link;
+    logic      csr_wr;
+    logic      csr_rd;
+    csr_addr_fields_t csr_f;
+
+    c        = core_init();
+    csr_f    = csr_addr_fields_t'(in.i.imm12);
+    word     = (in.i.opcode.major == I_ALUW);
+    rd_link  = is_link_reg(in.i.rd);
+    rs1_link = is_link_reg(in.i.rs1);
+    csr_wr   = 1'b0;
+    csr_rd   = 1'b0;
+
+    unique case (i_major_e'(in.i.opcode.major))
+      // -- Immediate ALU ------------------------------------------------------
+      I_ALU, I_ALUW: begin
+        c.ctrl.fu      = FU_ALU;
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.lat     = LAT_SINGLE;
+        c.ctrl.opa_sel = OPA_RS1;
+        c.ctrl.opb_sel = OPB_IMM;
+        c.ctrl.word_op = word;
+        c.dep.rs1      = opnd(RC_INT, in.i.rs1);
+        c.dep.rd       = opnd(RC_INT, in.i.rd);
+        c.imm          = imm_i12(in);
+        c.imm_kind     = IMM_I12;
+
+        unique case (f3_base_e'(in.i.funct3))
+          F3_ADD : c.ctrl.alu_op = ALU_ADD;
+          F3_SLT : c.ctrl.alu_op = ALU_SLT;
+          F3_SLTU: c.ctrl.alu_op = ALU_SLTU;
+          F3_XOR : c.ctrl.alu_op = ALU_XOR;
+          F3_OR  : c.ctrl.alu_op = ALU_OR;
+          F3_AND : c.ctrl.alu_op = ALU_AND;
+          F3_SLL : begin
+            c.ctrl.alu_op        = ALU_SLL;
+            c.fault.reserved_enc = (in.ish.shf != SHF_LOGIC);
+          end
+          F3_SRL : begin
+            unique case (shf_e'(in.ish.shf))
+              SHF_LOGIC: c.ctrl.alu_op = ALU_SRL;
+              SHF_ARITH: c.ctrl.alu_op = ALU_SRA;
+              SHF_ROT  : c.ctrl.alu_op = ALU_ROR;
+              default  : c.fault.reserved_enc = 1'b1;
+            endcase
+          end
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+
+        if (f3_base_e'(in.i.funct3) inside {F3_SLL, F3_SRL}) begin
+          c.imm             = imm_shamt(in, word);
+          c.imm_kind        = IMM_SHAMT;
+          c.fault.malformed = word && in.ish.shamt[SHAMT_W-1];
+        end
+
+        if (word && !alu_word_legal(c.ctrl.alu_op)) begin
+          c.fault.reserved_enc = 1'b1;
+        end
+
+        c.ctrl.iclass = alu_class(c.ctrl.alu_op);
+      end
+
+      // -- Upper-immediate forms ---------------------------------------------
+      I_LUI, I_AUIPC: begin
+        c.ctrl.iclass  = IC_ARITH;
+        c.ctrl.fu      = FU_ALU;
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.lat     = LAT_SINGLE;
+        c.ctrl.alu_op  = ALU_ADD;
+        c.ctrl.opa_sel = (in.u.opcode.major == I_AUIPC) ? OPA_PC : OPA_ZERO;
+        c.ctrl.opb_sel = OPB_IMM;
+        c.dep.rd       = opnd(RC_INT, in.u.rd);
+        c.imm          = imm_u20(in);
+        c.imm_kind     = IMM_U20;
+      end
+
+      // -- Integer load -------------------------------------------------------
+      I_LOAD: begin
+        c.ctrl.iclass       = IC_LOAD;
+        c.ctrl.fu           = FU_LDU;
+        c.ctrl.iq           = IQ_MEM;
+        c.ctrl.lat          = LAT_VAR;
+        c.ctrl.mem.op       = MEM_LOAD;
+        c.ctrl.mem.amode    = AM_BASE_DISP;
+        c.ctrl.mem.size     = mem_size_e'(in.i.funct3[1:0]);
+        c.ctrl.mem.sign_ext = !in.i.funct3[2];
+        c.dep.rs1           = opnd(RC_INT, in.i.rs1);
+        c.dep.rd            = opnd(RC_INT, in.i.rd);
+        c.imm               = imm_i12(in);
+        c.imm_kind          = IMM_I12;
+        c.spec.may_fault    = 1'b1;
+        c.fault.reserved_enc = !(ldf_e'(in.i.funct3) inside {LDF_B, LDF_H, LDF_W, LDF_D,
+                                                             LDF_BU, LDF_HU, LDF_WU});
+      end
+
+      // -- Conditional branch (rs2 occupies rd field) ------------------------
+      I_BRANCH: begin
+        c.ctrl.iclass  = IC_BRANCH;
+        c.ctrl.fu      = FU_BRU;
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.lat     = LAT_SINGLE;
+        c.ctrl.opa_sel = OPA_RS1;
+        c.ctrl.opb_sel = OPB_RS2;
+        c.dep.rs1      = opnd(RC_INT, in.i.rs1);
+        c.dep.rs2      = opnd(RC_INT, in.i.rd);
+        c.imm          = imm_b12(in);
+        c.imm_kind     = IMM_B12;
+        c.br.kind      = BR_COND;
+
+        unique case (br_cond_e'(in.i.funct3))
+          BC_EQ, BC_NE, BC_LT, BC_GE, BC_LTU, BC_GEU:
+                   c.br.cond = br_cond_e'(in.i.funct3);
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      // -- Direct jump --------------------------------------------------------
+      I_JAL: begin
+        c.ctrl.iclass  = IC_JUMP;
+        c.ctrl.fu      = FU_BRU;
+        c.ctrl.iq      = IQ_INT;
+        c.ctrl.lat     = LAT_SINGLE;
+        c.ctrl.opa_sel = OPA_PC;
+        c.ctrl.opb_sel = OPB_NONE;
+        c.dep.rd       = opnd(RC_INT, in.u.rd);
+        c.imm          = imm_j20(in);
+        c.imm_kind     = IMM_J20;
+        c.br.kind      = BR_JAL;
+        c.br.ras       = is_link_reg(in.u.rd) ? RAS_PUSH : RAS_NONE;
+      end
+
+      // -- Indirect jump ------------------------------------------------------
+      I_JALR: begin
+        c.ctrl.iclass     = IC_JUMP;
+        c.ctrl.fu         = FU_BRU;
+        c.ctrl.iq         = IQ_INT;
+        c.ctrl.lat        = LAT_SINGLE;
+        c.ctrl.opa_sel    = OPA_RS1;
+        c.ctrl.opb_sel    = OPB_IMM;
+        c.dep.rs1         = opnd(RC_INT, in.i.rs1);
+        c.dep.rd          = opnd(RC_INT, in.i.rd);
+        c.imm             = imm_i12(in);
+        c.imm_kind        = IMM_I12;
+        c.br.kind         = BR_JALR;
+        c.fault.malformed = (in.i.funct3 != '0);
+
+        unique case ({rd_link, rs1_link})
+          2'b10:   c.br.ras = RAS_PUSH;
+          2'b01:   c.br.ras = RAS_POP;
+          2'b11:   c.br.ras = (in.i.rd == in.i.rs1) ? RAS_PUSH : RAS_POPPUSH;
+          default: c.br.ras = RAS_NONE;
+        endcase
+      end
+
+      // -- System and CSR -----------------------------------------------------
+      I_SYSTEM: begin
+        c.ctrl.iq           = IQ_INT;
+        c.ctrl.lat          = LAT_SERIAL;
+        c.spec.nonspec_exec = 1'b1;
+
+        if (in.i.funct3 == SYSF_PRIV) begin
+          c.ctrl.iclass     = IC_SYSTEM;
+          c.ctrl.fu         = FU_SYS;
+          c.fault.malformed = (in.i.rd != AREG_ZERO) || (in.i.rs1 != AREG_ZERO);
+
+          unique case (sysi_e'(in.i.imm12))
+            SYSI_ECALL : c.ctrl.sys_op = SYS_ECALL;
+            SYSI_EBREAK: c.ctrl.sys_op = SYS_EBREAK;
+            SYSI_SRET  : begin
+              c.ctrl.sys_op           = SYS_SRET;
+              c.ctrl.min_priv         = PRIV_S;
+              c.spec.serialize_before = 1'b1;
+              c.spec.flush_after      = 1'b1;
+              c.fault.priv_violation  = (ctx.priv == PRIV_U) ||
+                                        ((ctx.priv == PRIV_S) && ctx.tsr);
+            end
+            SYSI_MRET  : begin
+              c.ctrl.sys_op           = SYS_MRET;
+              c.ctrl.min_priv         = PRIV_M;
+              c.spec.serialize_before = 1'b1;
+              c.spec.flush_after      = 1'b1;
+              c.fault.priv_violation  = (ctx.priv != PRIV_M);
+            end
+            SYSI_WFI   : begin
+              c.ctrl.sys_op           = SYS_WFI;
+              c.ctrl.min_priv         = PRIV_S;
+              c.spec.serialize_before = 1'b1;
+              c.fault.priv_violation  = (ctx.priv == PRIV_U) ||
+                                        ((ctx.priv != PRIV_M) && ctx.tw);
+            end
+            default    : c.fault.reserved_enc = 1'b1;
+          endcase
+        end else begin
+          csr_wr = (in.i.funct3[1:0] == CSR_RW) || (in.i.rs1 != AREG_ZERO);
+          csr_rd = (in.i.funct3[1:0] != CSR_RW) || (in.i.rd  != AREG_ZERO);
+
+          c.ctrl.iclass           = IC_CSR;
+          c.ctrl.fu               = FU_CSR;
+          c.ctrl.csr.op           = csr_op_e'(in.i.funct3[1:0]);
+          c.ctrl.csr.imm_src      = in.i.funct3[2];
+          c.ctrl.csr.addr         = in.i.imm12;
+          c.ctrl.csr.wr_en        = csr_wr;
+          c.ctrl.csr.rd_en        = csr_rd;
+          c.dep.rd                = opnd(RC_INT, in.i.rd);
+          c.spec.serialize_before = 1'b1;
+          c.spec.flush_after      = csr_wr;
+
+          if (in.i.funct3[2]) begin
+            c.imm      = imm_uimm5(in.i.rs1);
+            c.imm_kind = IMM_UIMM5;
+          end else begin
+            c.dep.rs1  = opnd(RC_INT, in.i.rs1);
+          end
+
+          if ((in.i.funct3[1:0] == CSR_NONE) || (csr_f.priv_lvl == PRIV_LVL_RSVD)) begin
+            c.fault.reserved_enc = 1'b1;
+          end else begin
+            c.ctrl.min_priv        = priv_e'(csr_f.priv_lvl);
+            c.fault.priv_violation = !csr_access_ok(in.i.imm12, csr_wr, ctx);
+          end
+        end
+      end
+
+      // -- FP load -------------------------------------------------------------
+      I_FLOAD: begin
+        c.ctrl.iclass     = IC_FP_MEM;
+        c.ctrl.fu         = FU_LDU;
+        c.ctrl.iq         = IQ_MEM;
+        c.ctrl.lat        = LAT_VAR;
+        c.ctrl.mem.op     = MEM_LOAD;
+        c.ctrl.mem.amode  = AM_BASE_DISP;
+        c.ctrl.mem.fp_data = 1'b1;
+        c.ctrl.fp.op      = FP_LOAD;
+        c.dep.rs1         = opnd(RC_INT, in.i.rs1);
+        c.dep.rd          = opnd(RC_FP,  in.i.rd);
+        c.imm             = imm_i12(in);
+        c.imm_kind        = IMM_I12;
+        c.spec.may_fault  = 1'b1;
+        c.fault.feature_off = !ctx.fp_en;
+
+        unique case (fmf_e'(in.i.funct3))
+          FMF_H  : begin c.ctrl.mem.size = SZ_H; c.ctrl.fp.prec = FPP_H; end
+          FMF_W  : begin c.ctrl.mem.size = SZ_W; c.ctrl.fp.prec = FPP_S; end
+          FMF_D  : begin c.ctrl.mem.size = SZ_D; c.ctrl.fp.prec = FPP_D; end
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      default: c.fault.illegal_opcode = 1'b1;
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // M-type decode: stores, indexed access, atomics, ordering, cache control
+  // ===========================================================================
+  function automatic dec_core_t decode_m (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+
+    c                = core_init();
+    c.ctrl.iq        = IQ_MEM;
+    c.ctrl.lat       = LAT_VAR;
+    c.ctrl.mem.amode = AM_BASE_DISP;
+    c.dep.rs1        = opnd(RC_INT, in.m.rs1);
+
+    unique case (m_major_e'(in.m.opcode.major))
+      // -- Integer store, size-scaled displacement ----------------------------
+      M_STORE: begin
+        c.ctrl.iclass           = IC_STORE;
+        c.ctrl.fu               = FU_STU;
+        c.ctrl.mem.op           = MEM_STORE;
+        c.ctrl.mem.size         = mem_size_e'(in.m.msize[1:0]);
+        c.ctrl.mem.ord          = mem_ord_e'(in.m.ord);
+        c.dep.rs2               = opnd(RC_INT, in.m.rs2);
+        c.imm                   = imm_mdisp(in, mem_size_e'(in.m.msize[1:0]));
+        c.imm_kind              = IMM_MDISP;
+        c.spec.may_fault        = 1'b1;
+        c.spec.mem_order_strict = (in.m.ord != ORD_RLX);
+        c.fault.reserved_enc    = in.m.msize[2] || !store_ord_legal(in.m.ord);
+      end
+
+      // -- FP store ------------------------------------------------------------
+      M_FSTORE: begin
+        c.ctrl.iclass       = IC_FP_MEM;
+        c.ctrl.fu           = FU_STU;
+        c.ctrl.mem.op       = MEM_STORE;
+        c.ctrl.mem.fp_data  = 1'b1;
+        c.ctrl.fp.op        = FP_STORE;
+        c.dep.rs2           = opnd(RC_FP, in.m.rs2);
+        c.spec.may_fault    = 1'b1;
+        c.fault.malformed   = (in.m.ord != ORD_RLX);
+        c.fault.feature_off = !ctx.fp_en;
+
+        unique case (fmf_e'(in.m.msize))
+          FMF_H  : begin c.ctrl.mem.size = SZ_H; c.ctrl.fp.prec = FPP_H; end
+          FMF_W  : begin c.ctrl.mem.size = SZ_W; c.ctrl.fp.prec = FPP_S; end
+          FMF_D  : begin c.ctrl.mem.size = SZ_D; c.ctrl.fp.prec = FPP_D; end
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+
+        c.imm      = imm_mdisp(in, c.ctrl.mem.size);
+        c.imm_kind = IMM_MDISP;
+      end
+
+      // -- Indexed load: rd <- [rs1 + (rs2 << scale)] --------------------------
+      M_LOADX: begin
+        c.ctrl.iclass           = IC_LOAD;
+        c.ctrl.fu               = FU_LDU;
+        c.ctrl.mem.op           = MEM_LOAD;
+        c.ctrl.mem.amode        = AM_BASE_INDEX;
+        c.ctrl.mem.size         = mem_size_e'(in.mx.msize[1:0]);
+        c.ctrl.mem.sign_ext     = !in.mx.msize[2];
+        c.ctrl.mem.idx_scale    = in.mx.scale;
+        c.ctrl.mem.ord          = mem_ord_e'(in.mx.ord);
+        c.dep.rs2               = opnd(RC_INT, in.mx.rs2);
+        c.dep.rd                = opnd(RC_INT, in.mx.rd_rs3);
+        c.spec.may_fault        = 1'b1;
+        c.spec.mem_order_strict = (in.mx.ord != ORD_RLX);
+        c.fault.malformed       = (in.mx.rsvd != '0);
+        c.fault.reserved_enc    = !load_ord_legal(in.mx.ord) ||
+                                  !(ldf_e'(in.mx.msize) inside {LDF_B, LDF_H, LDF_W, LDF_D,
+                                                                LDF_BU, LDF_HU, LDF_WU});
+      end
+
+      // -- Indexed store: [rs1 + (rs2 << scale)] <- rs3 ------------------------
+      M_STOREX: begin
+        c.ctrl.iclass           = IC_STORE;
+        c.ctrl.fu               = FU_STU;
+        c.ctrl.mem.op           = MEM_STORE;
+        c.ctrl.mem.amode        = AM_BASE_INDEX;
+        c.ctrl.mem.size         = mem_size_e'(in.mx.msize[1:0]);
+        c.ctrl.mem.idx_scale    = in.mx.scale;
+        c.ctrl.mem.ord          = mem_ord_e'(in.mx.ord);
+        c.dep.rs2               = opnd(RC_INT, in.mx.rs2);
+        c.dep.rs3               = opnd(RC_INT, in.mx.rd_rs3);
+        c.spec.may_fault        = 1'b1;
+        c.spec.mem_order_strict = (in.mx.ord != ORD_RLX);
+        c.fault.malformed       = (in.mx.rsvd != '0);
+        c.fault.reserved_enc    = in.mx.msize[2] || !store_ord_legal(in.mx.ord);
+      end
+
+      // -- Atomic memory operations --------------------------------------------
+      M_AMO: begin
+        c.ctrl.iclass           = IC_AMO;
+        c.ctrl.fu               = FU_AMO;
+        c.ctrl.mem.op           = MEM_AMO;
+        c.ctrl.mem.amode        = AM_NONE;
+        c.ctrl.mem.size         = mem_size_e'(in.m.msize[1:0]);
+        c.ctrl.mem.sign_ext     = 1'b1;
+        c.ctrl.mem.ord          = mem_ord_e'(in.m.ord);
+        c.dep.rs2               = opnd(RC_INT, in.m.rs2);
+        c.dep.rd                = opnd(RC_INT, in.m.rd_dlo);
+        c.spec.may_fault        = 1'b1;
+        c.spec.mem_order_strict = 1'b1;
+        c.spec.nonspec_exec     = 1'b1;
+
+        unique case (amof_e'(in.m.mfunct5))
+          AMOF_ADD : c.ctrl.mem.amo_op = AMO_ADD;
+          AMOF_SWAP: c.ctrl.mem.amo_op = AMO_SWAP;
+          AMOF_XOR : c.ctrl.mem.amo_op = AMO_XOR;
+          AMOF_OR  : c.ctrl.mem.amo_op = AMO_OR;
+          AMOF_AND : c.ctrl.mem.amo_op = AMO_AND;
+          AMOF_MIN : c.ctrl.mem.amo_op = AMO_MIN;
+          AMOF_MAX : c.ctrl.mem.amo_op = AMO_MAX;
+          AMOF_MINU: c.ctrl.mem.amo_op = AMO_MINU;
+          AMOF_MAXU: c.ctrl.mem.amo_op = AMO_MAXU;
+          AMOF_CAS : begin
+            c.ctrl.mem.amo_op = AMO_CAS;
+            c.dep.rs3         = opnd(RC_INT, in.m.rd_dlo);
+            c.dep.rd_is_src   = 1'b1;
+          end
+          AMOF_LR  : begin
+            c.ctrl.mem.amo_op = AMO_LR;
+            c.ctrl.mem.op     = MEM_LR;
+            c.dep.rs2         = '0;
+            c.fault.malformed = (in.m.rs2 != AREG_ZERO);
+          end
+          AMOF_SC  : begin
+            c.ctrl.mem.amo_op = AMO_SC;
+            c.ctrl.mem.op     = MEM_SC;
+          end
+          default  : c.fault.reserved_enc = 1'b1;
+        endcase
+
+        if (!(amow_e'(in.m.msize) inside {AMOW_W, AMOW_D})) begin
+          c.fault.reserved_enc = 1'b1;
+        end
+      end
+
+      // -- Ordering and translation fences --------------------------------------
+      M_FENCE: begin
+        c.ctrl.mem.amode = AM_NONE;
+        c.dep.rs1        = '0;
+
+        unique case (fnc_e'(in.fn.funct3))
+          FNC_FENCE: begin
+            c.ctrl.iclass           = IC_FENCE;
+            c.ctrl.fu               = FU_STU;
+            c.ctrl.mem.op           = MEM_FENCE;
+            c.ctrl.mem.fence_pred   = in.fn.pred;
+            c.ctrl.mem.fence_succ   = in.fn.succ;
+            c.spec.mem_order_strict = 1'b1;
+            c.fault.malformed       = (in.fn.rsvd != '0) || (in.fn.rd != AREG_ZERO);
+          end
+          FNC_FENCE_I: begin
+            c.ctrl.iclass           = IC_FENCE;
+            c.ctrl.fu               = FU_SYS;
+            c.ctrl.iq               = IQ_INT;
+            c.ctrl.lat              = LAT_SERIAL;
+            c.ctrl.sys_op           = SYS_FENCE_I;
+            c.ctrl.mem.op           = MEM_FENCE_I;
+            c.spec.nonspec_exec     = 1'b1;
+            c.spec.serialize_before = 1'b1;
+            c.spec.flush_after      = 1'b1;
+            c.fault.malformed       = (in.fn.pred != '0) || (in.fn.succ != '0) ||
+                                      (in.fn.rsvd != '0) || (in.fn.rd   != AREG_ZERO);
+          end
+          FNC_SFENCE_VMA: begin
+            c.ctrl.iclass           = IC_FENCE;
+            c.ctrl.fu               = FU_SYS;
+            c.ctrl.iq               = IQ_INT;
+            c.ctrl.lat              = LAT_SERIAL;
+            c.ctrl.sys_op           = SYS_SFENCE_VMA;
+            c.ctrl.mem.op           = MEM_SFENCE;
+            c.ctrl.min_priv         = PRIV_S;
+            c.dep.rs1               = opnd(RC_INT, in.m.rs1);
+            c.dep.rs2               = opnd(RC_INT, in.m.rs2);
+            c.spec.nonspec_exec     = 1'b1;
+            c.spec.serialize_before = 1'b1;
+            c.spec.flush_after      = 1'b1;
+            c.fault.malformed       = (in.m.mfunct5 != '0) || (in.m.ord != '0) ||
+                                      (in.m.rd_dlo  != AREG_ZERO);
+            c.fault.priv_violation  = (ctx.priv == PRIV_U) ||
+                                      ((ctx.priv == PRIV_S) && ctx.tvm);
+          end
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      // -- Software prefetch (architectural hint, never faults) ----------------
+      M_PREFETCH: begin
+        c.ctrl.iclass     = IC_PREFETCH;
+        c.ctrl.fu         = FU_LDU;
+        c.ctrl.mem.op     = MEM_PREFETCH;
+        c.imm             = imm_m12(in);
+        c.imm_kind        = IMM_M12;
+        c.fault.malformed = (in.m.rs2 != AREG_ZERO);
+
+        if (in.m.msize[2]) begin
+          c.fault.reserved_enc = 1'b1;
+        end else begin
+          c.ctrl.mem.pf_hint = pf_hint_e'(in.m.msize[1:0]);
+        end
+      end
+
+      // -- Cache-block maintenance ---------------------------------------------
+      M_CBO: begin
+        c.ctrl.iclass     = IC_CACHE;
+        c.ctrl.fu         = FU_STU;
+        c.ctrl.mem.op     = MEM_CBO;
+        c.ctrl.mem.amode  = AM_BASE_DISP;
+        c.spec.may_fault  = 1'b1;
+        c.fault.malformed = (in.m.mfunct5 != '0) || (in.m.ord != '0) ||
+                            (in.m.rs2 != AREG_ZERO) || (in.m.rd_dlo != AREG_ZERO);
+
+        if (in.m.msize[2]) begin
+          c.fault.reserved_enc = 1'b1;
+        end else begin
+          c.ctrl.mem.cbo_op       = cbo_op_e'(in.m.msize[1:0]);
+          c.spec.nonspec_exec     = (in.m.msize[1:0] != CBO_ZERO);
+          c.spec.mem_order_strict = (in.m.msize[1:0] != CBO_ZERO);
+          if (in.m.msize[1:0] == CBO_INVAL) begin
+            c.ctrl.min_priv        = PRIV_S;
+            c.fault.priv_violation = (ctx.priv == PRIV_U);
+          end
+        end
+      end
+
+      default: c.fault.illegal_opcode = 1'b1;
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: scalar floating point
+  // ===========================================================================
+  function automatic dec_core_t decode_fp (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+    logic      uses_rm;
+    logic      fflags;
+    logic      long_op;
+
+    c       = core_init();
+    uses_rm = 1'b0;
+    fflags  = 1'b1;
+    long_op = 1'b0;
+
+    c.ctrl.iclass       = IC_FP;
+    c.ctrl.fu           = FU_FPU;
+    c.ctrl.iq           = IQ_FP;
+    c.ctrl.lat          = LAT_FIXED;
+    c.ctrl.fp.prec      = fp_prec_e'(in.xf.fprec);
+    c.dep.rs1           = opnd(RC_FP, in.xf.rs1);
+    c.dep.rs2           = opnd(RC_FP, in.xf.rs2);
+    c.dep.rd            = opnd(RC_FP, in.xf.rd);
+    c.fault.feature_off = !ctx.fp_en;
+
+    unique case (ff5_e'(in.xf.ffunct5))
+      FF5_ADD: begin c.ctrl.fp.op = FP_ADD; uses_rm = 1'b1; end
+      FF5_SUB: begin c.ctrl.fp.op = FP_SUB; uses_rm = 1'b1; end
+      FF5_MUL: begin c.ctrl.fp.op = FP_MUL; uses_rm = 1'b1; end
+
+      FF5_DIV: begin
+        c.ctrl.fp.op         = FP_DIV;
+        uses_rm              = 1'b1;
+        long_op              = 1'b1;
+        c.fault.reserved_enc = (in.xf.fprec == FPP_BF16);
+      end
+
+      FF5_SQRT: begin
+        c.ctrl.fp.op         = FP_SQRT;
+        uses_rm              = 1'b1;
+        long_op              = 1'b1;
+        c.dep.rs2            = '0;
+        c.fault.malformed    = (in.xf.rs2 != AREG_ZERO);
+        c.fault.reserved_enc = (in.xf.fprec == FPP_BF16);
+      end
+
+      FF5_SGNJ: begin
+        fflags = 1'b0;
+        unique case (fsgnj_e'(in.xf.rm))
+          FSG_J  : c.ctrl.fp.op = FP_SGNJ;
+          FSG_JN : c.ctrl.fp.op = FP_SGNJN;
+          FSG_JX : c.ctrl.fp.op = FP_SGNJX;
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      FF5_MINMAX: begin
+        unique case (fminmax_e'(in.xf.rm))
+          FMM_MIN: c.ctrl.fp.op = FP_MIN;
+          FMM_MAX: c.ctrl.fp.op = FP_MAX;
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      FF5_CMP: begin
+        c.dep.rd = opnd(RC_INT, in.xf.rd);
+        unique case (fcmp_e'(in.xf.rm))
+          FCM_LE : c.ctrl.fp.op = FP_LE;
+          FCM_LT : c.ctrl.fp.op = FP_LT;
+          FCM_EQ : c.ctrl.fp.op = FP_EQ;
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      FF5_CVT_F2I: begin
+        c.ctrl.fp.op      = FP_CVT_F2I;
+        c.ctrl.fp.cvt_int = fp_int_e'(in.xf.rs2[1:0]);
+        uses_rm           = 1'b1;
+        c.dep.rs2         = '0;
+        c.dep.rd          = opnd(RC_INT, in.xf.rd);
+        c.fault.malformed = (in.xf.rs2[AREG_W-1:2] != '0);
+      end
+
+      FF5_CVT_I2F: begin
+        c.ctrl.fp.op      = FP_CVT_I2F;
+        c.ctrl.fp.cvt_int = fp_int_e'(in.xf.rs2[1:0]);
+        uses_rm           = 1'b1;
+        c.dep.rs1         = opnd(RC_INT, in.xf.rs1);
+        c.dep.rs2         = '0;
+        c.fault.malformed = (in.xf.rs2[AREG_W-1:2] != '0);
+      end
+
+      FF5_CVT_F2F: begin
+        c.ctrl.fp.op         = FP_CVT_F2F;
+        c.ctrl.fp.src_prec   = fp_prec_e'(in.xf.rs2[1:0]);
+        uses_rm              = 1'b1;
+        c.dep.rs2            = '0;
+        c.fault.malformed    = (in.xf.rs2[AREG_W-1:2] != '0);
+        c.fault.reserved_enc = (in.xf.rs2[1:0] == in.xf.fprec);
+      end
+
+      FF5_MV_F2X: begin
+        fflags            = 1'b0;
+        c.dep.rs2         = '0;
+        c.dep.rd          = opnd(RC_INT, in.xf.rd);
+        c.fault.malformed = (in.xf.rs2 != AREG_ZERO);
+        unique case (fmv_e'(in.xf.rm))
+          FMV_MV : c.ctrl.fp.op = FP_MV_F2X;
+          FMV_CLS: c.ctrl.fp.op = FP_CLASS;
+          default: c.fault.reserved_enc = 1'b1;
+        endcase
+      end
+
+      FF5_MV_X2F: begin
+        fflags            = 1'b0;
+        c.ctrl.fp.op      = FP_MV_X2F;
+        c.dep.rs1         = opnd(RC_INT, in.xf.rs1);
+        c.dep.rs2         = '0;
+        c.fault.malformed = (in.xf.rs2 != AREG_ZERO) || (in.xf.rm != '0);
+      end
+
+      default: c.fault.reserved_enc = 1'b1;
+    endcase
+
+    if (long_op) begin
+      c.ctrl.iclass = IC_FP_DIV;
+      c.ctrl.fu     = FU_FDIV;
+      c.ctrl.lat    = LAT_ITER;
+    end
+
+    if (uses_rm) begin
+      if (rm_legal(in.xf.rm)) begin
+        c.ctrl.fp.rm    = fp_rm_e'(in.xf.rm);
+        c.dep.reads_frm = (in.xf.rm == RM_DYN);
+      end else begin
+        c.fault.reserved_enc = 1'b1;
+      end
+    end
+
+    c.dep.writes_fflags = fflags;
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: fused multiply-add (R4 layout)
+  // ===========================================================================
+  function automatic dec_core_t decode_fma (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+
+    c                   = core_init();
+    c.ctrl.iclass       = IC_FP;
+    c.ctrl.fu           = FU_FPU;
+    c.ctrl.iq           = IQ_FP;
+    c.ctrl.lat          = LAT_FIXED;
+    c.ctrl.fp.prec      = fp_prec_e'(in.x4.fprec);
+    c.dep.rs1           = opnd(RC_FP, in.x4.rs1);
+    c.dep.rs2           = opnd(RC_FP, in.x4.rs2);
+    c.dep.rs3           = opnd(RC_FP, in.x4.rs3);
+    c.dep.rd            = opnd(RC_FP, in.x4.rd);
+    c.dep.writes_fflags = 1'b1;
+    c.fault.feature_off = !ctx.fp_en;
+
+    unique case (x_major_e'(in.x4.opcode.major))
+      X_FMADD : c.ctrl.fp.op = FP_MADD;
+      X_FMSUB : c.ctrl.fp.op = FP_MSUB;
+      X_FNMSUB: c.ctrl.fp.op = FP_NMSUB;
+      X_FNMADD: c.ctrl.fp.op = FP_NMADD;
+      default : c.fault.illegal_opcode = 1'b1;
+    endcase
+
+    if (rm_legal(in.x4.rm)) begin
+      c.ctrl.fp.rm    = fp_rm_e'(in.x4.rm);
+      c.dep.reads_frm = (in.x4.rm == RM_DYN);
+    end else begin
+      c.fault.reserved_enc = 1'b1;
+    end
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: vector arithmetic
+  // ===========================================================================
+  function automatic dec_core_t decode_vec (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+    vec_op_e   vop;
+    logic      form_ok;
+    logic      is_cmp;
+
+    c       = core_init();
+    vop     = vec_op_e'(in.x.xfunct4);
+    form_ok = 1'b0;
+    is_cmp  = vop inside {VOP_CMPEQ, VOP_CMPLT};
+
+    c.ctrl.iclass       = IC_VEC;
+    c.ctrl.fu           = FU_VALU;
+    c.ctrl.iq           = IQ_VEC;
+    c.ctrl.lat          = LAT_FIXED;
+    c.ctrl.vec.op       = vop;
+    c.ctrl.vec.pred_en  = (in.x.xsel != '0);
+    c.ctrl.vec.pred_idx = in.x.xsel;
+    c.dep.reads_vtype   = 1'b1;
+    c.fault.feature_off = !ctx.vec_en;
+
+    // Operand-form legality
+    unique case (vec_form_e'(in.x.xfunct3))
+      VFM_VV, VFM_VX: form_ok = 1'b1;
+      VFM_VI        : form_ok = !(vop inside {VOP_MUL, VOP_MACC});
+      VFM_VF        : form_ok = vop inside {VOP_ADD, VOP_SUB, VOP_MUL, VOP_MIN, VOP_MAX,
+                                            VOP_MACC, VOP_CMPEQ, VOP_CMPLT, VOP_MERGE,
+                                            VOP_MV};
+      VFM_RED       : form_ok = vop inside {VOP_ADD, VOP_AND, VOP_OR, VOP_XOR,
+                                            VOP_MIN, VOP_MAX};
+      default       : form_ok = 1'b0;
+    endcase
+
+    if (form_ok) begin
+      c.ctrl.vec.form = vec_form_e'(in.x.xfunct3);
+    end else begin
+      c.fault.reserved_enc = 1'b1;
+    end
+
+    // Scalar FP operand requires FP state
+    if ((in.x.xfunct3 == VFM_VF) && !ctx.fp_en) begin
+      c.fault.feature_off = 1'b1;
+    end
+
+    // Source 1 by operand form
+    unique case (vec_form_e'(in.x.xfunct3))
+      VFM_VV, VFM_RED: c.dep.rs1 = opnd(RC_VEC, in.x.rs1);
+      VFM_VX         : c.dep.rs1 = opnd(RC_INT, in.x.rs1);
+      VFM_VF         : c.dep.rs1 = opnd(RC_FP,  in.x.rs1);
+      VFM_VI         : begin
+        c.ctrl.opb_sel = OPB_IMM;
+        if (vop inside {VOP_SLL, VOP_SRL, VOP_SRA}) begin
+          c.imm      = imm_uimm5(in.x.rs1);
+          c.imm_kind = IMM_UIMM5;
+        end else begin
+          c.imm      = imm_simm5(in.x.rs1);
+          c.imm_kind = IMM_SIMM5;
+        end
+      end
+      default        : c.dep.rs1 = '0;
+    endcase
+
+    // Source 2: unary move consumes source 1 only
+    if (vop == VOP_MV) begin
+      c.fault.malformed = c.fault.malformed || (in.x.rs2 != AREG_ZERO);
+    end else begin
+      c.dep.rs2 = opnd(RC_VEC, in.x.rs2);
+    end
+
+    // Destination: compares target the predicate file
+    if (is_cmp) begin
+      c.dep.rd          = opnd(RC_PRED, nreg(in.x.rd));
+      c.fault.malformed = c.fault.malformed || !nreg_ok(in.x.rd);
+    end else begin
+      c.dep.rd = opnd(RC_VEC, in.x.rd);
+    end
+
+    // Accumulate reads the destination
+    if (vop == VOP_MACC) begin
+      c.dep.rs3       = opnd(RC_VEC, in.x.rd);
+      c.dep.rd_is_src = 1'b1;
+    end
+
+    // Merge requires a selecting predicate
+    if ((vop == VOP_MERGE) && (in.x.xsel == '0)) begin
+      c.fault.malformed = 1'b1;
+    end
+
+    if (in.x.xsel != '0) begin
+      c.dep.ps = opnd(RC_PRED, areg_t'(in.x.xsel));
+    end
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: vector memory
+  // ===========================================================================
+  function automatic dec_core_t decode_vmem (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t  c;
+    logic [3:0] vmop;
+    logic       is_store;
+    logic [1:0] mode;
+
+    c        = core_init();
+    vmop     = in.x.xfunct4;
+    is_store = vmop[2];
+    mode     = vmop[1:0];
+
+    c.ctrl.iclass       = IC_VEC_MEM;
+    c.ctrl.fu           = FU_VLSU;
+    c.ctrl.iq           = IQ_VEC;
+    c.ctrl.lat          = LAT_VAR;
+    c.ctrl.mem.op       = is_store ? MEM_VSTORE : MEM_VLOAD;
+    c.ctrl.vec.pred_en  = (in.x.xsel != '0);
+    c.ctrl.vec.pred_idx = in.x.xsel;
+    c.dep.rs1           = opnd(RC_INT, in.x.rs1);
+    c.dep.reads_vtype   = 1'b1;
+    c.spec.may_fault    = 1'b1;
+    c.fault.feature_off = !ctx.vec_en;
+
+    if (vmem_op_e'(vmop) inside {VMO_LE, VMO_LSE, VMO_LXE, VMO_SE, VMO_SSE, VMO_SXE}) begin
+      c.ctrl.vec.vmop = vmem_op_e'(vmop);
+    end else begin
+      c.fault.reserved_enc = 1'b1;
+    end
+
+    if (in.x.xfunct3[2]) begin
+      c.fault.reserved_enc = 1'b1;
+    end else begin
+      c.ctrl.vec.eew  = vec_eew_e'(in.x.xfunct3[1:0]);
+      c.ctrl.mem.size = mem_size_e'(in.x.xfunct3[1:0]);
+    end
+
+    unique case (vmem_mode_e'(mode))
+      VMA_UNIT: begin
+        c.ctrl.mem.amode  = AM_BASE_DISP;
+        c.fault.malformed = (in.x.rs2 != AREG_ZERO);
+      end
+      VMA_STRIDED: begin
+        c.ctrl.mem.amode = AM_BASE_STRIDE;
+        c.dep.rs2        = opnd(RC_INT, in.x.rs2);
+      end
+      VMA_INDEXED: begin
+        c.ctrl.mem.amode = AM_BASE_INDEX;
+        c.dep.rs2        = opnd(RC_VEC, in.x.rs2);
+      end
+      default: c.fault.reserved_enc = 1'b1;
+    endcase
+
+    if (is_store) begin
+      c.dep.rs3 = opnd(RC_VEC, in.x.rd);
+    end else begin
+      c.dep.rd  = opnd(RC_VEC, in.x.rd);
+    end
+
+    if (in.x.xsel != '0) begin
+      c.dep.ps = opnd(RC_PRED, areg_t'(in.x.xsel));
+    end
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: vector configuration
+  // ===========================================================================
+  function automatic dec_core_t decode_vcfg (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+
+    c                   = core_init();
+    c.ctrl.iclass       = IC_VEC_CFG;
+    c.ctrl.fu           = FU_VALU;
+    c.ctrl.iq           = IQ_VEC;
+    c.ctrl.lat          = LAT_SINGLE;
+    c.ctrl.vec.vtypei   = in.vc.vtypei;
+    c.dep.rd            = opnd(RC_INT, in.vc.rd);
+    c.dep.writes_vtype  = 1'b1;
+    c.fault.malformed   = (in.vc.funct3 != '0);
+    c.fault.feature_off = !ctx.vec_en;
+
+    unique case (vcfg_op_e'(in.vc.cfg))
+      VCF_SETVLI: begin
+        c.ctrl.vec.cfg       = VCF_SETVLI;
+        c.dep.rs1            = opnd(RC_INT, in.vc.rs1);
+        c.imm                = {{(XLEN-VTYPE_W){1'b0}}, in.vc.vtypei};
+        c.imm_kind           = IMM_VTYPE;
+        c.fault.reserved_enc = !vtype_legal(in.vc.vtypei);
+      end
+      VCF_SETIVLI: begin
+        c.ctrl.vec.cfg       = VCF_SETIVLI;
+        c.imm                = imm_uimm5(in.vc.rs1);
+        c.imm_kind           = IMM_UIMM5;
+        c.fault.reserved_enc = !vtype_legal(in.vc.vtypei);
+      end
+      VCF_SETVL: begin
+        c.ctrl.vec.cfg    = VCF_SETVL;
+        c.ctrl.vec.vtypei = '0;
+        c.dep.rs1         = opnd(RC_INT, in.x.rs1);
+        c.dep.rs2         = opnd(RC_INT, in.x.rs2);
+        c.fault.malformed = c.fault.malformed || (in.x.xsel != '0);
+      end
+      default: c.fault.reserved_enc = 1'b1;
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: tensor tile engine
+  // ===========================================================================
+  function automatic dec_core_t decode_tns (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+    logic      flags_zero;
+    logic      dtype_zero;
+
+    c          = core_init();
+    flags_zero = (in.x.xsel    == '0);
+    dtype_zero = (in.x.xfunct3 == '0);
+
+    c.ctrl.iclass       = IC_TENSOR;
+    c.ctrl.fu           = FU_TMU;
+    c.ctrl.iq           = IQ_ACC;
+    c.ctrl.lat          = LAT_ITER;
+    c.ctrl.tns.flags    = tns_flags_t'(in.x.xsel);
+    c.dep.reads_tcfg    = 1'b1;
+    c.fault.feature_off = !ctx.tns_en;
+
+    if (tdtype_legal(in.x.xfunct3)) begin
+      c.ctrl.tns.dtype = tns_dtype_e'(in.x.xfunct3);
+    end else begin
+      c.fault.reserved_enc = 1'b1;
+    end
+
+    unique case (tns_op_e'(in.x.xfunct4))
+      TOP_ZERO: begin
+        c.ctrl.tns.op     = TOP_ZERO;
+        c.ctrl.lat        = LAT_FIXED;
+        c.dep.rd          = opnd(RC_TILE, nreg(in.x.rd));
+        c.fault.malformed = !nreg_ok(in.x.rd) || (in.x.rs1 != AREG_ZERO) ||
+                            (in.x.rs2 != AREG_ZERO) || !flags_zero || !dtype_zero;
+      end
+      TOP_LOAD: begin
+        c.ctrl.tns.op     = TOP_LOAD;
+        c.ctrl.lat        = LAT_VAR;
+        c.ctrl.mem.op     = MEM_TLOAD;
+        c.ctrl.mem.amode  = AM_BASE_STRIDE;
+        c.dep.rs1         = opnd(RC_INT,  in.x.rs1);
+        c.dep.rs2         = opnd(RC_INT,  in.x.rs2);
+        c.dep.rd          = opnd(RC_TILE, nreg(in.x.rd));
+        c.spec.may_fault  = 1'b1;
+        c.fault.malformed = !nreg_ok(in.x.rd) || !flags_zero;
+      end
+      TOP_STORE: begin
+        c.ctrl.tns.op     = TOP_STORE;
+        c.ctrl.lat        = LAT_VAR;
+        c.ctrl.mem.op     = MEM_TSTORE;
+        c.ctrl.mem.amode  = AM_BASE_STRIDE;
+        c.dep.rs1         = opnd(RC_INT,  in.x.rs1);
+        c.dep.rs2         = opnd(RC_INT,  in.x.rs2);
+        c.dep.rs3         = opnd(RC_TILE, nreg(in.x.rd));
+        c.spec.may_fault  = 1'b1;
+        c.fault.malformed = !nreg_ok(in.x.rd) || !flags_zero;
+      end
+      TOP_MMA: begin
+        c.ctrl.tns.op     = TOP_MMA;
+        c.dep.rs1         = opnd(RC_TILE, nreg(in.x.rs1));
+        c.dep.rs2         = opnd(RC_TILE, nreg(in.x.rs2));
+        c.dep.rs3         = opnd(RC_TILE, nreg(in.x.rd));
+        c.dep.rd          = opnd(RC_TILE, nreg(in.x.rd));
+        c.dep.rd_is_src   = 1'b1;
+        c.fault.malformed = !nreg_ok(in.x.rd) || !nreg_ok(in.x.rs1) || !nreg_ok(in.x.rs2);
+      end
+      TOP_MMAZ: begin
+        c.ctrl.tns.op     = TOP_MMAZ;
+        c.dep.rs1         = opnd(RC_TILE, nreg(in.x.rs1));
+        c.dep.rs2         = opnd(RC_TILE, nreg(in.x.rs2));
+        c.dep.rd          = opnd(RC_TILE, nreg(in.x.rd));
+        c.fault.malformed = !nreg_ok(in.x.rd) || !nreg_ok(in.x.rs1) || !nreg_ok(in.x.rs2);
+      end
+      TOP_CFG: begin
+        c.ctrl.tns.op           = TOP_CFG;
+        c.ctrl.lat              = LAT_SERIAL;
+        c.dep.rs1               = opnd(RC_INT, in.x.rs1);
+        c.dep.reads_tcfg        = 1'b0;
+        c.dep.writes_tcfg       = 1'b1;
+        c.spec.nonspec_exec     = 1'b1;
+        c.spec.serialize_before = 1'b1;
+        c.fault.malformed       = (in.x.rd != AREG_ZERO) || (in.x.rs2 != AREG_ZERO) ||
+                                  !flags_zero || !dtype_zero;
+      end
+      default: c.fault.reserved_enc = 1'b1;
+    endcase
+
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: synchronization primitives
+  // ===========================================================================
+  function automatic dec_core_t decode_sync (input inst_u in);
+    dec_core_t c;
+    logic      rs1_used;
+
+    c        = core_init();
+    rs1_used = 1'b0;
+
+    c.ctrl.iclass       = IC_SYNC;
+    c.ctrl.fu           = FU_SYS;
+    c.ctrl.iq           = IQ_INT;
+    c.ctrl.lat          = LAT_SERIAL;
+    c.spec.nonspec_exec = 1'b1;
+
+    unique case (syf_e'(in.x.xfunct3))
+      SYF_PAUSE: begin
+        c.ctrl.sys_op       = SYS_PAUSE;
+        c.ctrl.lat          = LAT_SINGLE;
+        c.spec.nonspec_exec = 1'b0;
+      end
+      SYF_WFE: begin
+        c.ctrl.sys_op           = SYS_WFE;
+        c.spec.serialize_before = 1'b1;
+      end
+      SYF_SEV: begin
+        c.ctrl.sys_op = SYS_SEV;
+      end
+      SYF_BARRIER: begin
+        rs1_used                = 1'b1;
+        c.ctrl.sys_op           = SYS_BARRIER;
+        c.dep.rs1               = opnd(RC_INT, in.x.rs1);
+        c.spec.serialize_before = 1'b1;
+        c.spec.mem_order_strict = 1'b1;
+      end
+      SYF_CLREX: begin
+        c.ctrl.sys_op = SYS_CLREX;
+        c.ctrl.fu     = FU_AMO;
+        c.ctrl.iq     = IQ_MEM;
+      end
+      default: c.fault.reserved_enc = 1'b1;
+    endcase
+
+    c.fault.malformed = (in.x.xfunct4 != '0) || (in.x.xsel != '0) ||
+                        (in.x.rs2 != AREG_ZERO) || (in.x.rd != AREG_ZERO) ||
+                        (!rs1_used && (in.x.rs1 != AREG_ZERO));
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type decode: custom accelerator slots
+  // ===========================================================================
+  function automatic dec_core_t decode_accel (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t             c;
+    logic [ACCEL_ID_W-1:0] aid;
+
+    c   = core_init();
+    aid = in.r.opcode.major[ACCEL_ID_W-1:0];
+
+    c.ctrl.iclass       = IC_ACCEL;
+    c.ctrl.fu           = FU_ACCEL;
+    c.ctrl.iq           = IQ_ACC;
+    c.ctrl.lat          = LAT_VAR;
+    c.ctrl.accel.id     = aid;
+    c.ctrl.accel.funct7 = in.r.funct7;
+    c.ctrl.accel.xd     = in.r.funct3[2];
+    c.ctrl.accel.xs1    = in.r.funct3[1];
+    c.ctrl.accel.xs2    = in.r.funct3[0];
+    c.spec.nonspec_exec = 1'b1;
+    c.fault.feature_off = !ctx.accel_en[aid];
+
+    if (in.r.funct3[1]) c.dep.rs1 = opnd(RC_INT, in.r.rs1);
+    if (in.r.funct3[0]) c.dep.rs2 = opnd(RC_INT, in.r.rs2);
+    if (in.r.funct3[2]) c.dep.rd  = opnd(RC_INT, in.r.rd);
+
+    c.fault.malformed = (!in.r.funct3[2] && (in.r.rd  != AREG_ZERO)) ||
+                        (!in.r.funct3[1] && (in.r.rs1 != AREG_ZERO)) ||
+                        (!in.r.funct3[0] && (in.r.rs2 != AREG_ZERO));
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // X-type dispatch
+  // ===========================================================================
+  function automatic dec_core_t decode_x (input inst_u in, input dec_ctx_t ctx);
+    dec_core_t c;
+    unique case (x_major_e'(in.x.opcode.major))
+      X_FP                                : c = decode_fp   (in, ctx);
+      X_FMADD, X_FMSUB, X_FNMSUB, X_FNMADD: c = decode_fma  (in, ctx);
+      X_VEC                               : c = decode_vec  (in, ctx);
+      X_VMEM                              : c = decode_vmem (in, ctx);
+      X_VCFG                              : c = decode_vcfg (in, ctx);
+      X_TNS                               : c = decode_tns  (in, ctx);
+      X_SYNC                              : c = decode_sync (in);
+      X_CUST0, X_CUST1, X_CUST2, X_CUST3  : c = decode_accel(in, ctx);
+      default: begin
+        c                      = core_init();
+        c.fault.illegal_opcode = 1'b1;
+      end
+    endcase
+    return c;
+  endfunction
+
+  // ===========================================================================
+  // Lane decode: format dispatch, metadata qualification, exception resolution
+  // ===========================================================================
+  function automatic logic opnd_wakeup (input opnd_t o);
+    return o.valid && !o.zero && (o.rclass != RC_TILE);
+  endfunction
+
+  function automatic logic opnd_sb (input opnd_t o);
+    return o.valid && (o.rclass == RC_TILE);
+  endfunction
+
+  function automatic dec_packet_t decode_lane (input fetch_lane_t fl, input dec_ctx_t ctx);
+    dec_packet_t p;
+    dec_core_t   c;
+    inst_u       in;
+    logic        is_cti_spec;
+    logic        has_target;
+    logic        dec_fault;
+
+    in = inst_u'(fl.inst);
+
+    unique case (in.r.opcode.fmt)
+      FMT_R  : c = decode_r(in);
+      FMT_I  : c = decode_i(in, ctx);
+      FMT_M  : c = decode_m(in, ctx);
+      FMT_X  : c = decode_x(in, ctx);
+      default: begin
+        c                      = core_init();
+        c.fault.illegal_opcode = 1'b1;
+      end
+    endcase
+
+    is_cti_spec = (c.br.kind == BR_COND) || (c.br.kind == BR_JALR);
+    has_target  = (c.br.kind == BR_COND) || (c.br.kind == BR_JAL);
+    dec_fault   = |c.fault;
+
+    // -- Base packet ------------------------------------------------------------
+    p          = '0;
+    p.valid    = fl.valid;
+    p.pc       = fl.pc;
+    p.inst     = fl.inst;
+    p.fmt      = in.r.opcode.fmt;
+    p.ctrl     = c.ctrl;
+    p.imm      = c.imm;
+    p.imm_kind = c.imm_kind;
+    p.dep      = c.dep;
+    p.spec     = c.spec;
+    p.br       = c.br;
+    p.replay   = fl.replay;
+
+    // -- Branch metadata --------------------------------------------------------
+    p.br.target_valid = has_target;
+    p.br.target       = has_target ? (fl.pc + c.imm) : '0;
+    p.br.pred_taken   = fl.pred_taken;
+    p.br.pred_target  = fl.pred_target;
+    p.br.bp_meta      = fl.bp_meta;
+    p.br.ftq_idx      = fl.ftq_idx;
+
+    // -- Speculation metadata ---------------------------------------------------
+    p.spec.ctrl_spec        = is_cti_spec;
+    p.spec.needs_checkpoint = is_cti_spec;
+    p.spec.mem_order_strict = c.spec.mem_order_strict ||
+                              (fl.replay && (c.ctrl.mem.op != MEM_NONE));
+
+    // -- Dependency qualification -----------------------------------------------
+    p.dep.src_wakeup = {opnd_wakeup(c.dep.ps), opnd_wakeup(c.dep.rs3),
+                        opnd_wakeup(c.dep.rs2), opnd_wakeup(c.dep.rs1)};
+    p.dep.src_sb     = {opnd_sb(c.dep.ps), opnd_sb(c.dep.rs3),
+                        opnd_sb(c.dep.rs2), opnd_sb(c.dep.rs1)};
+    p.dep.dst_rename = c.dep.rd.valid && !c.dep.rd.zero &&
+                       (c.dep.rd.rclass inside {RC_INT, RC_FP, RC_VEC, RC_PRED});
+    p.dep.dst_sb     = opnd_sb(c.dep.rd);
+
+    // -- Exception resolution (priority order) ----------------------------------
+    p.exc.diag = c.fault;
+
+    if (fl.fault == FETCH_PAGE_FAULT) begin
+      p.exc.valid = 1'b1;
+      p.exc.cause = EXC_INST_PAGE_FAULT;
+      p.exc.tval  = fl.pc;
+      p.exc.diag  = '0;
+    end else if (fl.fault == FETCH_ACCESS_FAULT) begin
+      p.exc.valid = 1'b1;
+      p.exc.cause = EXC_INST_ACCESS;
+      p.exc.tval  = fl.pc;
+      p.exc.diag  = '0;
+    end else if (fl.pc[INST_ALIGN_LSB-1:0] != '0) begin
+      p.exc.valid = 1'b1;
+      p.exc.cause = EXC_INST_MISALIGNED;
+      p.exc.tval  = fl.pc;
+      p.exc.diag  = '0;
+    end else if (dec_fault) begin
+      p.exc.valid = 1'b1;
+      p.exc.cause = EXC_ILLEGAL_INST;
+      p.exc.tval  = {{(XLEN-ILEN){1'b0}}, fl.inst};
+    end else if (c.ctrl.sys_op == SYS_ECALL) begin
+      p.exc.valid = 1'b1;
+      unique case (ctx.priv)
+        PRIV_U : p.exc.cause = EXC_ECALL_U;
+        PRIV_S : p.exc.cause = EXC_ECALL_S;
+        default: p.exc.cause = EXC_ECALL_M;
+      endcase
+      p.exc.tval  = '0;
+    end else if (c.ctrl.sys_op == SYS_EBREAK) begin
+      p.exc.valid = 1'b1;
+      p.exc.cause = EXC_BREAKPOINT;
+      p.exc.tval  = fl.pc;
+    end
+
+    // -- Trap packet sanitization: ROB entry only, no execution side effects ----
+    if (p.exc.valid) begin
+      if (p.ctrl.sys_op inside {SYS_ECALL, SYS_EBREAK} && !dec_fault &&
+          (fl.fault == FETCH_OK)) begin
+        p.ctrl.iclass = IC_SYSTEM;
+      end else begin
+        p.ctrl.iclass = IC_TRAP;
+      end
+      p.ctrl.fu         = FU_NONE;
+      p.ctrl.iq         = IQ_NONE;
+      p.ctrl.lat        = LAT_NONE;
+      p.ctrl.mem.op     = MEM_NONE;
+      p.ctrl.csr.op     = CSR_NONE;
+      p.dep             = '0;
+      p.spec            = '0;
+      p.br.kind         = BR_NONE;
+      p.br.ras          = RAS_NONE;
+      p.br.target_valid = 1'b0;
+      p.br.target       = '0;
+    end
+
+    return p;
+  endfunction
+
+  // ===========================================================================
+  // Decode-time frontend correction
+  // ===========================================================================
+  function automatic redirect_t lane_redirect (input dec_packet_t p);
+    redirect_t r;
+    r         = '0;
+    r.br_kind = p.br.kind;
+    r.ras     = p.br.ras;
+    r.pc      = p.pc;
+    r.ftq_idx = p.br.ftq_idx;
+    r.bp_meta = p.br.bp_meta;
+
+    if (p.valid && !p.exc.valid) begin
+      unique case (p.br.kind)
+        BR_JAL: begin
+          if (!p.br.pred_taken || (p.br.pred_target != p.br.target)) begin
+            r.valid  = 1'b1;
+            r.reason = RDR_JAL;
+            r.target = p.br.target;
+          end
+        end
+        BR_COND: begin
+          if (p.br.pred_taken && (p.br.pred_target != p.br.target)) begin
+            r.valid  = 1'b1;
+            r.reason = RDR_BR_TARGET;
+            r.target = p.br.target;
+          end
+        end
+        BR_NONE: begin
+          if (p.br.pred_taken) begin
+            r.valid  = 1'b1;
+            r.reason = RDR_FALSE_TAKEN;
+            r.target = p.pc + INST_BYTES;
+          end
+        end
+        default: r.valid = 1'b0;
+      endcase
+    end
+
+    return r;
+  endfunction
+
+  // ===========================================================================
+  // Macro-fusion candidate detection
+  //   LUI   rd ; ADDI[W] rd, rd, imm      wide constant
+  //   AUIPC rd ; ADDI    rd, rd, imm      PC-relative address
+  //   AUIPC rd ; JALR    xN, imm(rd)      far call / far jump
+  // ===========================================================================
+  function automatic logic fusible_pair (input dec_packet_t a, input dec_packet_t b);
+    logic a_lui;
+    logic a_auipc;
+    logic b_addi;
+    logic b_jalr;
+    logic chain;
+    logic same_rd;
+
+    a_lui   = (a.imm_kind == IMM_U20) && (a.ctrl.opa_sel == OPA_ZERO);
+    a_auipc = (a.imm_kind == IMM_U20) && (a.ctrl.opa_sel == OPA_PC);
+    b_addi  = (b.ctrl.fu == FU_ALU) && (b.ctrl.alu_op == ALU_ADD) &&
+              (b.imm_kind == IMM_I12) && (b.ctrl.opa_sel == OPA_RS1);
+    b_jalr  = (b.br.kind == BR_JALR);
+    chain   = a.dep.rd.valid && !a.dep.rd.zero && b.dep.rs1.valid &&
+              (b.dep.rs1.idx == a.dep.rd.idx);
+    same_rd = b.dep.rd.valid && (b.dep.rd.idx == a.dep.rd.idx);
+
+    return !a.exc.valid && !b.exc.valid && chain &&
+           (((a_lui || a_auipc) && b_addi && same_rd) || (a_auipc && b_jalr));
+  endfunction
+
+  // ===========================================================================
+  // Lane decode array
+  // ===========================================================================
+  dec_packet_t             lane_pkt   [DECODE_WIDTH];
+  redirect_t               lane_redir [DECODE_WIDTH];
+  dec_packet_t             cap_pkt    [DECODE_WIDTH];
+  logic [DECODE_WIDTH-1:0] fe_lane_valid;
+  logic [DECODE_WIDTH-1:0] lane_live;
+  logic [DECODE_WIDTH-1:0] lane_stop;
+  logic [DECODE_WIDTH-1:0] lane_redir_sel;
+  logic [DECODE_WIDTH-1:0] lane_illegal;
+  logic [DECODE_WIDTH-1:0] lane_fuse;
+
+  for (genvar l = 0; l < DECODE_WIDTH; l++) begin : g_lane
+    assign lane_pkt[l]   = decode_lane(fe_lane_i[l], ctx_i);
+    assign lane_redir[l] = lane_redirect(lane_pkt[l]);
+  end
+
+  always_comb begin
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      fe_lane_valid[l] = fe_lane_i[l].valid;
+      lane_illegal[l]  = lane_pkt[l].exc.valid &&
+                         (lane_pkt[l].exc.cause == EXC_ILLEGAL_INST);
+    end
+  end
+
+  // ===========================================================================
+  // In-bundle kill chain: lanes younger than a trap or redirect are squashed
+  // ===========================================================================
+  always_comb begin
+    logic older_stop;
+    older_stop = 1'b0;
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      lane_live[l]      = fe_lane_valid[l] && !older_stop;
+      lane_redir_sel[l] = lane_live[l] && lane_redir[l].valid;
+      lane_stop[l]      = lane_live[l] && (lane_pkt[l].exc.valid || lane_redir[l].valid);
+      older_stop        = older_stop || lane_stop[l];
+    end
+  end
+
+  always_comb begin
+    lane_fuse = '0;
+    for (int unsigned l = 0; l + 1 < DECODE_WIDTH; l++) begin
+      lane_fuse[l] = lane_live[l] && lane_live[l+1] &&
+                     fusible_pair(lane_pkt[l], lane_pkt[l+1]);
+    end
+  end
+
+  // Redirect select: kill chain guarantees at most one live redirecting lane,
+  // permitting a flat AND-OR mux in place of a priority chain
+  localparam int unsigned REDIR_W = $bits(redirect_t);
+  typedef logic [REDIR_W-1:0] redir_vec_t;
+
+  redir_vec_t redir_sel_vec;
+  redirect_t  redir_sel;
+
+  always_comb begin
+    redir_sel_vec = '0;
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      redir_sel_vec = redir_sel_vec |
+                      (redir_vec_t'(lane_redir[l]) & {REDIR_W{lane_redir_sel[l]}});
+    end
+    redir_sel = redirect_t'(redir_sel_vec);
+  end
+
+  always_comb begin
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      cap_pkt[l]           = lane_pkt[l];
+      cap_pkt[l].valid     = lane_live[l];
+      cap_pkt[l].fuse_next = lane_fuse[l];
+    end
+  end
+
+  // ===========================================================================
+  // Stage handshake
+  // ===========================================================================
+  logic                    out_valid_q;
+  logic [DECODE_WIDTH-1:0] lane_valid_q;
+  dec_packet_t             out_pkt_q [DECODE_WIDTH];
+  redirect_t               redir_q;
+  logic                    wrongpath_drop;
+  logic                    bundle_accept;
+
+  assign fe_ready_o     = !out_valid_q || rn_ready_i;
+  assign wrongpath_drop = redir_q.valid;
+  assign bundle_accept  = fe_valid_i && fe_ready_o && !flush_i && !wrongpath_drop &&
+                          (|lane_live);
+
+  // Control state: reset
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      out_valid_q  <= 1'b0;
+      lane_valid_q <= '0;
+      redir_q      <= '0;
+    end else begin
+      if (flush_i) begin
+        out_valid_q  <= 1'b0;
+        lane_valid_q <= '0;
+      end else if (bundle_accept) begin
+        out_valid_q  <= 1'b1;
+        lane_valid_q <= lane_live;
+      end else if (rn_ready_i) begin
+        out_valid_q  <= 1'b0;
+        lane_valid_q <= '0;
+      end
+
+      redir_q <= bundle_accept ? redir_sel : '0;
+    end
+  end
+
+  // Payload: load-enabled, no reset
+  always_ff @(posedge clk_i) begin
+    if (bundle_accept) begin
+      out_pkt_q <= cap_pkt;
+    end
+  end
+
+  // ===========================================================================
+  // Outputs
+  // ===========================================================================
+  assign rn_valid_o = out_valid_q;
+
+  always_comb begin
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      rn_pkt_o[l]       = out_pkt_q[l];
+      rn_pkt_o[l].valid = out_valid_q && lane_valid_q[l];
+    end
+  end
+
+  always_comb begin
+    dec_redirect_o       = redir_q;
+    dec_redirect_o.valid = redir_q.valid && !flush_i;
+  end
+
+  always_comb begin
+    perf_lanes_o = '0;
+    for (int unsigned l = 0; l < DECODE_WIDTH; l++) begin
+      perf_lanes_o = perf_lanes_o + CNT_W'(bundle_accept && lane_live[l]);
+    end
+  end
+
+  assign perf_illegal_o      = bundle_accept && |(lane_live & lane_illegal);
+  assign perf_redirect_o     = bundle_accept && |lane_redir_sel;
+  assign perf_backpressure_o = out_valid_q && !rn_ready_i;
+  assign perf_wrongpath_o    = fe_valid_i && wrongpath_drop && !flush_i;
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+`ifndef SYNTHESIS
+
+  // -- Context and interface legality -------------------------------------------
+  a_priv_legal: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    priv_lvl_t'(ctx_i.priv) != PRIV_LVL_RSVD)
+    else $error("sf_decoder: reserved privilege level on context input");
+
+  a_redirect_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    $onehot0(lane_redir_sel))
+    else $error("sf_decoder: multiple live redirecting lanes in bundle");
+
+  a_out_hold: assert property (@(posedge clk_i) disable iff (!rst_ni || flush_i)
+    (rn_valid_o && !rn_ready_i) |=> (rn_valid_o && $stable(lane_valid_q)))
+    else $error("sf_decoder: output bundle not held under backpressure");
+
+  a_redirect_pulse: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    redir_q.valid |=> !redir_q.valid)
+    else $error("sf_decoder: decode redirect asserted on consecutive cycles");
+
+  a_no_accept_on_flush: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i |-> !bundle_accept)
+    else $error("sf_decoder: bundle captured during flush");
+
+  for (genvar l = 0; l < int'(DECODE_WIDTH) - 1; l++) begin : g_sva_fe
+    a_fe_taken_tail: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (fe_valid_i && fe_lane_i[l].valid && fe_lane_i[l].pred_taken) |->
+        ((fe_lane_valid >> (l + 1)) == '0))
+      else $error("sf_decoder: fetch lane valid beyond predicted-taken lane %0d", l);
+  end
+
+  // -- Per-lane packet consistency ---------------------------------------------
+  for (genvar l = 0; l < DECODE_WIDTH; l++) begin : g_sva_lane
+    logic  out_v;
+    inst_u out_inst;
+
+    assign out_v    = rn_valid_o && rn_pkt_o[l].valid;
+    assign out_inst = inst_u'(rn_pkt_o[l].inst);
+
+    a_fmt_consistent: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      out_v |-> (rn_pkt_o[l].fmt == out_inst.r.opcode.fmt))
+      else $error("sf_decoder: lane %0d format field inconsistent with encoding", l);
+
+    a_fault_traps: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && (|rn_pkt_o[l].exc.diag)) |->
+        (rn_pkt_o[l].exc.valid && (rn_pkt_o[l].exc.cause == EXC_ILLEGAL_INST)))
+      else $error("sf_decoder: lane %0d decode fault without illegal-instruction trap", l);
+
+    a_trap_sanitized: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && rn_pkt_o[l].exc.valid) |->
+        ((rn_pkt_o[l].ctrl.fu == FU_NONE) && (rn_pkt_o[l].ctrl.iq == IQ_NONE) &&
+         !rn_pkt_o[l].dep.dst_rename && !rn_pkt_o[l].dep.dst_sb &&
+         (rn_pkt_o[l].br.kind == BR_NONE) && (rn_pkt_o[l].ctrl.mem.op == MEM_NONE)))
+      else $error("sf_decoder: lane %0d trap packet carries execution state", l);
+
+    a_legal_routed: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && !rn_pkt_o[l].exc.valid) |->
+        ((rn_pkt_o[l].ctrl.fu != FU_NONE) && (rn_pkt_o[l].ctrl.iq != IQ_NONE) &&
+         (rn_pkt_o[l].ctrl.iclass != IC_TRAP)))
+      else $error("sf_decoder: lane %0d legal instruction without routing", l);
+
+    a_x0_not_renamed: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && rn_pkt_o[l].dep.dst_rename && (rn_pkt_o[l].dep.rd.rclass == RC_INT)) |->
+        (rn_pkt_o[l].dep.rd.idx != AREG_ZERO))
+      else $error("sf_decoder: lane %0d renames hardwired-zero destination", l);
+
+    a_dst_track_excl: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      out_v |-> !(rn_pkt_o[l].dep.dst_rename && rn_pkt_o[l].dep.dst_sb))
+      else $error("sf_decoder: lane %0d destination both renamed and scoreboarded", l);
+
+    a_src_track_excl: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      out_v |-> ((rn_pkt_o[l].dep.src_wakeup & rn_pkt_o[l].dep.src_sb) == '0))
+      else $error("sf_decoder: lane %0d source both renamed and scoreboarded", l);
+
+    a_target_aligned: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && rn_pkt_o[l].br.target_valid) |->
+        (rn_pkt_o[l].br.target[INST_ALIGN_LSB-1:0] == '0))
+      else $error("sf_decoder: lane %0d misaligned direct target", l);
+
+    a_class_excl: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      out_v |-> $onehot0({(rn_pkt_o[l].br.kind    != BR_NONE),
+                          (rn_pkt_o[l].ctrl.csr.op != CSR_NONE),
+                          ((rn_pkt_o[l].ctrl.mem.op != MEM_NONE) &&
+                           (rn_pkt_o[l].ctrl.sys_op == SYS_NONE))}))
+      else $error("sf_decoder: lane %0d overlapping control/memory/CSR decode", l);
+
+    a_checkpoint_cti: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (out_v && rn_pkt_o[l].spec.needs_checkpoint) |->
+        (rn_pkt_o[l].br.kind inside {BR_COND, BR_JALR}))
+      else $error("sf_decoder: lane %0d checkpoint requested on non-speculative CTI", l);
+
+    if (l == int'(DECODE_WIDTH) - 1) begin : g_fuse_last
+      a_fuse_tail: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        out_v |-> !rn_pkt_o[l].fuse_next)
+        else $error("sf_decoder: fusion hint on final lane");
+    end else begin : g_fuse_mid
+      a_fuse_succ: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (out_v && rn_pkt_o[l].fuse_next) |-> lane_valid_q[l + 1])
+        else $error("sf_decoder: lane %0d fusion hint without valid successor", l);
+    end
+  end
+
+`endif
+
+endmodule : sf_decoder
