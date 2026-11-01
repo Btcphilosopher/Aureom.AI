@@ -1,0 +1,930 @@
+// =============================================================================
+//  SilicaFlux Tensor Extension
+//  tensor_unit : deeply pipelined NxN signed integer matrix multiply engine
+// -----------------------------------------------------------------------------
+//  C[i][j] = sum_{k=0}^{DIM-1} A[i][k] * B[k][j]
+//
+//  Datapath
+//    DIM*DIM output-stationary dot-product lanes. Each lane owns DIM radix-4
+//    Booth multipliers fed by B operands recoded once per element (shared
+//    across the DIM lanes of a column), a 3:2 carry-save partial-product
+//    compressor, a product carry-propagate stage and a carry-segmented
+//    pipelined binary reduction tree. Accumulation is exact
+//    (ACC_W = 2*OP_W + log2(DIM)); narrowing to OUT_W follows a
+//    deterministic per-operation wrap / saturate policy.
+//
+//  Control
+//    valid/ready issue and result interfaces. The global pipeline advance is
+//    a flop output of the release buffer: no combinational path exists from
+//    res_ready_i into any datapath enable. flush_i synchronously kills every
+//    in-flight stage and the release buffer; no handshake completes on either
+//    interface in a flush cycle. elem_en_i gates each output lane end to end
+//    and forces disabled elements to zero at writeback.
+//
+//  Stage map (defaults DIM=4, ACC_ADD_SEGS=3, PIPE_STAGES=20)
+//    S0        CAP    operand capture
+//    S1        PREP   shared Booth radix-4 recoding of B, A staging
+//    S2        DIST   per-lane operand fan-out
+//    S3        PPSEL  partial-product magnitude select / conditional invert
+//    S4        CSA    row alignment, 3:2 carry-save compression to two rows
+//    S5        PCPA   product carry-propagate resolve
+//    S6        ALIGN  product sign extension to accumulator width
+//    S7..S12   TREE   reduction tree, ACC_ADD_SEGS carry segments per level
+//    S13       RANGE  narrowing range classification
+//    S14       SAT    overflow policy application
+//    S15       PACK   element-enable masking, writeback packaging
+//    S16..S19  WB     writeback latency alignment
+//    S20       REL    two-entry output release buffer
+//
+//  Issue-handshake-to-result-valid latency: PIPE_STAGES + 1 cycles.
+//  Sustained throughput: one DIMxDIM matrix product per cycle.
+// =============================================================================
+
+module tensor_unit
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned DIM            = 4,     // matrix dimension (DIM x DIM), power of two
+  parameter int unsigned OP_W           = 8,     // signed operand width
+  parameter int unsigned OUT_W          = 32,    // signed result element width
+  parameter int unsigned TAG_W          = 8,     // backend transaction tag width
+  parameter int unsigned ACC_ADD_SEGS   = 3,     // carry segments per reduction-tree level
+  parameter int unsigned PIPE_STAGES    = 20,    // pipeline register stages S0..S(PIPE_STAGES-1)
+  // Architecturally reserved extension controls; must remain 1'b0.
+  parameter bit          SYSTOLIC_EN    = 1'b0,  // weight-stationary systolic array organisation
+  parameter bit          MIXED_PREC_EN  = 1'b0,  // runtime INT8/INT16/INT32 operand packing
+  parameter bit          SPARSE_SKIP_EN = 1'b0,  // zero-operand partial-product skipping
+  parameter bit          VEC_FUSE_EN    = 1'b0   // vector-tensor fused accumulate input
+) (
+  input  logic                                clk_i,
+  input  logic                                rst_ni,
+
+  // Speculation recovery
+  input  logic                                flush_i,
+
+  // Operand issue (execution backend -> tensor unit)
+  input  logic                                issue_valid_i,
+  output logic                                issue_ready_o,
+  input  logic [DIM-1:0][DIM-1:0][OP_W-1:0]   mat_a_i,      // A[row][col]
+  input  logic [DIM-1:0][DIM-1:0][OP_W-1:0]   mat_b_i,      // B[row][col]
+  input  logic [DIM-1:0][DIM-1:0]             elem_en_i,    // C element enable [row][col]
+  input  logic [1:0]                          ovf_mode_i,   // tu_ovf_mode_e encoding
+  input  logic [TAG_W-1:0]                    tag_i,
+
+  // Result writeback (tensor unit -> execution backend)
+  output logic                                res_valid_o,
+  input  logic                                res_ready_i,
+  output logic [DIM-1:0][DIM-1:0][OUT_W-1:0]  mat_c_o,      // C[row][col]
+  output logic [DIM-1:0][DIM-1:0]             elem_en_o,
+  output logic [DIM-1:0][DIM-1:0]             elem_ovf_o,   // narrowing overflow per element
+  output logic [TAG_W-1:0]                    tag_o,
+
+  // Status
+  output logic                                busy_o
+);
+
+  // ===========================================================================
+  // Derived geometry
+  // ===========================================================================
+  localparam int unsigned TREE_LVLS  = unsigned'($clog2(DIM));
+  localparam int unsigned PROD_W     = 2 * OP_W;
+  localparam int unsigned ACC_W      = PROD_W + TREE_LVLS;
+  localparam int unsigned BOOTH_DIGS = (OP_W + 1) / 2;
+  localparam int unsigned BOOTH_W    = 2 * BOOTH_DIGS;
+  localparam int unsigned PP_ROWS    = BOOTH_DIGS + 1;
+  localparam int unsigned SEG_W      = (ACC_W + ACC_ADD_SEGS - 1) / ACC_ADD_SEGS;
+  localparam int          MSEG_W     = int'(ACC_W) - int'((ACC_ADD_SEGS - 1) * SEG_W);
+
+  // ===========================================================================
+  // Types
+  // ===========================================================================
+  typedef logic signed [OP_W-1:0]    tu_op_t;     // operand
+  typedef logic signed [OP_W:0]      tu_ppm_t;    // Booth partial-product magnitude
+  typedef logic signed [BOOTH_W-1:0] tu_bext_t;   // Booth-width extended operand
+  typedef logic signed [PROD_W-1:0]  tu_prod_t;   // exact product
+  typedef logic signed [ACC_W-1:0]   tu_acc_t;    // exact dot product
+  typedef logic signed [OUT_W-1:0]   tu_out_t;    // result element
+
+  typedef struct packed {
+    logic neg;
+    logic two;
+    logic one;
+  } tu_booth_t;
+
+  typedef tu_booth_t [BOOTH_DIGS-1:0] tu_bdvec_t;
+
+  typedef enum logic [1:0] {
+    TU_OVF_WRAP    = 2'b00,  // two's-complement modular narrowing
+    TU_OVF_SAT     = 2'b01,  // signed saturation to [OUT_MIN, OUT_MAX]
+    TU_OVF_SAT_SYM = 2'b10,  // reserved: symmetric saturation, executes as TU_OVF_SAT
+    TU_OVF_RSVD    = 2'b11   // reserved, executes as TU_OVF_SAT
+  } tu_ovf_mode_e;
+
+  typedef struct packed {
+    logic [TAG_W-1:0]        tag;
+    logic [DIM-1:0][DIM-1:0] elem_en;
+    tu_ovf_mode_e            ovf_mode;
+  } tu_meta_t;
+
+  typedef struct packed {
+    logic [DIM-1:0][DIM-1:0]            ovf;
+    logic [DIM-1:0][DIM-1:0][OUT_W-1:0] data;
+  } tu_wb_t;
+
+  typedef struct packed {
+    logic [TAG_W-1:0]        tag;
+    logic [DIM-1:0][DIM-1:0] elem_en;
+    tu_wb_t                  wb;
+  } tu_rel_t;
+
+  // ===========================================================================
+  // Functions
+  // ===========================================================================
+  function automatic int unsigned tu_csa_rows(input int unsigned rows, input int unsigned lvls);
+    int unsigned n;
+    n = rows;
+    for (int unsigned i = 0; i < lvls; i++) begin
+      n = n - (n / 3);
+    end
+    return n;
+  endfunction
+
+  function automatic int unsigned tu_csa_depth(input int unsigned rows);
+    int unsigned n;
+    int unsigned d;
+    n = rows;
+    d = 0;
+    while (n > 2) begin
+      n = n - (n / 3);
+      d = d + 1;
+    end
+    return d;
+  endfunction
+
+  // Radix-4 Booth digit encode of window {b[2d+1], b[2d], b[2d-1]}.
+  function automatic tu_booth_t tu_booth_enc(input logic [2:0] win);
+    tu_booth_t dig;
+    case (win)
+      3'b000, 3'b111: dig = '{neg: 1'b0, two: 1'b0, one: 1'b0};   //  0
+      3'b001, 3'b010: dig = '{neg: 1'b0, two: 1'b0, one: 1'b1};   // +1
+      3'b011:         dig = '{neg: 1'b0, two: 1'b1, one: 1'b0};   // +2
+      3'b100:         dig = '{neg: 1'b1, two: 1'b1, one: 1'b0};   // -2
+      3'b101, 3'b110: dig = '{neg: 1'b1, two: 1'b0, one: 1'b1};   // -1
+      default:        dig = '{neg: 1'b0, two: 1'b0, one: 1'b0};
+    endcase
+    return dig;
+  endfunction
+
+  // Two's-complement completion row: +1 at the LSB weight of every inverted row.
+  function automatic logic [PROD_W-1:0] tu_booth_corr(input logic [BOOTH_DIGS-1:0] neg);
+    logic [PROD_W-1:0] v;
+    v = '0;
+    for (int unsigned d = 0; d < BOOTH_DIGS; d++) begin
+      v[2*d] = neg[d];
+    end
+    return v;
+  endfunction
+
+`ifndef SYNTHESIS
+  // Signed value represented by a Booth digit vector (verification only).
+  function automatic tu_prod_t tu_booth_value(input tu_bdvec_t dv);
+    tu_prod_t acc;
+    tu_prod_t term;
+    acc = '0;
+    for (int unsigned d = 0; d < BOOTH_DIGS; d++) begin
+      term = dv[d].two ? tu_prod_t'(2) : (dv[d].one ? tu_prod_t'(1) : tu_prod_t'(0));
+      if (dv[d].neg) begin
+        term = -term;
+      end
+      acc = acc + (term <<< (2 * d));
+    end
+    return acc;
+  endfunction
+`endif
+
+  // ===========================================================================
+  // Stage indices
+  // ===========================================================================
+  localparam int unsigned CSA_LVLS    = tu_csa_depth(PP_ROWS);
+  localparam int unsigned TREE_STAGES = TREE_LVLS * ACC_ADD_SEGS;
+
+  localparam int unsigned ST_CAP      = 0;
+  localparam int unsigned ST_PREP     = 1;
+  localparam int unsigned ST_DIST     = 2;
+  localparam int unsigned ST_PPSEL    = 3;
+  localparam int unsigned ST_CSA      = 4;
+  localparam int unsigned ST_PCPA     = 5;
+  localparam int unsigned ST_ALIGN    = 6;
+  localparam int unsigned ST_TREE0    = 7;
+  localparam int unsigned ST_RANGE    = ST_TREE0 + TREE_STAGES;
+  localparam int unsigned ST_SAT      = ST_RANGE + 1;
+  localparam int unsigned ST_PACK     = ST_SAT + 1;
+  localparam int unsigned ST_WB0      = ST_PACK + 1;
+  localparam int unsigned ST_LAST     = PIPE_STAGES - 1;
+
+  localparam tu_out_t     OUT_MAX     = tu_out_t'({1'b0, {(OUT_W - 1){1'b1}}});
+  localparam tu_out_t     OUT_MIN     = tu_out_t'({1'b1, {(OUT_W - 1){1'b0}}});
+
+  // ===========================================================================
+  // Elaboration-time configuration guards
+  // ===========================================================================
+  if ((DIM < 2) || ((DIM & (DIM - 1)) != 0)) begin : g_chk_dim
+    $fatal(1, "tensor_unit: DIM (%0d) must be a power of two >= 2", DIM);
+  end
+  if (OP_W < 4) begin : g_chk_op_w
+    $fatal(1, "tensor_unit: OP_W (%0d) must be >= 4", OP_W);
+  end
+  if (OUT_W < 2) begin : g_chk_out_w
+    $fatal(1, "tensor_unit: OUT_W (%0d) must be >= 2", OUT_W);
+  end
+  if (TAG_W < 1) begin : g_chk_tag_w
+    $fatal(1, "tensor_unit: TAG_W must be >= 1");
+  end
+  if ((ACC_ADD_SEGS < 1) || (MSEG_W < 1)) begin : g_chk_segs
+    $fatal(1, "tensor_unit: ACC_ADD_SEGS (%0d) invalid for ACC_W (%0d)", ACC_ADD_SEGS, ACC_W);
+  end
+  if (PIPE_STAGES < ST_WB0 + 1) begin : g_chk_depth
+    $fatal(1, "tensor_unit: PIPE_STAGES (%0d) below structural minimum (%0d)", PIPE_STAGES, ST_WB0 + 1);
+  end
+  if (SYSTOLIC_EN || MIXED_PREC_EN || SPARSE_SKIP_EN || VEC_FUSE_EN) begin : g_chk_rsvd
+    $fatal(1, "tensor_unit: reserved extension parameter set");
+  end
+
+  // ===========================================================================
+  // Pipeline control
+  // ===========================================================================
+  logic                   pipe_adv;
+  logic                   issue_fire;
+  logic [PIPE_STAGES-1:0] stg_vld_q;
+  logic [PIPE_STAGES-1:0] stg_vld_in;
+  logic [PIPE_STAGES-1:0] stg_ld;
+  tu_meta_t               issue_meta;
+  tu_meta_t               stg_meta_in [PIPE_STAGES];
+  tu_meta_t               stg_meta_q  [PIPE_STAGES];
+
+  logic                   rel_hd_vld_q;
+  logic                   rel_sp_vld_q;
+  tu_rel_t                rel_hd_q;
+  tu_rel_t                rel_sp_q;
+  tu_rel_t                rel_d;
+  logic                   rel_push;
+  logic                   rel_pop;
+
+  // Global advance: the pipeline moves whenever the release buffer spare slot
+  // is empty, guaranteeing a landing slot for the S(PIPE_STAGES-1) occupant.
+  assign pipe_adv      = ~rel_sp_vld_q;
+  assign issue_ready_o = pipe_adv & ~flush_i;
+  assign issue_fire    = issue_valid_i & issue_ready_o;
+
+  assign issue_meta = '{
+    tag      : tag_i,
+    elem_en  : elem_en_i,
+    ovf_mode : tu_ovf_mode_e'(ovf_mode_i)
+  };
+
+  assign stg_vld_in = {stg_vld_q[PIPE_STAGES-2:0], issue_fire};
+  assign stg_ld     = stg_vld_in & {PIPE_STAGES{pipe_adv}};
+
+  always_comb begin : p_stg_meta_in
+    stg_meta_in[0] = issue_meta;
+    for (int unsigned s = 1; s < PIPE_STAGES; s++) begin
+      stg_meta_in[s] = stg_meta_q[s-1];
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_stg_vld
+    if (!rst_ni) begin
+      stg_vld_q <= '0;
+    end else if (flush_i) begin
+      stg_vld_q <= '0;
+    end else if (pipe_adv) begin
+      stg_vld_q <= stg_vld_in;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_stg_meta
+    for (int unsigned s = 0; s < PIPE_STAGES; s++) begin
+      if (stg_ld[s]) begin
+        stg_meta_q[s] <= stg_meta_in[s];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // S0 CAP : operand capture
+  // ===========================================================================
+  logic [DIM-1:0][DIM-1:0][OP_W-1:0] s0_a_q;
+  logic [DIM-1:0][DIM-1:0][OP_W-1:0] s0_b_q;
+
+  always_ff @(posedge clk_i) begin : p_s0_cap
+    if (stg_ld[ST_CAP]) begin
+      s0_a_q <= mat_a_i;
+      s0_b_q <= mat_b_i;
+    end
+  end
+
+  // ===========================================================================
+  // S1 PREP : shared Booth radix-4 recoding of every B element, A staging
+  //           (mixed-precision operand unpacking seam)
+  // ===========================================================================
+  logic      [DIM-1:0][DIM-1:0][OP_W-1:0] s1_a_q;
+  tu_bdvec_t [DIM-1:0][DIM-1:0]           s1_bd_d;
+  tu_bdvec_t [DIM-1:0][DIM-1:0]           s1_bd_q;
+
+  for (genvar i = 0; i < DIM; i++) begin : g_prep_row
+    for (genvar j = 0; j < DIM; j++) begin : g_prep_col
+      tu_bext_t           b_ext;
+      logic [BOOTH_W:0]   b_win;
+
+      assign b_ext = tu_bext_t'(tu_op_t'(s0_b_q[i][j]));
+      assign b_win = {b_ext, 1'b0};
+
+      for (genvar d = 0; d < BOOTH_DIGS; d++) begin : g_digit
+        assign s1_bd_d[i][j][d] = tu_booth_enc(b_win[2*d +: 3]);
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_s1_prep
+    if (stg_ld[ST_PREP]) begin
+      s1_a_q  <= s0_a_q;
+      s1_bd_q <= s1_bd_d;
+    end
+  end
+
+  // ===========================================================================
+  // Output-stationary dot-product lanes : lane (r, c) produces C[r][c]
+  // ===========================================================================
+  logic [DIM-1:0][DIM-1:0][OUT_W-1:0] lane_res;
+  logic [DIM-1:0][DIM-1:0]            lane_ovf;
+
+  for (genvar r = 0; r < DIM; r++) begin : g_row
+    for (genvar c = 0; c < DIM; c++) begin : g_col
+
+      // Per-element stage load enables (element valid tracking)
+      logic [ST_SAT:ST_DIST] lane_ld;
+
+      for (genvar s = ST_DIST; s <= ST_SAT; s++) begin : g_lane_ld
+        assign lane_ld[s] = stg_ld[s] & stg_meta_in[s].elem_en[r][c];
+      end
+
+      // -----------------------------------------------------------------------
+      // Per-product multiplier pipelines : P[k] = A[r][k] * B[k][c]
+      // -----------------------------------------------------------------------
+      for (genvar k = 0; k < DIM; k++) begin : g_prod
+
+        // ---- S2 DIST : operand fan-out ---------------------------------------
+        tu_op_t    s2_a_q;
+        tu_bdvec_t s2_bd_q;
+
+        always_ff @(posedge clk_i) begin : p_s2_dist
+          if (lane_ld[ST_DIST]) begin
+            s2_a_q  <= tu_op_t'(s1_a_q[r][k]);
+            s2_bd_q <= s1_bd_q[k][c];
+          end
+        end
+
+        // ---- S3 PPSEL : magnitude select {0, A, 2A}, conditional invert ------
+        //      (sparsity skip seam: zero digits / zero A are detected here)
+        tu_ppm_t                s3_pp_d [BOOTH_DIGS];
+        tu_ppm_t                s3_pp_q [BOOTH_DIGS];
+        logic [BOOTH_DIGS-1:0]  s3_neg_d;
+        logic [BOOTH_DIGS-1:0]  s3_neg_q;
+        tu_ppm_t                a_x1;
+        tu_ppm_t                a_x2;
+
+        assign a_x1 = tu_ppm_t'(s2_a_q);
+        assign a_x2 = tu_ppm_t'({s2_a_q, 1'b0});
+
+        for (genvar d = 0; d < BOOTH_DIGS; d++) begin : g_ppsel
+          tu_ppm_t mag;
+
+          always_comb begin : p_mag
+            case ({s2_bd_q[d].two, s2_bd_q[d].one})
+              2'b00:   mag = '0;
+              2'b01:   mag = a_x1;
+              2'b10:   mag = a_x2;
+              default: mag = '0;
+            endcase
+          end
+
+          assign s3_pp_d[d]  = s2_bd_q[d].neg ? ~mag : mag;
+          assign s3_neg_d[d] = s2_bd_q[d].neg;
+        end
+
+        always_ff @(posedge clk_i) begin : p_s3_ppsel
+          if (lane_ld[ST_PPSEL]) begin
+            s3_pp_q  <= s3_pp_d;
+            s3_neg_q <= s3_neg_d;
+          end
+        end
+
+        // ---- S4 CSA : row alignment + 3:2 carry-save reduction to two rows ---
+        for (genvar l = 0; l <= CSA_LVLS; l++) begin : g_csa
+          localparam int unsigned NR = tu_csa_rows(PP_ROWS, l);
+
+          logic [PROD_W-1:0] row [NR];
+
+          if (l == 0) begin : g_src
+            for (genvar d = 0; d < BOOTH_DIGS; d++) begin : g_pprow
+              assign row[d] = unsigned'(tu_prod_t'(s3_pp_q[d])) << (2 * d);
+            end
+            assign row[BOOTH_DIGS] = tu_booth_corr(s3_neg_q);
+          end else begin : g_cmp
+            localparam int unsigned PR = tu_csa_rows(PP_ROWS, l - 1);
+            localparam int unsigned NG = PR / 3;
+
+            for (genvar g = 0; g < NG; g++) begin : g_fa
+              logic [PROD_W-1:0] x;
+              logic [PROD_W-1:0] y;
+              logic [PROD_W-1:0] z;
+
+              assign x          = g_csa[l-1].row[3*g];
+              assign y          = g_csa[l-1].row[3*g+1];
+              assign z          = g_csa[l-1].row[3*g+2];
+              assign row[2*g]   = x ^ y ^ z;
+              assign row[2*g+1] = ((x & y) | (x & z) | (y & z)) << 1;
+            end
+
+            for (genvar p = 0; p < PR - (3 * NG); p++) begin : g_pass
+              assign row[(2*NG)+p] = g_csa[l-1].row[(3*NG)+p];
+            end
+          end
+        end
+
+        logic [PROD_W-1:0] s4_sum_q;
+        logic [PROD_W-1:0] s4_cry_q;
+
+        always_ff @(posedge clk_i) begin : p_s4_csa
+          if (lane_ld[ST_CSA]) begin
+            s4_sum_q <= g_csa[CSA_LVLS].row[0];
+            s4_cry_q <= g_csa[CSA_LVLS].row[1];
+          end
+        end
+
+        // ---- S5 PCPA : product carry-propagate resolve -----------------------
+        logic [PROD_W-1:0] s5_prod_d;
+        tu_prod_t          s5_prod_q;
+
+        assign s5_prod_d = s4_sum_q + s4_cry_q;
+
+        always_ff @(posedge clk_i) begin : p_s5_pcpa
+          if (lane_ld[ST_PCPA]) begin
+            s5_prod_q <= tu_prod_t'(s5_prod_d);
+          end
+        end
+
+        // ---- S6 ALIGN : sign extension to exact accumulator width ------------
+        //      (mixed-precision product alignment / fused accumulate seam)
+        tu_acc_t s6_ext_q;
+
+        always_ff @(posedge clk_i) begin : p_s6_align
+          if (lane_ld[ST_ALIGN]) begin
+            s6_ext_q <= tu_acc_t'(s5_prod_q);
+          end
+        end
+
+`ifndef SYNTHESIS
+        // Shadow product sign / zero expectation carried S2..S5
+        logic [1:0] chk_q [ST_DIST:ST_PCPA];   // {expect_zero, expect_negative}
+        tu_prod_t   chk_b;
+
+        assign chk_b = tu_booth_value(s1_bd_q[k][c]);
+
+        always_ff @(posedge clk_i) begin : p_chk
+          if (lane_ld[ST_DIST]) begin
+            chk_q[ST_DIST] <= {(s1_a_q[r][k] == '0) || (chk_b == '0),
+                               s1_a_q[r][k][OP_W-1] ^ chk_b[PROD_W-1]};
+          end
+          for (int unsigned s = ST_PPSEL; s <= ST_PCPA; s++) begin
+            if (lane_ld[s]) begin
+              chk_q[s] <= chk_q[s-1];
+            end
+          end
+        end
+
+        a_prod_sign: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          lane_ld[ST_ALIGN] |-> (chk_q[ST_PCPA][1] ? (s5_prod_q == '0)
+                                                   : (s5_prod_q[PROD_W-1] == chk_q[ST_PCPA][0])))
+          else $error("tensor_unit: product sign violation lane[%0d][%0d] k=%0d", r, c, k);
+`endif
+      end : g_prod
+
+      // -----------------------------------------------------------------------
+      // S7.. TREE : carry-segmented pipelined binary reduction tree
+      //   stage t handles level t / ACC_ADD_SEGS, segment t % ACC_ADD_SEGS.
+      //   Each node registers its completed low bits, the unconsumed operand
+      //   high bits and the inter-segment carry.
+      // -----------------------------------------------------------------------
+      for (genvar t = 0; t < TREE_STAGES; t++) begin : g_tree
+        localparam int unsigned LVL  = t / ACC_ADD_SEGS;
+        localparam int unsigned SEG  = t % ACC_ADD_SEGS;
+        localparam int unsigned STG  = ST_TREE0 + t;
+        localparam int unsigned NN   = DIM >> (LVL + 1);
+        localparam bit          LAST = (SEG == (ACC_ADD_SEGS - 1));
+
+        for (genvar n = 0; n < NN; n++) begin : g_node
+          localparam int unsigned IN_W   = ACC_W - (SEG * SEG_W);
+          localparam int unsigned CUR_W  = LAST ? IN_W : SEG_W;
+          localparam int unsigned DONE_W = (SEG * SEG_W) + CUR_W;
+
+          logic [IN_W-1:0]   in_x;
+          logic [IN_W-1:0]   in_y;
+          logic              cin;
+          logic [CUR_W-1:0]  seg_res;
+          logic [DONE_W-1:0] done_d;
+          logic [DONE_W-1:0] done_q;
+
+          if (SEG == 0) begin : g_head
+            if (LVL == 0) begin : g_leaf
+              assign in_x = unsigned'(g_prod[2*n].s6_ext_q);
+              assign in_y = unsigned'(g_prod[(2*n)+1].s6_ext_q);
+            end else begin : g_inner
+              assign in_x = g_tree[t-1].g_node[2*n].done_q;
+              assign in_y = g_tree[t-1].g_node[(2*n)+1].done_q;
+            end
+            assign cin    = 1'b0;
+            assign done_d = seg_res;
+          end else begin : g_body
+            assign in_x   = g_tree[t-1].g_node[n].g_fwd.rem_x_q;
+            assign in_y   = g_tree[t-1].g_node[n].g_fwd.rem_y_q;
+            assign cin    = g_tree[t-1].g_node[n].g_fwd.cy_q;
+            assign done_d = {seg_res, g_tree[t-1].g_node[n].done_q};
+          end
+
+          if (LAST) begin : g_msb
+            assign seg_res = in_x[CUR_W-1:0] + in_y[CUR_W-1:0] + CUR_W'(cin);
+          end else begin : g_fwd
+            logic                    cout;
+            logic [IN_W-SEG_W-1:0]   rem_x_q;
+            logic [IN_W-SEG_W-1:0]   rem_y_q;
+            logic                    cy_q;
+
+            assign {cout, seg_res} = {1'b0, in_x[SEG_W-1:0]}
+                                   + {1'b0, in_y[SEG_W-1:0]}
+                                   + {{SEG_W{1'b0}}, cin};
+
+            always_ff @(posedge clk_i) begin : p_fwd
+              if (lane_ld[STG]) begin
+                rem_x_q <= in_x[IN_W-1:SEG_W];
+                rem_y_q <= in_y[IN_W-1:SEG_W];
+                cy_q    <= cout;
+              end
+            end
+          end
+
+          always_ff @(posedge clk_i) begin : p_done
+            if (lane_ld[STG]) begin
+              done_q <= done_d;
+            end
+          end
+        end : g_node
+      end : g_tree
+
+      tu_acc_t lane_acc;
+
+      assign lane_acc = tu_acc_t'(g_tree[TREE_STAGES-1].g_node[0].done_q);
+
+      // -----------------------------------------------------------------------
+      // S13 RANGE : narrowing classification and modular result
+      // -----------------------------------------------------------------------
+      tu_out_t s13_val_d;
+      logic    s13_povf_d;
+      logic    s13_novf_d;
+      tu_out_t s13_val_q;
+      logic    s13_povf_q;
+      logic    s13_novf_q;
+
+      if (OUT_W >= ACC_W) begin : g_range_exact
+        assign s13_val_d  = tu_out_t'(lane_acc);
+        assign s13_povf_d = 1'b0;
+        assign s13_novf_d = 1'b0;
+      end else begin : g_range_narrow
+        logic [ACC_W-OUT_W:0] hi;
+        logic                 fits;
+
+        assign hi         = lane_acc[ACC_W-1:OUT_W-1];
+        assign fits       = (&hi) | ~(|hi);
+        assign s13_val_d  = tu_out_t'(lane_acc[OUT_W-1:0]);
+        assign s13_povf_d = ~fits & ~lane_acc[ACC_W-1];
+        assign s13_novf_d = ~fits &  lane_acc[ACC_W-1];
+      end
+
+      always_ff @(posedge clk_i) begin : p_s13_range
+        if (lane_ld[ST_RANGE]) begin
+          s13_val_q  <= s13_val_d;
+          s13_povf_q <= s13_povf_d;
+          s13_novf_q <= s13_novf_d;
+        end
+      end
+
+      // -----------------------------------------------------------------------
+      // S14 SAT : overflow policy (saturation-mode seam)
+      // -----------------------------------------------------------------------
+      tu_out_t s14_res_d;
+      logic    s14_ovf_d;
+      tu_out_t s14_res_q;
+      logic    s14_ovf_q;
+
+      always_comb begin : p_s14_sat
+        s14_ovf_d = s13_povf_q | s13_novf_q;
+        case (stg_meta_in[ST_SAT].ovf_mode)
+          TU_OVF_WRAP: begin
+            s14_res_d = s13_val_q;
+          end
+          TU_OVF_SAT, TU_OVF_SAT_SYM, TU_OVF_RSVD: begin
+            s14_res_d = s13_povf_q ? OUT_MAX : (s13_novf_q ? OUT_MIN : s13_val_q);
+          end
+          default: begin
+            s14_res_d = s13_povf_q ? OUT_MAX : (s13_novf_q ? OUT_MIN : s13_val_q);
+          end
+        endcase
+      end
+
+      always_ff @(posedge clk_i) begin : p_s14_sat_q
+        if (lane_ld[ST_SAT]) begin
+          s14_res_q <= s14_res_d;
+          s14_ovf_q <= s14_ovf_d;
+        end
+      end
+
+      assign lane_res[r][c] = unsigned'(s14_res_q);
+      assign lane_ovf[r][c] = s14_ovf_q;
+
+`ifndef SYNTHESIS
+      localparam tu_acc_t ACC_BOUND = tu_acc_t'(DIM) <<< (PROD_W - 2);
+
+      a_acc_bound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        lane_ld[ST_RANGE] |-> ((lane_acc <= ACC_BOUND) && (lane_acc >= -ACC_BOUND)))
+        else $error("tensor_unit: accumulator out of exact range lane[%0d][%0d]", r, c);
+
+      a_ovf_exclusive: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        lane_ld[ST_SAT] |-> !(s13_povf_q && s13_novf_q))
+        else $error("tensor_unit: contradictory overflow classes lane[%0d][%0d]", r, c);
+
+      a_sat_clamp: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (lane_ld[ST_SAT] && (stg_meta_in[ST_SAT].ovf_mode != TU_OVF_WRAP) && s14_ovf_d)
+          |-> ((s14_res_d == OUT_MAX) || (s14_res_d == OUT_MIN)))
+        else $error("tensor_unit: saturation clamp violation lane[%0d][%0d]", r, c);
+
+      if (OUT_W >= ACC_W) begin : g_chk_exact
+        a_no_ovf_exact: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          lane_ld[ST_SAT] |-> !s14_ovf_d)
+          else $error("tensor_unit: overflow flagged in lossless configuration");
+      end
+`endif
+    end : g_col
+  end : g_row
+
+  // ===========================================================================
+  // S15 PACK : element-enable masking, writeback packaging
+  // ===========================================================================
+  tu_wb_t pack_d;
+  tu_wb_t wb_q [ST_PACK:ST_LAST];
+
+  always_comb begin : p_pack
+    pack_d.ovf = lane_ovf & stg_meta_in[ST_PACK].elem_en;
+    for (int unsigned i = 0; i < DIM; i++) begin
+      for (int unsigned j = 0; j < DIM; j++) begin
+        pack_d.data[i][j] = stg_meta_in[ST_PACK].elem_en[i][j] ? lane_res[i][j] : '0;
+      end
+    end
+  end
+
+  // ===========================================================================
+  // S16.. WB : writeback latency alignment
+  // ===========================================================================
+  always_ff @(posedge clk_i) begin : p_wb
+    if (stg_ld[ST_PACK]) begin
+      wb_q[ST_PACK] <= pack_d;
+    end
+    for (int unsigned s = ST_PACK + 1; s <= ST_LAST; s++) begin
+      if (stg_ld[s]) begin
+        wb_q[s] <= wb_q[s-1];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // S20 REL : two-entry release buffer (head register drives the outputs)
+  // ===========================================================================
+  assign rel_d = '{
+    tag     : stg_meta_q[ST_LAST].tag,
+    elem_en : stg_meta_q[ST_LAST].elem_en,
+    wb      : wb_q[ST_LAST]
+  };
+
+  assign rel_push = pipe_adv & stg_vld_q[ST_LAST];
+  assign rel_pop  = rel_hd_vld_q & res_ready_i & ~flush_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_rel_vld
+    if (!rst_ni) begin
+      rel_hd_vld_q <= 1'b0;
+      rel_sp_vld_q <= 1'b0;
+    end else if (flush_i) begin
+      rel_hd_vld_q <= 1'b0;
+      rel_sp_vld_q <= 1'b0;
+    end else if (!rel_hd_vld_q || rel_pop) begin
+      rel_hd_vld_q <= rel_sp_vld_q | rel_push;
+      rel_sp_vld_q <= 1'b0;
+    end else if (rel_push) begin
+      rel_sp_vld_q <= 1'b1;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_rel_data
+    if (!rel_hd_vld_q || rel_pop) begin
+      if (rel_sp_vld_q) begin
+        rel_hd_q <= rel_sp_q;
+      end else if (rel_push) begin
+        rel_hd_q <= rel_d;
+      end
+    end else if (rel_push) begin
+      rel_sp_q <= rel_d;
+    end
+  end
+
+  assign res_valid_o = rel_hd_vld_q & ~flush_i;
+  assign mat_c_o     = rel_hd_q.wb.data;
+  assign elem_ovf_o  = rel_hd_q.wb.ovf;
+  assign elem_en_o   = rel_hd_q.elem_en;
+  assign tag_o       = rel_hd_q.tag;
+  assign busy_o      = (|stg_vld_q) | rel_hd_vld_q;
+
+  // ===========================================================================
+  // Assertions
+  // ===========================================================================
+`ifndef SYNTHESIS
+  // In-flight token conservation
+  int unsigned inflight_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_inflight
+    if (!rst_ni) begin
+      inflight_q <= 0;
+    end else if (flush_i) begin
+      inflight_q <= 0;
+    end else begin
+      inflight_q <= inflight_q + (issue_fire ? 1 : 0) - (rel_pop ? 1 : 0);
+    end
+  end
+
+  a_token_conserve: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    inflight_q == (unsigned'($countones(stg_vld_q)) + 32'(rel_hd_vld_q) + 32'(rel_sp_vld_q)))
+    else $error("tensor_unit: in-flight token count mismatch");
+
+  a_inflight_cap: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    inflight_q <= (PIPE_STAGES + 2))
+    else $error("tensor_unit: pipeline occupancy overflow");
+
+  a_rel_no_overflow: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    rel_push |-> !rel_sp_vld_q)
+    else $error("tensor_unit: release buffer overflow");
+
+  a_rel_order: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    rel_sp_vld_q |-> rel_hd_vld_q)
+    else $error("tensor_unit: release spare occupied with empty head");
+
+  a_no_issue_stalled: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !pipe_adv |-> !issue_fire)
+    else $error("tensor_unit: issue accepted while stalled");
+
+  // Previous-cycle control shadow (explicit registers keep every check a
+  // same-cycle implication, independent of simulator sampling semantics).
+  logic [PIPE_STAGES-1:0] chk_vld_in_q;
+  logic [PIPE_STAGES-1:0] chk_vld_q;
+  logic                   chk_adv_q;
+  logic                   chk_flush_q;
+  logic                   chk_hold_q;
+  tu_rel_t                chk_hd_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_chk_shadow
+    if (!rst_ni) begin
+      chk_vld_in_q <= '0;
+      chk_vld_q    <= '0;
+      chk_adv_q    <= 1'b0;
+      chk_flush_q  <= 1'b1;
+      chk_hold_q   <= 1'b0;
+      chk_hd_q     <= '0;
+    end else begin
+      chk_vld_in_q <= stg_vld_in;
+      chk_vld_q    <= stg_vld_q;
+      chk_adv_q    <= pipe_adv;
+      chk_flush_q  <= flush_i;
+      chk_hold_q   <= res_valid_o & ~res_ready_i;
+      chk_hd_q     <= rel_hd_q;
+    end
+  end
+
+  a_vld_advance: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (chk_adv_q && !chk_flush_q) |-> (stg_vld_q == chk_vld_in_q))
+    else $error("tensor_unit: valid propagation error on advance");
+
+  a_vld_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (!chk_adv_q && !chk_flush_q) |-> (stg_vld_q == chk_vld_q))
+    else $error("tensor_unit: valid state changed during stall");
+
+  a_flush_kill: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_flush_q |-> ((stg_vld_q == '0) && !rel_hd_vld_q && !rel_sp_vld_q))
+    else $error("tensor_unit: flush left in-flight state");
+
+  a_flush_no_emit: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    flush_i |-> (!res_valid_o && !issue_ready_o))
+    else $error("tensor_unit: handshake enabled during flush");
+
+  a_res_stable: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_hold_q |-> (flush_i || (res_valid_o && (rel_hd_q == chk_hd_q))))
+    else $error("tensor_unit: result changed under backpressure");
+
+  a_res_ovf_masked: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    res_valid_o |-> ((elem_ovf_o & ~elem_en_o) == '0))
+    else $error("tensor_unit: overflow flagged on disabled element");
+
+  a_busy: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (inflight_q != 0) == busy_o)
+    else $error("tensor_unit: busy indication inconsistent with occupancy");
+
+  a_ctrl_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !$isunknown({issue_valid_i, res_ready_i, flush_i}))
+    else $error("tensor_unit: unknown control input");
+
+  a_issue_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    issue_valid_i |-> !$isunknown({mat_a_i, mat_b_i, elem_en_i, ovf_mode_i, tag_i}))
+    else $error("tensor_unit: unknown issue payload");
+
+  a_ovf_mode_rsvd: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    issue_fire |-> (tu_ovf_mode_e'(ovf_mode_i) inside {TU_OVF_WRAP, TU_OVF_SAT}))
+    else $warning("tensor_unit: reserved overflow mode %0b issued, executing as saturate", ovf_mode_i);
+
+  for (genvar i = 0; i < DIM; i++) begin : g_chk_row
+    for (genvar j = 0; j < DIM; j++) begin : g_chk_col
+      a_booth_recode: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        stg_ld[ST_PREP] |-> (tu_booth_value(s1_bd_d[i][j]) == tu_prod_t'(tu_op_t'(s0_b_q[i][j]))))
+        else $error("tensor_unit: Booth recoding mismatch B[%0d][%0d]", i, j);
+
+      for (genvar d = 0; d < BOOTH_DIGS; d++) begin : g_chk_dig
+        a_booth_digit: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          stg_ld[ST_PREP] |-> (!(s1_bd_d[i][j][d].one && s1_bd_d[i][j][d].two)
+                               && (!s1_bd_d[i][j][d].neg || s1_bd_d[i][j][d].one || s1_bd_d[i][j][d].two)))
+          else $error("tensor_unit: illegal Booth digit B[%0d][%0d] d=%0d", i, j, d);
+      end
+
+      a_res_masked_zero: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (res_valid_o && !elem_en_o[i][j]) |-> (mat_c_o[i][j] == '0))
+        else $error("tensor_unit: disabled element C[%0d][%0d] not zero", i, j);
+    end
+  end
+
+  // Latency contract: shadow issue timestamps travel with each token.
+  // Issue-handshake-to-result-valid latency is PIPE_STAGES + 1 cycles.
+  localparam longint unsigned LATENCY = longint'(PIPE_STAGES) + 64'd1;
+
+  longint unsigned cyc_q;
+  longint unsigned ts_q   [PIPE_STAGES];
+  logic            stl_q  [PIPE_STAGES];
+  longint unsigned rel_hd_ts_q;
+  longint unsigned rel_sp_ts_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_cyc
+    if (!rst_ni) begin
+      cyc_q <= '0;
+    end else begin
+      cyc_q <= cyc_q + 1;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_ts
+    if (stg_ld[0]) begin
+      ts_q[0]  <= cyc_q;
+      stl_q[0] <= 1'b0;
+    end
+    for (int unsigned s = 1; s < PIPE_STAGES; s++) begin
+      if (stg_ld[s]) begin
+        ts_q[s]  <= ts_q[s-1];
+        stl_q[s] <= stl_q[s-1];
+      end
+    end
+    if (!pipe_adv) begin
+      for (int unsigned s = 0; s < PIPE_STAGES; s++) begin
+        stl_q[s] <= 1'b1;
+      end
+    end
+    if (!rel_hd_vld_q || rel_pop) begin
+      if (rel_sp_vld_q) begin
+        rel_hd_ts_q <= rel_sp_ts_q;
+      end else if (rel_push) begin
+        rel_hd_ts_q <= ts_q[ST_LAST];
+      end
+    end else if (rel_push) begin
+      rel_sp_ts_q <= ts_q[ST_LAST];
+    end
+  end
+
+  a_latency_exact: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (rel_push && !stl_q[ST_LAST]) |-> ((cyc_q - ts_q[ST_LAST]) == (LATENCY - 1)))
+    else $error("tensor_unit: unstalled pipeline latency deviates from contract");
+
+  a_latency_min: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    res_valid_o |-> ((cyc_q - rel_hd_ts_q) >= LATENCY))
+    else $error("tensor_unit: result released ahead of latency contract");
+`endif
+
+endmodule : tensor_unit
