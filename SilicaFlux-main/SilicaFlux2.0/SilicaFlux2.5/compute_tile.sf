@@ -1,0 +1,2300 @@
+// =============================================================================
+//  SilicaFlux :: compute_tile.sf
+//  Heterogeneous compute tile: scalar ALU cluster, SIMD vector engine,
+//  tensor engines, scratchpad memory controller and local interconnect
+// =============================================================================
+//  Language   : Silica Flux-2017
+//  Clocking   : single domain, rising edge of clk_i
+//  Reset      : rst_ni, active-low, asynchronous assert, synchronised release
+//
+//  Datapath / control partition
+//
+//    ex lanes --> [ingress lane buffers] --> [unit extraction] --> [dispatch
+//    queues] --> alu[NUM_ALU] | vector_engine | tensor_unit[NUM_TEN] | LSU |
+//    fault responder --> [result staging] --> [writeback allocator] --> wb/vwb
+//
+//    LSU, vector_engine, tensor_unit[k], NoC target
+//         --> [requester skids + region/ACL decode] --> [per-target arbiters]
+//         --> memory_controller {scalar SPM, vector SPM} | NoC initiator
+//         --> [per-requester response merge] --> requesters
+//
+//  Ingress
+//    - NUM_LANES execute lanes, each a LANE_DEPTH collapsing buffer with
+//      out-of-order extraction: every unit instance pulls the oldest eligible
+//      entry of its own class, so no unit is head-of-line blocked by another.
+//    - Each entry carries a pending-delivery mask over unit instances. A
+//      normal packet has exactly one bit set; an explicit broadcast sets one
+//      bit per targeted class. A delivery clears its bit; the entry retires
+//      when the mask is empty. Copies to non-primary units are shadow copies
+//      (no architectural completion).
+//    - Multi-instance classes are lane-bound: lane l feeds ALU (l % NUM_ALU)
+//      and tensor engine (l % NUM_TEN).
+//
+//  Side-effect containment
+//    - Stores, vector stores and tensor commands never leave the lane buffer
+//      while their branch mask is non-zero. Non-side-effecting work bypasses
+//      them, and a lane admits a speculative side-effecting packet only while
+//      ex_sfx_ready_o is high, which reserves one slot per lane for
+//      non-side-effecting traffic. Branch resolution therefore always makes
+//      progress and the scratchpad is never written by a killed instruction.
+//
+//  Control priority
+//    FLUSH / KILL  >  STALL  >  dispatch  >  backpressure
+//    - ctl_flush_i clears every tile-owned instruction and result queue in
+//      the same cycle, marks in-flight LSU transactions killed, forwards the
+//      flush to every unit and enters DRAIN. Memory transactions already in
+//      the interconnect complete (their responses are discarded by their
+//      owners); results surfacing during DRAIN are dropped and writeback is
+//      clamped. Ingress reopens once all units and all tile-owned memory
+//      transactions are quiet.
+//    - br_res_i (mispredict) kills by branch mask in lane buffers, dispatch
+//      queues, LSU transactions, result staging and writeback registers.
+//    - ctl_stall_i freezes extraction immediately and ingress from the next
+//      cycle; in-flight unit work and writeback continue.
+//
+//  Scratchpad / interconnect
+//    - Tile-local window [0, 2^LOCAL_AW) holds the scalar SPM region and the
+//      vector SPM region. Addresses whose tile-select field is neither zero
+//      nor tile_id_i are remote and route to the NoC initiator (NOC_EN).
+//    - Requester ACL (bit t = target t: 0 scalar SPM, 1 vector SPM, 2 NoC)
+//      enforces scalar/vector domain separation. Denied, unmapped or
+//      out-of-region requests are answered locally with err=1 and never
+//      reach a target.
+//    - Per-target arbitration: write-burst lock, then starved requesters
+//      (age >= XB_STARVE_LIM, lowest index), then fixed priority
+//      LSU > vector > tensor[0..] > NoC.
+//    - Reads return blen+1 beats; a write burst is acknowledged once on its
+//      wlast beat. A started write burst holds its target until wlast, across
+//      flushes. Responses are merged per requester round-robin and may
+//      interleave across targets; requesters demultiplex by txn.
+//    - The scratchpad is weakly ordered between requesters; DFSYNC.M at the
+//      scheduler orders it via tile_mem_quiesced_o.
+//
+//  Writeback
+//    - NUM_WB_PORTS scalar result ports (scalar results, completion-only
+//      results, branch outcomes, exceptions) allocated round-robin over the
+//      staging heads, plus one vector writeback port. cmpl_o mirrors all
+//      NUM_WB_PORTS+1 ports for the scheduler's completion network.
+//
+//  Power / clock
+//    - unit_pwr_on_i[u] low routes the unit's primary packets to the fault
+//      responder (SF_EXC_UNIT_OFF) and suppresses its shadow copies. A unit
+//      may be powered down only while unit_idle_o[u] is high.
+//    - unit_cg_en_o[u] is the activity-based clock enable for the unit ICG.
+//    - tile_iso_i requests isolation; the tile drains, enters ISO and clamps
+//      every output valid until released.
+//
+//  Extension architecture
+//    - Additional unit classes extend sf_tunit_e, the instance map (section
+//      1) and the extraction/adapter generate blocks; all queueing,
+//      staging and writeback logic is instance-generic.
+//    - More vector lanes: SF_VLANES (4/8/16) sizes every vector, line and
+//      byte-enable path, including the LSU lane-placement generate.
+//    - Coherent memory: an L1 or coherence agent attaches as an additional
+//      crossbar target with its own ACL column; the region decoder supplies
+//      its window.
+//    - Multi-tensor tiles: NUM_TEN engines, each with its own crossbar
+//      requester and lane binding.
+//
+//  Submodule contracts
+//    alu #(MUL_LAT)
+//      clk_i rst_ni flush_i br_res_i
+//      req_valid_i req_i:sf_alu_req_t req_ready_o
+//      rsp_valid_o rsp_o:sf_alu_rsp_t rsp_ready_i busy_o
+//    vector_engine #(LANES)
+//      clk_i rst_ni flush_i br_res_i
+//      req_valid_i req_i:sf_vec_req_t req_ready_o
+//      rsp_valid_o rsp_o:sf_vec_rsp_t rsp_ready_i
+//      mem_req_valid_o mem_req_o:sf_mem_req_t mem_req_ready_i
+//      mem_rsp_valid_i mem_rsp_i:sf_mem_rsp_t mem_rsp_ready_o busy_o
+//    tensor_unit #(PIPE_DEPTH)
+//      clk_i rst_ni flush_i br_res_i
+//      cmd_valid_i cmd_i:sf_tensor_cmd_t cmd_ready_o
+//      rsp_valid_o rsp_o:sf_tensor_rsp_t rsp_ready_i
+//      mem_req_valid_o mem_req_o mem_req_ready_i
+//      mem_rsp_valid_i mem_rsp_i mem_rsp_ready_o busy_o
+//    memory_controller #(NUM_PORTS, PORT_LINES[])
+//      clk_i rst_ni
+//      req_valid_i[] req_i[]:sf_mem_req_t req_ready_o[]
+//      rsp_valid_o[] rsp_o[]:sf_mem_rsp_t rsp_ready_i[] idle_o
+//    Unit obligations: ready outputs do not depend on the matching valid;
+//    in-flight metadata branch masks are cleaned on resolution; killed and
+//    flushed work is dropped; shadow requests create no memory side effects;
+//    a write burst whose first beat was issued is always completed through
+//    wlast (beats after a flush carry be = 0); memory responses are always
+//    eventually accepted; busy_o stays high while any memory transaction of
+//    the unit is outstanding.
+//
+//  silicaflux_pkg contract
+//    SF_XLEN(32) SF_VLANES SF_MEM_AW SF_MEM_LINE_W SF_MEM_SRC_W SF_MEM_TXN_W
+//    SF_TILE_ID_W SF_TU_NUM
+//    sf_ptag_t sf_rob_idx_t sf_br_mask_t sf_br_tag_t sf_itt_id_t sf_uop_t(imm)
+//    sf_fu_e sf_br_res_t sf_cmpl_t sf_xword_t sf_vreg_t sf_vmask_t sf_maddr_t
+//    sf_mline_t sf_mbe_t sf_msrc_t sf_mtxn_t sf_tile_id_t sf_tunit_mask_t
+//    sf_memop_e sf_msize_e sf_mattr_t sf_tunit_e sf_exc_e sf_exu_meta_t
+//    sf_tile_pkt_t sf_alu_req_t sf_alu_rsp_t sf_vec_req_t sf_vec_rsp_t
+//    sf_tensor_imm_t (overlays sf_uop_t.imm) sf_tensor_cmd_t sf_tensor_rsp_t
+//    sf_mem_req_t sf_mem_rsp_t sf_tile_wb_t sf_tile_vwb_t
+// =============================================================================
+
+`default_nettype none
+
+module compute_tile
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned NUM_LANES      = 4,
+  parameter int unsigned LANE_DEPTH     = 4,
+  parameter int unsigned NUM_ALU        = 2,
+  parameter int unsigned NUM_TEN        = 1,
+  parameter int unsigned VLANES         = SF_VLANES,
+  parameter int unsigned NUM_WB_PORTS   = 3,
+  parameter int unsigned DQ_DEPTH       = 2,
+  parameter int unsigned STG_DEPTH      = 2,
+  parameter int unsigned LSU_TXN        = 8,
+  parameter int unsigned XB_SKID_DEPTH  = 2,
+  parameter int unsigned XB_ERRQ_DEPTH  = 2,
+  parameter int unsigned XB_RSKID_DEPTH = 2,
+  parameter int unsigned XB_STARVE_LIM  = 16,
+  parameter int unsigned ALU_MUL_LAT    = 3,
+  parameter int unsigned TEN_PIPE_DEPTH = 20,
+  parameter int unsigned LOCAL_AW       = 18,
+  parameter int unsigned SPM_S_BASE     = 32'h0000_0000,
+  parameter int unsigned SPM_S_BYTES    = 32'h0000_4000,
+  parameter int unsigned SPM_V_BASE     = 32'h0001_0000,
+  parameter int unsigned SPM_V_BYTES    = 32'h0001_0000,
+  parameter bit          NOC_EN         = 1'b0,
+  parameter logic [2:0]  ACL_LSU        = 3'b111,
+  parameter logic [2:0]  ACL_VEC        = 3'b010,
+  parameter logic [2:0]  ACL_TEN        = 3'b010,
+  parameter logic [2:0]  ACL_NOC        = 3'b011
+) (
+  input  logic                                 clk_i,
+  input  logic                                 rst_ni,
+  input  sf_tile_id_t                          tile_id_i,
+
+  // control_core
+  input  logic                                 ctl_stall_i,
+  input  logic                                 ctl_flush_i,
+  input  sf_br_res_t                           br_res_i,
+
+  // execute ingress lanes (post register-read)
+  input  logic           [NUM_LANES-1:0]       ex_valid_i,
+  input  sf_tile_pkt_t                         ex_pkt_i      [NUM_LANES],
+  output logic           [NUM_LANES-1:0]       ex_ready_o,
+  output logic           [NUM_LANES-1:0]       ex_sfx_ready_o,
+
+  // scalar writeback / completion
+  output logic           [NUM_WB_PORTS-1:0]    wb_valid_o,
+  output sf_tile_wb_t                          wb_o          [NUM_WB_PORTS],
+
+  // vector writeback
+  output logic                                 vwb_valid_o,
+  output sf_tile_vwb_t                         vwb_o,
+
+  // scheduler completion network
+  output sf_cmpl_t                             cmpl_o        [NUM_WB_PORTS+1],
+
+  // NoC initiator hook (remote accesses from this tile)
+  output logic                                 noc_ini_req_valid_o,
+  output sf_mem_req_t                          noc_ini_req_o,
+  input  logic                                 noc_ini_req_ready_i,
+  input  logic                                 noc_ini_rsp_valid_i,
+  input  sf_mem_rsp_t                          noc_ini_rsp_i,
+  output logic                                 noc_ini_rsp_ready_o,
+
+  // NoC target hook (remote accesses into this tile's scratchpad)
+  input  logic                                 noc_tgt_req_valid_i,
+  input  sf_mem_req_t                          noc_tgt_req_i,
+  output logic                                 noc_tgt_req_ready_o,
+  output logic                                 noc_tgt_rsp_valid_o,
+  output sf_mem_rsp_t                          noc_tgt_rsp_o,
+  input  logic                                 noc_tgt_rsp_ready_i,
+
+  // power / clock management
+  input  logic                                 tile_iso_i,
+  input  logic           [NUM_ALU+NUM_TEN+1:0] unit_pwr_on_i,
+  output logic           [NUM_ALU+NUM_TEN+1:0] unit_idle_o,
+  output logic           [NUM_ALU+NUM_TEN+1:0] unit_cg_en_o,
+
+  // status
+  output logic                                 tile_idle_o,
+  output logic                                 tile_draining_o,
+  output logic                                 tile_iso_o,
+  output logic                                 tile_mem_quiesced_o,
+  output logic                                 tile_err_o,
+
+  // performance events
+  output logic [$clog2(NUM_LANES+1)-1:0]       perf_ingress_o,
+  output logic                                 perf_sfx_held_o,
+  output logic                                 perf_xb_conflict_o,
+  output logic                                 perf_wb_saturated_o
+);
+
+  // ===========================================================================
+  // 1. Instance map and derived constants
+  // ===========================================================================
+  // execution-unit instances (dispatch queue + result staging each)
+  localparam int unsigned I_ALU0         = 0;
+  localparam int unsigned I_VEC          = NUM_ALU;
+  localparam int unsigned I_TEN0         = NUM_ALU + 1;
+  localparam int unsigned I_LSU          = NUM_ALU + NUM_TEN + 1;
+  localparam int unsigned I_FLT          = NUM_ALU + NUM_TEN + 2;
+  localparam int unsigned NUM_UNITS      = NUM_ALU + NUM_TEN + 2;
+  localparam int unsigned NUM_INST       = NUM_UNITS + 1;
+
+  // interconnect requesters
+  localparam int unsigned R_LSU          = 0;
+  localparam int unsigned R_VEC          = 1;
+  localparam int unsigned R_TEN0         = 2;
+  localparam int unsigned R_NOC          = NUM_TEN + 2;
+  localparam int unsigned NUM_REQ        = NUM_TEN + 3;
+
+  // interconnect targets
+  localparam int unsigned T_SPM_S        = 0;
+  localparam int unsigned T_SPM_V        = 1;
+  localparam int unsigned T_NOC          = 2;
+  localparam int unsigned NUM_TGT        = 3;
+  localparam int unsigned NUM_MC_PORTS   = 2;
+  localparam int unsigned NUM_RSRC       = NUM_TGT + 1;
+  localparam int unsigned RS_ERR         = NUM_TGT;
+
+  // geometry
+  localparam int unsigned LE             = NUM_LANES * LANE_DEPTH;
+  localparam int unsigned LINE_BYTES     = SF_MEM_LINE_W / 8;
+  localparam int unsigned LINE_OFF_W     = $clog2(LINE_BYTES);
+  localparam int unsigned WORD_BYTES     = SF_XLEN / 8;
+  localparam int unsigned WORD_OFF_W     = $clog2(WORD_BYTES);
+  localparam int unsigned LANE_SEL_W     = LINE_OFF_W - WORD_OFF_W;
+  localparam int unsigned REMOTE_W       = SF_MEM_AW - LOCAL_AW;
+  localparam int unsigned MC_S_LINES     = SPM_S_BYTES / LINE_BYTES;
+  localparam int unsigned MC_V_LINES     = SPM_V_BYTES / LINE_BYTES;
+
+  // counter / index widths
+  localparam int unsigned LCNT_W         = $clog2(LANE_DEPTH + 1);
+  localparam int unsigned LANE_IDX_W     = (NUM_LANES > 1) ? $clog2(NUM_LANES) : 1;
+  localparam int unsigned INST_IDX_W     = $clog2(NUM_INST);
+  localparam int unsigned TXN_IDX_W      = (LSU_TXN > 1) ? $clog2(LSU_TXN) : 1;
+  localparam int unsigned RSRC_IDX_W     = $clog2(NUM_RSRC);
+  localparam int unsigned XB_AGE_W       = $clog2(XB_STARVE_LIM + 1);
+  localparam int unsigned ING_CNT_W      = $clog2(NUM_LANES + 1);
+
+  localparam int unsigned MC_PORT_LINES [NUM_MC_PORTS] = '{MC_S_LINES, MC_V_LINES};
+
+  // ===========================================================================
+  // 2. Local types
+  // ===========================================================================
+  typedef logic [NUM_INST-1:0]            inst_vec_t;
+  typedef logic [NUM_UNITS-1:0]           unit_vec_t;
+  typedef logic [LE-1:0]                  le_vec_t;
+  typedef logic [NUM_LANES-1:0]           lane_vec_t;
+  typedef logic [LANE_DEPTH-1:0]          ld_vec_t;
+  typedef logic [NUM_REQ-1:0]             req_vec_t;
+  typedef logic [NUM_TGT-1:0]             tgt_vec_t;
+  typedef logic [NUM_RSRC-1:0]            rsrc_vec_t;
+  typedef logic [LSU_TXN-1:0]             txn_vec_t;
+  typedef logic [LCNT_W-1:0]              lcnt_t;
+  typedef logic [LANE_IDX_W-1:0]          lane_idx_t;
+  typedef logic [INST_IDX_W-1:0]          inst_idx_t;
+  typedef logic [TXN_IDX_W-1:0]           txn_idx_t;
+  typedef logic [RSRC_IDX_W-1:0]          rsrc_idx_t;
+  typedef logic [XB_AGE_W-1:0]            xb_age_t;
+  typedef logic [LINE_OFF_W-1:0]          line_off_t;
+  typedef logic [WORD_BYTES-1:0]          word_be_t;
+  typedef logic [SF_MEM_AW:0]             maddr_ext_t;
+
+  // unit-independent dispatch record
+  typedef struct packed {
+    sf_uop_t      uop;
+    sf_fu_e       fu;
+    sf_mattr_t    mattr;
+    sf_xword_t    rs1;
+    sf_xword_t    rs2;
+    sf_exu_meta_t meta;
+  } dq_ent_t;
+
+  // vector operand side-payload (vector engine dispatch queue only)
+  typedef struct packed {
+    sf_vreg_t  vs1;
+    sf_vreg_t  vs2;
+    sf_vmask_t vm;
+  } dq_vec_t;
+
+  // unit-independent result record
+  typedef struct packed {
+    sf_exu_meta_t meta;
+    logic         vdest;
+    sf_xword_t    xdata;
+    sf_exc_e      exc;
+    logic         br_valid;
+    logic         br_taken;
+    sf_xword_t    br_target;
+  } res_ent_t;
+
+  // decoded interconnect request
+  typedef struct packed {
+    sf_mem_req_t req;
+    tgt_vec_t    tgt;
+    logic        err;
+  } xb_ent_t;
+
+  // LSU transaction record
+  typedef struct packed {
+    logic         killed;
+    logic         is_load;
+    sf_msize_e    size;
+    logic         zext;
+    line_off_t    off;
+    sf_exu_meta_t meta;
+  } lsu_txn_t;
+
+  typedef logic [$bits(dq_ent_t)-1:0]     dq_bits_t;
+  typedef logic [$bits(dq_vec_t)-1:0]     dqv_bits_t;
+  typedef logic [$bits(res_ent_t)-1:0]    res_bits_t;
+  typedef logic [$bits(sf_mem_req_t)-1:0] mreq_bits_t;
+  typedef logic [$bits(sf_mem_rsp_t)-1:0] mrsp_bits_t;
+  typedef logic [$bits(sf_tile_pkt_t)-1:0] pkt_bits_t;
+
+  typedef enum logic [1:0] {
+    TILE_RUN   = 2'b00,
+    TILE_STALL = 2'b01,
+    TILE_DRAIN = 2'b10,
+    TILE_ISO   = 2'b11
+  } tile_state_e;
+
+  // ===========================================================================
+  // 3. Elaboration-time functions and configuration checks
+  // ===========================================================================
+  function automatic sf_tunit_e f_inst_cls(input int unsigned i);
+    if (i < I_VEC) begin
+      return SF_TU_ALU;
+    end else if (i == I_VEC) begin
+      return SF_TU_VEC;
+    end else if (i < I_LSU) begin
+      return SF_TU_TEN;
+    end
+    return SF_TU_LSU;
+  endfunction
+
+  function automatic logic [NUM_TGT-1:0] f_acl(input int unsigned r);
+    if (r == R_LSU) begin
+      return ACL_LSU;
+    end else if (r == R_VEC) begin
+      return ACL_VEC;
+    end else if (r == R_NOC) begin
+      return ACL_NOC & {1'b0, {(NUM_TGT-1){1'b1}}};
+    end
+    return ACL_TEN;
+  endfunction
+
+  if ((NUM_LANES < 1) || (LANE_DEPTH < 2)) begin : g_chk_lanes
+    $error("compute_tile: NUM_LANES >= 1 and LANE_DEPTH >= 2 required");
+  end
+  if ((NUM_ALU < 1) || (NUM_TEN < 1)) begin : g_chk_units
+    $error("compute_tile: at least one ALU and one tensor engine required");
+  end
+  if ((VLANES != SF_VLANES) || ((VLANES != 4) && (VLANES != 8) && (VLANES != 16))) begin : g_chk_vlanes
+    $error("compute_tile: VLANES must equal SF_VLANES and be 4, 8 or 16");
+  end
+  if (SF_XLEN != 32) begin : g_chk_xlen
+    $error("compute_tile: scalar datapath requires SF_XLEN == 32");
+  end
+  if (NUM_REQ > (1 << SF_MEM_SRC_W)) begin : g_chk_src_w
+    $error("compute_tile: SF_MEM_SRC_W too narrow for interconnect requesters");
+  end
+  if ((LSU_TXN < 2) || (LSU_TXN > (1 << SF_MEM_TXN_W))) begin : g_chk_txn
+    $error("compute_tile: LSU_TXN out of range for SF_MEM_TXN_W");
+  end
+  if ((NUM_WB_PORTS < 1) || (NUM_WB_PORTS > NUM_INST)) begin : g_chk_wb
+    $error("compute_tile: NUM_WB_PORTS out of range");
+  end
+  if ((DQ_DEPTH < 2) || (STG_DEPTH < 2) || (XB_SKID_DEPTH < 2) ||
+      (XB_ERRQ_DEPTH < 1) || (XB_RSKID_DEPTH < 2)) begin : g_chk_depths
+    $error("compute_tile: queue depths below minimum");
+  end
+  if ((LOCAL_AW >= SF_MEM_AW) || (REMOTE_W > SF_TILE_ID_W)) begin : g_chk_local_aw
+    $error("compute_tile: LOCAL_AW inconsistent with SF_MEM_AW / SF_TILE_ID_W");
+  end
+  if (((SPM_S_BASE % LINE_BYTES) != 0) || ((SPM_S_BYTES % LINE_BYTES) != 0) ||
+      ((SPM_V_BASE % LINE_BYTES) != 0) || ((SPM_V_BYTES % LINE_BYTES) != 0) ||
+      (SPM_S_BYTES == 0) || (SPM_V_BYTES == 0)) begin : g_chk_spm_align
+    $error("compute_tile: scratchpad regions must be non-empty and line aligned");
+  end
+  if (((SPM_S_BASE + SPM_S_BYTES) > (1 << LOCAL_AW)) ||
+      ((SPM_V_BASE + SPM_V_BYTES) > (1 << LOCAL_AW)) ||
+      ((SPM_S_BASE < SPM_V_BASE + SPM_V_BYTES) && (SPM_V_BASE < SPM_S_BASE + SPM_S_BYTES))) begin : g_chk_spm_map
+    $error("compute_tile: scratchpad regions overlap or exceed the local window");
+  end
+
+  // ===========================================================================
+  // 4. Combinational helper functions
+  // ===========================================================================
+  function automatic logic f_mask_hit(input sf_br_mask_t mask, input sf_br_mask_t sel);
+    return |(mask & sel);
+  endfunction
+
+  function automatic logic f_fu_cls_ok(input sf_fu_e fu);
+    return (fu == SF_FU_ALU) || (fu == SF_FU_MUL) || (fu == SF_FU_BRANCH) ||
+           (fu == SF_FU_VECTOR) || (fu == SF_FU_TENSOR) || (fu == SF_FU_LSU);
+  endfunction
+
+  function automatic sf_tunit_e f_fu_cls(input sf_fu_e fu);
+    sf_tunit_e c;
+    case (fu)
+      SF_FU_VECTOR: c = SF_TU_VEC;
+      SF_FU_TENSOR: c = SF_TU_TEN;
+      SF_FU_LSU:    c = SF_TU_LSU;
+      default:      c = SF_TU_ALU;
+    endcase
+    return c;
+  endfunction
+
+  function automatic sf_tunit_mask_t f_cls_oh(input sf_tunit_e c);
+    sf_tunit_mask_t m;
+    m    = '0;
+    m[c] = 1'b1;
+    return m;
+  endfunction
+
+  function automatic ld_vec_t f_lsb_ld(input ld_vec_t v);
+    ld_vec_t r;
+    logic    seen;
+    seen = 1'b0;
+    for (int unsigned k = 0; k < LANE_DEPTH; k++) begin
+      r[k] = v[k] & ~seen;
+      seen = seen | v[k];
+    end
+    return r;
+  endfunction
+
+  function automatic req_vec_t f_lsb_req(input req_vec_t v);
+    req_vec_t r;
+    logic     seen;
+    seen = 1'b0;
+    for (int unsigned k = 0; k < NUM_REQ; k++) begin
+      r[k] = v[k] & ~seen;
+      seen = seen | v[k];
+    end
+    return r;
+  endfunction
+
+  function automatic txn_vec_t f_lsb_txn(input txn_vec_t v);
+    txn_vec_t r;
+    logic     seen;
+    seen = 1'b0;
+    for (int unsigned k = 0; k < LSU_TXN; k++) begin
+      r[k] = v[k] & ~seen;
+      seen = seen | v[k];
+    end
+    return r;
+  endfunction
+
+  function automatic txn_idx_t f_enc_txn(input txn_vec_t oh);
+    txn_idx_t idx;
+    idx = '0;
+    for (int unsigned k = 0; k < LSU_TXN; k++) begin
+      if (oh[k]) begin
+        idx = idx | txn_idx_t'(k);
+      end
+    end
+    return idx;
+  endfunction
+
+  // round-robin pick: first set bit at or after ptr (circular)
+  function automatic lane_vec_t f_rr_lane(input lane_vec_t v, input lane_idx_t ptr);
+    lane_vec_t   r;
+    logic        found;
+    lane_idx_t   k;
+    r     = '0;
+    found = 1'b0;
+    for (int unsigned o = 0; o < NUM_LANES; o++) begin
+      k = lane_idx_t'((32'(ptr) + o) % NUM_LANES);
+      if (!found && v[k]) begin
+        r[k]  = 1'b1;
+        found = 1'b1;
+      end
+    end
+    return r;
+  endfunction
+
+  function automatic inst_vec_t f_rr_inst(input inst_vec_t v, input inst_idx_t ptr);
+    inst_vec_t   r;
+    logic        found;
+    inst_idx_t   k;
+    r     = '0;
+    found = 1'b0;
+    for (int unsigned o = 0; o < NUM_INST; o++) begin
+      k = inst_idx_t'((32'(ptr) + o) % NUM_INST);
+      if (!found && v[k]) begin
+        r[k]  = 1'b1;
+        found = 1'b1;
+      end
+    end
+    return r;
+  endfunction
+
+  function automatic rsrc_vec_t f_rr_rsrc(input rsrc_vec_t v, input rsrc_idx_t ptr);
+    rsrc_vec_t   r;
+    logic        found;
+    rsrc_idx_t   k;
+    r     = '0;
+    found = 1'b0;
+    for (int unsigned o = 0; o < NUM_RSRC; o++) begin
+      k = rsrc_idx_t'((32'(ptr) + o) % NUM_RSRC);
+      if (!found && v[k]) begin
+        r[k]  = 1'b1;
+        found = 1'b1;
+      end
+    end
+    return r;
+  endfunction
+
+  function automatic lane_idx_t f_enc_lane(input lane_vec_t oh);
+    lane_idx_t idx;
+    idx = '0;
+    for (int unsigned k = 0; k < NUM_LANES; k++) begin
+      if (oh[k]) begin
+        idx = idx | lane_idx_t'(k);
+      end
+    end
+    return idx;
+  endfunction
+
+  function automatic inst_idx_t f_enc_inst(input inst_vec_t oh);
+    inst_idx_t idx;
+    idx = '0;
+    for (int unsigned k = 0; k < NUM_INST; k++) begin
+      if (oh[k]) begin
+        idx = idx | inst_idx_t'(k);
+      end
+    end
+    return idx;
+  endfunction
+
+  function automatic rsrc_idx_t f_enc_rsrc(input rsrc_vec_t oh);
+    rsrc_idx_t idx;
+    idx = '0;
+    for (int unsigned k = 0; k < NUM_RSRC; k++) begin
+      if (oh[k]) begin
+        idx = idx | rsrc_idx_t'(k);
+      end
+    end
+    return idx;
+  endfunction
+
+  function automatic inst_idx_t f_inc_inst(input inst_idx_t v);
+    return (v == inst_idx_t'(NUM_INST - 1)) ? '0 : (v + inst_idx_t'(1));
+  endfunction
+
+  function automatic lane_idx_t f_inc_lane(input lane_idx_t v);
+    return (v == lane_idx_t'(NUM_LANES - 1)) ? '0 : (v + lane_idx_t'(1));
+  endfunction
+
+  function automatic rsrc_idx_t f_inc_rsrc(input rsrc_idx_t v);
+    return (v == rsrc_idx_t'(NUM_RSRC - 1)) ? '0 : (v + rsrc_idx_t'(1));
+  endfunction
+
+  // scalar access byte-enable within a word
+  function automatic word_be_t f_size_be(input sf_msize_e size, input logic [WORD_OFF_W-1:0] off);
+    word_be_t be;
+    case (size)
+      SF_MSZ_B: be = word_be_t'(4'b0001) << off;
+      SF_MSZ_H: be = word_be_t'(4'b0011) << off;
+      default:  be = word_be_t'(4'b1111);
+    endcase
+    return be;
+  endfunction
+
+  // load extraction from a naturally aligned word
+  function automatic sf_xword_t f_load_ext(input sf_xword_t word, input sf_msize_e size,
+                                           input logic zext, input logic [WORD_OFF_W-1:0] off);
+    sf_xword_t sh;
+    sf_xword_t r;
+    sh = word >> {off, 3'b000};
+    case (size)
+      SF_MSZ_B: r = {{(SF_XLEN-8){~zext & sh[7]}},   sh[7:0]};
+      SF_MSZ_H: r = {{(SF_XLEN-16){~zext & sh[15]}}, sh[15:0]};
+      default:  r = sh;
+    endcase
+    return r;
+  endfunction
+
+  // region / ACL decode of one interconnect request
+  function automatic xb_ent_t f_xb_decode(input sf_mem_req_t req, input int unsigned r,
+                                          input logic [REMOTE_W-1:0] tile_sel);
+    xb_ent_t    d;
+    logic       remote;
+    maddr_ext_t off;
+    maddr_ext_t last;
+    maddr_ext_t rel_s;
+    maddr_ext_t rel_v;
+    logic       in_s;
+    logic       in_v;
+    tgt_vec_t   hit;
+
+    d     = '0;
+    d.req = req;
+    d.req.src = sf_msrc_t'(r);
+
+    remote = (req.addr[SF_MEM_AW-1:LOCAL_AW] != '0) &&
+             (req.addr[SF_MEM_AW-1:LOCAL_AW] != tile_sel);
+    off    = maddr_ext_t'(req.addr[LOCAL_AW-1:0]);
+    last   = off + (req.we ? maddr_ext_t'(0) : (maddr_ext_t'(req.blen) << LINE_OFF_W));
+    rel_s  = off - maddr_ext_t'(SPM_S_BASE);
+    rel_v  = off - maddr_ext_t'(SPM_V_BASE);
+    in_s   = ~rel_s[SF_MEM_AW] & ((last - maddr_ext_t'(SPM_S_BASE)) < maddr_ext_t'(SPM_S_BYTES));
+    in_v   = ~rel_v[SF_MEM_AW] & ((last - maddr_ext_t'(SPM_V_BASE)) < maddr_ext_t'(SPM_V_BYTES));
+
+    hit    = '0;
+    if (remote) begin
+      hit[T_NOC] = NOC_EN;
+    end else if (in_s) begin
+      hit[T_SPM_S] = 1'b1;
+    end else if (in_v) begin
+      hit[T_SPM_V] = 1'b1;
+    end
+
+    d.tgt = hit & f_acl(r);
+    d.err = ~(|d.tgt);
+
+    if (d.tgt[T_SPM_S]) begin
+      d.req.addr = rel_s[SF_MEM_AW-1:0];
+    end else if (d.tgt[T_SPM_V]) begin
+      d.req.addr = rel_v[SF_MEM_AW-1:0];
+    end
+    return d;
+  endfunction
+
+  // ===========================================================================
+  // 5. Declarations
+  // ===========================================================================
+  // tile control
+  tile_state_e                 state_q;
+  tile_state_e                 state_d;
+  logic                        iso_q;
+  unit_vec_t                   pwr_on_q;
+  unit_vec_t                   pwr_eff;
+  logic                        dispatch_en;
+  logic                        accept_en;
+  logic                        stg_accept_en;
+  logic                        drained;
+  logic                        tile_quiet;
+  logic                        err_q;
+  logic                        err_set;
+
+  // branch resolution
+  sf_br_mask_t                 br_res_sel;
+  sf_br_mask_t                 br_kill_sel;
+
+  // ingress lane buffer views
+  le_vec_t                     le_vld;
+  le_vec_t                     le_kill;
+  inst_vec_t                   le_pend   [LE];
+  inst_vec_t                   le_prim   [LE];
+  sf_tunit_mask_t              le_sfx    [LE];
+  sf_br_mask_t                 le_mask   [LE];
+  sf_tile_pkt_t                le_pkt    [LE];
+  dq_ent_t                     le_dq     [LE];
+  inst_vec_t                   le_deliv  [LE];
+  lane_vec_t                   lane_acc;
+  lane_vec_t                   lane_spec_sfx_viol;
+
+  // extraction
+  inst_vec_t                   xtr_fire;
+  le_vec_t                     xtr_sel   [NUM_INST];
+
+  // dispatch queues
+  inst_vec_t                   dq_space;
+  inst_vec_t                   dq_head_vld;
+  inst_vec_t                   dq_pop;
+  inst_vec_t                   dq_any;
+  dq_ent_t                     dq_head   [NUM_INST];
+  dq_vec_t                     dq_vhead;
+
+  // result staging
+  inst_vec_t                   stg_space;
+  inst_vec_t                   stg_head_vld;
+  inst_vec_t                   stg_push;
+  inst_vec_t                   stg_pop;
+  inst_vec_t                   stg_any;
+  res_ent_t                    stg_in    [NUM_INST];
+  res_ent_t                    stg_head  [NUM_INST];
+  sf_vreg_t                    stg_vin;
+  sf_vreg_t                    stg_vhead;
+
+  // unit activity
+  inst_vec_t                   unit_busy;
+
+  // interconnect: requester side
+  req_vec_t                    xr_valid;
+  sf_mem_req_t                 xr_req    [NUM_REQ];
+  req_vec_t                    xr_ready;
+  req_vec_t                    xr_rsp_valid;
+  sf_mem_rsp_t                 xr_rsp    [NUM_REQ];
+  req_vec_t                    xr_rsp_ready;
+  req_vec_t                    xb_head_vld;
+  xb_ent_t                     xb_head   [NUM_REQ];
+  req_vec_t                    xb_pop;
+  req_vec_t                    xb_err_pop;
+  req_vec_t                    xb_q_any;
+  rsrc_vec_t                   rsp_gnt   [NUM_REQ];
+
+  // interconnect: target side
+  tgt_vec_t                    tgt_req_valid;
+  sf_mem_req_t                 tgt_req   [NUM_TGT];
+  tgt_vec_t                    tgt_req_ready;
+  tgt_vec_t                    tgt_rsp_valid;
+  sf_mem_rsp_t                 tgt_rsp   [NUM_TGT];
+  tgt_vec_t                    tgt_rsp_ready;
+  req_vec_t                    tgt_gnt   [NUM_TGT];
+  tgt_vec_t                    tgt_lock_vld;
+  tgt_vec_t                    tgt_conflict;
+  tgt_vec_t                    tgt_rsp_src_bad;
+
+  // memory controller
+  logic [NUM_MC_PORTS-1:0]     mc_req_valid;
+  sf_mem_req_t                 mc_req    [NUM_MC_PORTS];
+  logic [NUM_MC_PORTS-1:0]     mc_req_ready;
+  logic [NUM_MC_PORTS-1:0]     mc_rsp_valid;
+  sf_mem_rsp_t                 mc_rsp    [NUM_MC_PORTS];
+  logic [NUM_MC_PORTS-1:0]     mc_rsp_ready;
+  logic                        mc_idle;
+
+  // LSU
+  txn_vec_t                    lsu_txn_vld_q;
+  lsu_txn_t                    lsu_txn_q [LSU_TXN];
+  logic                        lsu_rsp_bad;
+
+  // writeback
+  inst_vec_t                   wb_sel    [NUM_WB_PORTS];
+  inst_idx_t                   wb_rr_q;
+  inst_idx_t                   wb_rr_d;
+  logic                        vwb_take;
+  logic [NUM_WB_PORTS-1:0]     wb_vld_q;
+  sf_tile_wb_t                 wb_q      [NUM_WB_PORTS];
+  sf_tile_wb_t                 wb_d      [NUM_WB_PORTS];
+  logic                        vwb_vld_q;
+  sf_tile_vwb_t                vwb_q;
+  sf_tile_vwb_t                vwb_d;
+  logic                        out_clamp;
+  logic                        iso_clamp;
+
+  // ===========================================================================
+  // 6. Branch resolution decode
+  // ===========================================================================
+  always_comb begin : p_br_decode
+    br_res_sel = '0;
+    if (br_res_i.valid) begin
+      br_res_sel[br_res_i.tag] = 1'b1;
+    end
+    br_kill_sel = (br_res_i.valid && br_res_i.mispredict) ? br_res_sel : '0;
+  end
+
+  // ===========================================================================
+  // 7. Tile control: FLUSH/KILL > STALL > dispatch > backpressure
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_ctl_in_ff
+    if (!rst_ni) begin
+      iso_q    <= 1'b0;
+      pwr_on_q <= '0;
+    end else begin
+      iso_q    <= tile_iso_i;
+      pwr_on_q <= unit_pwr_on_i;
+    end
+  end
+
+  always_comb begin : p_tile_fsm
+    state_d = state_q;
+    case (state_q)
+      TILE_RUN: begin
+        if (iso_q && tile_quiet) begin
+          state_d = TILE_ISO;
+        end else if (ctl_stall_i) begin
+          state_d = TILE_STALL;
+        end
+      end
+      TILE_STALL: begin
+        if (!ctl_stall_i) begin
+          state_d = TILE_RUN;
+        end
+      end
+      TILE_DRAIN: begin
+        if (drained) begin
+          state_d = TILE_RUN;
+        end
+      end
+      TILE_ISO: begin
+        if (!iso_q) begin
+          state_d = TILE_RUN;
+        end
+      end
+      default: begin
+        state_d = TILE_DRAIN;
+      end
+    endcase
+    if (ctl_flush_i) begin
+      state_d = TILE_DRAIN;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_tile_fsm_ff
+    if (!rst_ni) begin
+      state_q <= TILE_DRAIN;
+    end else begin
+      state_q <= state_d;
+    end
+  end
+
+  assign pwr_eff       = pwr_on_q & unit_pwr_on_i;
+  assign accept_en     = (state_q == TILE_RUN) & ~iso_q;
+  assign dispatch_en   = ((state_q == TILE_RUN) | (state_q == TILE_STALL)) & ~ctl_stall_i & ~ctl_flush_i;
+  assign stg_accept_en = (state_q != TILE_DRAIN) & ~ctl_flush_i;
+  assign out_clamp     = (state_q == TILE_ISO) | (state_q == TILE_DRAIN) | ctl_flush_i;
+  assign iso_clamp     = (state_q == TILE_ISO);
+
+  // ===========================================================================
+  // 8. Ingress lane buffers
+  // ===========================================================================
+  for (genvar l = 0; l < NUM_LANES; l++) begin : g_lane
+    localparam int unsigned BASE  = l * LANE_DEPTH;
+    localparam int unsigned B_ALU = I_ALU0 + (l % NUM_ALU);
+    localparam int unsigned B_TEN = I_TEN0 + (l % NUM_TEN);
+
+    ld_vec_t          vld_q;
+    ld_vec_t          vld_d;
+    inst_vec_t        pend_q  [LANE_DEPTH];
+    inst_vec_t        pend_d  [LANE_DEPTH];
+    inst_vec_t        prim_q  [LANE_DEPTH];
+    inst_vec_t        prim_d  [LANE_DEPTH];
+    sf_tunit_mask_t   sfx_q   [LANE_DEPTH];
+    sf_tunit_mask_t   sfx_d   [LANE_DEPTH];
+    sf_br_mask_t      mask_q  [LANE_DEPTH];
+    sf_br_mask_t      mask_d  [LANE_DEPTH];
+    sf_tile_pkt_t     pkt_q   [LANE_DEPTH];
+    ld_vec_t          src_oh  [LANE_DEPTH];
+    ld_vec_t          ins_oh;
+    lcnt_t            cnt_q;
+    lcnt_t            cnt_d;
+
+    inst_vec_t        pend_in;
+    inst_vec_t        prim_in;
+    sf_tunit_mask_t   cls_mask;
+    sf_tunit_mask_t   sfx_in;
+    logic             spec_sfx;
+    logic             kill_in;
+    logic             acc;
+
+    // ------------------------------------------------- ingress classification
+    always_comb begin : p_classify
+      sf_tunit_e   pc;
+      logic        pok;
+      int unsigned inst;
+
+      pok      = f_fu_cls_ok(ex_pkt_i[l].fu);
+      pc       = f_fu_cls(ex_pkt_i[l].fu);
+      cls_mask = pok ? (f_cls_oh(pc) | (ex_pkt_i[l].bcast ? ex_pkt_i[l].bcast_mask : '0)) : '0;
+
+      sfx_in            = '0;
+      sfx_in[SF_TU_TEN] = 1'b1;
+      sfx_in[SF_TU_VEC] = (ex_pkt_i[l].mattr.op == SF_MEM_STORE);
+      sfx_in[SF_TU_LSU] = (ex_pkt_i[l].mattr.op == SF_MEM_STORE);
+
+      pend_in = '0;
+      prim_in = '0;
+      if (!pok) begin
+        pend_in[I_FLT] = 1'b1;
+        prim_in[I_FLT] = 1'b1;
+      end else begin
+        for (int unsigned c = 0; c < SF_TU_NUM; c++) begin
+          case (sf_tunit_e'(c))
+            SF_TU_ALU: inst = B_ALU;
+            SF_TU_VEC: inst = I_VEC;
+            SF_TU_TEN: inst = B_TEN;
+            default:   inst = I_LSU;
+          endcase
+          if (cls_mask[c]) begin
+            if (pwr_eff[inst]) begin
+              pend_in[inst] = 1'b1;
+            end else if (sf_tunit_e'(c) == pc) begin
+              pend_in[I_FLT] = 1'b1;
+            end
+            if (sf_tunit_e'(c) == pc) begin
+              prim_in[pwr_eff[inst] ? inst : I_FLT] = 1'b1;
+            end
+          end
+        end
+      end
+
+      spec_sfx = (|ex_pkt_i[l].br_mask) & (|(sfx_in & cls_mask));
+      kill_in  = f_mask_hit(ex_pkt_i[l].br_mask, br_kill_sel);
+      acc      = ex_valid_i[l] & ex_ready_o[l] & ~kill_in & ~ctl_flush_i;
+    end
+
+    assign ex_ready_o[l]         = accept_en & (cnt_q < lcnt_t'(LANE_DEPTH));
+    assign ex_sfx_ready_o[l]     = accept_en & (cnt_q <= lcnt_t'(LANE_DEPTH - 2));
+    assign lane_acc[l]           = acc;
+    assign lane_spec_sfx_viol[l] = acc & spec_sfx & (cnt_q > lcnt_t'(LANE_DEPTH - 2));
+
+    // ----------------------------------------------- retire, collapse, insert
+    always_comb begin : p_lane_next
+      ld_vec_t     keep;
+      inst_vec_t   pend_nx [LANE_DEPTH];
+      int unsigned n;
+
+      for (int unsigned e = 0; e < LANE_DEPTH; e++) begin
+        pend_nx[e] = pend_q[e] & ~le_deliv[BASE + e];
+        keep[e]    = vld_q[e] & ~le_kill[BASE + e] & (|pend_nx[e]) & ~ctl_flush_i;
+      end
+
+      n      = 0;
+      vld_d  = '0;
+      ins_oh = '0;
+      for (int unsigned d = 0; d < LANE_DEPTH; d++) begin
+        src_oh[d] = '0;
+        pend_d[d] = '0;
+        prim_d[d] = '0;
+        sfx_d[d]  = '0;
+        mask_d[d] = '0;
+      end
+      for (int unsigned e = 0; e < LANE_DEPTH; e++) begin
+        if (keep[e]) begin
+          src_oh[n][e] = 1'b1;
+          vld_d[n]     = 1'b1;
+          pend_d[n]    = pend_nx[e];
+          prim_d[n]    = prim_q[e];
+          sfx_d[n]     = sfx_q[e];
+          mask_d[n]    = mask_q[e] & ~br_res_sel;
+          n            = n + 1;
+        end
+      end
+      if (acc && (n < LANE_DEPTH)) begin
+        ins_oh[n] = 1'b1;
+        vld_d[n]  = 1'b1;
+        pend_d[n] = pend_in;
+        prim_d[n] = prim_in;
+        sfx_d[n]  = sfx_in;
+        mask_d[n] = ex_pkt_i[l].br_mask & ~br_res_sel;
+        n         = n + 1;
+      end
+      cnt_d = lcnt_t'(n);
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_lane_ctl_ff
+      if (!rst_ni) begin
+        vld_q <= '0;
+        cnt_q <= '0;
+      end else begin
+        vld_q <= vld_d;
+        cnt_q <= cnt_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_lane_meta_ff
+      for (int unsigned d = 0; d < LANE_DEPTH; d++) begin
+        pend_q[d] <= pend_d[d];
+        prim_q[d] <= prim_d[d];
+        sfx_q[d]  <= sfx_d[d];
+        mask_q[d] <= mask_d[d];
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_lane_pkt_ff
+      for (int unsigned d = 0; d < LANE_DEPTH; d++) begin
+        if (ins_oh[d]) begin
+          pkt_q[d] <= ex_pkt_i[l];
+        end else if (|src_oh[d] && !src_oh[d][d]) begin
+          for (int unsigned e = d + 1; e < LANE_DEPTH; e++) begin
+            if (src_oh[d][e]) begin
+              pkt_q[d] <= pkt_q[e];
+            end
+          end
+        end
+      end
+    end
+
+    // ------------------------------------------------------------ exports
+    for (genvar e = 0; e < LANE_DEPTH; e++) begin : g_export
+      assign le_vld[BASE + e]  = vld_q[e];
+      assign le_kill[BASE + e] = f_mask_hit(mask_q[e], br_kill_sel);
+      assign le_pend[BASE + e] = pend_q[e];
+      assign le_prim[BASE + e] = prim_q[e];
+      assign le_sfx[BASE + e]  = sfx_q[e];
+      assign le_mask[BASE + e] = mask_q[e];
+      assign le_pkt[BASE + e]  = pkt_q[e];
+    end
+  end
+
+  // per-entry dispatch record (shadow resolved per instance after selection)
+  always_comb begin : p_le_record
+    for (int unsigned k = 0; k < LE; k++) begin
+      le_dq[k].uop            = le_pkt[k].uop;
+      le_dq[k].fu             = le_pkt[k].fu;
+      le_dq[k].mattr          = le_pkt[k].mattr;
+      le_dq[k].rs1            = le_pkt[k].rs1;
+      le_dq[k].rs2            = le_pkt[k].rs2;
+      le_dq[k].meta.prd_valid = le_pkt[k].prd_valid;
+      le_dq[k].meta.prd_vec   = le_pkt[k].prd_vec;
+      le_dq[k].meta.prd       = le_pkt[k].prd;
+      le_dq[k].meta.rob_idx   = le_pkt[k].rob_idx;
+      le_dq[k].meta.br_mask   = le_mask[k] & ~br_res_sel;
+      le_dq[k].meta.itt_id    = le_pkt[k].itt_id;
+      le_dq[k].meta.shadow    = 1'b0;
+    end
+  end
+
+  always_comb begin : p_le_deliv
+    for (int unsigned k = 0; k < LE; k++) begin
+      for (int unsigned i = 0; i < NUM_INST; i++) begin
+        le_deliv[k][i] = xtr_fire[i] & xtr_sel[i][k];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // 9. Per-instance extraction, dispatch queue and result staging
+  // ===========================================================================
+  for (genvar i = 0; i < NUM_INST; i++) begin : g_inst
+    localparam sf_tunit_e CLS    = f_inst_cls(i);
+    localparam bit        IS_FLT = (i == I_FLT);
+
+    // ---------------------------------------------------------- extraction
+    le_vec_t      cand;
+    le_vec_t      first;
+    le_vec_t      sel;
+    lane_vec_t    lane_any;
+    lane_vec_t    lane_pick;
+    lane_idx_t    rr_q;
+    dq_ent_t      dq_in;
+
+    always_comb begin : p_candidates
+      logic held;
+      for (int unsigned k = 0; k < LE; k++) begin
+        held    = ~IS_FLT & le_sfx[k][CLS] & (|le_mask[k]);
+        cand[k] = le_vld[k] & le_pend[k][i] & ~held & ~le_kill[k];
+      end
+      for (int unsigned l = 0; l < NUM_LANES; l++) begin
+        lane_any[l]                           = |cand[l*LANE_DEPTH +: LANE_DEPTH];
+        first[l*LANE_DEPTH +: LANE_DEPTH]     = f_lsb_ld(cand[l*LANE_DEPTH +: LANE_DEPTH]);
+      end
+      lane_pick = f_rr_lane(lane_any, rr_q);
+      for (int unsigned l = 0; l < NUM_LANES; l++) begin
+        sel[l*LANE_DEPTH +: LANE_DEPTH] = first[l*LANE_DEPTH +: LANE_DEPTH] &
+                                          {LANE_DEPTH{lane_pick[l]}};
+      end
+    end
+
+    assign xtr_fire[i] = (|lane_any) & dq_space[i] & dispatch_en;
+    assign xtr_sel[i]  = sel;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_rr_ff
+      if (!rst_ni) begin
+        rr_q <= '0;
+      end else if (xtr_fire[i]) begin
+        rr_q <= f_inc_lane(f_enc_lane(lane_pick));
+      end
+    end
+
+    always_comb begin : p_dq_in
+      dq_bits_t acc_v;
+      logic     shadow;
+      acc_v  = '0;
+      shadow = 1'b1;
+      for (int unsigned k = 0; k < LE; k++) begin
+        acc_v  = acc_v | (dq_bits_t'(le_dq[k]) & {$bits(dq_ent_t){sel[k]}});
+        shadow = shadow & ~(sel[k] & le_prim[k][i]);
+      end
+      dq_in                = dq_ent_t'(acc_v);
+      dq_in.meta.shadow    = shadow;
+      dq_in.meta.prd_valid = dq_in.meta.prd_valid & ~shadow;
+    end
+
+    // ------------------------------------------------------ dispatch queue
+    logic [DQ_DEPTH-1:0] dq_vld_q;
+    logic [DQ_DEPTH-1:0] dq_vld_d;
+    dq_ent_t             dq_q   [DQ_DEPTH];
+    dq_ent_t             dq_d   [DQ_DEPTH];
+    logic [DQ_DEPTH:0]   dq_map [DQ_DEPTH];
+
+    always_comb begin : p_dq_next
+      logic [DQ_DEPTH-1:0] keep;
+      int unsigned         n;
+      for (int unsigned k = 0; k < DQ_DEPTH; k++) begin
+        keep[k] = dq_vld_q[k] & ~f_mask_hit(dq_q[k].meta.br_mask, br_kill_sel) &
+                  ~((k == 0) & dq_pop[i]) & ~ctl_flush_i;
+      end
+      n        = 0;
+      dq_vld_d = '0;
+      for (int unsigned d = 0; d < DQ_DEPTH; d++) begin
+        dq_map[d] = '0;
+      end
+      for (int unsigned k = 0; k < DQ_DEPTH; k++) begin
+        if (keep[k]) begin
+          dq_map[n][k] = 1'b1;
+          dq_vld_d[n]  = 1'b1;
+          n            = n + 1;
+        end
+      end
+      if (xtr_fire[i] && (n < DQ_DEPTH)) begin
+        dq_map[n][DQ_DEPTH] = 1'b1;
+        dq_vld_d[n]         = 1'b1;
+      end
+    end
+
+    always_comb begin : p_dq_move
+      dq_bits_t acc_v;
+      for (int unsigned d = 0; d < DQ_DEPTH; d++) begin
+        acc_v = dq_bits_t'(dq_in) & {$bits(dq_ent_t){dq_map[d][DQ_DEPTH]}};
+        for (int unsigned k = 0; k < DQ_DEPTH; k++) begin
+          acc_v = acc_v | (dq_bits_t'(dq_q[k]) & {$bits(dq_ent_t){dq_map[d][k]}});
+        end
+        dq_d[d]              = dq_ent_t'(acc_v);
+        dq_d[d].meta.br_mask = dq_d[d].meta.br_mask & ~br_res_sel;
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_dq_vld_ff
+      if (!rst_ni) begin
+        dq_vld_q <= '0;
+      end else begin
+        dq_vld_q <= dq_vld_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_dq_data_ff
+      for (int unsigned d = 0; d < DQ_DEPTH; d++) begin
+        if (|dq_map[d]) begin
+          dq_q[d] <= dq_d[d];
+        end
+      end
+    end
+
+    assign dq_space[i]    = ~dq_vld_q[DQ_DEPTH-1];
+    assign dq_any[i]      = |dq_vld_q;
+    assign dq_head_vld[i] = dq_vld_q[0] & ~f_mask_hit(dq_q[0].meta.br_mask, br_kill_sel) & ~ctl_flush_i;
+
+    dq_ent_t dq_head_l;
+
+    always_comb begin : p_dq_head
+      dq_head_l              = dq_q[0];
+      dq_head_l.meta.br_mask = dq_q[0].meta.br_mask & ~br_res_sel;
+    end
+
+    assign dq_head[i] = dq_head_l;
+
+    // vector operand side-payload follows the same compaction map
+    if (i == I_VEC) begin : g_dq_vec
+      dq_vec_t dqv_q [DQ_DEPTH];
+      dq_vec_t dqv_in;
+
+      always_comb begin : p_dqv_in
+        dqv_bits_t acc_v;
+        acc_v = '0;
+        for (int unsigned k = 0; k < LE; k++) begin
+          acc_v = acc_v | (dqv_bits_t'({le_pkt[k].vs1, le_pkt[k].vs2, le_pkt[k].vm}) &
+                           {$bits(dq_vec_t){sel[k]}});
+        end
+        dqv_in = dq_vec_t'(acc_v);
+      end
+
+      always_ff @(posedge clk_i) begin : p_dqv_ff
+        for (int unsigned d = 0; d < DQ_DEPTH; d++) begin
+          if (dq_map[d][DQ_DEPTH]) begin
+            dqv_q[d] <= dqv_in;
+          end else begin
+            for (int unsigned k = 0; k < DQ_DEPTH; k++) begin
+              if (dq_map[d][k] && (k != d)) begin
+                dqv_q[d] <= dqv_q[k];
+              end
+            end
+          end
+        end
+      end
+
+      assign dq_vhead = dqv_q[0];
+    end
+
+    // -------------------------------------------------------- result staging
+    logic [STG_DEPTH-1:0] stg_vld_q;
+    logic [STG_DEPTH-1:0] stg_vld_d;
+    res_ent_t             stg_q   [STG_DEPTH];
+    res_ent_t             stg_d   [STG_DEPTH];
+    logic [STG_DEPTH:0]   stg_map [STG_DEPTH];
+    logic                 push_eff;
+
+    assign push_eff = stg_push[i] & stg_accept_en & ~stg_in[i].meta.shadow &
+                      ~f_mask_hit(stg_in[i].meta.br_mask, br_kill_sel);
+
+    always_comb begin : p_stg_next
+      logic [STG_DEPTH-1:0] keep;
+      int unsigned          n;
+      for (int unsigned k = 0; k < STG_DEPTH; k++) begin
+        keep[k] = stg_vld_q[k] & ~f_mask_hit(stg_q[k].meta.br_mask, br_kill_sel) &
+                  ~((k == 0) & stg_pop[i]) & ~ctl_flush_i;
+      end
+      n         = 0;
+      stg_vld_d = '0;
+      for (int unsigned d = 0; d < STG_DEPTH; d++) begin
+        stg_map[d] = '0;
+      end
+      for (int unsigned k = 0; k < STG_DEPTH; k++) begin
+        if (keep[k]) begin
+          stg_map[n][k] = 1'b1;
+          stg_vld_d[n]  = 1'b1;
+          n             = n + 1;
+        end
+      end
+      if (push_eff && (n < STG_DEPTH)) begin
+        stg_map[n][STG_DEPTH] = 1'b1;
+        stg_vld_d[n]          = 1'b1;
+      end
+    end
+
+    always_comb begin : p_stg_move
+      res_bits_t acc_v;
+      for (int unsigned d = 0; d < STG_DEPTH; d++) begin
+        acc_v = res_bits_t'(stg_in[i]) & {$bits(res_ent_t){stg_map[d][STG_DEPTH]}};
+        for (int unsigned k = 0; k < STG_DEPTH; k++) begin
+          acc_v = acc_v | (res_bits_t'(stg_q[k]) & {$bits(res_ent_t){stg_map[d][k]}});
+        end
+        stg_d[d]              = res_ent_t'(acc_v);
+        stg_d[d].meta.br_mask = stg_d[d].meta.br_mask & ~br_res_sel;
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_stg_vld_ff
+      if (!rst_ni) begin
+        stg_vld_q <= '0;
+      end else begin
+        stg_vld_q <= stg_vld_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_stg_data_ff
+      for (int unsigned d = 0; d < STG_DEPTH; d++) begin
+        if (|stg_map[d]) begin
+          stg_q[d] <= stg_d[d];
+        end
+      end
+    end
+
+    assign stg_space[i]    = ~stg_vld_q[STG_DEPTH-1];
+    assign stg_any[i]      = |stg_vld_q;
+    assign stg_head_vld[i] = stg_vld_q[0] & ~f_mask_hit(stg_q[0].meta.br_mask, br_kill_sel) & ~ctl_flush_i;
+
+    res_ent_t stg_head_l;
+
+    always_comb begin : p_stg_head
+      stg_head_l              = stg_q[0];
+      stg_head_l.meta.br_mask = stg_q[0].meta.br_mask & ~br_res_sel;
+    end
+
+    assign stg_head[i] = stg_head_l;
+
+    if (i == I_VEC) begin : g_stg_vec
+      sf_vreg_t stgv_q [STG_DEPTH];
+
+      always_ff @(posedge clk_i) begin : p_stgv_ff
+        for (int unsigned d = 0; d < STG_DEPTH; d++) begin
+          if (stg_map[d][STG_DEPTH]) begin
+            stgv_q[d] <= stg_vin;
+          end else begin
+            for (int unsigned k = 0; k < STG_DEPTH; k++) begin
+              if (stg_map[d][k] && (k != d)) begin
+                stgv_q[d] <= stgv_q[k];
+              end
+            end
+          end
+        end
+      end
+
+      assign stg_vhead = stgv_q[0];
+    end
+  end
+
+  // ===========================================================================
+  // 10. Scalar execution cluster
+  // ===========================================================================
+  for (genvar a = 0; a < NUM_ALU; a++) begin : g_alu
+    localparam int unsigned I = I_ALU0 + a;
+
+    sf_alu_req_t req;
+    logic        req_ready;
+    logic        rsp_valid;
+    sf_alu_rsp_t rsp;
+    res_ent_t    res;
+
+    always_comb begin : p_req
+      req.uop  = dq_head[I].uop;
+      req.fu   = dq_head[I].fu;
+      req.a    = dq_head[I].rs1;
+      req.b    = dq_head[I].rs2;
+      req.meta = dq_head[I].meta;
+    end
+
+    alu #(
+      .MUL_LAT     (ALU_MUL_LAT)
+    ) u_alu (
+      .clk_i       (clk_i),
+      .rst_ni      (rst_ni),
+      .flush_i     (ctl_flush_i),
+      .br_res_i    (br_res_i),
+      .req_valid_i (dq_head_vld[I]),
+      .req_i       (req),
+      .req_ready_o (req_ready),
+      .rsp_valid_o (rsp_valid),
+      .rsp_o       (rsp),
+      .rsp_ready_i (stg_space[I]),
+      .busy_o      (unit_busy[I])
+    );
+
+    assign dq_pop[I]   = dq_head_vld[I] & req_ready;
+    assign stg_push[I] = rsp_valid & stg_space[I];
+
+    always_comb begin : p_res
+      res.meta      = rsp.meta;
+      res.vdest     = 1'b0;
+      res.xdata     = rsp.data;
+      res.exc       = rsp.exc;
+      res.br_valid  = rsp.br_valid;
+      res.br_taken  = rsp.br_taken;
+      res.br_target = rsp.br_target;
+    end
+
+    assign stg_in[I] = res;
+  end
+
+  // ===========================================================================
+  // 11. SIMD vector engine
+  // ===========================================================================
+  sf_vec_req_t vec_req;
+  logic        vec_req_ready;
+  logic        vec_rsp_valid;
+  sf_vec_rsp_t vec_rsp;
+  res_ent_t    vec_res;
+
+  always_comb begin : p_vec_req
+    vec_req.uop   = dq_head[I_VEC].uop;
+    vec_req.memop = dq_head[I_VEC].mattr.op;
+    vec_req.rs1   = dq_head[I_VEC].rs1;
+    vec_req.rs2   = dq_head[I_VEC].rs2;
+    vec_req.vs1   = dq_vhead.vs1;
+    vec_req.vs2   = dq_vhead.vs2;
+    vec_req.vm    = dq_vhead.vm;
+    vec_req.meta  = dq_head[I_VEC].meta;
+  end
+
+  vector_engine #(
+    .LANES           (VLANES)
+  ) u_vector_engine (
+    .clk_i           (clk_i),
+    .rst_ni          (rst_ni),
+    .flush_i         (ctl_flush_i),
+    .br_res_i        (br_res_i),
+    .req_valid_i     (dq_head_vld[I_VEC]),
+    .req_i           (vec_req),
+    .req_ready_o     (vec_req_ready),
+    .rsp_valid_o     (vec_rsp_valid),
+    .rsp_o           (vec_rsp),
+    .rsp_ready_i     (stg_space[I_VEC]),
+    .mem_req_valid_o (xr_valid[R_VEC]),
+    .mem_req_o       (xr_req[R_VEC]),
+    .mem_req_ready_i (xr_ready[R_VEC]),
+    .mem_rsp_valid_i (xr_rsp_valid[R_VEC]),
+    .mem_rsp_i       (xr_rsp[R_VEC]),
+    .mem_rsp_ready_o (xr_rsp_ready[R_VEC]),
+    .busy_o          (unit_busy[I_VEC])
+  );
+
+  assign dq_pop[I_VEC]   = dq_head_vld[I_VEC] & vec_req_ready;
+  assign stg_push[I_VEC] = vec_rsp_valid & stg_space[I_VEC];
+  assign stg_vin         = vec_rsp.vd;
+
+  always_comb begin : p_vec_res
+    vec_res.meta      = vec_rsp.meta;
+    vec_res.vdest     = vec_rsp.meta.prd_valid & vec_rsp.meta.prd_vec;
+    vec_res.xdata     = vec_rsp.xd;
+    vec_res.exc       = vec_rsp.exc;
+    vec_res.br_valid  = 1'b0;
+    vec_res.br_taken  = 1'b0;
+    vec_res.br_target = '0;
+  end
+
+  assign stg_in[I_VEC] = vec_res;
+
+  // ===========================================================================
+  // 12. Tensor engines
+  // ===========================================================================
+  for (genvar t = 0; t < NUM_TEN; t++) begin : g_ten
+    localparam int unsigned I = I_TEN0 + t;
+    localparam int unsigned R = R_TEN0 + t;
+
+    sf_tensor_cmd_t cmd;
+    sf_tensor_imm_t timm;
+    logic           cmd_ready;
+    logic           rsp_valid;
+    sf_tensor_rsp_t rsp;
+    res_ent_t       res;
+
+    always_comb begin : p_cmd
+      timm       = sf_tensor_imm_t'(dq_head[I].uop.imm);
+      cmd.a_addr = dq_head[I].rs1[SF_MEM_AW-1:0];
+      cmd.b_addr = dq_head[I].rs2[SF_MEM_AW-1:0];
+      cmd.c_addr = timm.c_addr;
+      cmd.k_m1   = timm.k_m1;
+      cmd.acc    = timm.acc;
+      cmd.uop    = dq_head[I].uop;
+      cmd.meta   = dq_head[I].meta;
+    end
+
+    tensor_unit #(
+      .PIPE_DEPTH      (TEN_PIPE_DEPTH)
+    ) u_tensor_unit (
+      .clk_i           (clk_i),
+      .rst_ni          (rst_ni),
+      .flush_i         (ctl_flush_i),
+      .br_res_i        (br_res_i),
+      .cmd_valid_i     (dq_head_vld[I]),
+      .cmd_i           (cmd),
+      .cmd_ready_o     (cmd_ready),
+      .rsp_valid_o     (rsp_valid),
+      .rsp_o           (rsp),
+      .rsp_ready_i     (stg_space[I]),
+      .mem_req_valid_o (xr_valid[R]),
+      .mem_req_o       (xr_req[R]),
+      .mem_req_ready_i (xr_ready[R]),
+      .mem_rsp_valid_i (xr_rsp_valid[R]),
+      .mem_rsp_i       (xr_rsp[R]),
+      .mem_rsp_ready_o (xr_rsp_ready[R]),
+      .busy_o          (unit_busy[I])
+    );
+
+    logic unused_timm_rsvd;
+    assign unused_timm_rsvd = ^timm.rsvd;
+
+    assign dq_pop[I]   = dq_head_vld[I] & cmd_ready;
+    assign stg_push[I] = rsp_valid & stg_space[I];
+
+    always_comb begin : p_res
+      res.meta      = rsp.meta;
+      res.vdest     = 1'b0;
+      res.xdata     = '0;
+      res.exc       = rsp.exc;
+      res.br_valid  = 1'b0;
+      res.br_taken  = 1'b0;
+      res.br_target = '0;
+    end
+
+    assign stg_in[I] = res;
+  end
+
+  // ===========================================================================
+  // 13. Scalar load/store unit (tile-resident)
+  // ===========================================================================
+  sf_xword_t   lsu_ea;
+  sf_maddr_t   lsu_addr;
+  sf_exc_e     lsu_exc;
+  txn_vec_t    lsu_txn_free_oh;
+  txn_idx_t    lsu_txn_idx;
+  logic        lsu_mem_fire;
+  logic        lsu_flt_fire;
+  logic        lsu_local;
+  logic        lsu_rsp_fire;
+  logic        lsu_rsp_push;
+  txn_idx_t    lsu_rsp_idx;
+  lsu_txn_t    lsu_rsp_txn;
+  sf_xword_t   lsu_ld_data;
+  sf_mem_req_t lsu_req;
+  res_ent_t    lsu_res;
+  res_ent_t    flt_res;
+
+  always_comb begin : p_lsu_agu
+    sf_msize_e sz;
+    logic      mis;
+    sz       = dq_head[I_LSU].mattr.size;
+    lsu_ea   = dq_head[I_LSU].rs1 + dq_head[I_LSU].uop.imm;
+    lsu_addr = lsu_ea[SF_MEM_AW-1:0];
+    case (sz)
+      SF_MSZ_H: mis = lsu_addr[0];
+      SF_MSZ_W: mis = |lsu_addr[WORD_OFF_W-1:0];
+      default:  mis = 1'b0;
+    endcase
+    if (|lsu_ea[SF_XLEN-1:SF_MEM_AW]) begin
+      lsu_exc = SF_EXC_MEM_FAULT;
+    end else if ((sz == SF_MSZ_LINE) || (dq_head[I_LSU].mattr.op == SF_MEM_NONE)) begin
+      lsu_exc = SF_EXC_ILLEGAL;
+    end else if (mis) begin
+      lsu_exc = SF_EXC_MISALIGN;
+    end else begin
+      lsu_exc = SF_EXC_NONE;
+    end
+  end
+
+  // lane placement of scalar store data and byte enables
+  always_comb begin : p_lsu_req
+    sf_xword_t                  wword;
+    word_be_t                   wbe;
+    logic [LANE_SEL_W-1:0]      lane;
+    lane = lsu_addr[LINE_OFF_W-1:WORD_OFF_W];
+    wword = dq_head[I_LSU].rs2 << {lsu_addr[WORD_OFF_W-1:0], 3'b000};
+    wbe   = f_size_be(dq_head[I_LSU].mattr.size, lsu_addr[WORD_OFF_W-1:0]);
+
+    lsu_req       = '0;
+    lsu_req.addr  = lsu_addr;
+    lsu_req.we    = (dq_head[I_LSU].mattr.op == SF_MEM_STORE);
+    lsu_req.blen  = '0;
+    lsu_req.wlast = 1'b1;
+    lsu_req.src   = sf_msrc_t'(R_LSU);
+    lsu_req.txn   = sf_mtxn_t'(lsu_txn_idx);
+    for (int unsigned v = 0; v < VLANES; v++) begin
+      lsu_req.wdata[v*SF_XLEN +: SF_XLEN] = wword;
+      lsu_req.be[v*WORD_BYTES +: WORD_BYTES] = (lane == LANE_SEL_W'(v)) ? wbe : '0;
+    end
+  end
+
+  assign lsu_txn_free_oh = f_lsb_txn(~lsu_txn_vld_q);
+  assign lsu_txn_idx     = f_enc_txn(lsu_txn_free_oh);
+
+  assign lsu_rsp_fire    = xr_rsp_valid[R_LSU] & xr_rsp_ready[R_LSU];
+  assign lsu_rsp_idx     = xr_rsp[R_LSU].txn[TXN_IDX_W-1:0];
+  assign lsu_rsp_txn     = lsu_txn_q[lsu_rsp_idx];
+  assign lsu_rsp_push    = lsu_rsp_fire & ~lsu_rsp_txn.killed &
+                           ~f_mask_hit(lsu_rsp_txn.meta.br_mask, br_kill_sel);
+  assign lsu_rsp_bad     = xr_rsp_valid[R_LSU] & ~lsu_txn_vld_q[lsu_rsp_idx];
+
+  assign lsu_local       = (lsu_exc != SF_EXC_NONE) | dq_head[I_LSU].meta.shadow;
+  assign lsu_mem_fire    = dq_head_vld[I_LSU] & ~lsu_local &
+                           (|(~lsu_txn_vld_q)) & xr_ready[R_LSU];
+  assign lsu_flt_fire    = dq_head_vld[I_LSU] & lsu_local & stg_space[I_LSU] & ~lsu_rsp_fire;
+
+  assign xr_valid[R_LSU]     = lsu_mem_fire;
+  assign xr_req[R_LSU]       = lsu_req;
+  assign xr_rsp_ready[R_LSU] = stg_space[I_LSU];
+  assign dq_pop[I_LSU]       = lsu_mem_fire | lsu_flt_fire;
+  assign stg_push[I_LSU]     = lsu_rsp_push | lsu_flt_fire;
+
+  // load data extraction from the returned line
+  always_comb begin : p_lsu_extract
+    sf_xword_t word;
+    word = '0;
+    for (int unsigned v = 0; v < VLANES; v++) begin
+      if (lsu_rsp_txn.off[LINE_OFF_W-1:WORD_OFF_W] == LANE_SEL_W'(v)) begin
+        word = xr_rsp[R_LSU].rdata[v*SF_XLEN +: SF_XLEN];
+      end
+    end
+    lsu_ld_data = f_load_ext(word, lsu_rsp_txn.size, lsu_rsp_txn.zext,
+                             lsu_rsp_txn.off[WORD_OFF_W-1:0]);
+  end
+
+  always_comb begin : p_lsu_res
+    lsu_res = '0;
+    if (lsu_rsp_fire) begin
+      lsu_res.meta  = lsu_rsp_txn.meta;
+      lsu_res.xdata = (lsu_rsp_txn.is_load && !xr_rsp[R_LSU].err) ? lsu_ld_data : '0;
+      lsu_res.exc   = xr_rsp[R_LSU].err ? SF_EXC_MEM_FAULT : SF_EXC_NONE;
+    end else begin
+      lsu_res.meta  = dq_head[I_LSU].meta;
+      lsu_res.xdata = '0;
+      lsu_res.exc   = lsu_exc;
+    end
+  end
+
+  assign stg_in[I_LSU] = lsu_res;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_lsu_txn_vld_ff
+    if (!rst_ni) begin
+      lsu_txn_vld_q <= '0;
+    end else begin
+      lsu_txn_vld_q <= (lsu_txn_vld_q &
+                        ~({{(LSU_TXN-1){1'b0}}, lsu_rsp_fire} << lsu_rsp_idx)) |
+                       (lsu_txn_free_oh & {LSU_TXN{lsu_mem_fire}});
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_lsu_txn_ff
+    for (int unsigned k = 0; k < LSU_TXN; k++) begin
+      if (lsu_mem_fire && lsu_txn_free_oh[k]) begin
+        lsu_txn_q[k].killed  <= 1'b0;
+        lsu_txn_q[k].is_load <= (dq_head[I_LSU].mattr.op == SF_MEM_LOAD);
+        lsu_txn_q[k].size    <= dq_head[I_LSU].mattr.size;
+        lsu_txn_q[k].zext    <= dq_head[I_LSU].mattr.zext;
+        lsu_txn_q[k].off     <= lsu_addr[LINE_OFF_W-1:0];
+        lsu_txn_q[k].meta    <= dq_head[I_LSU].meta;
+      end else begin
+        lsu_txn_q[k].killed       <= lsu_txn_q[k].killed | ctl_flush_i |
+                                     f_mask_hit(lsu_txn_q[k].meta.br_mask, br_kill_sel);
+        lsu_txn_q[k].meta.br_mask <= lsu_txn_q[k].meta.br_mask & ~br_res_sel;
+      end
+    end
+  end
+
+  assign unit_busy[I_LSU] = |lsu_txn_vld_q;
+
+  // ===========================================================================
+  // 14. Fault responder (offline units, illegal targets)
+  // ===========================================================================
+  assign dq_pop[I_FLT]    = dq_head_vld[I_FLT] & stg_space[I_FLT];
+  assign stg_push[I_FLT]  = dq_pop[I_FLT];
+  assign unit_busy[I_FLT] = 1'b0;
+
+  always_comb begin : p_flt_res
+    flt_res      = '0;
+    flt_res.meta = dq_head[I_FLT].meta;
+    flt_res.exc  = f_fu_cls_ok(dq_head[I_FLT].fu) ? SF_EXC_UNIT_OFF : SF_EXC_ILLEGAL;
+  end
+
+  assign stg_in[I_FLT] = flt_res;
+
+  // ===========================================================================
+  // 15. Local interconnect: requester skids, decode, error responders,
+  //     response merge
+  // ===========================================================================
+  assign xr_valid[R_NOC]     = NOC_EN & noc_tgt_req_valid_i & ~iso_q;
+  assign xr_req[R_NOC]       = noc_tgt_req_i;
+  assign noc_tgt_req_ready_o = NOC_EN & xr_ready[R_NOC] & ~iso_q;
+  assign noc_tgt_rsp_valid_o = NOC_EN & xr_rsp_valid[R_NOC];
+  assign noc_tgt_rsp_o       = xr_rsp[R_NOC];
+  assign xr_rsp_ready[R_NOC] = NOC_EN & noc_tgt_rsp_ready_i;
+
+  for (genvar r = 0; r < NUM_REQ; r++) begin : g_req
+    // ------------------------------------------------------ request skid
+    logic [XB_SKID_DEPTH-1:0]  sk_vld_q;
+    xb_ent_t                   sk_q  [XB_SKID_DEPTH];
+    xb_ent_t                   sk_in;
+    logic                      sk_push;
+
+    assign sk_in   = f_xb_decode(xr_req[r], r, tile_id_i[REMOTE_W-1:0]);
+    assign sk_push = xr_valid[r] & xr_ready[r];
+
+    logic [XB_SKID_DEPTH-1:0] sk_vld_d;
+    xb_ent_t                   sk_d [XB_SKID_DEPTH];
+
+    always_comb begin : p_sk_next
+      logic placed;
+      sk_vld_d = sk_vld_q;
+      for (int unsigned k = 0; k < XB_SKID_DEPTH; k++) begin
+        sk_d[k] = sk_q[k];
+      end
+      if (xb_pop[r]) begin
+        for (int unsigned k = 0; k + 1 < XB_SKID_DEPTH; k++) begin
+          sk_d[k] = sk_q[k+1];
+        end
+        sk_vld_d = sk_vld_q >> 1;
+      end
+      placed = 1'b0;
+      for (int unsigned k = 0; k < XB_SKID_DEPTH; k++) begin
+        if (sk_push && !placed && !sk_vld_d[k]) begin
+          sk_d[k]     = sk_in;
+          sk_vld_d[k] = 1'b1;
+          placed          = 1'b1;
+        end
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_sk_vld_ff
+      if (!rst_ni) begin
+        sk_vld_q <= '0;
+      end else begin
+        sk_vld_q <= sk_vld_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_sk_data_ff
+      for (int unsigned k = 0; k < XB_SKID_DEPTH; k++) begin
+        sk_q[k] <= sk_d[k];
+      end
+    end
+
+    assign xr_ready[r]    = ~sk_vld_q[XB_SKID_DEPTH-1];
+    assign xb_head_vld[r] = sk_vld_q[0];
+    assign xb_head[r]     = sk_q[0];
+
+    // --------------------------------------------- local error responder
+    logic [XB_ERRQ_DEPTH-1:0] eq_vld_q;
+    sf_mem_rsp_t              eq_q  [XB_ERRQ_DEPTH];
+    sf_mem_rsp_t              eq_in;
+    logic                     eq_push;
+    logic                     eq_pop;
+    logic                     need_rsp;
+
+    assign need_rsp      = ~sk_q[0].req.we | sk_q[0].req.wlast;
+    assign xb_err_pop[r] = sk_vld_q[0] & sk_q[0].err & (~need_rsp | ~eq_vld_q[XB_ERRQ_DEPTH-1]);
+    assign eq_push       = xb_err_pop[r] & need_rsp;
+
+    always_comb begin : p_eq_in
+      eq_in       = '0;
+      eq_in.we    = sk_q[0].req.we;
+      eq_in.last  = 1'b1;
+      eq_in.err   = 1'b1;
+      eq_in.src   = sf_msrc_t'(r);
+      eq_in.txn   = sk_q[0].req.txn;
+    end
+
+    logic [XB_ERRQ_DEPTH-1:0] eq_vld_d;
+    sf_mem_rsp_t               eq_d [XB_ERRQ_DEPTH];
+
+    always_comb begin : p_eq_next
+      logic placed;
+      eq_vld_d = eq_vld_q;
+      for (int unsigned k = 0; k < XB_ERRQ_DEPTH; k++) begin
+        eq_d[k] = eq_q[k];
+      end
+      if (eq_pop) begin
+        for (int unsigned k = 0; k + 1 < XB_ERRQ_DEPTH; k++) begin
+          eq_d[k] = eq_q[k+1];
+        end
+        eq_vld_d = eq_vld_q >> 1;
+      end
+      placed = 1'b0;
+      for (int unsigned k = 0; k < XB_ERRQ_DEPTH; k++) begin
+        if (eq_push && !placed && !eq_vld_d[k]) begin
+          eq_d[k]     = eq_in;
+          eq_vld_d[k] = 1'b1;
+          placed          = 1'b1;
+        end
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_eq_vld_ff
+      if (!rst_ni) begin
+        eq_vld_q <= '0;
+      end else begin
+        eq_vld_q <= eq_vld_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_eq_data_ff
+      for (int unsigned k = 0; k < XB_ERRQ_DEPTH; k++) begin
+        eq_q[k] <= eq_d[k];
+      end
+    end
+
+    // ------------------------------------------------- response merge
+    logic [XB_RSKID_DEPTH-1:0] rk_vld_q;
+    sf_mem_rsp_t               rk_q  [XB_RSKID_DEPTH];
+    sf_mem_rsp_t               rk_in;
+    rsrc_vec_t                 rcand;
+    rsrc_vec_t                 rpick;
+    rsrc_idx_t                 rrr_q;
+    logic                      rk_push;
+    logic                      rk_pop;
+
+    always_comb begin : p_rsp_merge
+      mrsp_bits_t acc_v;
+      for (int unsigned t = 0; t < NUM_TGT; t++) begin
+        rcand[t] = tgt_rsp_valid[t] & (tgt_rsp[t].src == sf_msrc_t'(r));
+      end
+      rcand[RS_ERR] = eq_vld_q[0];
+      rpick = rk_vld_q[XB_RSKID_DEPTH-1] ? '0 : f_rr_rsrc(rcand, rrr_q);
+      acc_v = '0;
+      for (int unsigned t = 0; t < NUM_TGT; t++) begin
+        acc_v = acc_v | (mrsp_bits_t'(tgt_rsp[t]) & {$bits(sf_mem_rsp_t){rpick[t]}});
+      end
+      acc_v = acc_v | (mrsp_bits_t'(eq_q[0]) & {$bits(sf_mem_rsp_t){rpick[RS_ERR]}});
+      rk_in = sf_mem_rsp_t'(acc_v);
+    end
+
+    assign rsp_gnt[r] = rpick;
+    assign rk_push    = |rpick;
+    assign eq_pop     = rpick[RS_ERR];
+    assign rk_pop     = rk_vld_q[0] & xr_rsp_ready[r];
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_rrr_ff
+      if (!rst_ni) begin
+        rrr_q <= '0;
+      end else if (rk_push) begin
+        rrr_q <= f_inc_rsrc(f_enc_rsrc(rpick));
+      end
+    end
+
+    logic [XB_RSKID_DEPTH-1:0] rk_vld_d;
+    sf_mem_rsp_t               rk_d [XB_RSKID_DEPTH];
+
+    always_comb begin : p_rk_next
+      logic placed;
+      rk_vld_d = rk_vld_q;
+      for (int unsigned k = 0; k < XB_RSKID_DEPTH; k++) begin
+        rk_d[k] = rk_q[k];
+      end
+      if (rk_pop) begin
+        for (int unsigned k = 0; k + 1 < XB_RSKID_DEPTH; k++) begin
+          rk_d[k] = rk_q[k+1];
+        end
+        rk_vld_d = rk_vld_q >> 1;
+      end
+      placed = 1'b0;
+      for (int unsigned k = 0; k < XB_RSKID_DEPTH; k++) begin
+        if (rk_push && !placed && !rk_vld_d[k]) begin
+          rk_d[k]     = rk_in;
+          rk_vld_d[k] = 1'b1;
+          placed          = 1'b1;
+        end
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_rk_vld_ff
+      if (!rst_ni) begin
+        rk_vld_q <= '0;
+      end else begin
+        rk_vld_q <= rk_vld_d;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_rk_data_ff
+      for (int unsigned k = 0; k < XB_RSKID_DEPTH; k++) begin
+        rk_q[k] <= rk_d[k];
+      end
+    end
+
+    assign xr_rsp_valid[r] = rk_vld_q[0];
+    assign xr_rsp[r]       = rk_q[0];
+    assign xb_q_any[r]     = (|sk_vld_q) | (|eq_vld_q) | (|rk_vld_q);
+  end
+
+  // ===========================================================================
+  // 16. Local interconnect: per-target arbitration
+  //     write-burst lock > starved requester > fixed priority
+  // ===========================================================================
+  for (genvar t = 0; t < NUM_TGT; t++) begin : g_tgt
+    req_vec_t    treq;
+    req_vec_t    starve;
+    req_vec_t    gnt;
+    sf_mem_req_t treq_mux;
+    logic        rsp_rdy;
+    logic        lock_vld_q;
+    req_vec_t lock_own_q;
+    xb_age_t  age_q [NUM_REQ];
+    logic     fire;
+
+    always_comb begin : p_arb
+      mreq_bits_t acc_v;
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        treq[r]   = xb_head_vld[r] & ~xb_head[r].err & xb_head[r].tgt[t];
+        starve[r] = treq[r] & (age_q[r] == xb_age_t'(XB_STARVE_LIM));
+      end
+      if (lock_vld_q) begin
+        gnt = treq & lock_own_q;
+      end else if (|starve) begin
+        gnt = f_lsb_req(starve);
+      end else begin
+        gnt = f_lsb_req(treq);
+      end
+      acc_v = '0;
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        acc_v = acc_v | (mreq_bits_t'(xb_head[r].req) & {$bits(sf_mem_req_t){gnt[r]}});
+      end
+      treq_mux = sf_mem_req_t'(acc_v);
+    end
+
+    assign tgt_req[t]       = treq_mux;
+    assign tgt_req_valid[t] = |gnt;
+    assign tgt_gnt[t]       = gnt & {NUM_REQ{tgt_req_ready[t]}};
+    assign fire             = tgt_req_valid[t] & tgt_req_ready[t];
+    assign tgt_lock_vld[t]  = lock_vld_q;
+    assign tgt_conflict[t]  = (treq & (treq - req_vec_t'(1))) != '0;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_lock_ff
+      if (!rst_ni) begin
+        lock_vld_q <= 1'b0;
+        lock_own_q <= '0;
+      end else if (fire && treq_mux.we) begin
+        lock_vld_q <= ~treq_mux.wlast;
+        lock_own_q <= treq_mux.wlast ? '0 : gnt;
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_age_ff
+      if (!rst_ni) begin
+        for (int unsigned r = 0; r < NUM_REQ; r++) begin
+          age_q[r] <= '0;
+        end
+      end else begin
+        for (int unsigned r = 0; r < NUM_REQ; r++) begin
+          if (!treq[r] || (fire && gnt[r])) begin
+            age_q[r] <= '0;
+          end else if (age_q[r] != xb_age_t'(XB_STARVE_LIM)) begin
+            age_q[r] <= age_q[r] + xb_age_t'(1'b1);
+          end
+        end
+      end
+    end
+
+    always_comb begin : p_rsp_ready
+      rsp_rdy = 1'b0;
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        rsp_rdy = rsp_rdy | rsp_gnt[r][t];
+      end
+    end
+
+    assign tgt_rsp_ready[t] = rsp_rdy;
+
+    assign tgt_rsp_src_bad[t] = tgt_rsp_valid[t] & (32'(tgt_rsp[t].src) >= NUM_REQ);
+  end
+
+  always_comb begin : p_xb_pop
+    for (int unsigned r = 0; r < NUM_REQ; r++) begin
+      xb_pop[r] = xb_err_pop[r];
+      for (int unsigned t = 0; t < NUM_TGT; t++) begin
+        xb_pop[r] = xb_pop[r] | tgt_gnt[t][r];
+      end
+    end
+  end
+
+  // ===========================================================================
+  // 17. Scratchpad memory controller and NoC initiator
+  // ===========================================================================
+  for (genvar p = 0; p < NUM_MC_PORTS; p++) begin : g_mc_bind
+    assign mc_req_valid[p]  = tgt_req_valid[p];
+    assign mc_req[p]        = tgt_req[p];
+    assign tgt_req_ready[p] = mc_req_ready[p];
+    assign tgt_rsp_valid[p] = mc_rsp_valid[p];
+    assign tgt_rsp[p]       = mc_rsp[p];
+    assign mc_rsp_ready[p]  = tgt_rsp_ready[p];
+  end
+
+  memory_controller #(
+    .NUM_PORTS   (NUM_MC_PORTS),
+    .PORT_LINES  (MC_PORT_LINES)
+  ) u_memory_controller (
+    .clk_i       (clk_i),
+    .rst_ni      (rst_ni),
+    .req_valid_i (mc_req_valid),
+    .req_i       (mc_req),
+    .req_ready_o (mc_req_ready),
+    .rsp_valid_o (mc_rsp_valid),
+    .rsp_o       (mc_rsp),
+    .rsp_ready_i (mc_rsp_ready),
+    .idle_o      (mc_idle)
+  );
+
+  if (NOC_EN) begin : g_noc_ini
+    assign noc_ini_req_valid_o    = tgt_req_valid[T_NOC] & ~iso_clamp;
+    assign noc_ini_req_o          = tgt_req[T_NOC];
+    assign tgt_req_ready[T_NOC]   = noc_ini_req_ready_i & ~iso_clamp;
+    assign tgt_rsp_valid[T_NOC]   = noc_ini_rsp_valid_i;
+    assign tgt_rsp[T_NOC]         = noc_ini_rsp_i;
+    assign noc_ini_rsp_ready_o    = tgt_rsp_ready[T_NOC];
+  end else begin : g_noc_ini_off
+    assign noc_ini_req_valid_o    = 1'b0;
+    assign noc_ini_req_o          = '0;
+    assign tgt_req_ready[T_NOC]   = 1'b0;
+    assign tgt_rsp_valid[T_NOC]   = 1'b0;
+    assign tgt_rsp[T_NOC]         = '0;
+    assign noc_ini_rsp_ready_o    = 1'b1;
+
+    logic unused_noc_ini;
+    assign unused_noc_ini = ^{noc_ini_req_ready_i, noc_ini_rsp_valid_i, noc_ini_rsp_i,
+                              tgt_rsp_ready[T_NOC], iso_clamp};
+  end
+
+  logic unused_tile_id;
+  assign unused_tile_id = ^tile_id_i;
+
+  // ===========================================================================
+  // 18. Writeback aggregation
+  // ===========================================================================
+  always_comb begin : p_wb_alloc
+    inst_vec_t   cand;
+    inst_vec_t   rem;
+    inst_vec_t   pick;
+    inst_vec_t   popped;
+    inst_idx_t   last;
+    logic        any;
+    res_bits_t   acc_v;
+    res_ent_t    r;
+
+    for (int unsigned i = 0; i < NUM_INST; i++) begin
+      cand[i] = stg_head_vld[i] & ~stg_head[i].vdest;
+    end
+    rem    = cand;
+    popped = '0;
+    last   = '0;
+    any    = 1'b0;
+    for (int unsigned k = 0; k < NUM_WB_PORTS; k++) begin
+      pick      = f_rr_inst(rem, wb_rr_q);
+      wb_sel[k] = pick;
+      rem       = rem & ~pick;
+      popped    = popped | pick;
+      if (|pick) begin
+        last = f_enc_inst(pick);
+        any  = 1'b1;
+      end
+
+      acc_v = '0;
+      for (int unsigned i = 0; i < NUM_INST; i++) begin
+        acc_v = acc_v | (res_bits_t'(stg_head[i]) & {$bits(res_ent_t){pick[i]}});
+      end
+      r                    = res_ent_t'(acc_v);
+      wb_d[k].prd_valid    = r.meta.prd_valid & ~r.meta.prd_vec & ~r.vdest;
+      wb_d[k].prd          = r.meta.prd;
+      wb_d[k].rob_idx      = r.meta.rob_idx;
+      wb_d[k].itt_id       = r.meta.itt_id;
+      wb_d[k].br_mask      = r.meta.br_mask;
+      wb_d[k].data         = r.xdata;
+      wb_d[k].exc          = r.exc;
+      wb_d[k].br_valid     = r.br_valid;
+      wb_d[k].br_taken     = r.br_taken;
+      wb_d[k].br_target    = r.br_target;
+    end
+
+    wb_rr_d  = any ? f_inc_inst(last) : wb_rr_q;
+    vwb_take = stg_head_vld[I_VEC] & stg_head[I_VEC].vdest;
+
+    for (int unsigned i = 0; i < NUM_INST; i++) begin
+      stg_pop[i] = popped[i] | ((i == I_VEC) & vwb_take);
+    end
+
+    vwb_d.prd     = stg_head[I_VEC].meta.prd;
+    vwb_d.rob_idx = stg_head[I_VEC].meta.rob_idx;
+    vwb_d.itt_id  = stg_head[I_VEC].meta.itt_id;
+    vwb_d.br_mask = stg_head[I_VEC].meta.br_mask;
+    vwb_d.vdata   = stg_vhead;
+    vwb_d.exc     = stg_head[I_VEC].exc;
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_wb_ctl_ff
+    if (!rst_ni) begin
+      wb_vld_q  <= '0;
+      vwb_vld_q <= 1'b0;
+      wb_rr_q   <= '0;
+    end else begin
+      for (int unsigned k = 0; k < NUM_WB_PORTS; k++) begin
+        wb_vld_q[k] <= (|wb_sel[k]) & ~ctl_flush_i;
+      end
+      vwb_vld_q <= vwb_take & ~ctl_flush_i;
+      wb_rr_q   <= wb_rr_d;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_wb_data_ff
+    for (int unsigned k = 0; k < NUM_WB_PORTS; k++) begin
+      if (|wb_sel[k]) begin
+        wb_q[k] <= wb_d[k];
+      end
+    end
+    if (vwb_take) begin
+      vwb_q <= vwb_d;
+    end
+  end
+
+  always_comb begin : p_wb_out
+    for (int unsigned k = 0; k < NUM_WB_PORTS; k++) begin
+      wb_valid_o[k]       = wb_vld_q[k] & ~out_clamp & ~f_mask_hit(wb_q[k].br_mask, br_kill_sel);
+      wb_o[k]             = wb_q[k];
+      wb_o[k].br_mask     = wb_q[k].br_mask & ~br_res_sel;
+      cmpl_o[k].valid     = wb_valid_o[k];
+      cmpl_o[k].prd_valid = wb_q[k].prd_valid;
+      cmpl_o[k].prd       = wb_q[k].prd;
+      cmpl_o[k].itt_id    = wb_q[k].itt_id;
+      cmpl_o[k].rob_idx   = wb_q[k].rob_idx;
+    end
+    vwb_valid_o                    = vwb_vld_q & ~out_clamp & ~f_mask_hit(vwb_q.br_mask, br_kill_sel);
+    vwb_o                          = vwb_q;
+    vwb_o.br_mask                  = vwb_q.br_mask & ~br_res_sel;
+    cmpl_o[NUM_WB_PORTS].valid     = vwb_valid_o;
+    cmpl_o[NUM_WB_PORTS].prd_valid = 1'b1;
+    cmpl_o[NUM_WB_PORTS].prd       = vwb_q.prd;
+    cmpl_o[NUM_WB_PORTS].itt_id    = vwb_q.itt_id;
+    cmpl_o[NUM_WB_PORTS].rob_idx   = vwb_q.rob_idx;
+  end
+
+  // ===========================================================================
+  // 19. Drain tracking, power / clock hooks, status, performance events
+  // ===========================================================================
+  always_comb begin : p_drain
+    req_vec_t own;
+    own     = '1;
+    own[R_NOC] = 1'b0;
+    drained = ~(|le_vld) & ~(|dq_any) & ~(|stg_any) & ~(|unit_busy) &
+              ~(|(xb_q_any & own)) & ~(|wb_vld_q) & ~vwb_vld_q;
+    tile_quiet = drained & ~xb_q_any[R_NOC] & mc_idle;
+  end
+
+  always_comb begin : p_unit_status
+    logic pending;
+    for (int unsigned u = 0; u < NUM_UNITS; u++) begin
+      pending = 1'b0;
+      for (int unsigned k = 0; k < LE; k++) begin
+        pending = pending | (le_vld[k] & le_pend[k][u]);
+      end
+      unit_idle_o[u]  = ~unit_busy[u] & ~dq_any[u] & ~stg_any[u] & ~pending;
+      unit_cg_en_o[u] = ~unit_idle_o[u];
+    end
+  end
+
+  always_comb begin : p_perf
+    logic [ING_CNT_W-1:0] n;
+    logic                 held;
+    n = '0;
+    for (int unsigned l = 0; l < NUM_LANES; l++) begin
+      n = n + ING_CNT_W'(lane_acc[l]);
+    end
+    held = 1'b0;
+    for (int unsigned k = 0; k < LE; k++) begin
+      held = held | (le_vld[k] & (|le_sfx[k]) & (|le_mask[k]));
+    end
+    perf_ingress_o      = n;
+    perf_sfx_held_o     = held;
+    perf_xb_conflict_o  = |tgt_conflict;
+    perf_wb_saturated_o = &wb_vld_q;
+  end
+
+  assign err_set = (|lane_spec_sfx_viol) | lsu_rsp_bad | (|tgt_rsp_src_bad);
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_err_ff
+    if (!rst_ni) begin
+      err_q <= 1'b0;
+    end else begin
+      err_q <= err_q | err_set;
+    end
+  end
+
+  assign tile_idle_o         = tile_quiet & ((state_q == TILE_RUN) | (state_q == TILE_ISO));
+  assign tile_draining_o     = (state_q == TILE_DRAIN);
+  assign tile_iso_o          = (state_q == TILE_ISO);
+  assign tile_mem_quiesced_o = ~(|lsu_txn_vld_q) & ~(|xb_q_any) & mc_idle & ~(|tgt_lock_vld) &
+                               ~unit_busy[I_VEC] & ~(|unit_busy[I_TEN0 +: NUM_TEN]);
+  assign tile_err_o          = err_q;
+
+  // ===========================================================================
+  // 20. Assertions
+  // ===========================================================================
+`ifndef SYNTHESIS
+  inst_vec_t chk_xtr_bad;
+  inst_vec_t chk_route_bad;
+  inst_vec_t chk_sfx_bad;
+  le_vec_t   chk_multi_primary;
+  logic      chk_wb_overlap;
+
+  always_comb begin : p_chk_extract
+    for (int unsigned i = 0; i < NUM_INST; i++) begin
+      chk_xtr_bad[i]   = 1'b0;
+      chk_route_bad[i] = 1'b0;
+      chk_sfx_bad[i]   = 1'b0;
+      if (xtr_fire[i]) begin
+        if (!$onehot(xtr_sel[i])) begin
+          chk_xtr_bad[i] = 1'b1;
+        end
+        for (int unsigned k = 0; k < LE; k++) begin
+          if (xtr_sel[i][k]) begin
+            if (!le_vld[k] || !le_pend[k][i] || le_kill[k]) begin
+              chk_xtr_bad[i] = 1'b1;
+            end
+            if (i == I_FLT) begin
+              if (!le_prim[k][i]) begin
+                chk_route_bad[i] = 1'b1;
+              end
+            end else if (le_prim[k][i]) begin
+              if (f_fu_cls(le_pkt[k].fu) != f_inst_cls(i)) begin
+                chk_route_bad[i] = 1'b1;
+              end
+            end else if (!le_pkt[k].bcast || !le_pkt[k].bcast_mask[f_inst_cls(i)]) begin
+              chk_route_bad[i] = 1'b1;
+            end
+            if ((i != I_FLT) && le_sfx[k][f_inst_cls(i)] && (|(le_mask[k] & ~br_res_sel))) begin
+              chk_sfx_bad[i] = 1'b1;
+            end
+          end
+        end
+      end
+    end
+    for (int unsigned k = 0; k < LE; k++) begin
+      chk_multi_primary[k] = le_vld[k] & ~$onehot(le_prim[k]);
+    end
+  end
+
+  always_comb begin : p_chk_wb
+    inst_vec_t seen;
+    seen           = '0;
+    chk_wb_overlap = 1'b0;
+    for (int unsigned k = 0; k < NUM_WB_PORTS; k++) begin
+      chk_wb_overlap = chk_wb_overlap | (|(seen & wb_sel[k]));
+      seen           = seen | wb_sel[k];
+    end
+  end
+
+  for (genvar t = 0; t < NUM_TGT; t++) begin : g_chk_tgt
+    a_xb_gnt_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $onehot0(g_tgt[t].gnt))
+      else $error("compute_tile: interconnect target granted to multiple requesters");
+
+    a_xb_gnt_acl: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (g_tgt[t].gnt & ~g_tgt[t].treq) == '0)
+      else $error("compute_tile: interconnect grant without a permitted request");
+
+    a_xb_lock_owner: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      g_tgt[t].lock_vld_q |-> ((g_tgt[t].gnt & ~g_tgt[t].lock_own_q) == '0))
+      else $error("compute_tile: write-burst lock violated");
+
+    a_xb_rsp_src: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !tgt_rsp_src_bad[t])
+      else $error("compute_tile: response routed to non-existent requester");
+  end
+
+  for (genvar r = 0; r < NUM_REQ; r++) begin : g_chk_req
+    a_xb_acl_decode: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      xb_head_vld[r] |-> ((xb_head[r].tgt & ~f_acl(r)) == '0))
+      else $error("compute_tile: decoded target outside requester ACL");
+
+    a_xb_rsp_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $onehot0(rsp_gnt[r]))
+      else $error("compute_tile: response merge granted multiple sources");
+  end
+
+  a_extract_legal: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_xtr_bad == '0)
+    else $error("compute_tile: extraction of a non-pending, killed or duplicate entry");
+
+  a_fu_routing: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_route_bad == '0)
+    else $error("compute_tile: packet delivered to a unit outside its class / broadcast set");
+
+  a_single_primary: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_multi_primary == '0)
+    else $error("compute_tile: lane entry without exactly one primary consumer");
+
+  a_no_spec_side_effect: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_sfx_bad == '0)
+    else $error("compute_tile: speculative side-effecting packet released to a unit");
+
+  a_sfx_reservation: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    lane_spec_sfx_viol == '0)
+    else $error("compute_tile: speculative side-effect accepted without ex_sfx_ready_o");
+
+  a_wb_unique: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !chk_wb_overlap)
+    else $error("compute_tile: one result consumed by two writeback ports");
+
+  a_flush_clears: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ctl_flush_i |=> (~(|le_vld) && ~(|dq_any) && ~(|stg_any) && (wb_vld_q == '0) && !vwb_vld_q))
+    else $error("compute_tile: tile state survived a flush");
+
+  a_drain_silent: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (state_q == TILE_DRAIN) |-> ((wb_valid_o == '0) && !vwb_valid_o && (xtr_fire == '0)))
+    else $error("compute_tile: execution or writeback while draining flushed state");
+
+  a_noc_drain_open: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ((state_q == TILE_DRAIN) && tgt_req_valid[T_NOC] && NOC_EN) |-> noc_ini_req_valid_o)
+    else $error("compute_tile: NoC initiator blocked while draining");
+
+  a_iso_clamp: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (state_q == TILE_ISO) |-> ((ex_ready_o == '0) && (wb_valid_o == '0) && !vwb_valid_o &&
+                               !noc_ini_req_valid_o && (xtr_fire == '0)))
+    else $error("compute_tile: isolated tile not clamped");
+
+  a_stall_freeze: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ctl_stall_i |-> (xtr_fire == '0))
+    else $error("compute_tile: dispatch during stall");
+
+  a_lsu_txn_tracked: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !lsu_rsp_bad)
+    else $error("compute_tile: LSU response for an unallocated transaction");
+
+  for (genvar u = 0; u < NUM_UNITS; u++) begin : g_chk_pwr
+    a_pwr_off_idle: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $fell(pwr_on_q[u]) |-> $past(unit_idle_o[u]))
+      else $error("compute_tile: unit powered down while not idle");
+  end
+`endif
+
+endmodule
+
+`default_nettype wire

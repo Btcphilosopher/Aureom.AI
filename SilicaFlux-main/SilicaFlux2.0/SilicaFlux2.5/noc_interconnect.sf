@@ -1,0 +1,1069 @@
+// =============================================================================
+//  SilicaFlux Interconnect Subsystem
+//  File      : noc_interconnect.sf
+//  Language  : Silica Flux-2017
+//  Function  : 2x2 2D-mesh Network-on-Chip, XY dimension-ordered routing,
+//              wormhole switching, valid/ready backpressure
+// -----------------------------------------------------------------------------
+//  Mesh map  : router (NODE_X, NODE_Y), tile ID = {y[Y_W-1:0], x[X_W-1:0]}
+//
+//              (0,1) id2 ======== (1,1) id3
+//                ||                  ||
+//                ||                  ||
+//              (0,0) id0 ======== (1,0) id1
+//
+//              North = +Y, East = +X. Tile port index t = y*MESH_X + x.
+// -----------------------------------------------------------------------------
+//  Router pipeline (2 cycles per hop, all inter-router link signals registered)
+//    S1  BW+RC : arriving flit is written into its input buffer together with
+//                its XY output-port mask, so route computation is removed from
+//                the switch-allocation critical path.
+//    S2  SA+ST : per-output round-robin switch allocation over buffer heads,
+//                one-hot AND-OR crossbar, capture in the egress staging register.
+//    LT        : the egress staging register drives the link directly.
+//
+//  Flow control
+//    Transfer on a link occurs iff valid && ready in the same cycle. Link ready
+//    is the registered !full flag of the downstream buffer and link valid/pkt
+//    are egress flop outputs, so no combinational path crosses a router
+//    boundary and no mesh-level combinational loop can form. Stalls propagate
+//    upstream one hop per cycle through buffer fill. BUF_DEPTH >= 2 sustains
+//    one flit per cycle per link with registered ready.
+//
+//  Correctness argument
+//    Deadlock : XY order prohibits Y->X turns and 180-degree turns, so the
+//               channel dependency graph is acyclic. Enforced by REQ_LEGAL and
+//               asserted at every ingress. Consumption assumption: tiles
+//               eventually accept every ejected flit.
+//    Livelock : routing is minimal and deterministic; every hop strictly
+//               reduces Manhattan distance to the destination.
+//    Starvation: per-output round-robin bounds the wait of any head flit to
+//               NUM_PORTS-1 competing packets (QOS_ARB_EN = 0).
+//    Ordering : single deterministic path plus FIFO buffers give in-order
+//               delivery per (source, destination) pair.
+//
+//  silicaflux_pkg::noc_packet_t contract (packed struct)
+//    dst_id   : destination tile ID, coordinate encoded as above
+//    src_id   : source tile ID, coordinate encoded as above
+//    valid    : packet valid qualifier
+//    qos      : priority class, MSB selects the high-priority class
+//    All other fields (txn_id, spec_tag, payload class/data) are carried
+//    transparently and never inspected by the fabric.
+//
+//  Extension architecture (structural hooks present, features not enabled)
+//    Virtual channels : g_input_buffer[i] is the per-VC storage unit. VCs
+//                       replicate it per port, add VC allocation between RC and
+//                       SA, and move wormhole lock state to per-output-VC.
+//    Adaptive routing : RC is split into xy_productive_ports() and the
+//                       dor_select() selection function. A minimal-adaptive
+//                       selector consumes the same productive mask plus
+//                       perf_link_stall_o congestion state, and requires an XY
+//                       escape VC to retain deadlock freedom.
+//    QoS arbitration  : two-class strict priority ahead of round-robin
+//                       (QOS_ARB_EN). Disabled by default because strict class
+//                       priority removes the round-robin starvation bound.
+//    Credit flow ctrl : ready == registered !full is on/off flow control. Credit
+//                       mode substitutes a credit return pulse on buffer pop and
+//                       an upstream counter initialised to BUF_DEPTH; SA and ST
+//                       are unchanged.
+//    Multicast        : routes are output-port masks. Multicast sets several
+//                       bits and pops the buffer when every requested output has
+//                       granted. Unicast is asserted one-hot.
+//    Congestion       : perf_link_stall_o / perf_hol_block_o export per-port
+//                       link stall and head-of-line blocking every cycle.
+// =============================================================================
+
+
+// =============================================================================
+//  noc_router : 5-port (L/N/E/S/W) wormhole router, XY routing
+// =============================================================================
+module noc_router
+  import silicaflux_pkg::*;
+#(
+  parameter type          pkt_t                = noc_packet_t,
+  parameter int unsigned  MESH_X               = 2,
+  parameter int unsigned  MESH_Y               = 2,
+  parameter int unsigned  NODE_X               = 0,
+  parameter int unsigned  NODE_Y               = 0,
+  parameter int unsigned  BUF_DEPTH            = 4,
+  parameter int unsigned  FLITS_PER_PKT        = 1,
+  parameter bit           QOS_ARB_EN           = 1'b0,
+  parameter int unsigned  PROGRESS_WDOG_CYCLES = 0,
+  localparam int unsigned NUM_PORTS            = 5
+) (
+  input  logic                 clk_i,
+  input  logic                 rst_ni,
+
+  // Local tile port (injection in, ejection out)
+  input  logic                 local_in_valid_i,
+  input  pkt_t                 local_in_pkt_i,
+  output logic                 local_in_ready_o,
+  output logic                 local_out_valid_o,
+  output pkt_t                 local_out_pkt_o,
+  input  logic                 local_out_ready_i,
+
+  // North port (+Y)
+  input  logic                 north_in_valid_i,
+  input  pkt_t                 north_in_pkt_i,
+  output logic                 north_in_ready_o,
+  output logic                 north_out_valid_o,
+  output pkt_t                 north_out_pkt_o,
+  input  logic                 north_out_ready_i,
+
+  // East port (+X)
+  input  logic                 east_in_valid_i,
+  input  pkt_t                 east_in_pkt_i,
+  output logic                 east_in_ready_o,
+  output logic                 east_out_valid_o,
+  output pkt_t                 east_out_pkt_o,
+  input  logic                 east_out_ready_i,
+
+  // South port (-Y)
+  input  logic                 south_in_valid_i,
+  input  pkt_t                 south_in_pkt_i,
+  output logic                 south_in_ready_o,
+  output logic                 south_out_valid_o,
+  output pkt_t                 south_out_pkt_o,
+  input  logic                 south_out_ready_i,
+
+  // West port (-X)
+  input  logic                 west_in_valid_i,
+  input  pkt_t                 west_in_pkt_i,
+  output logic                 west_in_ready_o,
+  output logic                 west_out_valid_o,
+  output pkt_t                 west_out_pkt_o,
+  input  logic                 west_out_ready_i,
+
+  // Congestion telemetry, bit order {W, S, E, N, L}
+  output logic [NUM_PORTS-1:0] perf_link_stall_o,
+  output logic [NUM_PORTS-1:0] perf_hol_block_o,
+  output logic                 idle_o
+);
+
+  // ---------------------------------------------------------------------------
+  // Port enumeration and geometry
+  // ---------------------------------------------------------------------------
+  localparam int unsigned PORT_LOCAL = 0;
+  localparam int unsigned PORT_NORTH = 1;
+  localparam int unsigned PORT_EAST  = 2;
+  localparam int unsigned PORT_SOUTH = 3;
+  localparam int unsigned PORT_WEST  = 4;
+
+  localparam int unsigned X_W        = (MESH_X > 1) ? $clog2(MESH_X) : 1;
+  localparam int unsigned Y_W        = (MESH_Y > 1) ? $clog2(MESH_Y) : 1;
+  localparam int unsigned COORD_W    = X_W + Y_W;
+  localparam int unsigned PTR_W      = (BUF_DEPTH > 1) ? $clog2(BUF_DEPTH) : 1;
+  localparam int unsigned CNT_W      = $clog2(BUF_DEPTH + 1);
+  localparam int unsigned FLIT_CNT_W = (FLITS_PER_PKT > 1) ? $clog2(FLITS_PER_PKT) : 1;
+  localparam int unsigned PKT_W      = $bits(pkt_t);
+
+  localparam logic [X_W-1:0]     MY_X  = X_W'(NODE_X);
+  localparam logic [Y_W-1:0]     MY_Y  = Y_W'(NODE_Y);
+  localparam logic [COORD_W-1:0] MY_ID = {MY_Y, MY_X};
+
+  // ---------------------------------------------------------------------------
+  // Flit buffer entry: packet plus metadata resolved at buffer write
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic                 head;
+    logic                 tail;
+    logic [NUM_PORTS-1:0] route;
+    pkt_t                 pkt;
+  } flit_entry_t;
+
+  // ---------------------------------------------------------------------------
+  // Port-indexed views
+  // ---------------------------------------------------------------------------
+  logic        [NUM_PORTS-1:0]                in_valid;
+  pkt_t                                       in_pkt    [NUM_PORTS];
+  logic        [NUM_PORTS-1:0]                in_ready;
+  logic        [NUM_PORTS-1:0]                in_push;
+  logic        [NUM_PORTS-1:0]                out_valid;
+  pkt_t                                       out_pkt   [NUM_PORTS];
+  logic        [NUM_PORTS-1:0]                out_ready;
+
+  // Route computation (S1)
+  logic        [NUM_PORTS-1:0][NUM_PORTS-1:0] rc_route;      // [in][out]
+  logic        [NUM_PORTS-1:0]                rc_head;
+  logic        [NUM_PORTS-1:0]                rc_tail;
+
+  // Input buffer heads (S1 -> S2)
+  logic        [NUM_PORTS-1:0]                hd_valid;
+  flit_entry_t                                hd_entry  [NUM_PORTS];
+  logic        [NUM_PORTS-1:0]                hd_qos_hi;
+  logic        [NUM_PORTS-1:0]                hd_pop;
+  logic        [CNT_W-1:0]                    buf_count [NUM_PORTS];
+
+  // Switch allocation (S2)
+  logic        [NUM_PORTS-1:0][NUM_PORTS-1:0] sa_req;        // [out][in]
+  logic        [NUM_PORTS-1:0][NUM_PORTS-1:0] sa_gnt;        // [out][in]
+  logic        [NUM_PORTS-1:0]                sa_fire;
+
+  localparam int unsigned TILE_ID_W = $bits(in_pkt[0].dst_id);
+  localparam int unsigned QOS_W     = $bits(in_pkt[0].qos);
+
+  // ---------------------------------------------------------------------------
+  // Elaboration-time configuration checks
+  // ---------------------------------------------------------------------------
+  if (MESH_X < 1 || MESH_Y < 1) begin : g_chk_mesh
+    $error("noc_router: MESH_X and MESH_Y must be >= 1");
+  end
+  if (NODE_X >= MESH_X || NODE_Y >= MESH_Y) begin : g_chk_node
+    $error("noc_router: node (%0d,%0d) outside %0dx%0d mesh", NODE_X, NODE_Y, MESH_X, MESH_Y);
+  end
+  if (BUF_DEPTH < 2) begin : g_chk_depth
+    $error("noc_router: BUF_DEPTH >= 2 required for full-rate registered-ready flow control");
+  end
+  if (FLITS_PER_PKT < 1) begin : g_chk_flits
+    $error("noc_router: FLITS_PER_PKT must be >= 1");
+  end
+  if (TILE_ID_W < COORD_W) begin : g_chk_id_w
+    $error("noc_router: pkt_t.dst_id width %0d < coordinate width %0d", TILE_ID_W, COORD_W);
+  end
+
+  // ---------------------------------------------------------------------------
+  // Static topology functions
+  // ---------------------------------------------------------------------------
+  function automatic logic [NUM_PORTS-1:0] calc_port_en();
+    logic [NUM_PORTS-1:0] en;
+    en             = '0;
+    en[PORT_LOCAL] = 1'b1;
+    en[PORT_NORTH] = (NODE_Y + 1 < MESH_Y);
+    en[PORT_EAST]  = (NODE_X + 1 < MESH_X);
+    en[PORT_SOUTH] = (NODE_Y > 0);
+    en[PORT_WEST]  = (NODE_X > 0);
+    return en;
+  endfunction
+
+  // Legal [input][output] pairs under XY dimension order. Input port names the
+  // side a flit arrived on: a flit on PORT_WEST is travelling eastbound.
+  function automatic logic [NUM_PORTS-1:0][NUM_PORTS-1:0] calc_req_legal();
+    logic [NUM_PORTS-1:0][NUM_PORTS-1:0] legal;
+    logic [NUM_PORTS-1:0]                en;
+    en    = calc_port_en();
+    legal = '0;
+    // Injection: any direction, including local loopback
+    legal[PORT_LOCAL]             = '1;
+    // Eastbound: continue +X, turn into Y, or eject
+    legal[PORT_WEST][PORT_EAST]   = 1'b1;
+    legal[PORT_WEST][PORT_NORTH]  = 1'b1;
+    legal[PORT_WEST][PORT_SOUTH]  = 1'b1;
+    legal[PORT_WEST][PORT_LOCAL]  = 1'b1;
+    // Westbound: continue -X, turn into Y, or eject
+    legal[PORT_EAST][PORT_WEST]   = 1'b1;
+    legal[PORT_EAST][PORT_NORTH]  = 1'b1;
+    legal[PORT_EAST][PORT_SOUTH]  = 1'b1;
+    legal[PORT_EAST][PORT_LOCAL]  = 1'b1;
+    // Northbound: X resolved, continue +Y or eject (no Y->X turn)
+    legal[PORT_SOUTH][PORT_NORTH] = 1'b1;
+    legal[PORT_SOUTH][PORT_LOCAL] = 1'b1;
+    // Southbound: X resolved, continue -Y or eject (no Y->X turn)
+    legal[PORT_NORTH][PORT_SOUTH] = 1'b1;
+    legal[PORT_NORTH][PORT_LOCAL] = 1'b1;
+    for (int p = 0; p < NUM_PORTS; p++) begin
+      legal[p] = en[p] ? (legal[p] & en) : '0;
+    end
+    return legal;
+  endfunction
+
+  localparam logic [NUM_PORTS-1:0]                PORT_EN   = calc_port_en();
+  localparam logic [NUM_PORTS-1:0][NUM_PORTS-1:0] REQ_LEGAL = calc_req_legal();
+
+  // ---------------------------------------------------------------------------
+  // Routing functions
+  // ---------------------------------------------------------------------------
+  // All minimal (distance-reducing) output ports for a destination, from the
+  // signed coordinate offsets delta = dst - node
+  function automatic logic [NUM_PORTS-1:0] xy_productive_ports(
+    input logic [X_W-1:0] dst_x,
+    input logic [Y_W-1:0] dst_y
+  );
+    logic [NUM_PORTS-1:0] prod;
+    logic [X_W:0]         delta_x;
+    logic [Y_W:0]         delta_y;
+    logic                 x_done;
+    logic                 y_done;
+    delta_x          = {1'b0, dst_x} - {1'b0, MY_X};
+    delta_y          = {1'b0, dst_y} - {1'b0, MY_Y};
+    x_done           = (delta_x == '0);
+    y_done           = (delta_y == '0);
+    prod             = '0;
+    prod[PORT_EAST]  = ~delta_x[X_W] & ~x_done;
+    prod[PORT_WEST]  =  delta_x[X_W];
+    prod[PORT_NORTH] = ~delta_y[Y_W] & ~y_done;
+    prod[PORT_SOUTH] =  delta_y[Y_W];
+    prod[PORT_LOCAL] =  x_done & y_done;
+    return prod;
+  endfunction
+
+  // Dimension-order selection: resolve X, then Y, then eject
+  function automatic logic [NUM_PORTS-1:0] dor_select(
+    input logic [NUM_PORTS-1:0] prod
+  );
+    logic [NUM_PORTS-1:0] sel;
+    sel = '0;
+    if (prod[PORT_EAST] || prod[PORT_WEST]) begin
+      sel[PORT_EAST]  = prod[PORT_EAST];
+      sel[PORT_WEST]  = prod[PORT_WEST];
+    end else if (prod[PORT_NORTH] || prod[PORT_SOUTH]) begin
+      sel[PORT_NORTH] = prod[PORT_NORTH];
+      sel[PORT_SOUTH] = prod[PORT_SOUTH];
+    end else begin
+      sel[PORT_LOCAL] = prod[PORT_LOCAL];
+    end
+    return sel;
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // Arbitration / buffering helpers
+  // ---------------------------------------------------------------------------
+  function automatic logic [NUM_PORTS-1:0] lsb_onehot(
+    input logic [NUM_PORTS-1:0] vec
+  );
+    return vec & (~vec + NUM_PORTS'(1));
+  endfunction
+
+  function automatic logic [PTR_W-1:0] ptr_inc(
+    input logic [PTR_W-1:0] ptr
+  );
+    return (ptr == PTR_W'(BUF_DEPTH - 1)) ? '0 : (ptr + PTR_W'(1));
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // Directional port binding
+  // ---------------------------------------------------------------------------
+  assign in_valid[PORT_LOCAL]  = local_in_valid_i;
+  assign in_valid[PORT_NORTH]  = north_in_valid_i;
+  assign in_valid[PORT_EAST]   = east_in_valid_i;
+  assign in_valid[PORT_SOUTH]  = south_in_valid_i;
+  assign in_valid[PORT_WEST]   = west_in_valid_i;
+
+  assign in_pkt[PORT_LOCAL]    = local_in_pkt_i;
+  assign in_pkt[PORT_NORTH]    = north_in_pkt_i;
+  assign in_pkt[PORT_EAST]     = east_in_pkt_i;
+  assign in_pkt[PORT_SOUTH]    = south_in_pkt_i;
+  assign in_pkt[PORT_WEST]     = west_in_pkt_i;
+
+  assign local_in_ready_o      = in_ready[PORT_LOCAL];
+  assign north_in_ready_o      = in_ready[PORT_NORTH];
+  assign east_in_ready_o       = in_ready[PORT_EAST];
+  assign south_in_ready_o      = in_ready[PORT_SOUTH];
+  assign west_in_ready_o       = in_ready[PORT_WEST];
+
+  assign local_out_valid_o     = out_valid[PORT_LOCAL];
+  assign north_out_valid_o     = out_valid[PORT_NORTH];
+  assign east_out_valid_o      = out_valid[PORT_EAST];
+  assign south_out_valid_o     = out_valid[PORT_SOUTH];
+  assign west_out_valid_o      = out_valid[PORT_WEST];
+
+  assign local_out_pkt_o       = out_pkt[PORT_LOCAL];
+  assign north_out_pkt_o       = out_pkt[PORT_NORTH];
+  assign east_out_pkt_o        = out_pkt[PORT_EAST];
+  assign south_out_pkt_o       = out_pkt[PORT_SOUTH];
+  assign west_out_pkt_o        = out_pkt[PORT_WEST];
+
+  assign out_ready[PORT_LOCAL] = local_out_ready_i;
+  assign out_ready[PORT_NORTH] = north_out_ready_i;
+  assign out_ready[PORT_EAST]  = east_out_ready_i;
+  assign out_ready[PORT_SOUTH] = south_out_ready_i;
+  assign out_ready[PORT_WEST]  = west_out_ready_i;
+
+  // ===========================================================================
+  // S1a : Route computation (on the arriving flit, stored with it)
+  // ===========================================================================
+  for (genvar i = 0; i < NUM_PORTS; i++) begin : g_route_compute
+    if (PORT_EN[i]) begin : g_port
+      logic [X_W-1:0]       dst_x;
+      logic [Y_W-1:0]       dst_y;
+      logic [NUM_PORTS-1:0] productive;
+      logic [NUM_PORTS-1:0] route_raw;
+      logic                 head;
+      logic                 tail;
+
+      assign dst_x      = in_pkt[i].dst_id[X_W-1:0];
+      assign dst_y      = in_pkt[i].dst_id[X_W +: Y_W];
+      assign productive = xy_productive_ports(dst_x, dst_y);
+
+      if (FLITS_PER_PKT > 1) begin : g_wormhole
+        // Head flit carries the route; body/tail flits follow the held route
+        logic [FLIT_CNT_W-1:0] flit_idx_q;
+        logic [NUM_PORTS-1:0]  route_hold_q;
+
+        assign head      = (flit_idx_q == '0);
+        assign tail      = (flit_idx_q == FLIT_CNT_W'(FLITS_PER_PKT - 1));
+        assign route_raw = head ? dor_select(productive) : route_hold_q;
+
+        always_ff @(posedge clk_i or negedge rst_ni) begin
+          if (!rst_ni) begin
+            flit_idx_q   <= '0;
+            route_hold_q <= '0;
+          end else if (in_push[i]) begin
+            flit_idx_q <= tail ? '0 : (flit_idx_q + FLIT_CNT_W'(1));
+            if (head) begin
+              route_hold_q <= route_raw;
+            end
+          end
+        end
+      end else begin : g_single_beat
+        assign head      = 1'b1;
+        assign tail      = 1'b1;
+        assign route_raw = dor_select(productive);
+      end
+
+      assign rc_route[i] = route_raw & REQ_LEGAL[i];
+      assign rc_head[i]  = head;
+      assign rc_tail[i]  = tail;
+
+`ifndef SYNTHESIS
+      // Unicast routing produces exactly one output port
+      a_rc_unicast: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (in_push[i] && head) |-> $onehot(route_raw))
+        else $error("noc_router(%0d,%0d) port %0d: route not one-hot", NODE_X, NODE_Y, i);
+
+      // Dimension-order turn rule and boundary reachability
+      a_rc_turn_legal: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (in_push[i] && head) |-> ((route_raw & ~REQ_LEGAL[i]) == '0))
+        else $error("noc_router(%0d,%0d) port %0d: illegal XY turn", NODE_X, NODE_Y, i);
+
+      // XY invariants on arriving traffic
+      if (i == PORT_WEST) begin : g_xy_inv
+        a_xy_eastbound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> (dst_x >= MY_X))
+          else $error("noc_router(%0d,%0d): eastbound flit overshot X", NODE_X, NODE_Y);
+      end else if (i == PORT_EAST) begin : g_xy_inv
+        a_xy_westbound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> (dst_x <= MY_X))
+          else $error("noc_router(%0d,%0d): westbound flit overshot X", NODE_X, NODE_Y);
+      end else if (i == PORT_SOUTH) begin : g_xy_inv
+        a_xy_northbound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> ((dst_x == MY_X) && (dst_y >= MY_Y)))
+          else $error("noc_router(%0d,%0d): northbound flit with unresolved X", NODE_X, NODE_Y);
+      end else if (i == PORT_NORTH) begin : g_xy_inv
+        a_xy_southbound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> ((dst_x == MY_X) && (dst_y <= MY_Y)))
+          else $error("noc_router(%0d,%0d): southbound flit with unresolved X", NODE_X, NODE_Y);
+      end else begin : g_xy_inv
+        // Injection: destination must exist, source must be this tile
+        a_inj_reachable: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |->
+            (((in_pkt[i].dst_id >> COORD_W) == '0) &&
+             (32'(dst_x) < MESH_X) && (32'(dst_y) < MESH_Y)))
+          else $error("noc_router(%0d,%0d): unreachable destination", NODE_X, NODE_Y);
+        a_inj_src_id: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> (in_pkt[i].src_id == TILE_ID_W'(MY_ID)))
+          else $error("noc_router(%0d,%0d): src_id does not match tile", NODE_X, NODE_Y);
+        a_inj_pkt_valid: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          (in_push[i] && head) |-> in_pkt[i].valid)
+          else $error("noc_router(%0d,%0d): injected head without pkt.valid", NODE_X, NODE_Y);
+      end
+`endif
+    end else begin : g_absent
+      assign rc_route[i] = '0;
+      assign rc_head[i]  = 1'b0;
+      assign rc_tail[i]  = 1'b0;
+    end
+  end
+
+  // ===========================================================================
+  // S1b : Input buffering (circular FIFO, registered full/empty)
+  // ===========================================================================
+  for (genvar i = 0; i < NUM_PORTS; i++) begin : g_input_buffer
+    if (PORT_EN[i]) begin : g_port
+      flit_entry_t       mem [BUF_DEPTH];
+      flit_entry_t       wr_entry;
+      logic [PTR_W-1:0]  wr_ptr_q;
+      logic [PTR_W-1:0]  rd_ptr_q;
+      logic [CNT_W-1:0]  count_q;
+      logic [CNT_W-1:0]  count_d;
+      logic              full_q;
+      logic              empty_q;
+      logic              push;
+      logic              pop;
+
+      assign push        = in_valid[i] & ~full_q;
+      assign pop         = hd_pop[i];
+      assign in_ready[i] = ~full_q;
+      assign in_push[i]  = push;
+
+      assign wr_entry = '{head:  rc_head[i],
+                          tail:  rc_tail[i],
+                          route: rc_route[i],
+                          pkt:   in_pkt[i]};
+
+      always_comb begin
+        unique case ({push, pop})
+          2'b10:   count_d = count_q + CNT_W'(1);
+          2'b01:   count_d = count_q - CNT_W'(1);
+          default: count_d = count_q;
+        endcase
+      end
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          wr_ptr_q <= '0;
+          rd_ptr_q <= '0;
+          count_q  <= '0;
+          full_q   <= 1'b0;
+          empty_q  <= 1'b1;
+        end else begin
+          if (push) begin
+            wr_ptr_q <= ptr_inc(wr_ptr_q);
+          end
+          if (pop) begin
+            rd_ptr_q <= ptr_inc(rd_ptr_q);
+          end
+          count_q <= count_d;
+          full_q  <= (count_d == CNT_W'(BUF_DEPTH));
+          empty_q <= (count_d == '0);
+        end
+      end
+
+      // Datapath storage: no reset, written only on accepted transfer
+      always_ff @(posedge clk_i) begin
+        if (push) begin
+          mem[wr_ptr_q] <= wr_entry;
+        end
+      end
+
+      assign hd_valid[i]  = ~empty_q;
+      assign hd_entry[i]  = mem[rd_ptr_q];
+      assign buf_count[i] = count_q;
+
+`ifndef SYNTHESIS
+      a_buf_no_overflow: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        push |-> (count_q < CNT_W'(BUF_DEPTH)))
+        else $error("noc_router(%0d,%0d) port %0d: buffer overflow", NODE_X, NODE_Y, i);
+      a_buf_no_underflow: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        pop |-> !empty_q)
+        else $error("noc_router(%0d,%0d) port %0d: buffer underflow", NODE_X, NODE_Y, i);
+      a_buf_flags: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (full_q == (count_q == CNT_W'(BUF_DEPTH))) && (empty_q == (count_q == '0)))
+        else $error("noc_router(%0d,%0d) port %0d: buffer flag mismatch", NODE_X, NODE_Y, i);
+      // Upstream must hold valid and payload stable until accepted
+      a_in_handshake_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (in_valid[i] && !in_ready[i]) |=> (in_valid[i] && $stable(in_pkt[i])))
+        else $error("noc_router(%0d,%0d) port %0d: ingress valid/pkt dropped under stall",
+                    NODE_X, NODE_Y, i);
+`endif
+    end else begin : g_absent
+      assign in_ready[i]  = 1'b0;
+      assign in_push[i]   = 1'b0;
+      assign hd_valid[i]  = 1'b0;
+      assign hd_entry[i]  = '0;
+      assign buf_count[i] = '0;
+
+`ifndef SYNTHESIS
+      a_absent_port_quiet: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        !in_valid[i] && (in_pkt[i] == '0))
+        else $error("noc_router(%0d,%0d) port %0d: traffic on absent port", NODE_X, NODE_Y, i);
+`endif
+    end
+  end
+
+  // QoS class of each buffer head
+  always_comb begin
+    for (int i = 0; i < NUM_PORTS; i++) begin
+      hd_qos_hi[i] = QOS_ARB_EN & hd_entry[i].pkt.qos[QOS_W-1];
+    end
+  end
+
+  // Switch requests, pruned to legal XY turns at elaboration
+  always_comb begin
+    for (int o = 0; o < NUM_PORTS; o++) begin
+      for (int i = 0; i < NUM_PORTS; i++) begin
+        sa_req[o][i] = hd_valid[i] & hd_entry[i].route[o] & REQ_LEGAL[i][o];
+      end
+    end
+  end
+
+  // Buffer pop: a head leaves when any output grants it
+  always_comb begin
+    hd_pop = '0;
+    for (int o = 0; o < NUM_PORTS; o++) begin
+      hd_pop |= sa_gnt[o];
+    end
+  end
+
+  // ===========================================================================
+  // S2a : Switch allocation (per-output round-robin, wormhole lock)
+  // ===========================================================================
+  for (genvar o = 0; o < NUM_PORTS; o++) begin : g_switch_alloc
+    if (PORT_EN[o]) begin : g_port
+      logic [NUM_PORTS-1:0] req;
+      logic [NUM_PORTS-1:0] req_hi;
+      logic [NUM_PORTS-1:0] req_arb;
+      logic [NUM_PORTS-1:0] req_masked;
+      logic [NUM_PORTS-1:0] gnt_rr;
+      logic [NUM_PORTS-1:0] gnt_sel;
+      logic [NUM_PORTS-1:0] rr_mask_q;
+      logic                 out_can_accept;
+      logic                 arb_advance;
+
+      assign req            = sa_req[o];
+      assign req_hi         = req & hd_qos_hi;
+      assign req_arb        = (|req_hi) ? req_hi : req;
+      assign req_masked     = req_arb & rr_mask_q;
+      assign gnt_rr         = (|req_masked) ? lsb_onehot(req_masked) : lsb_onehot(req_arb);
+      assign out_can_accept = ~out_valid[o] | out_ready[o];
+
+      if (FLITS_PER_PKT > 1) begin : g_wormhole_lock
+        // Output held by one input from head flit through tail flit
+        logic                 lock_q;
+        logic [NUM_PORTS-1:0] owner_q;
+        logic [NUM_PORTS-1:0] hd_tail;
+
+        always_comb begin
+          for (int i = 0; i < NUM_PORTS; i++) begin
+            hd_tail[i] = hd_entry[i].tail;
+          end
+        end
+
+        assign gnt_sel     = lock_q ? (req & owner_q) : gnt_rr;
+        assign arb_advance = sa_fire[o] & ~lock_q;
+
+        always_ff @(posedge clk_i or negedge rst_ni) begin
+          if (!rst_ni) begin
+            lock_q  <= 1'b0;
+            owner_q <= '0;
+          end else if (sa_fire[o]) begin
+            lock_q  <= ~|(gnt_sel & hd_tail);
+            owner_q <= gnt_sel;
+          end
+        end
+
+`ifndef SYNTHESIS
+        a_lock_owner_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          lock_q |-> $onehot(owner_q))
+          else $error("noc_router(%0d,%0d) out %0d: invalid lock owner", NODE_X, NODE_Y, o);
+`endif
+      end else begin : g_single_beat
+        assign gnt_sel     = gnt_rr;
+        assign arb_advance = sa_fire[o];
+      end
+
+      assign sa_gnt[o]  = out_can_accept ? gnt_sel : '0;
+      assign sa_fire[o] = |sa_gnt[o];
+
+      // Priority rotates past the winner of each newly allocated packet
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          rr_mask_q <= '0;
+        end else if (arb_advance) begin
+          rr_mask_q <= ~(sa_gnt[o] | (sa_gnt[o] - NUM_PORTS'(1)));
+        end
+      end
+    end else begin : g_absent
+      assign sa_gnt[o]  = '0;
+      assign sa_fire[o] = 1'b0;
+    end
+  end
+
+  // ===========================================================================
+  // S2b : Crossbar traversal and egress staging register (drives the link)
+  // ===========================================================================
+  for (genvar o = 0; o < NUM_PORTS; o++) begin : g_egress
+    if (PORT_EN[o]) begin : g_port
+      logic [PKT_W-1:0] xbar_bits;
+      logic             valid_q;
+      pkt_t             pkt_q;
+
+      // One-hot AND-OR crossbar column
+      always_comb begin
+        xbar_bits = '0;
+        for (int i = 0; i < NUM_PORTS; i++) begin
+          xbar_bits |= {PKT_W{sa_gnt[o][i]}} & hd_entry[i].pkt;
+        end
+      end
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          valid_q <= 1'b0;
+        end else if (sa_fire[o]) begin
+          valid_q <= 1'b1;
+        end else if (out_ready[o]) begin
+          valid_q <= 1'b0;
+        end
+      end
+
+      always_ff @(posedge clk_i) begin
+        if (sa_fire[o]) begin
+          pkt_q <= pkt_t'(xbar_bits);
+        end
+      end
+
+      assign out_valid[o] = valid_q;
+      assign out_pkt[o]   = pkt_q;
+
+`ifndef SYNTHESIS
+      a_out_handshake_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+        (out_valid[o] && !out_ready[o]) |=> (out_valid[o] && $stable(out_pkt[o])))
+        else $error("noc_router(%0d,%0d) out %0d: egress valid/pkt dropped under stall",
+                    NODE_X, NODE_Y, o);
+
+      if (PROGRESS_WDOG_CYCLES > 0) begin : g_progress_wdog
+        localparam int unsigned WDOG_W = $clog2(PROGRESS_WDOG_CYCLES + 1);
+        logic [WDOG_W-1:0] stall_cnt_q;
+
+        always_ff @(posedge clk_i or negedge rst_ni) begin
+          if (!rst_ni) begin
+            stall_cnt_q <= '0;
+          end else if (out_valid[o] && !out_ready[o]) begin
+            if (stall_cnt_q != '1) begin
+              stall_cnt_q <= stall_cnt_q + WDOG_W'(1);
+            end
+          end else begin
+            stall_cnt_q <= '0;
+          end
+        end
+
+        a_forward_progress: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          32'(stall_cnt_q) < PROGRESS_WDOG_CYCLES)
+          else $error("noc_router(%0d,%0d) out %0d: no forward progress in %0d cycles",
+                      NODE_X, NODE_Y, o, PROGRESS_WDOG_CYCLES);
+      end
+`endif
+    end else begin : g_absent
+      assign out_valid[o] = 1'b0;
+      assign out_pkt[o]   = '0;
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Telemetry
+  // ---------------------------------------------------------------------------
+  assign perf_link_stall_o = out_valid & ~out_ready;
+  assign perf_hol_block_o  = hd_valid & ~hd_pop;
+  assign idle_o            = ~|{hd_valid, out_valid};
+
+  // ---------------------------------------------------------------------------
+  // Router-level safety checks
+  // ---------------------------------------------------------------------------
+`ifndef SYNTHESIS
+  localparam int unsigned OCC_W = $clog2(NUM_PORTS * (BUF_DEPTH + 1) + 1);
+
+  logic [NUM_PORTS-1:0][NUM_PORTS-1:0] sa_gnt_by_in;   // [in][out]
+  logic [OCC_W-1:0]                    occ_actual;
+  logic [OCC_W-1:0]                    occ_shadow_q;
+
+  always_comb begin
+    for (int i = 0; i < NUM_PORTS; i++) begin
+      for (int o = 0; o < NUM_PORTS; o++) begin
+        sa_gnt_by_in[i][o] = sa_gnt[o][i];
+      end
+    end
+  end
+
+  always_comb begin
+    occ_actual = OCC_W'($countones(out_valid));
+    for (int i = 0; i < NUM_PORTS; i++) begin
+      occ_actual += OCC_W'(buf_count[i]);
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      occ_shadow_q <= '0;
+    end else begin
+      occ_shadow_q <= occ_shadow_q
+                    + OCC_W'($countones(in_valid & in_ready))
+                    - OCC_W'($countones(out_valid & out_ready));
+    end
+  end
+
+  for (genvar p = 0; p < NUM_PORTS; p++) begin : g_switch_checks
+    a_gnt_onehot_per_output: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $onehot0(sa_gnt[p]))
+      else $error("noc_router(%0d,%0d) out %0d: multiple grants", NODE_X, NODE_Y, p);
+    a_gnt_onehot_per_input: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $onehot0(sa_gnt_by_in[p]))
+      else $error("noc_router(%0d,%0d) in %0d: flit granted to multiple outputs",
+                  NODE_X, NODE_Y, p);
+    a_gnt_requires_req: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (sa_gnt[p] & ~sa_req[p]) == '0)
+      else $error("noc_router(%0d,%0d) out %0d: grant without request", NODE_X, NODE_Y, p);
+    a_ctrl_known: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      !$isunknown({in_valid[p], in_ready[p], out_valid[p], out_ready[p], hd_valid[p]}))
+      else $error("noc_router(%0d,%0d) port %0d: X on handshake", NODE_X, NODE_Y, p);
+    // Ejected head flits must be addressed to this tile
+    a_eject_dst: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (sa_gnt[PORT_LOCAL][p] && hd_entry[p].head) |->
+        (hd_entry[p].pkt.dst_id == TILE_ID_W'(MY_ID)))
+      else $error("noc_router(%0d,%0d): misdelivered flit from port %0d", NODE_X, NODE_Y, p);
+  end
+
+  // Every buffer pop lands in exactly one egress register (no loss/duplication)
+  a_xbar_conservation: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    $countones(hd_pop) == $countones(sa_fire))
+    else $error("noc_router(%0d,%0d): crossbar flit conservation violated", NODE_X, NODE_Y);
+
+  // Router occupancy equals accepted-in minus delivered-out
+  a_flit_conservation: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    occ_shadow_q == occ_actual)
+    else $error("noc_router(%0d,%0d): flit conservation violated", NODE_X, NODE_Y);
+`endif
+
+endmodule : noc_router
+
+
+// =============================================================================
+//  noc_interconnect : 2x2 XY mesh fabric
+// =============================================================================
+module noc_interconnect
+  import silicaflux_pkg::*;
+#(
+  parameter type          pkt_t                = noc_packet_t,
+  parameter int unsigned  MESH_X               = 2,
+  parameter int unsigned  MESH_Y               = 2,
+  parameter int unsigned  BUF_DEPTH            = 4,
+  parameter int unsigned  FLITS_PER_PKT        = 1,
+  parameter bit           QOS_ARB_EN           = 1'b0,
+  parameter int unsigned  PROGRESS_WDOG_CYCLES = 0,
+  localparam int unsigned NUM_TILES            = MESH_X * MESH_Y,
+  localparam int unsigned NUM_PORTS            = 5
+) (
+  input  logic                                clk_i,
+  input  logic                                rst_ni,
+
+  // Tile injection (compute_tile -> NoC), index t = y*MESH_X + x
+  input  logic [NUM_TILES-1:0]                tile_inj_valid_i,
+  input  pkt_t [NUM_TILES-1:0]                tile_inj_pkt_i,
+  output logic [NUM_TILES-1:0]                tile_inj_ready_o,
+
+  // Tile ejection (NoC -> compute_tile), index t = y*MESH_X + x
+  output logic [NUM_TILES-1:0]                tile_ej_valid_o,
+  output pkt_t [NUM_TILES-1:0]                tile_ej_pkt_o,
+  input  logic [NUM_TILES-1:0]                tile_ej_ready_i,
+
+  // Congestion telemetry per router, port order {W, S, E, N, L}
+  output logic [NUM_TILES-1:0][NUM_PORTS-1:0] perf_link_stall_o,
+  output logic [NUM_TILES-1:0][NUM_PORTS-1:0] perf_hol_block_o,
+
+  // Fabric quiescent: all buffers and egress registers empty
+  output logic                                noc_idle_o
+);
+
+  // ---------------------------------------------------------------------------
+  // Elaboration-time configuration checks
+  // ---------------------------------------------------------------------------
+  if (MESH_X < 1 || MESH_Y < 1) begin : g_chk_mesh
+    $error("noc_interconnect: MESH_X and MESH_Y must be >= 1");
+  end
+
+  // ---------------------------------------------------------------------------
+  // Directional mesh links, indexed by the SOURCE router (x, y)
+  //   lnk_east_*  [x][y] : (x,y) -> (x+1,y)
+  //   lnk_west_*  [x][y] : (x,y) -> (x-1,y)
+  //   lnk_north_* [x][y] : (x,y) -> (x,y+1)
+  //   lnk_south_* [x][y] : (x,y) -> (x,y-1)
+  // valid/pkt driven by the source egress, ready by the sink ingress.
+  // ---------------------------------------------------------------------------
+  logic lnk_east_valid  [MESH_X][MESH_Y];
+  pkt_t lnk_east_pkt    [MESH_X][MESH_Y];
+  logic lnk_east_ready  [MESH_X][MESH_Y];
+
+  logic lnk_west_valid  [MESH_X][MESH_Y];
+  pkt_t lnk_west_pkt    [MESH_X][MESH_Y];
+  logic lnk_west_ready  [MESH_X][MESH_Y];
+
+  logic lnk_north_valid [MESH_X][MESH_Y];
+  pkt_t lnk_north_pkt   [MESH_X][MESH_Y];
+  logic lnk_north_ready [MESH_X][MESH_Y];
+
+  logic lnk_south_valid [MESH_X][MESH_Y];
+  pkt_t lnk_south_pkt   [MESH_X][MESH_Y];
+  logic lnk_south_ready [MESH_X][MESH_Y];
+
+  logic [NUM_TILES-1:0] router_idle;
+
+  // ---------------------------------------------------------------------------
+  // Router array: Router[x][y] = g_router_x[x].g_router_y[y].u_router
+  //   Router[0][0] tile 0   Router[1][0] tile 1
+  //   Router[0][1] tile 2   Router[1][1] tile 3
+  // ---------------------------------------------------------------------------
+  for (genvar gx = 0; gx < MESH_X; gx++) begin : g_router_x
+    for (genvar gy = 0; gy < MESH_Y; gy++) begin : g_router_y
+      localparam int unsigned TILE = gy * MESH_X + gx;
+
+      logic north_in_valid;
+      pkt_t north_in_pkt;
+      logic north_in_ready;
+
+      logic east_in_valid;
+      pkt_t east_in_pkt;
+      logic east_in_ready;
+
+      logic south_in_valid;
+      pkt_t south_in_pkt;
+      logic south_in_ready;
+
+      logic west_in_valid;
+      pkt_t west_in_pkt;
+      logic west_in_ready;
+
+      noc_router #(
+        .pkt_t                (pkt_t),
+        .MESH_X               (MESH_X),
+        .MESH_Y               (MESH_Y),
+        .NODE_X               (gx),
+        .NODE_Y               (gy),
+        .BUF_DEPTH            (BUF_DEPTH),
+        .FLITS_PER_PKT        (FLITS_PER_PKT),
+        .QOS_ARB_EN           (QOS_ARB_EN),
+        .PROGRESS_WDOG_CYCLES (PROGRESS_WDOG_CYCLES)
+      ) u_router (
+        .clk_i             (clk_i),
+        .rst_ni            (rst_ni),
+
+        .local_in_valid_i  (tile_inj_valid_i[TILE]),
+        .local_in_pkt_i    (tile_inj_pkt_i[TILE]),
+        .local_in_ready_o  (tile_inj_ready_o[TILE]),
+        .local_out_valid_o (tile_ej_valid_o[TILE]),
+        .local_out_pkt_o   (tile_ej_pkt_o[TILE]),
+        .local_out_ready_i (tile_ej_ready_i[TILE]),
+
+        .north_in_valid_i  (north_in_valid),
+        .north_in_pkt_i    (north_in_pkt),
+        .north_in_ready_o  (north_in_ready),
+        .north_out_valid_o (lnk_north_valid[gx][gy]),
+        .north_out_pkt_o   (lnk_north_pkt[gx][gy]),
+        .north_out_ready_i (lnk_north_ready[gx][gy]),
+
+        .east_in_valid_i   (east_in_valid),
+        .east_in_pkt_i     (east_in_pkt),
+        .east_in_ready_o   (east_in_ready),
+        .east_out_valid_o  (lnk_east_valid[gx][gy]),
+        .east_out_pkt_o    (lnk_east_pkt[gx][gy]),
+        .east_out_ready_i  (lnk_east_ready[gx][gy]),
+
+        .south_in_valid_i  (south_in_valid),
+        .south_in_pkt_i    (south_in_pkt),
+        .south_in_ready_o  (south_in_ready),
+        .south_out_valid_o (lnk_south_valid[gx][gy]),
+        .south_out_pkt_o   (lnk_south_pkt[gx][gy]),
+        .south_out_ready_i (lnk_south_ready[gx][gy]),
+
+        .west_in_valid_i   (west_in_valid),
+        .west_in_pkt_i     (west_in_pkt),
+        .west_in_ready_o   (west_in_ready),
+        .west_out_valid_o  (lnk_west_valid[gx][gy]),
+        .west_out_pkt_o    (lnk_west_pkt[gx][gy]),
+        .west_out_ready_i  (lnk_west_ready[gx][gy]),
+
+        .perf_link_stall_o (perf_link_stall_o[TILE]),
+        .perf_hol_block_o  (perf_hol_block_o[TILE]),
+        .idle_o            (router_idle[TILE])
+      );
+
+      // -- North side: sink of (gx,gy+1) southbound link ----------------------
+      if (gy + 1 < MESH_Y) begin : g_north_link
+        assign north_in_valid             = lnk_south_valid[gx][gy+1];
+        assign north_in_pkt               = lnk_south_pkt[gx][gy+1];
+        assign lnk_south_ready[gx][gy+1]  = north_in_ready;
+      end else begin : g_north_edge
+        assign north_in_valid             = 1'b0;
+        assign north_in_pkt               = '0;
+        assign lnk_north_ready[gx][gy]    = 1'b0;
+`ifndef SYNTHESIS
+        a_north_edge_isolated: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          !lnk_north_valid[gx][gy] && (lnk_north_pkt[gx][gy] == '0) && !north_in_ready)
+          else $error("noc_interconnect: traffic on north mesh boundary at (%0d,%0d)", gx, gy);
+`endif
+      end
+
+      // -- East side: sink of (gx+1,gy) westbound link ------------------------
+      if (gx + 1 < MESH_X) begin : g_east_link
+        assign east_in_valid              = lnk_west_valid[gx+1][gy];
+        assign east_in_pkt                = lnk_west_pkt[gx+1][gy];
+        assign lnk_west_ready[gx+1][gy]   = east_in_ready;
+      end else begin : g_east_edge
+        assign east_in_valid              = 1'b0;
+        assign east_in_pkt                = '0;
+        assign lnk_east_ready[gx][gy]     = 1'b0;
+`ifndef SYNTHESIS
+        a_east_edge_isolated: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          !lnk_east_valid[gx][gy] && (lnk_east_pkt[gx][gy] == '0) && !east_in_ready)
+          else $error("noc_interconnect: traffic on east mesh boundary at (%0d,%0d)", gx, gy);
+`endif
+      end
+
+      // -- South side: sink of (gx,gy-1) northbound link ----------------------
+      if (gy > 0) begin : g_south_link
+        assign south_in_valid             = lnk_north_valid[gx][gy-1];
+        assign south_in_pkt               = lnk_north_pkt[gx][gy-1];
+        assign lnk_north_ready[gx][gy-1]  = south_in_ready;
+      end else begin : g_south_edge
+        assign south_in_valid             = 1'b0;
+        assign south_in_pkt               = '0;
+        assign lnk_south_ready[gx][gy]    = 1'b0;
+`ifndef SYNTHESIS
+        a_south_edge_isolated: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          !lnk_south_valid[gx][gy] && (lnk_south_pkt[gx][gy] == '0) && !south_in_ready)
+          else $error("noc_interconnect: traffic on south mesh boundary at (%0d,%0d)", gx, gy);
+`endif
+      end
+
+      // -- West side: sink of (gx-1,gy) eastbound link ------------------------
+      if (gx > 0) begin : g_west_link
+        assign west_in_valid              = lnk_east_valid[gx-1][gy];
+        assign west_in_pkt                = lnk_east_pkt[gx-1][gy];
+        assign lnk_east_ready[gx-1][gy]   = west_in_ready;
+      end else begin : g_west_edge
+        assign west_in_valid              = 1'b0;
+        assign west_in_pkt                = '0;
+        assign lnk_west_ready[gx][gy]     = 1'b0;
+`ifndef SYNTHESIS
+        a_west_edge_isolated: assert property (@(posedge clk_i) disable iff (!rst_ni)
+          !lnk_west_valid[gx][gy] && (lnk_west_pkt[gx][gy] == '0) && !west_in_ready)
+          else $error("noc_interconnect: traffic on west mesh boundary at (%0d,%0d)", gx, gy);
+`endif
+      end
+    end
+  end
+
+  assign noc_idle_o = &router_idle;
+
+  // ---------------------------------------------------------------------------
+  // Fabric-level end-to-end conservation
+  // ---------------------------------------------------------------------------
+`ifndef SYNTHESIS
+  localparam int unsigned MAX_IN_FLIGHT = NUM_TILES * NUM_PORTS * (BUF_DEPTH + 1);
+  localparam int unsigned FLIGHT_W      = $clog2(MAX_IN_FLIGHT + 1);
+
+  logic [FLIGHT_W-1:0] in_flight_q;
+  logic [FLIGHT_W-1:0] inj_fire_cnt;
+  logic [FLIGHT_W-1:0] ej_fire_cnt;
+
+  assign inj_fire_cnt = FLIGHT_W'($countones(tile_inj_valid_i & tile_inj_ready_o));
+  assign ej_fire_cnt  = FLIGHT_W'($countones(tile_ej_valid_o  & tile_ej_ready_i));
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      in_flight_q <= '0;
+    end else begin
+      in_flight_q <= in_flight_q + inj_fire_cnt - ej_fire_cnt;
+    end
+  end
+
+  // More flits ejected than injected implies duplication
+  a_no_duplication: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (32'(in_flight_q) + 32'(inj_fire_cnt)) >= 32'(ej_fire_cnt))
+    else $error("noc_interconnect: ejected flits exceed injected flits");
+
+  a_capacity_bound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    32'(in_flight_q) <= MAX_IN_FLIGHT)
+    else $error("noc_interconnect: in-flight count exceeds fabric capacity");
+
+  // Quiescence iff every injected flit has been ejected (no loss, no phantoms)
+  a_idle_consistent: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    noc_idle_o == (in_flight_q == '0))
+    else $error("noc_interconnect: idle state inconsistent with in-flight count");
+
+  for (genvar t = 0; t < NUM_TILES; t++) begin : g_tile_checks
+    a_ej_handshake_hold: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      (tile_ej_valid_o[t] && !tile_ej_ready_i[t]) |=>
+        (tile_ej_valid_o[t] && $stable(tile_ej_pkt_o[t])))
+      else $error("noc_interconnect: ejection handshake violated at tile %0d", t);
+  end
+`endif
+
+endmodule : noc_interconnect
