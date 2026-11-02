@@ -1,0 +1,1492 @@
+// =============================================================================
+//  SilicaFlux Architecture
+//  File      : memory_controller.sf
+//  Language  : Silica Flux-2017
+//  Module    : memory_controller
+//
+//  Unified banked scratchpad memory controller.
+//  Services scalar (32-bit), vector (128-bit) and burst (DMA / tensor stream)
+//  traffic into a shared, bank-interleaved on-chip SRAM.
+//
+//  ---------------------------------------------------------------------------
+//  STORAGE ORGANISATION
+//  ---------------------------------------------------------------------------
+//  NUM_BANKS single-ported SRAM banks, each BANK_DEPTH lines x 128 bits with
+//  per-byte write enables. Lines are interleaved across banks on the low
+//  line-index bits so that sequential bursts rotate through every bank:
+//
+//      paddr  = | aperture tag | row   | bank   | lane | byte |
+//               | == SPM_BASE  | ROW_W | BANK_W |  2   |  2   |
+//
+//  The aperture is partitioned on a line boundary into two access domains:
+//      lines [0, SCALAR_LINES)            : scalar domain  (32-bit port)
+//      lines [SCALAR_LINES, TOTAL_LINES)  : vector domain  (128-bit port)
+//  With STRICT_DOMAINS set, a port may only access its own domain, which
+//  makes scalar and vector traffic address-disjoint by construction. The
+//  burst engine may target either domain, but one burst must stay inside a
+//  single domain, a single BURST_PAGE_BYTES page and the aperture.
+//
+//  ---------------------------------------------------------------------------
+//  PIPELINE  (L = SRAM_LATENCY)
+//  ---------------------------------------------------------------------------
+//    I     ingress   : request decoded and checked (alignment, aperture,
+//                      domain) and captured in a 2-entry skid buffer; every
+//                      ready_o is register driven.
+//    A     arbitrate : per-bank arbitration between {scalar, vector, burst}.
+//                      Each requester targets exactly one bank, so up to
+//                      NUM_REQ accesses issue per cycle when bank-disjoint.
+//                      Stores commit to the array on the closing edge of A.
+//    M1-ML storage   : read data is captured on the closing edge of A and
+//                      emerges L cycles later; per-port metadata travels in
+//                      a parallel L-deep valid/tag pipe.
+//    R     respond   : lane extract / lane mask, integrity check, push into
+//                      the port response FIFO. Response space is reserved by
+//                      credit at issue, so the storage pipeline never stalls
+//                      and response backpressure never reaches arbitration.
+//
+//  ---------------------------------------------------------------------------
+//  ORDERING AND CONSISTENCY
+//  ---------------------------------------------------------------------------
+//  * Each port issues in order with a fixed latency, so responses return in
+//    request order per port, including exception responses.
+//  * A bank performs at most one access per cycle and reads sample the array
+//    on the issue edge, so every access observes exactly the stores granted
+//    in earlier cycles: no RAW / WAR / WAW hazard exists inside the window.
+//  * Same-cycle contention for a bank is serialised by the arbiter; outcomes
+//    depend only on registered state (deterministic).
+//
+//  ---------------------------------------------------------------------------
+//  FLUSH / KILL
+//  ---------------------------------------------------------------------------
+//  flush_i      : squashes all scalar/vector work. Requests presented in the
+//                 flush cycle are discarded, nothing issues to storage in the
+//                 flush cycle, ingress buffers, metadata pipes and response
+//                 FIFOs are cleared, and response valids are masked in the
+//                 flush cycle: no writeback is ever presented for flushed work.
+//  burst_kill_i : (also flush_i when FLUSH_KILLS_BURST) aborts the active
+//                 burst. No beat commits on or after the kill edge, staged
+//                 write data and undelivered read data are discarded, and the
+//                 burst completes with SF_MEM_EXC_FLUSHED and the exact count
+//                 of beats committed / delivered before the kill.
+//
+//  ---------------------------------------------------------------------------
+//  ARCHITECTED EXTENSION POINTS
+//  ---------------------------------------------------------------------------
+//  * Bank scaling      : NUM_BANKS / BANK_DEPTH are free powers of two; the
+//                        arbiter, datapath muxes and storage are generated.
+//  * Conflict network  : arbitration is a per-bank request matrix; additional
+//                        compute-unit ports extend NUM_REQ and the matrix
+//                        without changing the per-bank arbiter.
+//  * Coherence hooks   : coh_wr_valid_o / coh_wr_addr_o broadcast every
+//                        committed line write (registered) for L1 invalidate
+//                        or directory update.
+//  * DMA attachment    : the burst descriptor/data channels are the DMA port.
+//  * ECC / parity      : PARITY_EN stores per-byte even parity; the bank read
+//                        port exposes a per-byte error vector that a SECDED
+//                        code can replace without touching the pipeline.
+//  * Gather / scatter  : vector lane masks already flow to byte enables; a
+//                        gather unit decomposes into per-lane scalar-domain
+//                        requests on additional arbitration ports.
+//  * Non-temporal hint : request hints are accepted on every port and are
+//                        reserved for a streaming/victim buffer stage.
+// =============================================================================
+
+module memory_controller
+  import silicaflux_pkg::*;
+#(
+  // Aperture and capacity
+  parameter sf_paddr_t   SPM_BASE          = 32'h1000_0000,  // aligned to aperture size
+  parameter int unsigned NUM_BANKS         = 8,              // power of two, >= 2
+  parameter int unsigned BANK_DEPTH        = 512,            // lines per bank, power of two, >= 2
+  parameter int unsigned SCALAR_LINES      = 1024,           // scalar-domain lines from line 0
+  // Storage timing
+  parameter int unsigned SRAM_LATENCY      = 1,              // read latency in cycles, >= 1
+  // Queueing (response depth >= SRAM_LATENCY + 2 sustains one op per cycle)
+  parameter int unsigned SCALAR_RSP_DEPTH  = 4,
+  parameter int unsigned VECTOR_RSP_DEPTH  = 4,
+  parameter int unsigned BURST_WDATA_DEPTH = 4,
+  parameter int unsigned BURST_RDATA_DEPTH = 8,
+  // Burst rules
+  parameter int unsigned BURST_MAX_BEATS   = 256,            // 1 .. 2**SF_BURST_LEN_W
+  parameter int unsigned BURST_PAGE_BYTES  = 4096,           // power of two, >= one line
+  // Policy
+  parameter logic        ARB_ROUND_ROBIN   = 1'b1,           // 0: fixed scalar > vector > burst
+  parameter logic        STRICT_DOMAINS    = 1'b1,
+  parameter logic        FLUSH_KILLS_BURST = 1'b1,
+  parameter logic        PARITY_EN         = 1'b1,
+  parameter logic        INIT_ON_RESET     = 1'b1            // zero storage after reset
+) (
+  input  logic                          clk_i,
+  input  logic                          rst_ni,
+
+  // Pipeline control
+  input  logic                          flush_i,
+  input  logic                          burst_kill_i,
+
+  // Scalar load/store port
+  input  logic                          scalar_req_valid_i,
+  output logic                          scalar_req_ready_o,
+  input  sf_scalar_mem_req_t            scalar_req_i,
+  output logic                          scalar_rsp_valid_o,
+  input  logic                          scalar_rsp_ready_i,
+  output sf_scalar_mem_rsp_t            scalar_rsp_o,
+
+  // Vector load/store port
+  input  logic                          vector_req_valid_i,
+  output logic                          vector_req_ready_o,
+  input  sf_vector_mem_req_t            vector_req_i,
+  output logic                          vector_rsp_valid_o,
+  input  logic                          vector_rsp_ready_i,
+  output sf_vector_mem_rsp_t            vector_rsp_o,
+
+  // Burst engine port
+  input  logic                          burst_req_valid_i,
+  output logic                          burst_req_ready_o,
+  input  sf_burst_desc_t                burst_req_i,
+  input  logic                          burst_wdata_valid_i,
+  output logic                          burst_wdata_ready_o,
+  input  sf_burst_wbeat_t               burst_wdata_i,
+  output logic                          burst_rdata_valid_o,
+  input  logic                          burst_rdata_ready_i,
+  output sf_burst_rbeat_t               burst_rdata_o,
+  output logic                          burst_done_valid_o,
+  input  logic                          burst_done_ready_i,
+  output sf_burst_done_t                burst_done_o,
+
+  // Coherence write-notify hook
+  output logic      [NUM_BANKS-1:0]     coh_wr_valid_o,
+  output sf_paddr_t [NUM_BANKS-1:0]     coh_wr_addr_o,
+
+  // Status
+  output logic                          init_done_o,
+  output logic                          busy_o,
+  output logic                          bank_conflict_o
+);
+
+  // ===========================================================================
+  // Derived configuration
+  // ===========================================================================
+  localparam int unsigned NUM_REQ     = 3;
+  localparam int unsigned REQ_S       = 0;
+  localparam int unsigned REQ_V       = 1;
+  localparam int unsigned REQ_B       = 2;
+
+  localparam int unsigned BYTE_W      = 8;
+  localparam int unsigned WORD_OFF_W  = $clog2(SF_XBYTES);
+  localparam int unsigned LINE_OFF_W  = $clog2(SF_VBYTES);
+  localparam int unsigned LANE_W      = $clog2(SF_VLANES);
+  localparam int unsigned BANK_W      = $clog2(NUM_BANKS);
+  localparam int unsigned ROW_W       = $clog2(BANK_DEPTH);
+  localparam int unsigned LINE_W      = BANK_W + ROW_W;
+  localparam int unsigned TOTAL_LINES = NUM_BANKS * BANK_DEPTH;
+  localparam int unsigned SPM_ADDR_W  = LINE_W + LINE_OFF_W;
+  localparam int unsigned APT_TAG_W   = SF_PADDR_W - SPM_ADDR_W;
+  localparam int unsigned PAGE_LINES  = BURST_PAGE_BYTES / SF_VBYTES;
+  localparam int unsigned PAGE_W      = $clog2(PAGE_LINES);
+  localparam int unsigned BEXT_W      = ((LINE_W > SF_BURST_LEN_W) ? LINE_W : SF_BURST_LEN_W) + 1;
+
+  localparam int unsigned IBUF_DEPTH  = 2;
+  localparam int unsigned IBUF_CNT_W  = 2;
+
+  localparam int unsigned SRSP_PTR_W  = $clog2(SCALAR_RSP_DEPTH);
+  localparam int unsigned SRSP_CNT_W  = $clog2(SCALAR_RSP_DEPTH + 1);
+  localparam int unsigned VRSP_PTR_W  = $clog2(VECTOR_RSP_DEPTH);
+  localparam int unsigned VRSP_CNT_W  = $clog2(VECTOR_RSP_DEPTH + 1);
+  localparam int unsigned BWF_PTR_W   = $clog2(BURST_WDATA_DEPTH);
+  localparam int unsigned BWF_CNT_W   = $clog2(BURST_WDATA_DEPTH + 1);
+  localparam int unsigned BRF_PTR_W   = $clog2(BURST_RDATA_DEPTH);
+  localparam int unsigned BRF_CNT_W   = $clog2(BURST_RDATA_DEPTH + 1);
+
+  localparam logic [APT_TAG_W-1:0] APT_TAG = SPM_BASE[SF_PADDR_W-1:SPM_ADDR_W];
+
+  // ===========================================================================
+  // Elaboration-time configuration checks
+  // ===========================================================================
+  if ((NUM_BANKS < 2) || ((NUM_BANKS & (NUM_BANKS - 1)) != 0)) begin : g_cfg_num_banks
+    $fatal(1, "memory_controller: NUM_BANKS must be a power of two >= 2");
+  end
+  if ((BANK_DEPTH < 2) || ((BANK_DEPTH & (BANK_DEPTH - 1)) != 0)) begin : g_cfg_bank_depth
+    $fatal(1, "memory_controller: BANK_DEPTH must be a power of two >= 2");
+  end
+  if (SCALAR_LINES > TOTAL_LINES) begin : g_cfg_scalar_lines
+    $fatal(1, "memory_controller: SCALAR_LINES exceeds scratchpad capacity");
+  end
+  if (SPM_ADDR_W >= SF_PADDR_W) begin : g_cfg_aperture_width
+    $fatal(1, "memory_controller: scratchpad aperture must be smaller than the physical space");
+  end
+  if (SPM_BASE[SPM_ADDR_W-1:0] != '0) begin : g_cfg_aperture_align
+    $fatal(1, "memory_controller: SPM_BASE must be aligned to the aperture size");
+  end
+  if (SRAM_LATENCY < 1) begin : g_cfg_latency
+    $fatal(1, "memory_controller: SRAM_LATENCY must be >= 1");
+  end
+  if ((SCALAR_RSP_DEPTH < 2) || (VECTOR_RSP_DEPTH < 2) ||
+      (BURST_WDATA_DEPTH < 2) || (BURST_RDATA_DEPTH < 2)) begin : g_cfg_queue_depth
+    $fatal(1, "memory_controller: queue depths must be >= 2");
+  end
+  if ((BURST_MAX_BEATS < 1) || (BURST_MAX_BEATS > (1 << SF_BURST_LEN_W))) begin : g_cfg_burst_max
+    $fatal(1, "memory_controller: BURST_MAX_BEATS out of descriptor range");
+  end
+  if ((BURST_PAGE_BYTES < SF_VBYTES) ||
+      ((BURST_PAGE_BYTES & (BURST_PAGE_BYTES - 1)) != 0)) begin : g_cfg_burst_page
+    $fatal(1, "memory_controller: BURST_PAGE_BYTES must be a power of two >= one line");
+  end
+
+  // ===========================================================================
+  // Local types
+  // ===========================================================================
+  typedef logic [BANK_W-1:0]                    bank_idx_t;
+  typedef logic [ROW_W-1:0]                     row_idx_t;
+  typedef logic [LINE_W-1:0]                    line_idx_t;
+  typedef logic [LANE_W-1:0]                    lane_idx_t;
+  typedef logic [NUM_REQ-1:0]                   req_vec_t;
+  typedef logic [NUM_BANKS-1:0]                 bank_vec_t;
+  typedef logic [BEXT_W-1:0]                    bext_t;
+  typedef logic [SRAM_LATENCY-1:0]              pipe_vec_t;
+  typedef logic [SF_VLANES-1:0][SF_XBYTES-1:0]  vstrb_lanes_t;
+  typedef logic [SF_PADDR_W-1:WORD_OFF_W]       waddr_t;
+
+  typedef enum logic [0:0] {
+    DOM_SCALAR = 1'b0,
+    DOM_VECTOR = 1'b1
+  } mc_domain_e;
+
+  typedef enum logic [1:0] {
+    BST_IDLE   = 2'd0,
+    BST_ACTIVE = 2'd1,
+    BST_DONE   = 2'd2
+  } mc_bst_e;
+
+  // Address decode result
+  typedef struct packed {
+    logic        in_range;
+    line_idx_t   line;
+    lane_idx_t   lane;
+    mc_domain_e  domain;
+  } mc_addr_dec_t;
+
+  // Ingress entries (decoded, checked, storage-ready)
+  typedef struct packed {
+    sf_mem_op_e    op;
+    logic          sram;        // 1: access storage, 0: exception bypass
+    bank_idx_t     bank;
+    row_idx_t      row;
+    lane_idx_t     lane;
+    sf_vstrb_t     be;          // line-relative byte enables
+    sf_word_t      wdata;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } mc_s_entry_t;
+
+  typedef struct packed {
+    sf_mem_op_e    op;
+    logic          sram;
+    bank_idx_t     bank;
+    row_idx_t      row;
+    sf_lane_mask_t lane_mask;
+    sf_vstrb_t     be;
+    sf_vword_t     wdata;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } mc_v_entry_t;
+
+  // Pipeline metadata (travels alongside the SRAM read pipe)
+  typedef struct packed {
+    logic          valid;
+    logic          sram;
+    sf_mem_op_e    op;
+    bank_idx_t     bank;
+    lane_idx_t     lane;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } mc_s_meta_t;
+
+  typedef struct packed {
+    logic          valid;
+    logic          sram;
+    sf_mem_op_e    op;
+    bank_idx_t     bank;
+    sf_lane_mask_t lane_mask;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } mc_v_meta_t;
+
+  typedef struct packed {
+    logic          valid;
+    bank_idx_t     bank;
+    logic          last;
+  } mc_b_meta_t;
+
+  // Per-bank storage command
+  typedef struct packed {
+    logic          en;
+    logic          we;
+    row_idx_t      row;
+    sf_vstrb_t     be;
+    sf_vword_t     wdata;
+  } mc_bank_cmd_t;
+
+  localparam row_idx_t          ROW_LAST     = row_idx_t'(BANK_DEPTH - 1);
+  localparam logic [LINE_W:0]   SCALAR_BOUND = (LINE_W + 1)'(SCALAR_LINES);
+  localparam bext_t             BEXT_SCALAR  = bext_t'(SCALAR_LINES);
+  localparam bext_t             BEXT_TOTAL   = bext_t'(TOTAL_LINES);
+  localparam sf_burst_cnt_t     BCNT_ONE     = sf_burst_cnt_t'(1);
+
+  // ===========================================================================
+  // Functions
+  // ===========================================================================
+  // Word address -> aperture / line / lane / domain
+  function automatic mc_addr_dec_t mc_decode(input waddr_t addr);
+    mc_addr_dec_t dec;
+    dec.in_range = (addr[SF_PADDR_W-1:SPM_ADDR_W] == APT_TAG);
+    dec.line     = addr[SPM_ADDR_W-1:LINE_OFF_W];
+    dec.lane     = addr[LINE_OFF_W-1:WORD_OFF_W];
+    dec.domain   = ({1'b0, dec.line} >= SCALAR_BOUND) ? DOM_VECTOR : DOM_SCALAR;
+    return dec;
+  endfunction
+
+  // Scalar byte strobe placed at its lane within a line
+  function automatic sf_vstrb_t mc_word_be(input sf_wstrb_t wstrb, input lane_idx_t lane);
+    vstrb_lanes_t be;
+    be = '0;
+    for (int unsigned l = 0; l < SF_VLANES; l++) begin
+      if (lane == lane_idx_t'(l)) begin
+        be[l] = wstrb;
+      end
+    end
+    return sf_vstrb_t'(be);
+  endfunction
+
+  // Vector lane mask expanded to line byte enables
+  function automatic sf_vstrb_t mc_lane_be(input sf_lane_mask_t mask);
+    vstrb_lanes_t be;
+    for (int unsigned l = 0; l < SF_VLANES; l++) begin
+      be[l] = {SF_XBYTES{mask[l]}};
+    end
+    return sf_vstrb_t'(be);
+  endfunction
+
+  // Per-byte even parity of a line
+  function automatic sf_vstrb_t mc_line_parity(input sf_vword_t data);
+    sf_vstrb_t par;
+    for (int unsigned i = 0; i < SF_VBYTES; i++) begin
+      par[i] = ^data[i*BYTE_W +: BYTE_W];
+    end
+    return par;
+  endfunction
+
+  // Round-robin pick: lowest requester above the priority pointer, else lowest
+  function automatic req_vec_t mc_rr_pick(input req_vec_t req, input req_vec_t prio);
+    req_vec_t pool;
+    pool = ((req & prio) != '0) ? (req & prio) : req;
+    return pool & (~pool + req_vec_t'(1));
+  endfunction
+
+  // ===========================================================================
+  // Signal declarations
+  // ===========================================================================
+  // Init
+  logic                  init_done_q;
+  logic                  init_active;
+  row_idx_t              init_row_q;
+
+  // Kill domains
+  logic                  b_kill;
+
+  // Scalar ingress
+  mc_addr_dec_t          s_dec;
+  sf_mem_exc_e           s_in_exc;
+  mc_s_entry_t           s_in_entry;
+  mc_s_entry_t           s_ibuf_q [IBUF_DEPTH];
+  logic                  s_ibuf_wptr_q;
+  logic                  s_ibuf_rptr_q;
+  logic [IBUF_CNT_W-1:0] s_ibuf_cnt_q;
+  logic                  s_push;
+  logic                  s_head_vld;
+  mc_s_entry_t           s_head;
+
+  // Vector ingress
+  mc_addr_dec_t          v_dec;
+  sf_mem_exc_e           v_in_exc;
+  mc_v_entry_t           v_in_entry;
+  mc_v_entry_t           v_ibuf_q [IBUF_DEPTH];
+  logic                  v_ibuf_wptr_q;
+  logic                  v_ibuf_rptr_q;
+  logic [IBUF_CNT_W-1:0] v_ibuf_cnt_q;
+  logic                  v_push;
+  logic                  v_head_vld;
+  mc_v_entry_t           v_head;
+
+  // Response credits
+  logic [SRSP_CNT_W-1:0] s_credit_q;
+  logic [VRSP_CNT_W-1:0] v_credit_q;
+  logic [BRF_CNT_W-1:0]  b_rd_credit_q;
+  logic                  s_credit_ok;
+  logic                  v_credit_ok;
+  logic                  b_rd_credit_ok;
+
+  // Burst engine
+  mc_addr_dec_t          b_dec;
+  bext_t                 b_start_ext;
+  bext_t                 b_end_ext;
+  logic                  b_start_vec;
+  logic                  b_end_vec;
+  sf_mem_exc_e           b_in_exc;
+  mc_bst_e               b_state_q;
+  mc_bst_e               b_state_d;
+  sf_burst_done_t        b_done_q;
+  sf_burst_done_t        b_done_d;
+  sf_mem_op_e            b_op_q;
+  sf_mem_tag_t           b_tag_q;
+  sf_burst_cnt_t         b_total_q;
+  line_idx_t             b_line_q;
+  sf_burst_cnt_t         b_issue_cnt_q;
+  sf_burst_cnt_t         b_retire_cnt_q;
+  sf_burst_cnt_t         b_wacc_cnt_q;
+  logic                  b_ecc_q;
+  logic                  b_desc_acc;
+  logic                  b_active;
+  logic                  b_is_store;
+  logic                  b_all_issued;
+  logic                  b_want;
+  logic                  b_commit;
+  logic                  b_retire;
+  logic                  b_complete;
+
+  // Burst write staging FIFO
+  sf_burst_wbeat_t       b_wf_mem_q [BURST_WDATA_DEPTH];
+  logic [BWF_PTR_W-1:0]  b_wf_wptr_q;
+  logic [BWF_PTR_W-1:0]  b_wf_rptr_q;
+  logic [BWF_CNT_W-1:0]  b_wf_cnt_q;
+  logic                  b_wf_push;
+  logic                  b_wf_head_vld;
+  sf_burst_wbeat_t       b_wf_head;
+
+  // Arbitration
+  req_vec_t              arb_req;
+  req_vec_t              req_live;
+  bank_idx_t             req_bank [NUM_REQ];
+  req_vec_t              bank_req [NUM_BANKS];
+  req_vec_t              bank_gnt [NUM_BANKS];
+  req_vec_t              bank_gnt_live [NUM_BANKS];
+  req_vec_t              bank_prio_q [NUM_BANKS];
+  req_vec_t              req_gnt;
+  bank_vec_t             bank_conflict;
+  logic                  s_issue;
+  logic                  v_issue;
+  logic                  b_issue;
+  logic                  b_rd_issue;
+
+  // Storage
+  mc_bank_cmd_t          bank_cmd [NUM_BANKS];
+  sf_vword_t             bank_rdata [NUM_BANKS];
+  sf_vstrb_t             bank_perr [NUM_BANKS];
+
+  // Metadata pipes
+  mc_s_meta_t            s_meta_q [SRAM_LATENCY];
+  mc_s_meta_t            s_meta_d [SRAM_LATENCY];
+  mc_v_meta_t            v_meta_q [SRAM_LATENCY];
+  mc_v_meta_t            v_meta_d [SRAM_LATENCY];
+  mc_b_meta_t            b_meta_q [SRAM_LATENCY];
+  mc_b_meta_t            b_meta_d [SRAM_LATENCY];
+  pipe_vec_t             s_inflight;
+  pipe_vec_t             v_inflight;
+  pipe_vec_t             b_inflight;
+
+  // Response formation
+  mc_s_meta_t            s_tail;
+  sf_vlanes_t            s_tail_lanes;
+  vstrb_lanes_t          s_tail_perr;
+  logic                  s_tail_ecc;
+  sf_scalar_mem_rsp_t    s_rsp_new;
+  logic                  s_rsp_push;
+
+  mc_v_meta_t            v_tail;
+  sf_vlanes_t            v_tail_lanes;
+  sf_vlanes_t            v_rsp_lanes;
+  logic                  v_tail_ecc;
+  sf_vector_mem_rsp_t    v_rsp_new;
+  logic                  v_rsp_push;
+
+  mc_b_meta_t            b_tail;
+  sf_burst_rbeat_t       b_rsp_new;
+  logic                  b_rsp_push;
+
+  // Response FIFOs
+  sf_scalar_mem_rsp_t    s_rsp_mem_q [SCALAR_RSP_DEPTH];
+  logic [SRSP_PTR_W-1:0] s_rsp_wptr_q;
+  logic [SRSP_PTR_W-1:0] s_rsp_rptr_q;
+  logic [SRSP_CNT_W-1:0] s_rsp_cnt_q;
+  logic                  s_rsp_pop;
+
+  sf_vector_mem_rsp_t    v_rsp_mem_q [VECTOR_RSP_DEPTH];
+  logic [VRSP_PTR_W-1:0] v_rsp_wptr_q;
+  logic [VRSP_PTR_W-1:0] v_rsp_rptr_q;
+  logic [VRSP_CNT_W-1:0] v_rsp_cnt_q;
+  logic                  v_rsp_pop;
+
+  sf_burst_rbeat_t       b_rf_mem_q [BURST_RDATA_DEPTH];
+  logic [BRF_PTR_W-1:0]  b_rf_wptr_q;
+  logic [BRF_PTR_W-1:0]  b_rf_rptr_q;
+  logic [BRF_CNT_W-1:0]  b_rf_cnt_q;
+  logic                  b_rf_pop;
+
+  // Coherence hook / status
+  bank_vec_t             coh_wr_valid_q;
+  line_idx_t             coh_wr_line_q [NUM_BANKS];
+  logic                  bank_conflict_q;
+
+  // ===========================================================================
+  // Storage initialisation sequencer
+  // Sweeps every row of every bank once after reset, writing zero data and
+  // consistent parity. All request ports are held not-ready until complete.
+  // ===========================================================================
+  assign init_active = ~init_done_q;
+  assign init_done_o = init_done_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_init
+    if (!rst_ni) begin
+      init_done_q <= ~INIT_ON_RESET;
+      init_row_q  <= '0;
+    end else if (init_active) begin
+      init_row_q  <= init_row_q + row_idx_t'(1);
+      init_done_q <= (init_row_q == ROW_LAST);
+    end
+  end
+
+  assign b_kill = burst_kill_i | (FLUSH_KILLS_BURST & flush_i);
+
+  // ===========================================================================
+  // Scalar ingress: decode, rule enforcement, 2-entry skid buffer
+  // ===========================================================================
+  always_comb begin : p_s_decode
+    s_dec = mc_decode(scalar_req_i.addr[SF_PADDR_W-1:WORD_OFF_W]);
+
+    if (scalar_req_i.addr[WORD_OFF_W-1:0] != '0) begin
+      s_in_exc = SF_MEM_EXC_MISALIGN;
+    end else if (!s_dec.in_range) begin
+      s_in_exc = SF_MEM_EXC_RANGE;
+    end else if (STRICT_DOMAINS && (s_dec.domain != DOM_SCALAR)) begin
+      s_in_exc = SF_MEM_EXC_DOMAIN;
+    end else begin
+      s_in_exc = SF_MEM_EXC_NONE;
+    end
+
+    s_in_entry.op    = scalar_req_i.op;
+    s_in_entry.sram  = (s_in_exc == SF_MEM_EXC_NONE);
+    s_in_entry.bank  = s_dec.line[BANK_W-1:0];
+    s_in_entry.row   = s_dec.line[LINE_W-1:BANK_W];
+    s_in_entry.lane  = s_dec.lane;
+    s_in_entry.be    = (scalar_req_i.op == SF_MEM_STORE) ? mc_word_be(scalar_req_i.wstrb, s_dec.lane)
+                                                         : '0;
+    s_in_entry.wdata = scalar_req_i.wdata;
+    s_in_entry.tag   = scalar_req_i.tag;
+    s_in_entry.exc   = s_in_exc;
+  end
+
+  assign scalar_req_ready_o = init_done_q & (s_ibuf_cnt_q != IBUF_CNT_W'(IBUF_DEPTH));
+  assign s_push             = scalar_req_valid_i & scalar_req_ready_o & ~flush_i;
+  assign s_head_vld         = (s_ibuf_cnt_q != '0);
+  assign s_head             = s_ibuf_q[s_ibuf_rptr_q];
+
+  always_ff @(posedge clk_i) begin : p_s_ibuf_data
+    if (s_push) begin
+      s_ibuf_q[s_ibuf_wptr_q] <= s_in_entry;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_s_ibuf_ctrl
+    if (!rst_ni) begin
+      s_ibuf_wptr_q <= 1'b0;
+      s_ibuf_rptr_q <= 1'b0;
+      s_ibuf_cnt_q  <= '0;
+    end else if (flush_i) begin
+      s_ibuf_wptr_q <= 1'b0;
+      s_ibuf_rptr_q <= 1'b0;
+      s_ibuf_cnt_q  <= '0;
+    end else begin
+      if (s_push) begin
+        s_ibuf_wptr_q <= ~s_ibuf_wptr_q;
+      end
+      if (s_issue) begin
+        s_ibuf_rptr_q <= ~s_ibuf_rptr_q;
+      end
+      s_ibuf_cnt_q <= s_ibuf_cnt_q + IBUF_CNT_W'(s_push) - IBUF_CNT_W'(s_issue);
+    end
+  end
+
+  // ===========================================================================
+  // Vector ingress: decode, rule enforcement, 2-entry skid buffer
+  // ===========================================================================
+  always_comb begin : p_v_decode
+    v_dec = mc_decode(vector_req_i.addr[SF_PADDR_W-1:WORD_OFF_W]);
+
+    if (vector_req_i.addr[LINE_OFF_W-1:0] != '0) begin
+      v_in_exc = SF_MEM_EXC_MISALIGN;
+    end else if (!v_dec.in_range) begin
+      v_in_exc = SF_MEM_EXC_RANGE;
+    end else if (STRICT_DOMAINS && (v_dec.domain != DOM_VECTOR)) begin
+      v_in_exc = SF_MEM_EXC_DOMAIN;
+    end else begin
+      v_in_exc = SF_MEM_EXC_NONE;
+    end
+
+    v_in_entry.op        = vector_req_i.op;
+    v_in_entry.sram      = (v_in_exc == SF_MEM_EXC_NONE);
+    v_in_entry.bank      = v_dec.line[BANK_W-1:0];
+    v_in_entry.row       = v_dec.line[LINE_W-1:BANK_W];
+    v_in_entry.lane_mask = vector_req_i.lane_mask;
+    v_in_entry.be        = (vector_req_i.op == SF_MEM_STORE) ? mc_lane_be(vector_req_i.lane_mask)
+                                                             : '0;
+    v_in_entry.wdata     = vector_req_i.wdata;
+    v_in_entry.tag       = vector_req_i.tag;
+    v_in_entry.exc       = v_in_exc;
+  end
+
+  assign vector_req_ready_o = init_done_q & (v_ibuf_cnt_q != IBUF_CNT_W'(IBUF_DEPTH));
+  assign v_push             = vector_req_valid_i & vector_req_ready_o & ~flush_i;
+  assign v_head_vld         = (v_ibuf_cnt_q != '0);
+  assign v_head             = v_ibuf_q[v_ibuf_rptr_q];
+
+  always_ff @(posedge clk_i) begin : p_v_ibuf_data
+    if (v_push) begin
+      v_ibuf_q[v_ibuf_wptr_q] <= v_in_entry;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_v_ibuf_ctrl
+    if (!rst_ni) begin
+      v_ibuf_wptr_q <= 1'b0;
+      v_ibuf_rptr_q <= 1'b0;
+      v_ibuf_cnt_q  <= '0;
+    end else if (flush_i) begin
+      v_ibuf_wptr_q <= 1'b0;
+      v_ibuf_rptr_q <= 1'b0;
+      v_ibuf_cnt_q  <= '0;
+    end else begin
+      if (v_push) begin
+        v_ibuf_wptr_q <= ~v_ibuf_wptr_q;
+      end
+      if (v_issue) begin
+        v_ibuf_rptr_q <= ~v_ibuf_rptr_q;
+      end
+      v_ibuf_cnt_q <= v_ibuf_cnt_q + IBUF_CNT_W'(v_push) - IBUF_CNT_W'(v_issue);
+    end
+  end
+
+  // ===========================================================================
+  // Response credits
+  // A credit is consumed at issue and returned when the response leaves the
+  // FIFO, so FIFO occupancy plus in-flight operations never exceed depth.
+  // ===========================================================================
+  assign s_credit_ok    = (s_credit_q != '0);
+  assign v_credit_ok    = (v_credit_q != '0);
+  assign b_rd_credit_ok = (b_rd_credit_q != '0);
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_credits
+    if (!rst_ni) begin
+      s_credit_q    <= SRSP_CNT_W'(SCALAR_RSP_DEPTH);
+      v_credit_q    <= VRSP_CNT_W'(VECTOR_RSP_DEPTH);
+      b_rd_credit_q <= BRF_CNT_W'(BURST_RDATA_DEPTH);
+    end else begin
+      if (flush_i) begin
+        s_credit_q <= SRSP_CNT_W'(SCALAR_RSP_DEPTH);
+        v_credit_q <= VRSP_CNT_W'(VECTOR_RSP_DEPTH);
+      end else begin
+        s_credit_q <= s_credit_q - SRSP_CNT_W'(s_issue) + SRSP_CNT_W'(s_rsp_pop);
+        v_credit_q <= v_credit_q - VRSP_CNT_W'(v_issue) + VRSP_CNT_W'(v_rsp_pop);
+      end
+
+      if (b_kill) begin
+        b_rd_credit_q <= BRF_CNT_W'(BURST_RDATA_DEPTH);
+      end else begin
+        b_rd_credit_q <= b_rd_credit_q - BRF_CNT_W'(b_rd_issue) + BRF_CNT_W'(b_rf_pop);
+      end
+    end
+  end
+
+  // ===========================================================================
+  // Burst engine: descriptor validation
+  // Rules: line-aligned base, inside aperture, length within BURST_MAX_BEATS,
+  // last beat inside aperture, no domain crossing, no page crossing.
+  // ===========================================================================
+  always_comb begin : p_b_validate
+    b_dec       = mc_decode(burst_req_i.base[SF_PADDR_W-1:WORD_OFF_W]);
+    b_start_ext = bext_t'(b_dec.line);
+    b_end_ext   = b_start_ext + bext_t'(burst_req_i.len_m1);
+    b_start_vec = (b_start_ext >= BEXT_SCALAR);
+    b_end_vec   = (b_end_ext   >= BEXT_SCALAR);
+
+    if (burst_req_i.base[LINE_OFF_W-1:0] != '0) begin
+      b_in_exc = SF_MEM_EXC_MISALIGN;
+    end else if (!b_dec.in_range) begin
+      b_in_exc = SF_MEM_EXC_RANGE;
+    end else if (32'(burst_req_i.len_m1) >= BURST_MAX_BEATS) begin
+      b_in_exc = SF_MEM_EXC_BURST_LEN;
+    end else if ((b_end_ext >= BEXT_TOTAL) ||
+                 (b_start_vec != b_end_vec) ||
+                 ((b_start_ext >> PAGE_W) != (b_end_ext >> PAGE_W))) begin
+      b_in_exc = SF_MEM_EXC_BURST_BND;
+    end else begin
+      b_in_exc = SF_MEM_EXC_NONE;
+    end
+  end
+
+  // ===========================================================================
+  // Burst engine: control
+  // ===========================================================================
+  assign burst_req_ready_o = init_done_q & (b_state_q == BST_IDLE);
+  assign b_desc_acc        = burst_req_valid_i & burst_req_ready_o & ~b_kill;
+  assign b_active          = (b_state_q == BST_ACTIVE);
+  assign b_is_store        = (b_op_q == SF_MEM_STORE);
+  assign b_all_issued      = (b_issue_cnt_q == b_total_q);
+
+  // Beat request: stores need staged write data, loads need read-FIFO credit
+  assign b_want     = b_active & ~b_all_issued & (b_is_store ? b_wf_head_vld : b_rd_credit_ok);
+  assign b_commit   = b_issue & b_is_store;
+  assign b_retire   = b_is_store ? b_commit : b_rf_pop;
+  assign b_complete = b_active & ~b_kill & b_retire &
+                      ((b_retire_cnt_q + BCNT_ONE) == b_total_q);
+
+  always_comb begin : p_b_fsm
+    b_state_d = b_state_q;
+    b_done_d  = b_done_q;
+
+    case (b_state_q)
+      BST_IDLE: begin
+        if (b_desc_acc) begin
+          if (b_in_exc == SF_MEM_EXC_NONE) begin
+            b_state_d = BST_ACTIVE;
+          end else begin
+            b_state_d      = BST_DONE;
+            b_done_d.op    = burst_req_i.op;
+            b_done_d.tag   = burst_req_i.tag;
+            b_done_d.beats = '0;
+            b_done_d.exc   = b_in_exc;
+          end
+        end
+      end
+
+      BST_ACTIVE: begin
+        if (b_kill) begin
+          b_state_d      = BST_DONE;
+          b_done_d.op    = b_op_q;
+          b_done_d.tag   = b_tag_q;
+          b_done_d.beats = b_retire_cnt_q;
+          b_done_d.exc   = SF_MEM_EXC_FLUSHED;
+        end else if (b_complete) begin
+          b_state_d      = BST_DONE;
+          b_done_d.op    = b_op_q;
+          b_done_d.tag   = b_tag_q;
+          b_done_d.beats = b_total_q;
+          b_done_d.exc   = b_ecc_q ? SF_MEM_EXC_ECC : SF_MEM_EXC_NONE;
+        end
+      end
+
+      BST_DONE: begin
+        if (burst_done_ready_i) begin
+          b_state_d = BST_IDLE;
+        end
+      end
+
+      default: begin
+        b_state_d = BST_IDLE;
+      end
+    endcase
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_b_state
+    if (!rst_ni) begin
+      b_state_q <= BST_IDLE;
+      b_done_q  <= '0;
+    end else begin
+      b_state_q <= b_state_d;
+      b_done_q  <= b_done_d;
+    end
+  end
+
+  // Address generation unit and beat accounting
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_b_agu
+    if (!rst_ni) begin
+      b_op_q         <= SF_MEM_LOAD;
+      b_tag_q        <= '0;
+      b_total_q      <= '0;
+      b_line_q       <= '0;
+      b_issue_cnt_q  <= '0;
+      b_retire_cnt_q <= '0;
+      b_wacc_cnt_q   <= '0;
+      b_ecc_q        <= 1'b0;
+    end else if (b_desc_acc) begin
+      b_op_q         <= burst_req_i.op;
+      b_tag_q        <= burst_req_i.tag;
+      b_total_q      <= sf_burst_cnt_t'(burst_req_i.len_m1) + BCNT_ONE;
+      b_line_q       <= b_dec.line;
+      b_issue_cnt_q  <= '0;
+      b_retire_cnt_q <= '0;
+      b_wacc_cnt_q   <= '0;
+      b_ecc_q        <= 1'b0;
+    end else begin
+      if (b_issue) begin
+        b_line_q      <= b_line_q + line_idx_t'(1);
+        b_issue_cnt_q <= b_issue_cnt_q + BCNT_ONE;
+      end
+      if (b_retire) begin
+        b_retire_cnt_q <= b_retire_cnt_q + BCNT_ONE;
+      end
+      if (b_wf_push) begin
+        b_wacc_cnt_q <= b_wacc_cnt_q + BCNT_ONE;
+      end
+      if (b_rsp_push && (b_rsp_new.exc == SF_MEM_EXC_ECC)) begin
+        b_ecc_q <= 1'b1;
+      end
+    end
+  end
+
+  assign burst_done_valid_o = (b_state_q == BST_DONE);
+  assign burst_done_o       = b_done_q;
+
+  // ===========================================================================
+  // Burst engine: write-data staging FIFO
+  // Accepts exactly the beats of the active store burst; never more.
+  // ===========================================================================
+  assign burst_wdata_ready_o = b_active & b_is_store &
+                               (b_wf_cnt_q != BWF_CNT_W'(BURST_WDATA_DEPTH)) &
+                               (b_wacc_cnt_q != b_total_q);
+  assign b_wf_push           = burst_wdata_valid_i & burst_wdata_ready_o & ~b_kill;
+  assign b_wf_head_vld       = (b_wf_cnt_q != '0);
+  assign b_wf_head           = b_wf_mem_q[b_wf_rptr_q];
+
+  always_ff @(posedge clk_i) begin : p_b_wf_data
+    if (b_wf_push) begin
+      b_wf_mem_q[b_wf_wptr_q] <= burst_wdata_i;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_b_wf_ctrl
+    if (!rst_ni) begin
+      b_wf_wptr_q <= '0;
+      b_wf_rptr_q <= '0;
+      b_wf_cnt_q  <= '0;
+    end else if (b_kill) begin
+      b_wf_wptr_q <= '0;
+      b_wf_rptr_q <= '0;
+      b_wf_cnt_q  <= '0;
+    end else begin
+      if (b_wf_push) begin
+        b_wf_wptr_q <= (b_wf_wptr_q == BWF_PTR_W'(BURST_WDATA_DEPTH - 1)) ? '0
+                     : b_wf_wptr_q + BWF_PTR_W'(1'b1);
+      end
+      if (b_commit) begin
+        b_wf_rptr_q <= (b_wf_rptr_q == BWF_PTR_W'(BURST_WDATA_DEPTH - 1)) ? '0
+                     : b_wf_rptr_q + BWF_PTR_W'(1'b1);
+      end
+      b_wf_cnt_q <= b_wf_cnt_q + BWF_CNT_W'(b_wf_push) - BWF_CNT_W'(b_commit);
+    end
+  end
+
+  // ===========================================================================
+  // Arbitration
+  // Request matrix bank_req[bank][requester]; each requester asserts at most
+  // one bank. Per-bank round-robin (or fixed priority) from registered state
+  // only; kill/flush qualify grants at the output so the decision path stays
+  // independent of late control inputs.
+  // ===========================================================================
+  always_comb begin : p_arb_req
+    arb_req        = '0;
+    arb_req[REQ_S] = s_head_vld & s_credit_ok & s_head.sram;
+    arb_req[REQ_V] = v_head_vld & v_credit_ok & v_head.sram;
+    arb_req[REQ_B] = b_want;
+
+    req_bank[REQ_S] = s_head.bank;
+    req_bank[REQ_V] = v_head.bank;
+    req_bank[REQ_B] = b_line_q[BANK_W-1:0];
+
+    req_live        = '0;
+    req_live[REQ_S] = ~flush_i;
+    req_live[REQ_V] = ~flush_i;
+    req_live[REQ_B] = ~b_kill;
+  end
+
+  always_comb begin : p_arb
+    req_gnt = '0;
+    for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+      for (int unsigned r = 0; r < NUM_REQ; r++) begin
+        bank_req[bk][r] = arb_req[r] & (req_bank[r] == bank_idx_t'(bk));
+      end
+      bank_gnt[bk]      = mc_rr_pick(bank_req[bk], bank_prio_q[bk]);
+      bank_gnt_live[bk] = bank_gnt[bk] & req_live;
+      bank_conflict[bk] = ((bank_req[bk] & (bank_req[bk] - req_vec_t'(1))) != '0);
+      req_gnt           = req_gnt | bank_gnt[bk];
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_arb_prio
+    if (!rst_ni) begin
+      for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+        bank_prio_q[bk] <= '1;
+      end
+    end else if (ARB_ROUND_ROBIN) begin
+      for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+        if (bank_gnt_live[bk] != '0) begin
+          bank_prio_q[bk] <= ~(bank_gnt_live[bk] | (bank_gnt_live[bk] - req_vec_t'(1)));
+        end
+      end
+    end
+  end
+
+  // Issue: storage-bound requests need a bank grant; exception requests
+  // bypass storage but still take a pipeline slot to preserve ordering.
+  assign s_issue = ~flush_i & s_head_vld & s_credit_ok & (s_head.sram ? req_gnt[REQ_S] : 1'b1);
+  assign v_issue = ~flush_i & v_head_vld & v_credit_ok & (v_head.sram ? req_gnt[REQ_V] : 1'b1);
+  assign b_issue = ~b_kill & req_gnt[REQ_B];
+  assign b_rd_issue = b_issue & ~b_is_store;
+
+  // ===========================================================================
+  // Bank command datapath (one-hot AND-OR, no priority chain)
+  // ===========================================================================
+  always_comb begin : p_bank_cmd
+    for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+      bank_cmd[bk].en    = init_active
+                         | bank_gnt_live[bk][REQ_S]
+                         | bank_gnt_live[bk][REQ_V]
+                         | bank_gnt_live[bk][REQ_B];
+
+      bank_cmd[bk].we    = init_active
+                         | (bank_gnt_live[bk][REQ_S] & (s_head.op == SF_MEM_STORE))
+                         | (bank_gnt_live[bk][REQ_V] & (v_head.op == SF_MEM_STORE))
+                         | (bank_gnt_live[bk][REQ_B] & b_is_store);
+
+      bank_cmd[bk].row   = ({ROW_W{init_active}}              & init_row_q)
+                         | ({ROW_W{bank_gnt_live[bk][REQ_S]}} & s_head.row)
+                         | ({ROW_W{bank_gnt_live[bk][REQ_V]}} & v_head.row)
+                         | ({ROW_W{bank_gnt_live[bk][REQ_B]}} & b_line_q[LINE_W-1:BANK_W]);
+
+      bank_cmd[bk].be    = ({SF_VBYTES{init_active}})
+                         | ({SF_VBYTES{bank_gnt_live[bk][REQ_S]}} & s_head.be)
+                         | ({SF_VBYTES{bank_gnt_live[bk][REQ_V]}} & v_head.be)
+                         | ({SF_VBYTES{bank_gnt_live[bk][REQ_B]}} & b_wf_head.strb);
+
+      bank_cmd[bk].wdata = ({SF_VLEN{bank_gnt_live[bk][REQ_S]}} & {SF_VLANES{s_head.wdata}})
+                         | ({SF_VLEN{bank_gnt_live[bk][REQ_V]}} & v_head.wdata)
+                         | ({SF_VLEN{bank_gnt_live[bk][REQ_B]}} & b_wf_head.data);
+    end
+  end
+
+  // ===========================================================================
+  // Scratchpad storage: NUM_BANKS single-port byte-writable SRAM banks with
+  // an SRAM_LATENCY-deep, valid-gated read pipeline.
+  // ===========================================================================
+  for (genvar gb = 0; gb < NUM_BANKS; gb++) begin : g_bank
+    sf_vword_t  mem_q [BANK_DEPTH];
+    sf_vword_t  rd_q  [SRAM_LATENCY];
+    pipe_vec_t  rd_vld_q;
+    logic       rd_fire;
+
+    assign rd_fire = bank_cmd[gb].en & ~bank_cmd[gb].we;
+
+    always_ff @(posedge clk_i) begin : p_sram
+      if (bank_cmd[gb].en) begin
+        if (bank_cmd[gb].we) begin
+          for (int unsigned i = 0; i < SF_VBYTES; i++) begin
+            if (bank_cmd[gb].be[i]) begin
+              mem_q[bank_cmd[gb].row][i*BYTE_W +: BYTE_W] <= bank_cmd[gb].wdata[i*BYTE_W +: BYTE_W];
+            end
+          end
+        end else begin
+          rd_q[0] <= mem_q[bank_cmd[gb].row];
+        end
+      end
+      for (int unsigned k = 1; k < SRAM_LATENCY; k++) begin
+        if (rd_vld_q[k-1]) begin
+          rd_q[k] <= rd_q[k-1];
+        end
+      end
+    end
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_rd_vld
+      if (!rst_ni) begin
+        rd_vld_q <= '0;
+      end else begin
+        rd_vld_q[0] <= rd_fire;
+        for (int unsigned k = 1; k < SRAM_LATENCY; k++) begin
+          rd_vld_q[k] <= rd_vld_q[k-1];
+        end
+      end
+    end
+
+    assign bank_rdata[gb] = rd_q[SRAM_LATENCY-1];
+
+    if (PARITY_EN) begin : g_parity
+      sf_vstrb_t par_mem_q [BANK_DEPTH];
+      sf_vstrb_t par_rd_q  [SRAM_LATENCY];
+      sf_vstrb_t par_wr;
+
+      assign par_wr = mc_line_parity(bank_cmd[gb].wdata);
+
+      always_ff @(posedge clk_i) begin : p_par_sram
+        if (bank_cmd[gb].en) begin
+          if (bank_cmd[gb].we) begin
+            for (int unsigned i = 0; i < SF_VBYTES; i++) begin
+              if (bank_cmd[gb].be[i]) begin
+                par_mem_q[bank_cmd[gb].row][i] <= par_wr[i];
+              end
+            end
+          end else begin
+            par_rd_q[0] <= par_mem_q[bank_cmd[gb].row];
+          end
+        end
+        for (int unsigned k = 1; k < SRAM_LATENCY; k++) begin
+          if (rd_vld_q[k-1]) begin
+            par_rd_q[k] <= par_rd_q[k-1];
+          end
+        end
+      end
+
+      assign bank_perr[gb] = par_rd_q[SRAM_LATENCY-1] ^ mc_line_parity(rd_q[SRAM_LATENCY-1]);
+    end else begin : g_no_parity
+      assign bank_perr[gb] = '0;
+    end
+  end
+
+  // ===========================================================================
+  // Metadata pipelines (one per port, SRAM_LATENCY deep)
+  // Flush / kill clear every valid bit, so no squashed operation can produce
+  // a response or a read-data beat.
+  // ===========================================================================
+  always_comb begin : p_meta_next
+    s_meta_d[0].valid = s_issue;
+    s_meta_d[0].sram  = s_head.sram;
+    s_meta_d[0].op    = s_head.op;
+    s_meta_d[0].bank  = s_head.bank;
+    s_meta_d[0].lane  = s_head.lane;
+    s_meta_d[0].tag   = s_head.tag;
+    s_meta_d[0].exc   = s_head.exc;
+
+    v_meta_d[0].valid     = v_issue;
+    v_meta_d[0].sram      = v_head.sram;
+    v_meta_d[0].op        = v_head.op;
+    v_meta_d[0].bank      = v_head.bank;
+    v_meta_d[0].lane_mask = v_head.lane_mask;
+    v_meta_d[0].tag       = v_head.tag;
+    v_meta_d[0].exc       = v_head.exc;
+
+    b_meta_d[0].valid = b_rd_issue;
+    b_meta_d[0].bank  = b_line_q[BANK_W-1:0];
+    b_meta_d[0].last  = (b_issue_cnt_q == (b_total_q - BCNT_ONE));
+
+    for (int unsigned k = 1; k < SRAM_LATENCY; k++) begin
+      s_meta_d[k] = s_meta_q[k-1];
+      v_meta_d[k] = v_meta_q[k-1];
+      b_meta_d[k] = b_meta_q[k-1];
+    end
+
+    for (int unsigned k = 0; k < SRAM_LATENCY; k++) begin
+      if (flush_i) begin
+        s_meta_d[k].valid = 1'b0;
+        v_meta_d[k].valid = 1'b0;
+      end
+      if (b_kill) begin
+        b_meta_d[k].valid = 1'b0;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_meta
+    if (!rst_ni) begin
+      for (int unsigned k = 0; k < SRAM_LATENCY; k++) begin
+        s_meta_q[k] <= '0;
+        v_meta_q[k] <= '0;
+        b_meta_q[k] <= '0;
+      end
+    end else begin
+      for (int unsigned k = 0; k < SRAM_LATENCY; k++) begin
+        s_meta_q[k] <= s_meta_d[k];
+        v_meta_q[k] <= v_meta_d[k];
+        b_meta_q[k] <= b_meta_d[k];
+      end
+    end
+  end
+
+  always_comb begin : p_inflight
+    for (int unsigned k = 0; k < SRAM_LATENCY; k++) begin
+      s_inflight[k] = s_meta_q[k].valid;
+      v_inflight[k] = v_meta_q[k].valid;
+      b_inflight[k] = b_meta_q[k].valid;
+    end
+  end
+
+  // ===========================================================================
+  // Response formation
+  // ===========================================================================
+  always_comb begin : p_s_rsp
+    s_tail       = s_meta_q[SRAM_LATENCY-1];
+    s_tail_lanes = sf_vlanes_t'(bank_rdata[s_tail.bank]);
+    s_tail_perr  = vstrb_lanes_t'(bank_perr[s_tail.bank]);
+    s_tail_ecc   = s_tail.sram & (s_tail.op == SF_MEM_LOAD) & (s_tail_perr[s_tail.lane] != '0);
+
+    s_rsp_new.op    = s_tail.op;
+    s_rsp_new.tag   = s_tail.tag;
+    s_rsp_new.rdata = (s_tail.sram && (s_tail.op == SF_MEM_LOAD)) ? s_tail_lanes[s_tail.lane] : '0;
+    if (s_tail.exc != SF_MEM_EXC_NONE) begin
+      s_rsp_new.exc = s_tail.exc;
+    end else if (s_tail_ecc) begin
+      s_rsp_new.exc = SF_MEM_EXC_ECC;
+    end else begin
+      s_rsp_new.exc = SF_MEM_EXC_NONE;
+    end
+
+    s_rsp_push = s_tail.valid & ~flush_i;
+  end
+
+  always_comb begin : p_v_rsp
+    v_tail       = v_meta_q[SRAM_LATENCY-1];
+    v_tail_lanes = sf_vlanes_t'(bank_rdata[v_tail.bank]);
+    v_tail_ecc   = v_tail.sram & (v_tail.op == SF_MEM_LOAD) &
+                   ((bank_perr[v_tail.bank] & mc_lane_be(v_tail.lane_mask)) != '0);
+
+    for (int unsigned l = 0; l < SF_VLANES; l++) begin
+      v_rsp_lanes[l] = (v_tail.sram && (v_tail.op == SF_MEM_LOAD) && v_tail.lane_mask[l])
+                     ? v_tail_lanes[l] : '0;
+    end
+
+    v_rsp_new.op        = v_tail.op;
+    v_rsp_new.rdata     = sf_vword_t'(v_rsp_lanes);
+    v_rsp_new.lane_mask = v_tail.lane_mask;
+    v_rsp_new.tag       = v_tail.tag;
+    if (v_tail.exc != SF_MEM_EXC_NONE) begin
+      v_rsp_new.exc = v_tail.exc;
+    end else if (v_tail_ecc) begin
+      v_rsp_new.exc = SF_MEM_EXC_ECC;
+    end else begin
+      v_rsp_new.exc = SF_MEM_EXC_NONE;
+    end
+
+    v_rsp_push = v_tail.valid & ~flush_i;
+  end
+
+  always_comb begin : p_b_rsp
+    b_tail          = b_meta_q[SRAM_LATENCY-1];
+    b_rsp_new.data  = bank_rdata[b_tail.bank];
+    b_rsp_new.tag   = b_tag_q;
+    b_rsp_new.last  = b_tail.last;
+    b_rsp_new.exc   = (bank_perr[b_tail.bank] != '0) ? SF_MEM_EXC_ECC : SF_MEM_EXC_NONE;
+    b_rsp_push      = b_tail.valid & ~b_kill;
+  end
+
+  // ===========================================================================
+  // Scalar response FIFO
+  // ===========================================================================
+  assign scalar_rsp_valid_o = (s_rsp_cnt_q != '0) & ~flush_i;
+  assign scalar_rsp_o       = s_rsp_mem_q[s_rsp_rptr_q];
+  assign s_rsp_pop          = scalar_rsp_valid_o & scalar_rsp_ready_i;
+
+  always_ff @(posedge clk_i) begin : p_s_rsp_data
+    if (s_rsp_push) begin
+      s_rsp_mem_q[s_rsp_wptr_q] <= s_rsp_new;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_s_rsp_ctrl
+    if (!rst_ni) begin
+      s_rsp_wptr_q <= '0;
+      s_rsp_rptr_q <= '0;
+      s_rsp_cnt_q  <= '0;
+    end else if (flush_i) begin
+      s_rsp_wptr_q <= '0;
+      s_rsp_rptr_q <= '0;
+      s_rsp_cnt_q  <= '0;
+    end else begin
+      if (s_rsp_push) begin
+        s_rsp_wptr_q <= (s_rsp_wptr_q == SRSP_PTR_W'(SCALAR_RSP_DEPTH - 1)) ? '0
+                      : s_rsp_wptr_q + SRSP_PTR_W'(1'b1);
+      end
+      if (s_rsp_pop) begin
+        s_rsp_rptr_q <= (s_rsp_rptr_q == SRSP_PTR_W'(SCALAR_RSP_DEPTH - 1)) ? '0
+                      : s_rsp_rptr_q + SRSP_PTR_W'(1'b1);
+      end
+      s_rsp_cnt_q <= s_rsp_cnt_q + SRSP_CNT_W'(s_rsp_push) - SRSP_CNT_W'(s_rsp_pop);
+    end
+  end
+
+  // ===========================================================================
+  // Vector response FIFO
+  // ===========================================================================
+  assign vector_rsp_valid_o = (v_rsp_cnt_q != '0) & ~flush_i;
+  assign vector_rsp_o       = v_rsp_mem_q[v_rsp_rptr_q];
+  assign v_rsp_pop          = vector_rsp_valid_o & vector_rsp_ready_i;
+
+  always_ff @(posedge clk_i) begin : p_v_rsp_data
+    if (v_rsp_push) begin
+      v_rsp_mem_q[v_rsp_wptr_q] <= v_rsp_new;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_v_rsp_ctrl
+    if (!rst_ni) begin
+      v_rsp_wptr_q <= '0;
+      v_rsp_rptr_q <= '0;
+      v_rsp_cnt_q  <= '0;
+    end else if (flush_i) begin
+      v_rsp_wptr_q <= '0;
+      v_rsp_rptr_q <= '0;
+      v_rsp_cnt_q  <= '0;
+    end else begin
+      if (v_rsp_push) begin
+        v_rsp_wptr_q <= (v_rsp_wptr_q == VRSP_PTR_W'(VECTOR_RSP_DEPTH - 1)) ? '0
+                      : v_rsp_wptr_q + VRSP_PTR_W'(1'b1);
+      end
+      if (v_rsp_pop) begin
+        v_rsp_rptr_q <= (v_rsp_rptr_q == VRSP_PTR_W'(VECTOR_RSP_DEPTH - 1)) ? '0
+                      : v_rsp_rptr_q + VRSP_PTR_W'(1'b1);
+      end
+      v_rsp_cnt_q <= v_rsp_cnt_q + VRSP_CNT_W'(v_rsp_push) - VRSP_CNT_W'(v_rsp_pop);
+    end
+  end
+
+  // ===========================================================================
+  // Burst read-data FIFO
+  // ===========================================================================
+  assign burst_rdata_valid_o = (b_rf_cnt_q != '0) & ~b_kill;
+  assign burst_rdata_o       = b_rf_mem_q[b_rf_rptr_q];
+  assign b_rf_pop            = burst_rdata_valid_o & burst_rdata_ready_i;
+
+  always_ff @(posedge clk_i) begin : p_b_rf_data
+    if (b_rsp_push) begin
+      b_rf_mem_q[b_rf_wptr_q] <= b_rsp_new;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_b_rf_ctrl
+    if (!rst_ni) begin
+      b_rf_wptr_q <= '0;
+      b_rf_rptr_q <= '0;
+      b_rf_cnt_q  <= '0;
+    end else if (b_kill) begin
+      b_rf_wptr_q <= '0;
+      b_rf_rptr_q <= '0;
+      b_rf_cnt_q  <= '0;
+    end else begin
+      if (b_rsp_push) begin
+        b_rf_wptr_q <= (b_rf_wptr_q == BRF_PTR_W'(BURST_RDATA_DEPTH - 1)) ? '0
+                     : b_rf_wptr_q + BRF_PTR_W'(1'b1);
+      end
+      if (b_rf_pop) begin
+        b_rf_rptr_q <= (b_rf_rptr_q == BRF_PTR_W'(BURST_RDATA_DEPTH - 1)) ? '0
+                     : b_rf_rptr_q + BRF_PTR_W'(1'b1);
+      end
+      b_rf_cnt_q <= b_rf_cnt_q + BRF_CNT_W'(b_rsp_push) - BRF_CNT_W'(b_rf_pop);
+    end
+  end
+
+  // ===========================================================================
+  // Coherence write-notify hook (registered, one entry per bank per cycle)
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_coh_vld
+    if (!rst_ni) begin
+      coh_wr_valid_q <= '0;
+    end else begin
+      for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+        coh_wr_valid_q[bk] <= bank_cmd[bk].en & bank_cmd[bk].we & ~init_active;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_coh_line
+    for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+      if (bank_cmd[bk].en & bank_cmd[bk].we) begin
+        coh_wr_line_q[bk] <= {bank_cmd[bk].row, bank_idx_t'(bk)};
+      end
+    end
+  end
+
+  always_comb begin : p_coh_out
+    coh_wr_valid_o = coh_wr_valid_q;
+    for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+      coh_wr_addr_o[bk] = {APT_TAG, coh_wr_line_q[bk], {LINE_OFF_W{1'b0}}};
+    end
+  end
+
+  // ===========================================================================
+  // Status
+  // ===========================================================================
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_status
+    if (!rst_ni) begin
+      bank_conflict_q <= 1'b0;
+    end else begin
+      bank_conflict_q <= |bank_conflict;
+    end
+  end
+
+  assign bank_conflict_o = bank_conflict_q;
+  assign busy_o          = init_active
+                         | s_head_vld | v_head_vld
+                         | (|s_inflight) | (|v_inflight) | (|b_inflight)
+                         | (s_rsp_cnt_q != '0) | (v_rsp_cnt_q != '0)
+                         | (b_state_q != BST_IDLE);
+
+  // ===========================================================================
+  // Interface fields reserved for architected extensions
+  // ===========================================================================
+  logic unused_ok;
+  assign unused_ok = ^{scalar_req_i.hint, vector_req_i.hint, burst_req_i.hint,
+                       v_dec.lane, b_dec.lane, b_dec.domain};
+
+  // ===========================================================================
+  // Assertions (simulation / formal only)
+  // ===========================================================================
+`ifndef SYNTHESIS
+`ifndef SF_DISABLE_ASSERTIONS
+
+  logic sva_off;
+  assign sva_off = ~rst_ni;
+
+  function automatic logic [31:0] sva_popcount(input pipe_vec_t v);
+    logic [31:0] n;
+    n = '0;
+    for (int unsigned k = 0; k < SRAM_LATENCY; k++) begin
+      n = n + 32'(v[k]);
+    end
+    return n;
+  endfunction
+
+  // --- Arbitration exclusivity ---------------------------------------------
+  for (genvar gb = 0; gb < NUM_BANKS; gb++) begin : g_sva_bank
+    a_bank_gnt_onehot : assert property (@(posedge clk_i) disable iff (sva_off)
+      $onehot0(bank_gnt[gb]))
+      else $error("memory_controller: multiple grants on bank %0d", gb);
+
+    a_bank_gnt_subset : assert property (@(posedge clk_i) disable iff (sva_off)
+      ((bank_gnt[gb] & ~bank_req[gb]) == '0))
+      else $error("memory_controller: grant without request on bank %0d", gb);
+
+    a_bank_flush_quiet : assert property (@(posedge clk_i) disable iff (sva_off)
+      flush_i |-> !(bank_gnt_live[gb][REQ_S] || bank_gnt_live[gb][REQ_V]))
+      else $error("memory_controller: scalar/vector storage access on bank %0d during flush", gb);
+
+    a_bank_kill_quiet : assert property (@(posedge clk_i) disable iff (sva_off)
+      b_kill |-> !bank_gnt_live[gb][REQ_B])
+      else $error("memory_controller: burst storage access on bank %0d during kill", gb);
+  end
+
+  for (genvar gr = 0; gr < NUM_REQ; gr++) begin : g_sva_req
+    bank_vec_t won;
+    always_comb begin
+      for (int unsigned bk = 0; bk < NUM_BANKS; bk++) begin
+        won[bk] = bank_gnt[bk][gr];
+      end
+    end
+    a_req_single_bank : assert property (@(posedge clk_i) disable iff (sva_off)
+      $onehot0(won))
+      else $error("memory_controller: requester %0d granted on multiple banks", gr);
+  end
+
+  a_no_req_during_init : assert property (@(posedge clk_i) disable iff (sva_off)
+    init_active |-> (arb_req == '0))
+    else $error("memory_controller: request issued during storage initialisation");
+
+  // --- Alignment / access-rule enforcement ---------------------------------
+  a_s_align : assert property (@(posedge clk_i) disable iff (sva_off)
+    (s_push && (scalar_req_i.addr[WORD_OFF_W-1:0] != '0)) |-> !s_in_entry.sram)
+    else $error("memory_controller: misaligned scalar access reached storage path");
+
+  a_v_align : assert property (@(posedge clk_i) disable iff (sva_off)
+    (v_push && (vector_req_i.addr[LINE_OFF_W-1:0] != '0)) |-> !v_in_entry.sram)
+    else $error("memory_controller: misaligned vector access reached storage path");
+
+  a_s_legal : assert property (@(posedge clk_i) disable iff (sva_off)
+    (s_push && s_in_entry.sram) |-> (s_dec.in_range && (!STRICT_DOMAINS || (s_dec.domain == DOM_SCALAR))))
+    else $error("memory_controller: illegal scalar access accepted for storage");
+
+  a_v_legal : assert property (@(posedge clk_i) disable iff (sva_off)
+    (v_push && v_in_entry.sram) |-> (v_dec.in_range && (!STRICT_DOMAINS || (v_dec.domain == DOM_VECTOR))))
+    else $error("memory_controller: illegal vector access accepted for storage");
+
+  // --- Flush / kill safety --------------------------------------------------
+  a_no_issue_on_flush : assert property (@(posedge clk_i) disable iff (sva_off)
+    flush_i |-> !(s_issue || v_issue))
+    else $error("memory_controller: scalar/vector issue during flush");
+
+  a_no_rsp_on_flush : assert property (@(posedge clk_i) disable iff (sva_off)
+    flush_i |-> !(scalar_rsp_valid_o || vector_rsp_valid_o))
+    else $error("memory_controller: response presented during flush");
+
+  a_flush_drains : assert property (@(posedge clk_i) disable iff (sva_off)
+    flush_i |=> ((s_inflight == '0) && (v_inflight == '0) &&
+                 (s_rsp_cnt_q == '0) && (v_rsp_cnt_q == '0) &&
+                 (s_ibuf_cnt_q == '0) && (v_ibuf_cnt_q == '0)))
+    else $error("memory_controller: state survived flush");
+
+  a_no_commit_on_kill : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_kill |-> !b_issue)
+    else $error("memory_controller: burst beat issued during kill");
+
+  a_kill_drains : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_kill |=> ((b_inflight == '0) && (b_rf_cnt_q == '0) && (b_wf_cnt_q == '0)))
+    else $error("memory_controller: burst state survived kill");
+
+  // --- Burst boundary validation -------------------------------------------
+  line_idx_t sva_b_first_q;
+  line_idx_t sva_b_last_q;
+
+  always_ff @(posedge clk_i) begin : p_sva_b_bounds
+    if (b_desc_acc && (b_in_exc == SF_MEM_EXC_NONE)) begin
+      sva_b_first_q <= b_dec.line;
+      sva_b_last_q  <= line_idx_t'(b_end_ext);
+    end
+  end
+
+  a_b_beat_in_bounds : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_issue |-> ((b_line_q >= sva_b_first_q) && (b_line_q <= sva_b_last_q) &&
+                 (b_issue_cnt_q < b_total_q)))
+    else $error("memory_controller: burst beat outside validated window");
+
+  a_b_beat_domain : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_issue |-> (({1'b0, b_line_q} >= SCALAR_BOUND) == ({1'b0, sva_b_first_q} >= SCALAR_BOUND)))
+    else $error("memory_controller: burst beat crossed access domain");
+
+  a_b_done_clean : assert property (@(posedge clk_i) disable iff (sva_off)
+    (b_state_q == BST_DONE) |-> ((b_wf_cnt_q == '0) && (b_inflight == '0) && (b_rf_cnt_q == '0)))
+    else $error("memory_controller: burst completed with residual beats");
+
+  a_b_state_legal : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_state_q inside {BST_IDLE, BST_ACTIVE, BST_DONE})
+    else $error("memory_controller: illegal burst state encoding");
+
+  // --- Queue integrity / credit accounting ---------------------------------
+  a_s_rsp_no_overflow : assert property (@(posedge clk_i) disable iff (sva_off)
+    s_rsp_push |-> (s_rsp_cnt_q != SRSP_CNT_W'(SCALAR_RSP_DEPTH)))
+    else $error("memory_controller: scalar response FIFO overflow");
+
+  a_v_rsp_no_overflow : assert property (@(posedge clk_i) disable iff (sva_off)
+    v_rsp_push |-> (v_rsp_cnt_q != VRSP_CNT_W'(VECTOR_RSP_DEPTH)))
+    else $error("memory_controller: vector response FIFO overflow");
+
+  a_b_rf_no_overflow : assert property (@(posedge clk_i) disable iff (sva_off)
+    b_rsp_push |-> (b_rf_cnt_q != BRF_CNT_W'(BURST_RDATA_DEPTH)))
+    else $error("memory_controller: burst read FIFO overflow");
+
+  a_s_credit_conserved : assert property (@(posedge clk_i) disable iff (sva_off)
+    (32'(s_credit_q) + 32'(s_rsp_cnt_q) + sva_popcount(s_inflight)) == SCALAR_RSP_DEPTH)
+    else $error("memory_controller: scalar credit accounting broken");
+
+  a_v_credit_conserved : assert property (@(posedge clk_i) disable iff (sva_off)
+    (32'(v_credit_q) + 32'(v_rsp_cnt_q) + sva_popcount(v_inflight)) == VECTOR_RSP_DEPTH)
+    else $error("memory_controller: vector credit accounting broken");
+
+  // --- Handshake stability --------------------------------------------------
+  a_s_rsp_stable : assert property (@(posedge clk_i) disable iff (sva_off || flush_i)
+    (scalar_rsp_valid_o && !scalar_rsp_ready_i) |=> (scalar_rsp_valid_o && $stable(scalar_rsp_o)))
+    else $error("memory_controller: scalar response changed while stalled");
+
+  a_v_rsp_stable : assert property (@(posedge clk_i) disable iff (sva_off || flush_i)
+    (vector_rsp_valid_o && !vector_rsp_ready_i) |=> (vector_rsp_valid_o && $stable(vector_rsp_o)))
+    else $error("memory_controller: vector response changed while stalled");
+
+  a_b_done_stable : assert property (@(posedge clk_i) disable iff (sva_off)
+    (burst_done_valid_o && !burst_done_ready_i) |=> (burst_done_valid_o && $stable(burst_done_o)))
+    else $error("memory_controller: burst completion changed while stalled");
+
+`endif
+`endif
+
+endmodule : memory_controller

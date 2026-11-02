@@ -1,0 +1,136 @@
+// =============================================================================
+//  SilicaFlux Architecture
+//  File      : silicaflux_pkg.sf
+//  Language  : Silica Flux-2017
+//  Section   : Memory subsystem transaction types
+//
+//  Shared architectural widths and strongly typed memory transactions consumed
+//  by memory_controller.sf and every scratchpad client (scalar LSU, vector LSU,
+//  tensor/DMA burst engines). Widths here are architectural; capacity, banking
+//  and latency are per-instance parameters of the controller.
+// =============================================================================
+
+package silicaflux_pkg;
+
+  // ---------------------------------------------------------------------------
+  // Architectural widths
+  // ---------------------------------------------------------------------------
+  localparam int unsigned SF_XLEN        = 32;                 // scalar word
+  localparam int unsigned SF_VLEN        = 128;                // vector line
+  localparam int unsigned SF_XBYTES      = SF_XLEN / 8;        // 4
+  localparam int unsigned SF_VBYTES      = SF_VLEN / 8;        // 16
+  localparam int unsigned SF_VLANES      = SF_VLEN / SF_XLEN;  // 4
+  localparam int unsigned SF_PADDR_W     = 32;                 // physical address
+  localparam int unsigned SF_MEM_TAG_W   = 8;                  // transaction tag
+  localparam int unsigned SF_BURST_LEN_W = 8;                  // beats - 1
+
+  // ---------------------------------------------------------------------------
+  // Scalar / vector data containers
+  // ---------------------------------------------------------------------------
+  typedef logic [SF_XLEN-1:0]                 sf_word_t;
+  typedef logic [SF_VLEN-1:0]                 sf_vword_t;
+  typedef logic [SF_VLANES-1:0][SF_XLEN-1:0]  sf_vlanes_t;
+  typedef logic [SF_PADDR_W-1:0]              sf_paddr_t;
+  typedef logic [SF_XBYTES-1:0]               sf_wstrb_t;
+  typedef logic [SF_VBYTES-1:0]               sf_vstrb_t;
+  typedef logic [SF_VLANES-1:0]               sf_lane_mask_t;
+  typedef logic [SF_MEM_TAG_W-1:0]            sf_mem_tag_t;
+  typedef logic [SF_BURST_LEN_W-1:0]          sf_burst_len_t;
+  typedef logic [SF_BURST_LEN_W:0]            sf_burst_cnt_t;
+
+  // ---------------------------------------------------------------------------
+  // Operation / hint / exception encodings
+  // ---------------------------------------------------------------------------
+  typedef enum logic [0:0] {
+    SF_MEM_LOAD  = 1'b0,
+    SF_MEM_STORE = 1'b1
+  } sf_mem_op_e;
+
+  typedef enum logic [1:0] {
+    SF_MEM_HINT_NORMAL      = 2'd0,
+    SF_MEM_HINT_NONTEMPORAL = 2'd1,
+    SF_MEM_HINT_STREAM      = 2'd2,
+    SF_MEM_HINT_RESERVED    = 2'd3
+  } sf_mem_hint_e;
+
+  typedef enum logic [2:0] {
+    SF_MEM_EXC_NONE      = 3'd0,   // completed normally
+    SF_MEM_EXC_MISALIGN  = 3'd1,   // address not aligned to access width
+    SF_MEM_EXC_RANGE     = 3'd2,   // outside the scratchpad aperture
+    SF_MEM_EXC_DOMAIN    = 3'd3,   // scalar/vector domain violation
+    SF_MEM_EXC_BURST_BND = 3'd4,   // burst crosses aperture/domain/page boundary
+    SF_MEM_EXC_BURST_LEN = 3'd5,   // burst exceeds configured maximum
+    SF_MEM_EXC_ECC       = 3'd6,   // storage integrity (parity/ECC) error
+    SF_MEM_EXC_FLUSHED   = 3'd7    // aborted by flush / kill
+  } sf_mem_exc_e;
+
+  // ---------------------------------------------------------------------------
+  // Scalar load/store packets (32-bit, word aligned, single beat)
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_paddr_t     addr;
+    sf_word_t      wdata;
+    sf_wstrb_t     wstrb;
+    sf_mem_tag_t   tag;
+    sf_mem_hint_e  hint;
+  } sf_scalar_mem_req_t;
+
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_word_t      rdata;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } sf_scalar_mem_rsp_t;
+
+  // ---------------------------------------------------------------------------
+  // Vector memory packets (128-bit, line aligned, lane-masked)
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_paddr_t     addr;
+    sf_vword_t     wdata;
+    sf_lane_mask_t lane_mask;
+    sf_mem_tag_t   tag;
+    sf_mem_hint_e  hint;
+  } sf_vector_mem_req_t;
+
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_vword_t     rdata;
+    sf_lane_mask_t lane_mask;
+    sf_mem_tag_t   tag;
+    sf_mem_exc_e   exc;
+  } sf_vector_mem_rsp_t;
+
+  // ---------------------------------------------------------------------------
+  // Burst (DMA / tensor streaming) descriptors and beats
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_paddr_t     base;      // line aligned
+    sf_burst_len_t len_m1;    // number of 128-bit beats minus one
+    sf_mem_tag_t   tag;
+    sf_mem_hint_e  hint;
+  } sf_burst_desc_t;
+
+  typedef struct packed {
+    sf_vword_t     data;
+    sf_vstrb_t     strb;
+  } sf_burst_wbeat_t;
+
+  typedef struct packed {
+    sf_vword_t     data;
+    sf_mem_tag_t   tag;
+    logic          last;
+    sf_mem_exc_e   exc;
+  } sf_burst_rbeat_t;
+
+  typedef struct packed {
+    sf_mem_op_e    op;
+    sf_mem_tag_t   tag;
+    sf_burst_cnt_t beats;     // beats committed (store) or delivered (load)
+    sf_mem_exc_e   exc;
+  } sf_burst_done_t;
+
+endpackage : silicaflux_pkg

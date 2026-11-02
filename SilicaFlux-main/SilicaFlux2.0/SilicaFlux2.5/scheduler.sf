@@ -1,0 +1,1450 @@
+// =============================================================================
+//  SilicaFlux :: scheduler.sf
+//  Dataflow-aware out-of-order issue scheduler with DFSYNC barrier semantics
+// =============================================================================
+//  Language   : Silica Flux-2017
+//  Clocking   : single domain, rising edge of clk_i
+//  Reset      : rst_ni, active-low, asynchronous assert, synchronised release
+//
+//  Organisation
+//    - Issue window of IQ_DEPTH entries, split into a select-critical control
+//      array (tags, ready, bound port, epoch, branch mask) and a payload array
+//      that is only read by the post-select one-hot mux.
+//    - Dispatch-time port binding (per-class round-robin). Each entry is bound
+//      to exactly one issue port, so every port selects in parallel and an
+//      entry can never be granted twice in one cycle.
+//    - Oldest-first select through an IQ_DEPTH x IQ_DEPTH age matrix, with an
+//      optional priority-class pre-filter guarded by an anti-starvation count.
+//    - Atomic wakeup/select. Fixed-latency ports broadcast the destination tag
+//      PORT_LAT-1 cycles after select (back-to-back dependants); variable-
+//      latency results wake through fwd_wkup_i or the completion network.
+//      No load-hit speculation is performed, therefore no replay exists.
+//    - Writeback-slot reservation for fixed-latency ports sharing a result
+//      bus, with a starvation guard that throttles longer-latency ports.
+//    - DFSYNC barriers are issue epochs held in an in-order barrier queue and
+//      retired by an enum-encoded sync FSM. Only current-epoch entries issue.
+//    - Per-port in-flight tracking table (ITT); its id travels with the
+//      execute packet and returns on the completion network.
+//    - Branch-mask speculation on every speculative structure; ctl_flush_i
+//      kills all scheduler state.
+//
+//  Interface contract
+//    - fu_ready_i[p] is a registered ready: high in cycle t means the FU
+//      accepts the packet presented on iss_pkt_o[p] in cycle t+1.
+//    - Fixed-latency FUs (PORT_LAT != 0) never stall after acceptance.
+//    - Every accepted, non-killed packet returns exactly one cmpl_i beat that
+//      carries its itt_id. FUs drop packets killed by br_res_i or ctl_flush_i.
+//    - fwd_wkup_i: the tag is on the bypass network for a consumer selected
+//      in the following cycle.
+//    - Source ready bits in disp_pkt_i may lag the wakeup network by up to
+//      WKUP_HIST_DEPTH cycles.
+//    - br_res_i is a registered resolution broadcast (one branch per cycle).
+//
+//  silicaflux_pkg contract
+//    SF_NUM_SRC, SF_ITT_PORT_W, SF_ITT_SLOT_W
+//    sf_ptag_t, sf_rob_idx_t, sf_br_mask_t, sf_br_tag_t, sf_uop_t
+//    sf_fu_e           : SF_FU_ALU SF_FU_MUL SF_FU_BRANCH SF_FU_LSU
+//                        SF_FU_VECTOR SF_FU_TENSOR SF_FU_NONE
+//    sf_src_t          : used tag ready
+//    sf_rename_pkt_t   : uop fu is_dfsync dfsync_mem prio_hi src[] prd_valid
+//                        prd rob_idx br_mask
+//    sf_exec_pkt_t     : uop fu src_tag[] src_used prd_valid prd rob_idx
+//                        br_mask itt_id
+//    sf_itt_id_t       : port_idx slot_idx
+//    sf_wakeup_t       : valid tag
+//    sf_cmpl_t         : valid prd_valid prd itt_id rob_idx
+//    sf_br_res_t       : valid mispredict tag
+//    sf_barrier_meta_t : rob_idx br_mask mem_fence
+// =============================================================================
+
+`default_nettype none
+
+module scheduler
+  import silicaflux_pkg::*;
+#(
+  parameter int unsigned IQ_DEPTH        = 32,
+  parameter int unsigned DISPATCH_W      = 4,
+  parameter int unsigned NUM_ISSUE_PORTS = 8,
+  parameter int unsigned NUM_CMPL_PORTS  = 4,
+  parameter int unsigned NUM_FWD_WKUP    = 2,
+  parameter int unsigned ITT_PER_PORT    = 8,
+  parameter int unsigned BAR_Q_DEPTH     = 8,
+  parameter int unsigned WKUP_HIST_DEPTH = 1,
+  parameter int unsigned NUM_WB_GRP      = 3,
+  parameter bit          PRIO_SEL_EN     = 1'b1,
+  parameter int unsigned PRIO_STARVE_LIM = 8,
+  parameter int unsigned WB_STARVE_LIM   = 4,
+  parameter int unsigned HANG_LIMIT      = 4096,
+  parameter sf_fu_e      PORT_FU     [NUM_ISSUE_PORTS] = '{SF_FU_ALU,    SF_FU_ALU,
+                                                          SF_FU_MUL,    SF_FU_BRANCH,
+                                                          SF_FU_LSU,    SF_FU_LSU,
+                                                          SF_FU_VECTOR, SF_FU_TENSOR},
+  parameter int unsigned PORT_LAT    [NUM_ISSUE_PORTS] = '{1, 1, 3, 1, 0, 0, 0, 0},
+  parameter int unsigned PORT_WB_GRP [NUM_ISSUE_PORTS] = '{0, 1, 1, 2, 0, 0, 0, 0}
+) (
+  input  logic                                              clk_i,
+  input  logic                                              rst_ni,
+
+  // control_core
+  input  logic                                              ctl_stall_i,
+  input  logic                                              ctl_flush_i,
+
+  // branch resolution broadcast
+  input  sf_br_res_t                                        br_res_i,
+
+  // rename / dispatch
+  input  logic           [DISPATCH_W-1:0]                   disp_valid_i,
+  input  sf_rename_pkt_t                                    disp_pkt_i      [DISPATCH_W],
+  output logic                                              disp_ready_o,
+
+  // issue ports -> register read / execution clusters
+  input  logic           [NUM_ISSUE_PORTS-1:0]              fu_ready_i,
+  output logic           [NUM_ISSUE_PORTS-1:0]              iss_valid_o,
+  output sf_exec_pkt_t                                      iss_pkt_o       [NUM_ISSUE_PORTS],
+
+  // fixed-latency wakeup broadcast -> register_bank busy table, forwarding_unit
+  output sf_wakeup_t                                        iss_wkup_o      [NUM_ISSUE_PORTS],
+
+  // forwarding_unit early wakeups (variable-latency producers)
+  input  sf_wakeup_t                                        fwd_wkup_i      [NUM_FWD_WKUP],
+
+  // writeback completion network
+  input  sf_cmpl_t                                          cmpl_i          [NUM_CMPL_PORTS],
+
+  // memory ordering
+  input  logic                                              mem_quiesced_i,
+
+  // DFSYNC retirement -> reorder buffer
+  output logic                                              bar_done_valid_o,
+  output sf_barrier_meta_t                                  bar_done_meta_o,
+
+  // status -> control_core
+  output logic [$clog2(IQ_DEPTH+1)-1:0]                     sched_occupancy_o,
+  output logic [$clog2(NUM_ISSUE_PORTS*ITT_PER_PORT+1)-1:0] sched_inflight_o,
+  output logic                                              sched_empty_o,
+  output logic                                              sched_bar_active_o,
+  output logic                                              sched_hang_o,
+  output logic                                              sched_err_route_o,
+  output logic                                              sched_err_cmpl_o,
+
+  // performance events
+  output logic [$clog2(NUM_ISSUE_PORTS+1)-1:0]              perf_issue_cnt_o,
+  output logic                                              perf_bar_block_o,
+  output logic                                              perf_fu_bp_o,
+  output logic                                              perf_disp_stall_o
+);
+
+  // ===========================================================================
+  // 1. Derived constants
+  // ===========================================================================
+  localparam int unsigned IQ_CNT_W        = $clog2(IQ_DEPTH + 1);
+  localparam int unsigned ITT_IDX_W       = (ITT_PER_PORT > 1) ? $clog2(ITT_PER_PORT) : 1;
+  localparam int unsigned ITT_TOTAL       = NUM_ISSUE_PORTS * ITT_PER_PORT;
+  localparam int unsigned ITT_CNT_W       = $clog2(ITT_TOTAL + 1);
+  localparam int unsigned ISS_CNT_W       = $clog2(NUM_ISSUE_PORTS + 1);
+  localparam int unsigned BAR_IDX_W       = (BAR_Q_DEPTH > 1) ? $clog2(BAR_Q_DEPTH) : 1;
+  localparam int unsigned BAR_CNT_W       = $clog2(BAR_Q_DEPTH + 1);
+  localparam int unsigned EPOCH_W         = BAR_CNT_W;
+  localparam int unsigned NUM_WKUP        = NUM_ISSUE_PORTS + NUM_CMPL_PORTS + NUM_FWD_WKUP;
+  localparam int unsigned WK_CMPL_BASE    = NUM_ISSUE_PORTS;
+  localparam int unsigned WK_FWD_BASE     = NUM_ISSUE_PORTS + NUM_CMPL_PORTS;
+  localparam int unsigned NUM_ALLOC_BANKS = (DISPATCH_W + 1) / 2;
+  localparam int unsigned ALLOC_BANK_SZ   = IQ_DEPTH / NUM_ALLOC_BANKS;
+  localparam int unsigned PRIO_STARVE_W   = $clog2(PRIO_STARVE_LIM + 1);
+  localparam int unsigned WB_STARVE_W     = $clog2(WB_STARVE_LIM + 1);
+  localparam int unsigned HANG_W          = $clog2(HANG_LIMIT + 1);
+
+  // ===========================================================================
+  // 2. Local types
+  // ===========================================================================
+  typedef logic [IQ_DEPTH-1:0]                              iq_vec_t;
+  typedef logic [IQ_DEPTH-1:0][IQ_DEPTH-1:0]                iq_mat_t;
+  typedef logic [IQ_CNT_W-1:0]                              iq_cnt_t;
+  typedef logic [NUM_ISSUE_PORTS-1:0]                       port_vec_t;
+  typedef logic [NUM_ISSUE_PORTS-1:0][NUM_ISSUE_PORTS-1:0]  port_mat_t;
+  typedef logic [ISS_CNT_W-1:0]                             iss_cnt_t;
+  typedef logic [ITT_PER_PORT-1:0]                          itt_vec_t;
+  typedef logic [ITT_IDX_W-1:0]                             itt_idx_t;
+  typedef logic [ITT_CNT_W-1:0]                             itt_cnt_t;
+  typedef logic [ALLOC_BANK_SZ-1:0]                         bank_vec_t;
+  typedef logic [EPOCH_W-1:0]                               epoch_t;
+  typedef logic [SF_NUM_SRC-1:0]                            src_vec_t;
+  typedef logic [NUM_WKUP-1:0]                              wk_vec_t;
+  typedef sf_ptag_t [NUM_WKUP-1:0]                          wk_tags_t;
+  typedef logic [BAR_IDX_W-1:0]                             bar_idx_t;
+  typedef logic [BAR_CNT_W-1:0]                             bar_cnt_t;
+  typedef logic [BAR_Q_DEPTH-1:0]                           bar_vec_t;
+
+  // select-critical issue entry state
+  typedef struct packed {
+    sf_ptag_t [SF_NUM_SRC-1:0] src_tag;
+    src_vec_t                  src_rdy;
+    port_vec_t                 port_oh;
+    epoch_t                    epoch;
+    sf_br_mask_t               br_mask;
+    logic                      prio_hi;
+    logic                      prd_valid;
+    sf_ptag_t                  prd;
+  } iq_ctrl_t;
+
+  // non-critical issue entry payload
+  typedef struct packed {
+    sf_uop_t     uop;
+    sf_fu_e      fu;
+    src_vec_t    src_used;
+    sf_rob_idx_t rob_idx;
+  } iq_payload_t;
+
+  // post-select view of the control array
+  typedef struct packed {
+    sf_ptag_t [SF_NUM_SRC-1:0] src_tag;
+    sf_br_mask_t               br_mask;
+    logic                      prd_valid;
+    sf_ptag_t                  prd;
+  } iq_route_t;
+
+  typedef logic [$bits(iq_route_t)-1:0]                     iq_route_bits_t;
+  typedef logic [$bits(iq_payload_t)-1:0]                   iq_pl_bits_t;
+
+  // delayed wakeup pipeline stage
+  typedef struct packed {
+    logic        valid;
+    sf_ptag_t    tag;
+    sf_br_mask_t br_mask;
+  } wk_pipe_t;
+
+  // DFSYNC sync controller
+  typedef enum logic [1:0] {
+    SYNC_IDLE     = 2'b00,
+    SYNC_DRAIN    = 2'b01,
+    SYNC_MEMFENCE = 2'b10,
+    SYNC_RELEASE  = 2'b11
+  } sync_state_e;
+
+  // ===========================================================================
+  // 3. Elaboration-time functions and constants
+  // ===========================================================================
+  function automatic int unsigned f_max_lat();
+    int unsigned m;
+    m = 0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      if (PORT_LAT[p] > m) begin
+        m = PORT_LAT[p];
+      end
+    end
+    return m;
+  endfunction
+
+  // next port of the same functional-unit class (circular), one-hot per row
+  function automatic port_mat_t f_build_next_same();
+    port_mat_t m;
+    logic      found;
+    m = '0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      found = 1'b0;
+      for (int unsigned k = 1; k <= NUM_ISSUE_PORTS; k++) begin
+        if (!found && (PORT_FU[(p + k) % NUM_ISSUE_PORTS] == PORT_FU[p])) begin
+          m[p][(p + k) % NUM_ISSUE_PORTS] = 1'b1;
+          found                           = 1'b1;
+        end
+      end
+    end
+    return m;
+  endfunction
+
+  // lowest-indexed port of each class owns the initial binding turn
+  function automatic port_vec_t f_build_turn_rst();
+    port_vec_t v;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      v[p] = 1'b1;
+      for (int unsigned q = 0; q < p; q++) begin
+        if (PORT_FU[q] == PORT_FU[p]) begin
+          v[p] = 1'b0;
+        end
+      end
+    end
+    return v;
+  endfunction
+
+  // fixed-latency ports sharing a writeback group must have distinct latencies
+  function automatic bit f_wb_cfg_ok();
+    bit ok;
+    ok = 1'b1;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      if ((PORT_LAT[p] != 0) && (PORT_WB_GRP[p] >= NUM_WB_GRP)) begin
+        ok = 1'b0;
+      end
+      for (int unsigned q = p + 1; q < NUM_ISSUE_PORTS; q++) begin
+        if ((PORT_LAT[p] != 0) && (PORT_LAT[q] != 0) &&
+            (PORT_WB_GRP[p] == PORT_WB_GRP[q]) && (PORT_LAT[p] == PORT_LAT[q])) begin
+          ok = 1'b0;
+        end
+      end
+    end
+    return ok;
+  endfunction
+
+  function automatic bit f_port_cfg_ok();
+    bit ok;
+    ok = 1'b1;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      if (PORT_FU[p] == SF_FU_NONE) begin
+        ok = 1'b0;
+      end
+    end
+    return ok;
+  endfunction
+
+  localparam port_mat_t   NEXT_SAME_PORT = f_build_next_same();
+  localparam port_vec_t   BIND_TURN_RST  = f_build_turn_rst();
+  localparam int unsigned MAX_FIXED_LAT  = f_max_lat();
+  localparam int unsigned WB_RESV_D      = (MAX_FIXED_LAT > 1) ? (MAX_FIXED_LAT - 1) : 1;
+
+  // ===========================================================================
+  // 4. Configuration checks
+  // ===========================================================================
+  if (IQ_DEPTH < 4) begin : g_chk_iq_depth
+    $error("scheduler: IQ_DEPTH must be >= 4");
+  end
+  if (DISPATCH_W < 1) begin : g_chk_disp_w
+    $error("scheduler: DISPATCH_W must be >= 1");
+  end
+  if ((IQ_DEPTH % NUM_ALLOC_BANKS) != 0) begin : g_chk_alloc_bank_div
+    $error("scheduler: IQ_DEPTH must divide evenly into allocation banks");
+  end
+  if (ALLOC_BANK_SZ < 2) begin : g_chk_alloc_bank_sz
+    $error("scheduler: allocation bank must hold >= 2 entries");
+  end
+  if ((BAR_Q_DEPTH < 2) || ((BAR_Q_DEPTH & (BAR_Q_DEPTH - 1)) != 0)) begin : g_chk_bar_pow2
+    $error("scheduler: BAR_Q_DEPTH must be a power of two >= 2");
+  end
+  if (BAR_Q_DEPTH < DISPATCH_W) begin : g_chk_bar_depth
+    $error("scheduler: BAR_Q_DEPTH must be >= DISPATCH_W");
+  end
+  if (NUM_ISSUE_PORTS > (1 << SF_ITT_PORT_W)) begin : g_chk_itt_port_w
+    $error("scheduler: SF_ITT_PORT_W too narrow for NUM_ISSUE_PORTS");
+  end
+  if ((ITT_PER_PORT < 1) || (ITT_PER_PORT > (1 << SF_ITT_SLOT_W))) begin : g_chk_itt_slot_w
+    $error("scheduler: ITT_PER_PORT out of range for SF_ITT_SLOT_W");
+  end
+  if ((NUM_CMPL_PORTS < 1) || (NUM_FWD_WKUP < 1) || (WKUP_HIST_DEPTH < 1)) begin : g_chk_wkup
+    $error("scheduler: completion, forwarding and history widths must be >= 1");
+  end
+  if ((PRIO_STARVE_LIM < 1) || (WB_STARVE_LIM < 1) || (HANG_LIMIT < 2)) begin : g_chk_limits
+    $error("scheduler: starvation and hang limits out of range");
+  end
+  if (!f_wb_cfg_ok()) begin : g_chk_wb_cfg
+    $error("scheduler: fixed-latency ports sharing a writeback group need distinct latencies");
+  end
+  if (!f_port_cfg_ok()) begin : g_chk_port_cfg
+    $error("scheduler: SF_FU_NONE is not a legal issue port class");
+  end
+
+  // ===========================================================================
+  // 5. Combinational helper functions
+  // ===========================================================================
+  function automatic logic f_mask_hit(input sf_br_mask_t mask, input sf_br_mask_t sel);
+    return |(mask & sel);
+  endfunction
+
+  function automatic logic f_tag_hit(input sf_ptag_t tag, input wk_vec_t vld, input wk_tags_t tags);
+    logic hit;
+    hit = 1'b0;
+    for (int unsigned w = 0; w < NUM_WKUP; w++) begin
+      hit = hit | (vld[w] & (tags[w] == tag));
+    end
+    return hit;
+  endfunction
+
+  // single-level oldest-first arbitration: older[i][j] == 1 <=> j older than i
+  function automatic iq_vec_t f_oldest_sel(input iq_vec_t req, input iq_mat_t older);
+    iq_vec_t gnt;
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      gnt[i] = req[i] & ~(|(req & older[i]));
+    end
+    return gnt;
+  endfunction
+
+  function automatic bank_vec_t f_lsb_oh_bank(input bank_vec_t v);
+    bank_vec_t r;
+    logic      seen;
+    seen = 1'b0;
+    for (int unsigned i = 0; i < ALLOC_BANK_SZ; i++) begin
+      r[i] = v[i] & ~seen;
+      seen = seen | v[i];
+    end
+    return r;
+  endfunction
+
+  function automatic bank_vec_t f_msb_oh_bank(input bank_vec_t v);
+    bank_vec_t r;
+    logic      seen;
+    seen = 1'b0;
+    for (int i = int'(ALLOC_BANK_SZ) - 1; i >= 0; i--) begin
+      r[i] = v[i] & ~seen;
+      seen = seen | v[i];
+    end
+    return r;
+  endfunction
+
+  function automatic itt_vec_t f_lsb_oh_itt(input itt_vec_t v);
+    itt_vec_t r;
+    logic     seen;
+    seen = 1'b0;
+    for (int unsigned i = 0; i < ITT_PER_PORT; i++) begin
+      r[i] = v[i] & ~seen;
+      seen = seen | v[i];
+    end
+    return r;
+  endfunction
+
+  function automatic itt_idx_t f_enc_itt(input itt_vec_t oh);
+    itt_idx_t idx;
+    idx = '0;
+    for (int unsigned i = 0; i < ITT_PER_PORT; i++) begin
+      if (oh[i]) begin
+        idx = idx | itt_idx_t'(i);
+      end
+    end
+    return idx;
+  endfunction
+
+  function automatic port_vec_t f_class_match(input sf_fu_e fu);
+    port_vec_t m;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      m[p] = (fu == PORT_FU[p]);
+    end
+    return m;
+  endfunction
+
+  function automatic port_vec_t f_rotate_turn(input port_vec_t turn, input port_vec_t sel);
+    port_vec_t nxt;
+    nxt = '0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      if (sel[p]) begin
+        nxt = nxt | NEXT_SAME_PORT[p];
+      end
+    end
+    return (turn & ~sel) | nxt;
+  endfunction
+
+  // ===========================================================================
+  // 6. State and interconnect declarations
+  // ===========================================================================
+  // issue window
+  iq_vec_t                  iq_vld_q;
+  iq_vec_t                  iq_vld_d;
+  iq_ctrl_t                 iq_ctrl_q      [IQ_DEPTH];
+  iq_ctrl_t                 iq_ctrl_d      [IQ_DEPTH];
+  iq_payload_t              iq_pl_q        [IQ_DEPTH];
+  iq_mat_t                  iq_older_q;
+  iq_mat_t                  iq_older_d;
+  iq_vec_t                  iq_alloc_vec;
+  iq_vec_t                  iq_fire_vec;
+
+  // entry status
+  iq_vec_t                  ent_rdy;
+  iq_vec_t                  ent_epoch_ok;
+  iq_vec_t                  ent_kill;
+  iq_vec_t                  ent_prio;
+  iq_vec_t                  ent_elig;
+  iq_vec_t                  port_ent       [NUM_ISSUE_PORTS];
+
+  // branch resolution
+  sf_br_mask_t              br_res_sel;
+  sf_br_mask_t              br_kill_sel;
+
+  // wakeup network
+  sf_wakeup_t               iss_wkup       [NUM_ISSUE_PORTS];
+  wk_vec_t                  wk_vld;
+  wk_tags_t                 wk_tag;
+  wk_vec_t                  wk_hist_vld_q  [WKUP_HIST_DEPTH];
+  wk_tags_t                 wk_hist_tag_q  [WKUP_HIST_DEPTH];
+
+  // dispatch
+  port_vec_t                bind_turn_q;
+  port_vec_t                bind_turn_d;
+  logic [NUM_ALLOC_BANKS-1:0]                alloc_bank_ok;
+  iq_vec_t                  alloc_oh       [DISPATCH_W];
+  iq_vec_t                  alloc_earlier  [DISPATCH_W];
+  logic [DISPATCH_W-1:0]    disp_fire;
+  logic [DISPATCH_W-1:0]    disp_alloc;
+  logic [DISPATCH_W-1:0]    disp_bar_push;
+  logic [DISPATCH_W-1:0]    disp_route_err;
+  iq_ctrl_t                 disp_ctrl      [DISPATCH_W];
+  iq_payload_t              disp_pl        [DISPATCH_W];
+  sf_barrier_meta_t         disp_bar_meta  [DISPATCH_W];
+  logic                     bar_space_ok;
+
+  // issue
+  logic                     issue_glb_en;
+  port_vec_t                port_can_issue;
+  port_vec_t                iss_req_any;
+  port_vec_t                iss_fire;
+  iq_vec_t                  iss_gnt        [NUM_ISSUE_PORTS];
+
+  // structural hazards
+  port_vec_t                itt_has_free;
+  port_vec_t                wb_slot_free;
+  port_vec_t                wb_starve;
+  port_vec_t                wb_hold;
+  logic [WB_RESV_D:1]       wb_set_port    [NUM_ISSUE_PORTS];
+  logic [WB_RESV_D:1]       wb_resv_q      [NUM_WB_GRP];
+  logic [WB_RESV_D:1]       wb_resv_d      [NUM_WB_GRP];
+
+  // in-flight tracking
+  itt_vec_t                 itt_vld_all    [NUM_ISSUE_PORTS];
+  port_vec_t                itt_orphan_port;
+  logic                     itt_any;
+
+  // DFSYNC barrier queue
+  sf_barrier_meta_t         bar_q          [BAR_Q_DEPTH];
+  bar_idx_t                 bar_head_q;
+  bar_idx_t                 bar_tail_q;
+  bar_cnt_t                 bar_cnt_q;
+  epoch_t                   issue_epoch_q;
+  sync_state_e              sync_state_q;
+  sync_state_e              sync_state_d;
+  bar_vec_t                 bar_kill_off;
+  bar_cnt_t                 bar_kill_cnt;
+  bar_cnt_t                 bar_push_cnt;
+  bar_idx_t                 bar_push_idx   [DISPATCH_W];
+  logic                     bar_head_vld;
+  logic                     bar_head_live;
+  logic                     bar_pop;
+  logic                     cur_epoch_live;
+  logic                     sync_drained;
+  logic                     bar_done_vld_q;
+  sf_barrier_meta_t         bar_done_meta_q;
+
+  // supervision
+  logic [HANG_W-1:0]        hang_cnt_q;
+  logic                     hang_q;
+  logic                     err_route_q;
+  logic                     err_cmpl_q;
+  logic                     cmpl_any;
+
+  // ===========================================================================
+  // 7. Branch resolution decode
+  // ===========================================================================
+  always_comb begin : p_br_decode
+    br_res_sel = '0;
+    if (br_res_i.valid) begin
+      br_res_sel[br_res_i.tag] = 1'b1;
+    end
+    br_kill_sel = (br_res_i.valid && br_res_i.mispredict) ? br_res_sel : '0;
+  end
+
+  // ===========================================================================
+  // 8. Wakeup network
+  //    [0 .. NUM_ISSUE_PORTS-1]     fixed-latency issue-time broadcasts
+  //    [WK_CMPL_BASE .. +CMPL-1]    writeback completion broadcasts
+  //    [WK_FWD_BASE  .. +FWD-1]     forwarding_unit early broadcasts
+  // ===========================================================================
+  always_comb begin : p_wkup_bus
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      wk_vld[p] = iss_wkup[p].valid;
+      wk_tag[p] = iss_wkup[p].tag;
+    end
+    for (int unsigned c = 0; c < NUM_CMPL_PORTS; c++) begin
+      wk_vld[WK_CMPL_BASE + c] = cmpl_i[c].valid & cmpl_i[c].prd_valid;
+      wk_tag[WK_CMPL_BASE + c] = cmpl_i[c].prd;
+    end
+    for (int unsigned f = 0; f < NUM_FWD_WKUP; f++) begin
+      wk_vld[WK_FWD_BASE + f] = fwd_wkup_i[f].valid;
+      wk_tag[WK_FWD_BASE + f] = fwd_wkup_i[f].tag;
+    end
+  end
+
+  assign iss_wkup_o = iss_wkup;
+
+  // wakeup history closes the busy-table read -> dispatch window
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_wkup_hist_vld
+    if (!rst_ni) begin
+      for (int unsigned h = 0; h < WKUP_HIST_DEPTH; h++) begin
+        wk_hist_vld_q[h] <= '0;
+      end
+    end else if (ctl_flush_i) begin
+      for (int unsigned h = 0; h < WKUP_HIST_DEPTH; h++) begin
+        wk_hist_vld_q[h] <= '0;
+      end
+    end else begin
+      wk_hist_vld_q[0] <= wk_vld;
+      for (int unsigned h = 1; h < WKUP_HIST_DEPTH; h++) begin
+        wk_hist_vld_q[h] <= wk_hist_vld_q[h-1];
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_wkup_hist_tag
+    wk_hist_tag_q[0] <= wk_tag;
+    for (int unsigned h = 1; h < WKUP_HIST_DEPTH; h++) begin
+      wk_hist_tag_q[h] <= wk_hist_tag_q[h-1];
+    end
+  end
+
+  // ===========================================================================
+  // 9. Dispatch: banked dual-ended allocation, port binding, epoch stamping
+  // ===========================================================================
+  for (genvar b = 0; b < NUM_ALLOC_BANKS; b++) begin : g_alloc_bank
+    localparam int unsigned BASE  = b * ALLOC_BANK_SZ;
+    localparam int unsigned SLOT0 = 2 * b;
+
+    bank_vec_t free_v;
+    bank_vec_t lo_oh;
+    bank_vec_t hi_oh;
+
+    assign free_v          = ~iq_vld_q[BASE +: ALLOC_BANK_SZ];
+    assign lo_oh           = f_lsb_oh_bank(free_v);
+    assign hi_oh           = f_msb_oh_bank(free_v);
+    assign alloc_oh[SLOT0] = iq_vec_t'(lo_oh) << BASE;
+
+    if ((SLOT0 + 1) < DISPATCH_W) begin : g_dual
+      assign alloc_oh[SLOT0+1] = iq_vec_t'(hi_oh) << BASE;
+      assign alloc_bank_ok[b]  = (|free_v) & (lo_oh != hi_oh);
+    end else begin : g_single
+      assign alloc_bank_ok[b]  = |free_v;
+    end
+  end
+
+  assign bar_space_ok = (bar_cnt_q <= bar_cnt_t'(BAR_Q_DEPTH - DISPATCH_W));
+  assign disp_ready_o = (&alloc_bank_ok) & bar_space_ok;
+
+  always_comb begin : p_dispatch
+    port_vec_t turn_v;
+    epoch_t    epoch_v;
+    iq_vec_t   earlier_v;
+    port_vec_t cls_match;
+    logic      kill_in;
+    logic      hist_hit;
+
+    turn_v       = bind_turn_q;
+    epoch_v      = issue_epoch_q + epoch_t'(bar_cnt_q);
+    earlier_v    = '0;
+    iq_alloc_vec = '0;
+
+    for (int unsigned s = 0; s < DISPATCH_W; s++) begin
+      cls_match = f_class_match(disp_pkt_i[s].fu);
+      kill_in   = f_mask_hit(disp_pkt_i[s].br_mask, br_kill_sel);
+
+      disp_fire[s]      = disp_valid_i[s] & disp_ready_o & ~ctl_flush_i & ~kill_in;
+      disp_bar_push[s]  = disp_fire[s] &  disp_pkt_i[s].is_dfsync;
+      disp_alloc[s]     = disp_fire[s] & ~disp_pkt_i[s].is_dfsync &  (|cls_match);
+      disp_route_err[s] = disp_fire[s] & ~disp_pkt_i[s].is_dfsync & ~(|cls_match);
+
+      disp_ctrl[s].port_oh   = cls_match & turn_v;
+      disp_ctrl[s].epoch     = epoch_v;
+      disp_ctrl[s].br_mask   = disp_pkt_i[s].br_mask & ~br_res_sel;
+      disp_ctrl[s].prio_hi   = disp_pkt_i[s].prio_hi;
+      disp_ctrl[s].prd_valid = disp_pkt_i[s].prd_valid;
+      disp_ctrl[s].prd       = disp_pkt_i[s].prd;
+
+      for (int unsigned k = 0; k < SF_NUM_SRC; k++) begin
+        hist_hit = 1'b0;
+        for (int unsigned h = 0; h < WKUP_HIST_DEPTH; h++) begin
+          hist_hit = hist_hit |
+                     f_tag_hit(disp_pkt_i[s].src[k].tag, wk_hist_vld_q[h], wk_hist_tag_q[h]);
+        end
+        disp_ctrl[s].src_tag[k] = disp_pkt_i[s].src[k].tag;
+        disp_ctrl[s].src_rdy[k] = ~disp_pkt_i[s].src[k].used
+                                |  disp_pkt_i[s].src[k].ready
+                                |  f_tag_hit(disp_pkt_i[s].src[k].tag, wk_vld, wk_tag)
+                                |  hist_hit;
+        disp_pl[s].src_used[k]  = disp_pkt_i[s].src[k].used;
+      end
+
+      disp_pl[s].uop     = disp_pkt_i[s].uop;
+      disp_pl[s].fu      = disp_pkt_i[s].fu;
+      disp_pl[s].rob_idx = disp_pkt_i[s].rob_idx;
+
+      disp_bar_meta[s].rob_idx   = disp_pkt_i[s].rob_idx;
+      disp_bar_meta[s].br_mask   = disp_pkt_i[s].br_mask & ~br_res_sel;
+      disp_bar_meta[s].mem_fence = disp_pkt_i[s].dfsync_mem;
+
+      alloc_earlier[s] = earlier_v;
+      if (disp_alloc[s]) begin
+        earlier_v    = earlier_v    | alloc_oh[s];
+        iq_alloc_vec = iq_alloc_vec | alloc_oh[s];
+        turn_v       = f_rotate_turn(turn_v, disp_ctrl[s].port_oh);
+      end
+      if (disp_bar_push[s]) begin
+        epoch_v = epoch_v + epoch_t'(1);
+      end
+    end
+
+    bind_turn_d = turn_v;
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_bind_turn_ff
+    if (!rst_ni) begin
+      bind_turn_q <= BIND_TURN_RST;
+    end else begin
+      bind_turn_q <= bind_turn_d;
+    end
+  end
+
+  // ===========================================================================
+  // 10. Entry status (all inputs registered except the branch kill vector)
+  // ===========================================================================
+  always_comb begin : p_entry_status
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      ent_rdy[i]      = &iq_ctrl_q[i].src_rdy;
+      ent_epoch_ok[i] = (iq_ctrl_q[i].epoch == issue_epoch_q);
+      ent_kill[i]     = f_mask_hit(iq_ctrl_q[i].br_mask, br_kill_sel);
+      ent_prio[i]     = iq_ctrl_q[i].prio_hi;
+    end
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+        port_ent[p][i] = iq_ctrl_q[i].port_oh[p];
+      end
+    end
+    ent_elig = iq_vld_q & ent_rdy & ent_epoch_ok & ~ent_kill;
+  end
+
+  assign issue_glb_en   = ~ctl_stall_i & ~ctl_flush_i;
+  assign port_can_issue = {NUM_ISSUE_PORTS{issue_glb_en}} & fu_ready_i & itt_has_free &
+                          wb_slot_free & ~wb_hold;
+
+  // ===========================================================================
+  // 11. Per-port issue engine
+  //     select -> payload mux -> issue register, ITT bank, wakeup timing,
+  //     writeback reservation and anti-starvation control
+  // ===========================================================================
+  for (genvar p = 0; p < NUM_ISSUE_PORTS; p++) begin : g_port
+    localparam int unsigned               LAT     = PORT_LAT[p];
+    localparam logic [SF_ITT_PORT_W-1:0] PORT_ID = SF_ITT_PORT_W'(p);
+
+    iq_vec_t                  req_raw;
+    iq_vec_t                  req_all;
+    iq_vec_t                  req_hi;
+    iq_vec_t                  gnt_all;
+    iq_vec_t                  gnt_hi;
+    iq_vec_t                  gnt;
+    logic                     use_hi;
+    logic                     prio_bypass;
+    logic                     prio_starve;
+    logic [PRIO_STARVE_W-1:0] prio_starve_cnt_q;
+
+    iq_route_t                sel_rt;
+    iq_payload_t              sel_pl;
+    sf_exec_pkt_t             exec_d;
+    logic                     iss_vld_q;
+    sf_exec_pkt_t             iss_pkt_q;
+    sf_exec_pkt_t             iss_pkt_out;
+
+    itt_vec_t                 itt_vld_q;
+    sf_br_mask_t              itt_mask_q [ITT_PER_PORT];
+    itt_vec_t                 itt_free_oh;
+    itt_idx_t                 itt_alloc_idx;
+    itt_vec_t                 itt_cmpl_clr;
+    itt_vec_t                 itt_kill_clr;
+
+    sf_wakeup_t               wkup;
+    logic [WB_RESV_D:1]       wb_set;
+
+    // ---------------------------------------------------------------- select
+    assign req_raw         = ent_elig & port_ent[p];
+    assign iss_req_any[p]  = |req_raw;
+    assign prio_starve     = (prio_starve_cnt_q == PRIO_STARVE_W'(PRIO_STARVE_LIM));
+
+    always_comb begin : p_select
+      req_all = req_raw & {IQ_DEPTH{port_can_issue[p]}};
+      req_hi  = req_all & ent_prio;
+      gnt_all = f_oldest_sel(req_all, iq_older_q);
+      gnt_hi  = f_oldest_sel(req_hi,  iq_older_q);
+      use_hi  = PRIO_SEL_EN & (|req_hi) & ~prio_starve;
+      gnt     = use_hi ? gnt_hi : gnt_all;
+    end
+
+    assign prio_bypass = use_hi & (gnt_hi != gnt_all);
+    assign iss_gnt[p]  = gnt;
+    assign iss_fire[p] = |gnt;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_prio_starve_ff
+      if (!rst_ni) begin
+        prio_starve_cnt_q <= '0;
+      end else if (ctl_flush_i) begin
+        prio_starve_cnt_q <= '0;
+      end else if (iss_fire[p]) begin
+        if (!prio_bypass) begin
+          prio_starve_cnt_q <= '0;
+        end else if (!prio_starve) begin
+          prio_starve_cnt_q <= prio_starve_cnt_q + PRIO_STARVE_W'(1'b1);
+        end
+      end
+    end
+
+    // ------------------------------------------------------ one-hot read mux
+    always_comb begin : p_sel_mux
+      iq_route_t      rt_i;
+      iq_route_bits_t rt_v;
+      iq_pl_bits_t    pl_v;
+      rt_v = '0;
+      pl_v = '0;
+      for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+        rt_i.src_tag   = iq_ctrl_q[i].src_tag;
+        rt_i.br_mask   = iq_ctrl_q[i].br_mask;
+        rt_i.prd_valid = iq_ctrl_q[i].prd_valid;
+        rt_i.prd       = iq_ctrl_q[i].prd;
+        rt_v = rt_v | (iq_route_bits_t'(rt_i)     & {$bits(iq_route_t){gnt[i]}});
+        pl_v = pl_v | (iq_pl_bits_t'(iq_pl_q[i]) & {$bits(iq_payload_t){gnt[i]}});
+      end
+      sel_rt = iq_route_t'(rt_v);
+      sel_pl = iq_payload_t'(pl_v);
+    end
+
+    always_comb begin : p_exec_pkt
+      exec_d                 = '0;
+      exec_d.uop             = sel_pl.uop;
+      exec_d.fu              = sel_pl.fu;
+      exec_d.src_tag         = sel_rt.src_tag;
+      exec_d.src_used        = sel_pl.src_used;
+      exec_d.prd_valid       = sel_rt.prd_valid;
+      exec_d.prd             = sel_rt.prd;
+      exec_d.rob_idx         = sel_pl.rob_idx;
+      exec_d.br_mask         = sel_rt.br_mask & ~br_res_sel;
+      exec_d.itt_id.port_idx = PORT_ID;
+      exec_d.itt_id.slot_idx = SF_ITT_SLOT_W'(itt_alloc_idx);
+    end
+
+    // -------------------------------------------------------- issue register
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_iss_vld_ff
+      if (!rst_ni) begin
+        iss_vld_q <= 1'b0;
+      end else begin
+        iss_vld_q <= iss_fire[p] & ~ctl_flush_i;
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_iss_pkt_ff
+      if (iss_fire[p]) begin
+        iss_pkt_q <= exec_d;
+      end
+    end
+
+    always_comb begin : p_iss_out
+      iss_pkt_out         = iss_pkt_q;
+      iss_pkt_out.br_mask = iss_pkt_q.br_mask & ~br_res_sel;
+    end
+
+    assign iss_valid_o[p] = iss_vld_q & ~ctl_flush_i & ~f_mask_hit(iss_pkt_q.br_mask, br_kill_sel);
+    assign iss_pkt_o[p]   = iss_pkt_out;
+
+    // ------------------------------------------------- in-flight table bank
+    assign itt_free_oh     = f_lsb_oh_itt(~itt_vld_q);
+    assign itt_alloc_idx   = f_enc_itt(itt_free_oh);
+    assign itt_has_free[p] = |(~itt_vld_q);
+    assign itt_vld_all[p]  = itt_vld_q;
+
+    always_comb begin : p_itt_clr
+      itt_cmpl_clr = '0;
+      for (int unsigned c = 0; c < NUM_CMPL_PORTS; c++) begin
+        if (cmpl_i[c].valid && (cmpl_i[c].itt_id.port_idx == PORT_ID)) begin
+          for (int unsigned e = 0; e < ITT_PER_PORT; e++) begin
+            if (cmpl_i[c].itt_id.slot_idx == SF_ITT_SLOT_W'(e)) begin
+              itt_cmpl_clr[e] = 1'b1;
+            end
+          end
+        end
+      end
+      for (int unsigned e = 0; e < ITT_PER_PORT; e++) begin
+        itt_kill_clr[e] = f_mask_hit(itt_mask_q[e], br_kill_sel);
+      end
+    end
+
+    assign itt_orphan_port[p] = |(itt_cmpl_clr & ~itt_vld_q);
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : p_itt_vld_ff
+      if (!rst_ni) begin
+        itt_vld_q <= '0;
+      end else if (ctl_flush_i) begin
+        itt_vld_q <= '0;
+      end else begin
+        itt_vld_q <= (itt_vld_q & ~itt_cmpl_clr & ~itt_kill_clr) |
+                     (itt_free_oh & {ITT_PER_PORT{iss_fire[p]}});
+      end
+    end
+
+    always_ff @(posedge clk_i) begin : p_itt_mask_ff
+      for (int unsigned e = 0; e < ITT_PER_PORT; e++) begin
+        if (iss_fire[p] && itt_free_oh[e]) begin
+          itt_mask_q[e] <= exec_d.br_mask;
+        end else begin
+          itt_mask_q[e] <= itt_mask_q[e] & ~br_res_sel;
+        end
+      end
+    end
+
+    // ------------------------------------------------- wakeup timing engine
+    if (LAT == 1) begin : g_wk_imm
+      always_comb begin : p_wk_imm
+        wkup.valid = iss_fire[p] & sel_rt.prd_valid;
+        wkup.tag   = sel_rt.prd;
+      end
+    end else if (LAT >= 2) begin : g_wk_pipe
+      wk_pipe_t pipe_q [LAT-1];
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin : p_wk_pipe_ff
+        if (!rst_ni) begin
+          for (int unsigned k = 0; k < LAT - 1; k++) begin
+            pipe_q[k] <= '0;
+          end
+        end else begin
+          for (int unsigned k = 0; (k + 1) < (LAT - 1); k++) begin
+            pipe_q[k].valid   <= pipe_q[k+1].valid & ~ctl_flush_i &
+                                 ~f_mask_hit(pipe_q[k+1].br_mask, br_kill_sel);
+            pipe_q[k].tag     <= pipe_q[k+1].tag;
+            pipe_q[k].br_mask <= pipe_q[k+1].br_mask & ~br_res_sel;
+          end
+          pipe_q[LAT-2].valid   <= iss_fire[p] & sel_rt.prd_valid & ~ctl_flush_i;
+          pipe_q[LAT-2].tag     <= sel_rt.prd;
+          pipe_q[LAT-2].br_mask <= sel_rt.br_mask & ~br_res_sel;
+        end
+      end
+
+      always_comb begin : p_wk_pipe_out
+        wkup.valid = pipe_q[0].valid & ~ctl_flush_i & ~f_mask_hit(pipe_q[0].br_mask, br_kill_sel);
+        wkup.tag   = pipe_q[0].tag;
+      end
+    end else begin : g_wk_none
+      always_comb begin : p_wk_none
+        wkup = '0;
+      end
+    end
+
+    assign iss_wkup[p] = wkup;
+
+    // ------------------------------------------ writeback slot reservation
+    if (LAT >= 2) begin : g_wb_set
+      always_comb begin : p_wb_set
+        wb_set        = '0;
+        wb_set[LAT-1] = iss_fire[p];
+      end
+    end else begin : g_wb_noset
+      always_comb begin : p_wb_noset
+        wb_set = '0;
+      end
+    end
+
+    assign wb_set_port[p] = wb_set;
+
+    if ((LAT >= 1) && (LAT <= WB_RESV_D) && (MAX_FIXED_LAT >= 2)) begin : g_wb_chk
+      assign wb_slot_free[p] = ~wb_resv_q[PORT_WB_GRP[p]][LAT];
+    end else begin : g_wb_free
+      assign wb_slot_free[p] = 1'b1;
+    end
+
+    if (LAT >= 1) begin : g_wb_starve
+      logic                   wb_blocked;
+      logic [WB_STARVE_W-1:0] wb_starve_cnt_q;
+
+      assign wb_blocked   = iss_req_any[p] & issue_glb_en & fu_ready_i[p] &
+                            itt_has_free[p] & ~wb_slot_free[p];
+      assign wb_starve[p] = (wb_starve_cnt_q == WB_STARVE_W'(WB_STARVE_LIM));
+
+      always_ff @(posedge clk_i or negedge rst_ni) begin : p_wb_starve_ff
+        if (!rst_ni) begin
+          wb_starve_cnt_q <= '0;
+        end else if (ctl_flush_i || !wb_blocked) begin
+          wb_starve_cnt_q <= '0;
+        end else if (!wb_starve[p]) begin
+          wb_starve_cnt_q <= wb_starve_cnt_q + WB_STARVE_W'(1'b1);
+        end
+      end
+    end else begin : g_wb_nostarve
+      assign wb_starve[p] = 1'b0;
+    end
+  end
+
+  // ===========================================================================
+  // 12. Writeback reservation table and longer-latency throttle
+  // ===========================================================================
+  always_comb begin : p_wb_resv_next
+    for (int unsigned g = 0; g < NUM_WB_GRP; g++) begin
+      wb_resv_d[g] = wb_resv_q[g] >> 1;
+      for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+        if ((PORT_LAT[p] >= 2) && (PORT_WB_GRP[p] == g)) begin
+          wb_resv_d[g] = wb_resv_d[g] | wb_set_port[p];
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_wb_resv_ff
+    if (!rst_ni) begin
+      for (int unsigned g = 0; g < NUM_WB_GRP; g++) begin
+        wb_resv_q[g] <= '0;
+      end
+    end else if (ctl_flush_i) begin
+      for (int unsigned g = 0; g < NUM_WB_GRP; g++) begin
+        wb_resv_q[g] <= '0;
+      end
+    end else begin
+      for (int unsigned g = 0; g < NUM_WB_GRP; g++) begin
+        wb_resv_q[g] <= wb_resv_d[g];
+      end
+    end
+  end
+
+  always_comb begin : p_wb_hold
+    wb_hold = '0;
+    for (int unsigned q = 0; q < NUM_ISSUE_PORTS; q++) begin
+      for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+        if ((PORT_LAT[p] != 0) && (PORT_LAT[q] > PORT_LAT[p]) &&
+            (PORT_WB_GRP[p] == PORT_WB_GRP[q])) begin
+          wb_hold[q] = wb_hold[q] | wb_starve[p];
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // 13. Issue window state update
+  // ===========================================================================
+  always_comb begin : p_iq_fire
+    iq_fire_vec = '0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      iq_fire_vec = iq_fire_vec | iss_gnt[p];
+    end
+  end
+
+  always_comb begin : p_iq_next
+    iq_vld_d = ctl_flush_i ? '0 : ((iq_vld_q & ~iq_fire_vec & ~ent_kill) | iq_alloc_vec);
+
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      iq_ctrl_d[i]         = iq_ctrl_q[i];
+      iq_ctrl_d[i].br_mask = iq_ctrl_q[i].br_mask & ~br_res_sel;
+      for (int unsigned k = 0; k < SF_NUM_SRC; k++) begin
+        iq_ctrl_d[i].src_rdy[k] = iq_ctrl_q[i].src_rdy[k] |
+                                  f_tag_hit(iq_ctrl_q[i].src_tag[k], wk_vld, wk_tag);
+      end
+      iq_older_d[i] = iq_older_q[i] & ~iq_alloc_vec;
+
+      for (int unsigned s = 0; s < DISPATCH_W; s++) begin
+        if (disp_alloc[s] && alloc_oh[s][i]) begin
+          iq_ctrl_d[i]  = disp_ctrl[s];
+          iq_older_d[i] = iq_vld_q | alloc_earlier[s];
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_iq_vld_ff
+    if (!rst_ni) begin
+      iq_vld_q <= '0;
+    end else begin
+      iq_vld_q <= iq_vld_d;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_iq_ctrl_ff
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      iq_ctrl_q[i] <= iq_ctrl_d[i];
+    end
+    iq_older_q <= iq_older_d;
+  end
+
+  always_ff @(posedge clk_i) begin : p_iq_payload_ff
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      for (int unsigned s = 0; s < DISPATCH_W; s++) begin
+        if (disp_alloc[s] && alloc_oh[s][i]) begin
+          iq_pl_q[i] <= disp_pl[s];
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // 14. DFSYNC barrier queue and sync controller
+  // ===========================================================================
+  always_comb begin : p_bar_status
+    bar_idx_t idx;
+    bar_idx_t tail_v;
+
+    bar_kill_cnt = '0;
+    for (int unsigned o = 0; o < BAR_Q_DEPTH; o++) begin
+      idx             = bar_head_q + bar_idx_t'(o);
+      bar_kill_off[o] = (bar_cnt_t'(o) < bar_cnt_q) & f_mask_hit(bar_q[idx].br_mask, br_kill_sel);
+      bar_kill_cnt    = bar_kill_cnt + bar_cnt_t'(bar_kill_off[o]);
+    end
+
+    bar_push_cnt = '0;
+    tail_v       = bar_tail_q - bar_idx_t'(bar_kill_cnt);
+    for (int unsigned s = 0; s < DISPATCH_W; s++) begin
+      bar_push_idx[s] = tail_v;
+      if (disp_bar_push[s]) begin
+        tail_v       = tail_v + bar_idx_t'(1);
+        bar_push_cnt = bar_push_cnt + bar_cnt_t'(1);
+      end
+    end
+
+    bar_head_vld   = (bar_cnt_q != '0);
+    bar_head_live  = bar_head_vld & ~bar_kill_off[0];
+    cur_epoch_live = |(iq_vld_q & ent_epoch_ok);
+    sync_drained   = ~cur_epoch_live & ~itt_any;
+  end
+
+  always_comb begin : p_sync_fsm
+    sync_state_d = sync_state_q;
+    bar_pop      = 1'b0;
+
+    case (sync_state_q)
+      SYNC_IDLE: begin
+        if (bar_head_live) begin
+          sync_state_d = SYNC_DRAIN;
+        end
+      end
+      SYNC_DRAIN: begin
+        if (!bar_head_live) begin
+          sync_state_d = SYNC_IDLE;
+        end else if (sync_drained) begin
+          sync_state_d = bar_q[bar_head_q].mem_fence ? SYNC_MEMFENCE : SYNC_RELEASE;
+        end
+      end
+      SYNC_MEMFENCE: begin
+        if (!bar_head_live) begin
+          sync_state_d = SYNC_IDLE;
+        end else if (mem_quiesced_i) begin
+          sync_state_d = SYNC_RELEASE;
+        end
+      end
+      SYNC_RELEASE: begin
+        if (!bar_head_live) begin
+          sync_state_d = SYNC_IDLE;
+        end else begin
+          bar_pop      = 1'b1;
+          sync_state_d = ((bar_cnt_q - bar_kill_cnt) > bar_cnt_t'(1)) ? SYNC_DRAIN : SYNC_IDLE;
+        end
+      end
+      default: begin
+        sync_state_d = SYNC_IDLE;
+      end
+    endcase
+
+    if (ctl_flush_i) begin
+      sync_state_d = SYNC_IDLE;
+      bar_pop      = 1'b0;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_bar_ctrl_ff
+    if (!rst_ni) begin
+      bar_head_q    <= '0;
+      bar_tail_q    <= '0;
+      bar_cnt_q     <= '0;
+      issue_epoch_q <= '0;
+      sync_state_q  <= SYNC_IDLE;
+    end else if (ctl_flush_i) begin
+      bar_head_q    <= '0;
+      bar_tail_q    <= '0;
+      bar_cnt_q     <= '0;
+      issue_epoch_q <= '0;
+      sync_state_q  <= SYNC_IDLE;
+    end else begin
+      bar_head_q    <= bar_head_q + bar_idx_t'(bar_pop);
+      bar_tail_q    <= bar_tail_q - bar_idx_t'(bar_kill_cnt) + bar_idx_t'(bar_push_cnt);
+      bar_cnt_q     <= bar_cnt_q - bar_kill_cnt - bar_cnt_t'(bar_pop) + bar_push_cnt;
+      issue_epoch_q <= issue_epoch_q + epoch_t'(bar_pop);
+      sync_state_q  <= sync_state_d;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_bar_meta_ff
+    for (int unsigned k = 0; k < BAR_Q_DEPTH; k++) begin
+      bar_q[k].br_mask <= bar_q[k].br_mask & ~br_res_sel;
+    end
+    for (int unsigned s = 0; s < DISPATCH_W; s++) begin
+      if (disp_bar_push[s]) begin
+        bar_q[bar_push_idx[s]] <= disp_bar_meta[s];
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_bar_done_vld_ff
+    if (!rst_ni) begin
+      bar_done_vld_q <= 1'b0;
+    end else begin
+      bar_done_vld_q <= bar_pop;
+    end
+  end
+
+  always_ff @(posedge clk_i) begin : p_bar_done_meta_ff
+    if (bar_pop) begin
+      bar_done_meta_q         <= bar_q[bar_head_q];
+      bar_done_meta_q.br_mask <= bar_q[bar_head_q].br_mask & ~br_res_sel;
+    end
+  end
+
+  always_comb begin : p_bar_done_out
+    bar_done_meta_o         = bar_done_meta_q;
+    bar_done_meta_o.br_mask = bar_done_meta_q.br_mask & ~br_res_sel;
+    bar_done_valid_o        = bar_done_vld_q & ~ctl_flush_i &
+                              ~f_mask_hit(bar_done_meta_q.br_mask, br_kill_sel);
+  end
+
+  // ===========================================================================
+  // 15. Status, performance events, supervision
+  // ===========================================================================
+  always_comb begin : p_status
+    iq_cnt_t  occ;
+    itt_cnt_t infl;
+    iss_cnt_t icnt;
+
+    occ = '0;
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      occ = occ + iq_cnt_t'(iq_vld_q[i]);
+    end
+
+    infl    = '0;
+    itt_any = 1'b0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      itt_any = itt_any | (|itt_vld_all[p]);
+      for (int unsigned e = 0; e < ITT_PER_PORT; e++) begin
+        infl = infl + itt_cnt_t'(itt_vld_all[p][e]);
+      end
+    end
+
+    icnt = '0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      icnt = icnt + iss_cnt_t'(iss_fire[p]);
+    end
+
+    cmpl_any = 1'b0;
+    for (int unsigned c = 0; c < NUM_CMPL_PORTS; c++) begin
+      cmpl_any = cmpl_any | cmpl_i[c].valid;
+    end
+
+    sched_occupancy_o = occ;
+    sched_inflight_o  = infl;
+    perf_issue_cnt_o  = icnt;
+  end
+
+  assign sched_empty_o      = ~(|iq_vld_q) & ~itt_any & ~bar_head_vld & ~bar_done_vld_q;
+  assign sched_bar_active_o = bar_head_vld;
+  assign perf_bar_block_o   = |(iq_vld_q & ent_rdy & ~ent_epoch_ok);
+  assign perf_fu_bp_o       = |(iss_req_any & ~fu_ready_i);
+  assign perf_disp_stall_o  = (|disp_valid_i) & ~disp_ready_o;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_hang_ff
+    if (!rst_ni) begin
+      hang_cnt_q <= '0;
+      hang_q     <= 1'b0;
+    end else if (ctl_flush_i) begin
+      hang_cnt_q <= '0;
+      hang_q     <= 1'b0;
+    end else begin
+      if (!((|iq_vld_q) | itt_any | bar_head_vld) ||
+          (|iss_fire) || cmpl_any || bar_pop || (|disp_fire)) begin
+        hang_cnt_q <= '0;
+      end else if (hang_cnt_q != HANG_W'(HANG_LIMIT)) begin
+        hang_cnt_q <= hang_cnt_q + HANG_W'(1'b1);
+      end
+      hang_q <= hang_q | (hang_cnt_q == HANG_W'(HANG_LIMIT));
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : p_err_ff
+    if (!rst_ni) begin
+      err_route_q <= 1'b0;
+      err_cmpl_q  <= 1'b0;
+    end else begin
+      err_route_q <= err_route_q | (|disp_route_err);
+      err_cmpl_q  <= err_cmpl_q  | ((|itt_orphan_port) & ~ctl_flush_i);
+    end
+  end
+
+  assign sched_hang_o      = hang_q;
+  assign sched_err_route_o = err_route_q;
+  assign sched_err_cmpl_o  = err_cmpl_q;
+
+  // ===========================================================================
+  // 16. Assertions
+  // ===========================================================================
+`ifndef SYNTHESIS
+  iq_vec_t   chk_dup_issue;
+  iq_vec_t   chk_illegal_gnt;
+  port_vec_t chk_route_bad;
+  iq_vec_t   chk_rdy_regress;
+  iq_vec_t   chk_epoch_range;
+  logic      chk_age_bad;
+  logic      chk_bar_suffix_bad;
+  logic      chk_turn_bad;
+  logic      chk_wb_conflict;
+
+  always_comb begin : p_chk_issue
+    iq_vec_t seen;
+    seen            = '0;
+    chk_dup_issue   = '0;
+    chk_illegal_gnt = '0;
+    chk_route_bad   = '0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      chk_dup_issue   = chk_dup_issue | (seen & iss_gnt[p]);
+      seen            = seen | iss_gnt[p];
+      chk_illegal_gnt = chk_illegal_gnt | (iss_gnt[p] & ~(ent_elig & port_ent[p]));
+      for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+        if (iss_gnt[p][i] && (iq_pl_q[i].fu != PORT_FU[p])) begin
+          chk_route_bad[p] = 1'b1;
+        end
+      end
+    end
+  end
+
+  always_comb begin : p_chk_state
+    epoch_t ep_dist;
+    ep_dist         = '0;
+    chk_age_bad     = 1'b0;
+    chk_rdy_regress = '0;
+    chk_epoch_range = '0;
+    for (int unsigned i = 0; i < IQ_DEPTH; i++) begin
+      if (iq_vld_q[i]) begin
+        if (iq_older_q[i][i]) begin
+          chk_age_bad = 1'b1;
+        end
+        for (int unsigned j = 0; j < IQ_DEPTH; j++) begin
+          if ((j != i) && iq_vld_q[j] && (iq_older_q[i][j] == iq_older_q[j][i])) begin
+            chk_age_bad = 1'b1;
+          end
+        end
+        ep_dist            = iq_ctrl_q[i].epoch - issue_epoch_q;
+        chk_epoch_range[i] = (bar_cnt_t'(ep_dist) > bar_cnt_q);
+      end
+      chk_rdy_regress[i] = iq_vld_q[i] & iq_vld_d[i] & ~iq_alloc_vec[i] &
+                           (|(iq_ctrl_q[i].src_rdy & ~iq_ctrl_d[i].src_rdy));
+    end
+  end
+
+  always_comb begin : p_chk_bar
+    logic killed_seen;
+    killed_seen        = 1'b0;
+    chk_bar_suffix_bad = 1'b0;
+    for (int unsigned o = 0; o < BAR_Q_DEPTH; o++) begin
+      if (bar_cnt_t'(o) < bar_cnt_q) begin
+        if (killed_seen && !bar_kill_off[o]) begin
+          chk_bar_suffix_bad = 1'b1;
+        end
+        killed_seen = killed_seen | bar_kill_off[o];
+      end
+    end
+  end
+
+  always_comb begin : p_chk_turn
+    int unsigned n;
+    chk_turn_bad = 1'b0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      n = 0;
+      for (int unsigned q = 0; q < NUM_ISSUE_PORTS; q++) begin
+        if ((PORT_FU[q] == PORT_FU[p]) && bind_turn_q[q]) begin
+          n = n + 1;
+        end
+      end
+      if (n != 1) begin
+        chk_turn_bad = 1'b1;
+      end
+    end
+  end
+
+  always_comb begin : p_chk_wb
+    chk_wb_conflict = 1'b0;
+    for (int unsigned p = 0; p < NUM_ISSUE_PORTS; p++) begin
+      for (int unsigned g = 0; g < NUM_WB_GRP; g++) begin
+        for (int unsigned d = 1; d <= WB_RESV_D; d++) begin
+          if (iss_fire[p] && (PORT_LAT[p] == d) && (PORT_WB_GRP[p] == g) && wb_resv_q[g][d]) begin
+            chk_wb_conflict = 1'b1;
+          end
+        end
+      end
+    end
+  end
+
+  a_no_double_issue: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_dup_issue == '0)
+    else $error("scheduler: entry granted by more than one port");
+
+  a_grant_legal: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_illegal_gnt == '0)
+    else $error("scheduler: grant to non-eligible entry (ready/epoch/kill/port)");
+
+  a_fu_routing: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_route_bad == '0)
+    else $error("scheduler: entry issued to port of wrong functional-unit class");
+
+  a_no_reissue: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (iq_fire_vec != '0) |=> ((iq_vld_q & $past(iq_fire_vec)) == '0))
+    else $error("scheduler: issued entry still valid");
+
+  a_alloc_free_only: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (iq_alloc_vec & iq_vld_q) == '0)
+    else $error("scheduler: allocation into occupied entry");
+
+  a_rdy_monotonic: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_rdy_regress == '0)
+    else $error("scheduler: operand readiness regressed");
+
+  a_age_matrix: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !chk_age_bad)
+    else $error("scheduler: age matrix not a strict total order");
+
+  a_epoch_range: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    chk_epoch_range == '0)
+    else $error("scheduler: entry epoch outside outstanding barrier window");
+
+  a_bar_release_drained: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    bar_pop |-> (sync_drained && bar_head_live))
+    else $error("scheduler: DFSYNC released before older work completed");
+
+  a_bar_kill_suffix: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !chk_bar_suffix_bad)
+    else $error("scheduler: barrier kill set is not a youngest suffix");
+
+  a_bar_cnt_bound: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    bar_cnt_q <= bar_cnt_t'(BAR_Q_DEPTH))
+    else $error("scheduler: barrier queue overflow");
+
+  a_sync_state_head: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (sync_state_q != SYNC_IDLE) |-> bar_head_vld)
+    else $error("scheduler: sync controller active without barrier");
+
+  a_bind_turn: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !chk_turn_bad)
+    else $error("scheduler: port-binding turn vector corrupt");
+
+  a_dispatch_route: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    disp_route_err == '0)
+    else $error("scheduler: dispatched uop has no issue port for its class");
+
+  a_cmpl_tracked: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    ctl_flush_i || (itt_orphan_port == '0))
+    else $error("scheduler: completion for untracked in-flight id");
+
+  a_issue_gated: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (ctl_stall_i || ctl_flush_i) |-> (iss_fire == '0))
+    else $error("scheduler: issue while stalled or flushing");
+
+  a_fu_ready: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    (iss_fire & ~fu_ready_i) == '0)
+    else $error("scheduler: issue to back-pressured functional unit");
+
+  a_wb_slot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !chk_wb_conflict)
+    else $error("scheduler: fixed-latency issue onto a reserved writeback slot");
+
+  a_no_hang: assert property (@(posedge clk_i) disable iff (!rst_ni)
+    !hang_q)
+    else $error("scheduler: forward-progress watchdog expired");
+
+  for (genvar p = 0; p < NUM_ISSUE_PORTS; p++) begin : g_chk_port
+    a_gnt_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      $onehot0(iss_gnt[p]))
+      else $error("scheduler: port grant not one-hot");
+  end
+
+  for (genvar s = 0; s < DISPATCH_W; s++) begin : g_chk_disp
+    a_bind_onehot: assert property (@(posedge clk_i) disable iff (!rst_ni)
+      disp_alloc[s] |-> $onehot(disp_ctrl[s].port_oh))
+      else $error("scheduler: dispatch port binding not one-hot");
+  end
+`endif
+
+endmodule
+
+`default_nettype wire
