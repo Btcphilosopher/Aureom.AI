@@ -1,0 +1,2605 @@
+//==============================================================================
+// tb_memory_controller.sf
+//------------------------------------------------------------------------------
+// Self-checking, transaction-aware verification environment for
+// memory_controller.sf (scalar 32b / vector 128b / burst scratchpad controller).
+// Language : Silica Flux-2017
+//------------------------------------------------------------------------------
+// DUT contract exercised by this environment
+//   * Storage     : MC_WORDS x 32-bit words, word addressed. Vector lane k of
+//                   a 128-bit access maps to word (base + k), lane 0 = [31:0].
+//   * Scalar port : req valid/ready {we, addr, wdata, id}; rsp valid/ready
+//                   {id, rdata[31:0], status}.
+//   * Vector port : as scalar with 128-bit data. addr[1:0] != 0 is misaligned:
+//                   MC_MISALIGN_MODE 0 -> ERR_ALIGN, rdata 0, no SRAM access.
+//                   MC_MISALIGN_MODE 1 -> access performed at addr & ~3, OKAY.
+//   * Burst port  : cmd valid/ready {we, addr, len = beats-1, id};
+//                   wdata valid/ready {wdata, wlast}, beats follow command
+//                   acceptance order; rsp valid/ready {id, rdata, status, last}.
+//                   Read: one rsp beat per data beat, last on final beat.
+//                   Write: one rsp beat (last=1) after every beat committed.
+//                   addr + beats > MC_WORDS -> ERR_RANGE: write beats are still
+//                   drained, read returns 'beats' error beats, no SRAM access.
+//   * Status      : 2'd0 OKAY, 2'd1 ERR_ALIGN, 2'd2 ERR_RANGE. Non-read and
+//                   error responses carry rdata == 0.
+//   * Ordering    : per-port commit order == per-port acceptance order;
+//                   per-port response order == acceptance order. No cross-port
+//                   ordering guarantee: the SRAM commit trace is the
+//                   serialisation point for the golden model.
+//   * Flow control: mem_stall_i high -> no SRAM access in that cycle
+//                   (MC_STALL_HALT_LAT cycles of grace). rsp payload stable
+//                   while valid && !ready.
+//   * Commit trace: trc_valid_o pulses once per SRAM access {src, id, we,
+//                   addr (vector: aligned base, burst: beat address), beat}.
+//==============================================================================
+`timescale 1ns/1ps
+
+package mc_tb_pkg;
+
+  //--------------------------------------------------------------------------
+  // Environment configuration
+  //--------------------------------------------------------------------------
+  localparam int          MC_ADDR_W            = 12;
+  localparam int          MC_WORDS             = 1 << MC_ADDR_W;
+  localparam int          MC_ID_W              = 8;
+  localparam int          MC_NUM_IDS           = 1 << MC_ID_W;
+  localparam int          MC_BLEN_W            = 4;
+  localparam int          MC_MAX_BEATS         = 1 << MC_BLEN_W;
+  localparam int          MC_LANES             = 4;
+  localparam int          MC_NUM_SRC           = 3;
+  localparam int          MC_MISALIGN_MODE     = 0;
+  localparam int          MC_STALL_HALT_LAT    = 0;
+  localparam bit          MC_RSP_IN_ORDER      = 1'b1;
+  localparam bit          MC_COMMIT_IN_ORDER   = 1'b1;
+  localparam bit          MC_ZERO_NONREAD_DATA = 1'b1;
+  localparam int          MC_TXN_TIMEOUT       = 20000;
+  localparam int          MC_DEADLOCK_CYCLES   = 4000;
+  localparam int          MC_DRAIN_LIMIT       = 400000;
+  localparam int          MC_ARB_MAX_WAIT      = 8;
+  localparam int          MC_ARB_MIN_SHARE_PCT = 20;
+  localparam int          MC_ARB_MIN_SAMPLES   = 60;
+  localparam int          MC_MAX_ERR_PRINT     = 40;
+  localparam int          MC_ABORT_ERRORS      = 500;
+  localparam bit          MC_ENFORCE_COVERAGE  = 1'b1;
+  localparam bit [63:0]   MC_DEFAULT_SEED      = 64'h5EED_C0DE_2017_0001;
+
+  localparam logic [1:0]  MC_ST_OKAY           = 2'd0;
+  localparam logic [1:0]  MC_ST_ERR_ALIGN      = 2'd1;
+  localparam logic [1:0]  MC_ST_ERR_RANGE      = 2'd2;
+
+  typedef int unsigned u32_t;
+
+  typedef enum int {
+    ACC_SCALAR = 0,
+    ACC_VECTOR = 1,
+    ACC_BURST  = 2
+  } acc_e;
+
+  typedef enum int {
+    TS_ISSUED   = 0,
+    TS_ACCEPTED = 1,
+    TS_DONE     = 2
+  } txn_state_e;
+
+  typedef enum int {
+    BP_ALWAYS = 0,
+    BP_RANDOM = 1,
+    BP_WINDOW = 2,
+    BP_HOLD   = 3
+  } bp_mode_e;
+
+  function automatic string acc_name(acc_e a);
+    case (a)
+      ACC_SCALAR: return "SCALAR";
+      ACC_VECTOR: return "VECTOR";
+      default:    return "BURST";
+    endcase
+  endfunction
+
+  function automatic string src_tag(u32_t s);
+    case (s)
+      0:       return "s";
+      1:       return "v";
+      2:       return "b";
+      default: return "?";
+    endcase
+  endfunction
+
+  function automatic string st_name(logic [1:0] s);
+    case (s)
+      MC_ST_OKAY:      return "OKAY";
+      MC_ST_ERR_ALIGN: return "ERR_ALIGN";
+      MC_ST_ERR_RANGE: return "ERR_RANGE";
+      default:         return "ST_RSVD";
+    endcase
+  endfunction
+
+  function automatic string rw_tag(bit we);
+    return we ? "wr" : "rd";
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // Deterministic, simulator-independent PRNG (splitmix64)
+  //--------------------------------------------------------------------------
+  class mc_rng;
+    local bit [63:0] state;
+
+    function new(bit [63:0] seed);
+      state = seed;
+    endfunction
+
+    function void reseed(bit [63:0] seed);
+      state = seed;
+    endfunction
+
+    function bit [63:0] next64();
+      bit [63:0] z;
+      state = state + 64'h9E37_79B9_7F4A_7C15;
+      z     = state;
+      z     = (z ^ (z >> 30)) * 64'hBF58_476D_1CE4_E5B9;
+      z     = (z ^ (z >> 27)) * 64'h94D0_49BB_1331_11EB;
+      return z ^ (z >> 31);
+    endfunction
+
+    function bit [31:0] next32();
+      bit [63:0] z;
+      z = next64();
+      return 32'(z >> 32);
+    endfunction
+
+    function u32_t range(u32_t lo, u32_t hi);
+      bit [63:0] z;
+      bit [63:0] span;
+      if (hi <= lo) return lo;
+      z    = next64();
+      span = 64'(hi) - 64'(lo) + 64'd1;
+      return lo + u32_t'(z % span);
+    endfunction
+
+    function bit chance(u32_t pct);
+      return range(0, 99) < pct;
+    endfunction
+  endclass
+
+  //--------------------------------------------------------------------------
+  // Memory transaction
+  //--------------------------------------------------------------------------
+  class mc_txn;
+    u32_t        uid;
+    u32_t        id;
+    acc_e        acc;
+    bit          we;
+    u32_t        addr;
+    u32_t        beats;
+    bit [31:0]   wdata[];
+    bit [31:0]   exp_rdata[];
+    bit          exp_rdata_vld[];
+    bit          dir_exp_vld;
+    bit [31:0]   dir_exp[];
+    logic [1:0]  exp_status;
+    u32_t        exp_commits;
+    u32_t        exp_rsp_beats;
+    u32_t        commits;
+    u32_t        rsp_beats;
+    u32_t        wbeats;
+    u32_t        idle_before;
+    u32_t        wgap[];
+    longint      issue_cyc;
+    longint      accept_cyc;
+    longint      done_cyc;
+    longint      last_wbeat_cyc;
+    txn_state_e  state;
+    bit          timed_out;
+    bit          wgap_seen;
+    string       tag;
+
+    function new(u32_t uid_, acc_e acc_, bit we_, u32_t addr_, u32_t beats_, string tag_);
+      uid            = uid_;
+      id             = 0;
+      acc            = acc_;
+      we             = we_;
+      addr           = addr_;
+      beats          = beats_;
+      tag            = tag_;
+      wdata          = new[words()];
+      exp_rdata      = new[words()];
+      exp_rdata_vld  = new[words()];
+      dir_exp        = new[words()];
+      wgap           = new[beats_];
+      dir_exp_vld    = 1'b0;
+      exp_status     = MC_ST_OKAY;
+      exp_commits    = 0;
+      exp_rsp_beats  = 0;
+      commits        = 0;
+      rsp_beats      = 0;
+      wbeats         = 0;
+      idle_before    = 0;
+      issue_cyc      = 0;
+      accept_cyc     = 0;
+      done_cyc       = 0;
+      last_wbeat_cyc = 0;
+      state          = TS_ISSUED;
+      timed_out      = 1'b0;
+      wgap_seen      = 1'b0;
+      foreach (wdata[i]) begin
+        wdata[i]         = '0;
+        exp_rdata[i]     = '0;
+        exp_rdata_vld[i] = 1'b0;
+        dir_exp[i]       = '0;
+      end
+      foreach (wgap[i]) wgap[i] = 0;
+    endfunction
+
+    function u32_t words();
+      return (acc == ACC_VECTOR) ? MC_LANES : beats;
+    endfunction
+
+    function u32_t commit_addr(u32_t beat);
+      case (acc)
+        ACC_SCALAR: return addr;
+        ACC_VECTOR: return (MC_MISALIGN_MODE == 1) ? (addr & ~u32_t'(MC_LANES - 1)) : addr;
+        default:    return (addr + beat) % MC_WORDS;
+      endcase
+    endfunction
+
+    function string state_name();
+      case (state)
+        TS_ISSUED:   return "ISSUED";
+        TS_ACCEPTED: return "ACCEPTED";
+        default:     return "DONE";
+      endcase
+    endfunction
+
+    function bit [127:0] wvec();
+      return {wdata[3], wdata[2], wdata[1], wdata[0]};
+    endfunction
+
+    function void expect_word(u32_t idx, bit [31:0] d);
+      dir_exp_vld  = 1'b1;
+      dir_exp[idx] = d;
+    endfunction
+
+    function void expect_vec(bit [127:0] v);
+      dir_exp_vld = 1'b1;
+      for (int l = 0; l < MC_LANES; l++) dir_exp[l] = v[l*32 +: 32];
+    endfunction
+
+    function string sprint();
+      string s;
+      s = $sformatf("txn uid=%0d id=0x%02h type=%s(%s) addr=0x%03h beats=%0d exp_status=%s commits=%0d/%0d rsp=%0d/%0d",
+                    uid, id, acc_name(acc), rw_tag(we), addr, beats, st_name(exp_status),
+                    commits, exp_commits, rsp_beats, exp_rsp_beats);
+      s = {s, $sformatf("\n      state=%s issue_cyc=%0d accept_cyc=%0d done_cyc=%0d idle_before=%0d directed=%0d timed_out=%0d tag=%s",
+                        state_name(), issue_cyc, accept_cyc, done_cyc, idle_before, dir_exp_vld, timed_out, tag)};
+      if (acc == ACC_BURST)
+        s = {s, $sformatf("\n      burst: start=0x%03h end=0x%03h len_field=%0d wbeats=%0d last_wbeat_cyc=%0d wgap_seen=%0d",
+                          addr, (addr + beats - 1) % MC_WORDS, beats - 1, wbeats, last_wbeat_cyc, wgap_seen)};
+      return s;
+    endfunction
+  endclass
+
+  //--------------------------------------------------------------------------
+  // Golden reference memory: word-addressed, scalar/vector/burst views
+  //--------------------------------------------------------------------------
+  class mc_ref_model;
+    local bit [31:0] mem[];
+    local bit        known[];
+    local int        writer[];
+
+    function new();
+      mem    = new[MC_WORDS];
+      known  = new[MC_WORDS];
+      writer = new[MC_WORDS];
+      invalidate();
+    endfunction
+
+    function void invalidate();
+      foreach (mem[i]) begin
+        mem[i]    = '0;
+        known[i]  = 1'b0;
+        writer[i] = -1;
+      end
+    endfunction
+
+    function void write_word(u32_t a, bit [31:0] d, acc_e who);
+      mem[a]    = d;
+      known[a]  = 1'b1;
+      writer[a] = int'(who);
+    endfunction
+
+    function void write_vec(u32_t base, bit [127:0] v);
+      u32_t a;
+      for (int l = 0; l < MC_LANES; l++) begin
+        a         = base + l;
+        mem[a]    = v[l*32 +: 32];
+        known[a]  = 1'b1;
+        writer[a] = int'(ACC_VECTOR);
+      end
+    endfunction
+
+    function bit read_word(u32_t a, output bit [31:0] d);
+      d = mem[a];
+      return known[a];
+    endfunction
+
+    function int last_writer(u32_t a);
+      return writer[a];
+    endfunction
+
+    function u32_t known_words();
+      u32_t n = 0;
+      foreach (known[i]) if (known[i]) n++;
+      return n;
+    endfunction
+  endclass
+
+  //--------------------------------------------------------------------------
+  // Functional coverage: named bins with mandatory-closure enforcement
+  //--------------------------------------------------------------------------
+  class mc_coverage;
+    u32_t  bin_cnt[string];
+    bit    mandatory[string];
+    u32_t  undefined_hits;
+
+    function new();
+      string r;
+      undefined_hits = 0;
+      for (int w = 0; w < 2; w++) begin
+        r = rw_tag(w != 0);
+        for (int o = 0; o < 8; o++) define($sformatf("scalar.%s.oct%0d", r, o), 1'b1);
+        define({"scalar.", r, ".addr_min"}, 1'b1);
+        define({"scalar.", r, ".addr_max"}, 1'b1);
+        define({"vector.", r, ".aligned"}, 1'b1);
+        define({"vector.", r, ".row_min"}, 1'b1);
+        define({"vector.", r, ".row_max"}, 1'b1);
+        for (int l = 0; l < MC_LANES; l++) define($sformatf("vector.lane%0d.%s", l, r), 1'b1);
+        for (int b = 1; b <= MC_MAX_BEATS; b++) define($sformatf("burst.len%02d.%s", b, r), 1'b1);
+        define({"burst.", r, ".end_at_top"}, 1'b1);
+        define({"burst.", r, ".unaligned_start"}, 1'b1);
+        for (int o = 1; o < MC_LANES; o++) define($sformatf("misalign.off%0d.%s", o, r), 1'b1);
+        define({"range.", r}, 1'b1);
+      end
+      define("scalar.overwrite_b2b", 1'b1);
+      define("scalar.raw_b2b", 1'b1);
+      define("burst.wr_data_gap", 1'b1);
+      define("burst.rd_rsp_stall_mid", 1'b1);
+      define("burst.partial_observed", 1'b1);
+      define("burst.back2back", 1'b1);
+      define("misalign.top_row", 1'b1);
+      define("range.len_max", 1'b1);
+      for (int rd = 0; rd < MC_NUM_SRC; rd++)
+        for (int wr = 0; wr < MC_NUM_SRC; wr++) begin
+          define($sformatf("xview.%s_after_%s", src_tag(u32_t'(rd)), src_tag(u32_t'(wr))), 1'b1);
+          define($sformatf("arb.xfer.%s_to_%s", src_tag(u32_t'(wr)), src_tag(u32_t'(rd))), 1'b1);
+        end
+      for (int n = 1; n <= MC_NUM_SRC; n++) define($sformatf("arb.pending_src%0d", n), 1'b1);
+      define("arb.all_req_valid", 1'b1);
+      define("arb.same_row_conflict", 1'b1);
+      define("arb.replay_identical", 1'b1);
+      for (int s = 0; s < MC_NUM_SRC; s++) begin
+        define($sformatf("bp.req_stall.%s", src_tag(u32_t'(s))), 1'b1);
+        define($sformatf("bp.rsp_stall.%s", src_tag(u32_t'(s))), 1'b1);
+        define($sformatf("lat.%s.le4", src_tag(u32_t'(s))), 1'b1);
+        define($sformatf("lat.%s.le16", src_tag(u32_t'(s))), 1'b1);
+        define($sformatf("lat.%s.le64", src_tag(u32_t'(s))), 1'b1);
+        define($sformatf("lat.%s.gt64", src_tag(u32_t'(s))), 1'b1);
+      end
+      define("bp.wdata_stall", 1'b1);
+      define("bp.mem_stall_pending", 1'b1);
+      define("bp.mem_stall_req_full", 1'b1);
+      define("bp.rsp_hold16", 1'b1);
+      define("outstanding.ge1", 1'b1);
+      define("outstanding.ge4", 1'b1);
+      define("outstanding.ge8", 1'b1);
+      define("outstanding.ge16", 1'b0);
+    endfunction
+
+    function void define(string name, bit must);
+      bin_cnt[name]      = 0;
+      mandatory[name] = must;
+    endfunction
+
+    function void hit(string name);
+      if (bin_cnt.exists(name) == 0) begin
+        undefined_hits++;
+        $display("[MC-COV] INTERNAL: sample of undefined bin '%s'", name);
+        return;
+      end
+      bin_cnt[name]++;
+    endfunction
+
+    function u32_t holes();
+      u32_t n = 0;
+      foreach (bin_cnt[k]) if (mandatory[k] && bin_cnt[k] == 0) n++;
+      return n;
+    endfunction
+
+    function real percent();
+      u32_t tot = 0;
+      u32_t hitn = 0;
+      foreach (bin_cnt[k]) begin
+        if (mandatory[k]) begin
+          tot++;
+          if (bin_cnt[k] != 0) hitn++;
+        end
+      end
+      return (tot == 0) ? 100.0 : (100.0 * real'(hitn)) / real'(tot);
+    endfunction
+
+    function void report();
+      string grp;
+      string cur;
+      u32_t  g_tot;
+      u32_t  g_hit;
+      $display("------------------------------------------------------------------------------");
+      $display(" FUNCTIONAL COVERAGE");
+      $display("------------------------------------------------------------------------------");
+      cur   = "";
+      g_tot = 0;
+      g_hit = 0;
+      foreach (bin_cnt[k]) begin
+        grp = group_of(k);
+        if (grp != cur) begin
+          if (cur != "") $display("   %-14s %4d / %-4d bins", cur, g_hit, g_tot);
+          cur   = grp;
+          g_tot = 0;
+          g_hit = 0;
+        end
+        g_tot++;
+        if (bin_cnt[k] != 0) g_hit++;
+      end
+      if (cur != "") $display("   %-14s %4d / %-4d bins", cur, g_hit, g_tot);
+      foreach (bin_cnt[k]) if (mandatory[k] && bin_cnt[k] == 0) $display("   HOLE: %s", k);
+      $display("   mandatory coverage = %0.2f%%  holes = %0d  undefined samples = %0d",
+               percent(), holes(), undefined_hits);
+    endfunction
+
+    local function string group_of(string k);
+      for (int i = 0; i < k.len(); i++) if (k[i] == ".") return k.substr(0, i - 1);
+      return k;
+    endfunction
+  endclass
+
+  //--------------------------------------------------------------------------
+  // Scoreboard: ROB keyed by transaction ID, commit-ordered golden model,
+  // per-transaction response checking, arbitration and ordering checkers
+  //--------------------------------------------------------------------------
+  class mc_scoreboard;
+    mc_ref_model  mdl;
+    mc_coverage   cov;
+
+    mc_txn        rob[u32_t];
+    u32_t         rsp_q_s[$];
+    u32_t         rsp_q_v[$];
+    u32_t         rsp_q_b[$];
+    u32_t         cmt_q_s[$];
+    u32_t         cmt_q_v[$];
+    u32_t         cmt_q_b[$];
+    u32_t         bw_q[$];
+    u32_t         free_ids[$];
+    u32_t         pending[MC_NUM_SRC];
+
+    longint       cyc;
+    string        test_name;
+    u32_t         errors;
+    u32_t         checks;
+    u32_t         uid_ctr;
+    u32_t         n_accepted;
+    u32_t         n_retired;
+    u32_t         n_commits;
+    u32_t         n_rsp_beats;
+    u32_t         n_wbeats;
+    u32_t         max_outstanding;
+    longint       last_progress_cyc;
+    longint       lat_sum[MC_NUM_SRC];
+    longint       lat_min[MC_NUM_SRC];
+    longint       lat_max[MC_NUM_SRC];
+    u32_t         lat_cnt[MC_NUM_SRC];
+
+    bit           strict;
+    u32_t         foreign[MC_NUM_SRC];
+    u32_t         max_foreign[MC_NUM_SRC];
+    u32_t         share_gnt[MC_NUM_SRC];
+    u32_t         share_total;
+    int           prev_src;
+    u32_t         prev_row;
+    bit           prev_we;
+    u32_t         prev_addr;
+    int           last_scalar_wr;
+
+    bit           sig_on;
+    longint       sig_base;
+    bit [63:0]    sig;
+    u32_t         sig_cnt;
+
+    string        test_log[$];
+    u32_t         t_err0;
+    u32_t         t_txn0;
+    longint       t_cyc0;
+
+    function new(mc_ref_model m, mc_coverage c);
+      mdl     = m;
+      cov     = c;
+      errors  = 0;
+      checks  = 0;
+      uid_ctr = 0;
+      n_accepted  = 0;
+      n_retired   = 0;
+      n_commits   = 0;
+      n_rsp_beats = 0;
+      n_wbeats    = 0;
+      max_outstanding = 0;
+      for (int s = 0; s < MC_NUM_SRC; s++) begin
+        lat_sum[s] = 0;
+        lat_min[s] = 64'h7FFF_FFFF_FFFF_FFFF;
+        lat_max[s] = 0;
+        lat_cnt[s] = 0;
+      end
+      strict    = 1'b0;
+      sig_on    = 1'b0;
+      sig       = '0;
+      sig_cnt   = 0;
+      sig_base  = 0;
+      test_name = "none";
+      cyc       = 0;
+      flush();
+    endfunction
+
+    // ---------------------------------------------------------------- state
+    function void flush();
+      rob.delete();
+      rsp_q_s.delete(); rsp_q_v.delete(); rsp_q_b.delete();
+      cmt_q_s.delete(); cmt_q_v.delete(); cmt_q_b.delete();
+      bw_q.delete();
+      free_ids.delete();
+      for (int i = 0; i < MC_NUM_IDS; i++) free_ids.push_back(u32_t'(i));
+      for (int s = 0; s < MC_NUM_SRC; s++) begin
+        pending[s]     = 0;
+        foreign[s]     = 0;
+        max_foreign[s] = 0;
+        share_gnt[s]   = 0;
+      end
+      share_total       = 0;
+      prev_src          = -1;
+      prev_row          = 0;
+      prev_we           = 1'b0;
+      prev_addr         = 0;
+      last_scalar_wr    = -1;
+      last_progress_cyc = cyc;
+    endfunction
+
+    function bit try_alloc_id(output u32_t id);
+      id = 0;
+      if (free_ids.size() == 0) return 1'b0;
+      id = free_ids.pop_front();
+      return 1'b1;
+    endfunction
+
+    function mc_txn create(acc_e acc, bit we, u32_t addr, u32_t beats, string tag);
+      mc_txn t;
+      u32_t  n;
+      n = (acc == ACC_BURST) ? beats : 1;
+      if (n < 1 || n > MC_MAX_BEATS || addr >= MC_WORDS)
+        $fatal(1, "[MC-TB] illegal stimulus request acc=%s addr=0x%0h beats=%0d", acc_name(acc), addr, beats);
+      uid_ctr++;
+      t = new(uid_ctr, acc, we, addr, n, tag);
+      predict(t);
+      return t;
+    endfunction
+
+    function void predict(mc_txn t);
+      t.exp_status = MC_ST_OKAY;
+      if (t.acc == ACC_VECTOR && (t.addr % MC_LANES) != 0 && MC_MISALIGN_MODE == 0)
+        t.exp_status = MC_ST_ERR_ALIGN;
+      if (t.acc == ACC_BURST && (t.addr + t.beats) > MC_WORDS)
+        t.exp_status = MC_ST_ERR_RANGE;
+      t.exp_commits   = (t.exp_status != MC_ST_OKAY) ? 0 : ((t.acc == ACC_BURST) ? t.beats : 1);
+      t.exp_rsp_beats = (t.acc == ACC_BURST && !t.we) ? t.beats : 1;
+    endfunction
+
+    // -------------------------------------------------------------- errors
+    function void err(string kind, mc_txn t, string detail);
+      errors++;
+      if (errors <= MC_MAX_ERR_PRINT) begin
+        $display("[MC-SB] ERROR #%0d %s  cycle=%0d  test=%s", errors, kind, cyc, test_name);
+        if (t != null)    $display("      %s", t.sprint());
+        if (detail != "") $display("      %s", detail);
+      end else if (errors == MC_MAX_ERR_PRINT + 1) begin
+        $display("[MC-SB] further error diagnostics suppressed");
+      end
+      if (errors >= MC_ABORT_ERRORS) begin
+        $display("[MC-SB] abort context: test=%s cycle=%0d checks=%0d accepted=%0d retired=%0d in_flight=%0d",
+                 test_name, cyc, checks, n_accepted, n_retired, rob.num());
+        $fatal(1, "[MC-SB] error limit reached (%0d) - aborting", errors);
+      end
+    endfunction
+
+    // ------------------------------------------------------------ test log
+    function void test_begin(string name);
+      test_name = name;
+      t_err0    = errors;
+      t_txn0    = n_retired;
+      t_cyc0    = cyc;
+      $display("[MC-TB] ==== %s ==== cycle=%0d", name, cyc);
+    endfunction
+
+    function void test_end();
+      string s;
+      s = $sformatf(" %-28s cycles=%-8d txns=%-7d errors=%0d  %s", test_name, cyc - t_cyc0,
+                    n_retired - t_txn0, errors - t_err0, (errors == t_err0) ? "PASS" : "FAIL");
+      test_log.push_back(s);
+      $display("[MC-TB] %s", s);
+    endfunction
+
+    // --------------------------------------------------------- queue utils
+    local function void q_remove(ref u32_t q[$], input u32_t id);
+      for (int i = 0; i < q.size(); i++) begin
+        if (q[i] == id) begin
+          q.delete(i);
+          return;
+        end
+      end
+    endfunction
+
+    local function u32_t q_front(u32_t src, bit rsp, output bit ok);
+      ok = 1'b1;
+      if (rsp) begin
+        case (src)
+          0: begin if (rsp_q_s.size() == 0) ok = 1'b0; else return rsp_q_s[0]; end
+          1: begin if (rsp_q_v.size() == 0) ok = 1'b0; else return rsp_q_v[0]; end
+          default: begin if (rsp_q_b.size() == 0) ok = 1'b0; else return rsp_q_b[0]; end
+        endcase
+      end else begin
+        case (src)
+          0: begin if (cmt_q_s.size() == 0) ok = 1'b0; else return cmt_q_s[0]; end
+          1: begin if (cmt_q_v.size() == 0) ok = 1'b0; else return cmt_q_v[0]; end
+          default: begin if (cmt_q_b.size() == 0) ok = 1'b0; else return cmt_q_b[0]; end
+        endcase
+      end
+      return 0;
+    endfunction
+
+    local function void q_push(u32_t src, bit rsp, u32_t id);
+      if (rsp) begin
+        case (src)
+          0: rsp_q_s.push_back(id);
+          1: rsp_q_v.push_back(id);
+          default: rsp_q_b.push_back(id);
+        endcase
+      end else begin
+        case (src)
+          0: cmt_q_s.push_back(id);
+          1: cmt_q_v.push_back(id);
+          default: cmt_q_b.push_back(id);
+        endcase
+      end
+    endfunction
+
+    local function void q_del(u32_t src, bit rsp, u32_t id);
+      if (rsp) begin
+        case (src)
+          0: q_remove(rsp_q_s, id);
+          1: q_remove(rsp_q_v, id);
+          default: q_remove(rsp_q_b, id);
+        endcase
+      end else begin
+        case (src)
+          0: q_remove(cmt_q_s, id);
+          1: q_remove(cmt_q_v, id);
+          default: q_remove(cmt_q_b, id);
+        endcase
+      end
+    endfunction
+
+    // ------------------------------------------------------------- issue
+    function void on_issue(mc_txn t);
+      if (rob.exists(t.id) != 0) begin
+        err("TB_ID_COLLISION", t, "transaction ID allocated while still outstanding");
+        return;
+      end
+      t.state     = TS_ISSUED;
+      t.issue_cyc = cyc;
+      rob[t.id]   = t;
+    endfunction
+
+    // ------------------------------------------------------------ accept
+    function void on_accept(u32_t port, u32_t id, bit we, u32_t addr, u32_t beats, bit [127:0] wbus);
+      mc_txn t;
+      u32_t  n;
+      if (rob.exists(id) == 0) begin
+        err("ACCEPT_UNKNOWN_ID", null, $sformatf("port=%s id=0x%02h", acc_name(acc_e'(port)), id));
+        return;
+      end
+      t = rob[id];
+      checks++;
+      if (t.state != TS_ISSUED)
+        err("ACCEPT_DUPLICATE", t, "request handshake observed for a transaction already accepted");
+      if (u32_t'(t.acc) != port || t.we != we || t.addr != addr || (t.acc == ACC_BURST && t.beats != beats))
+        err("TB_DRIVER_PAYLOAD", t, $sformatf("bus: port=%0d we=%0d addr=0x%03h beats=%0d", port, we, addr, beats));
+      if (we && t.acc == ACC_SCALAR && wbus[31:0] != t.wdata[0])
+        err("TB_DRIVER_WDATA", t, $sformatf("bus wdata=0x%08h", wbus[31:0]));
+      if (we && t.acc == ACC_VECTOR && wbus != t.wvec())
+        err("TB_DRIVER_WDATA", t, $sformatf("bus wdata=0x%032h", wbus));
+      t.state      = TS_ACCEPTED;
+      t.accept_cyc = cyc;
+      q_push(port, 1'b1, id);
+      if (t.exp_commits != 0) begin
+        q_push(port, 1'b0, id);
+        pending[port]++;
+      end
+      if (t.acc == ACC_BURST && t.we) bw_q.push_back(id);
+      if (t.acc == ACC_BURST && rsp_q_b.size() > 1) cov.hit("burst.back2back");
+      n_accepted++;
+      n = u32_t'(rob.num());
+      if (n > max_outstanding) max_outstanding = n;
+      if (n >= 1)  cov.hit("outstanding.ge1");
+      if (n >= 4)  cov.hit("outstanding.ge4");
+      if (n >= 8)  cov.hit("outstanding.ge8");
+      if (n >= 16) cov.hit("outstanding.ge16");
+    endfunction
+
+    // ------------------------------------------------------- write data
+    function void on_wdata(bit [31:0] d, bit last);
+      mc_txn t;
+      bit    exp_last;
+      n_wbeats++;
+      if (bw_q.size() == 0) begin
+        err("WDATA_UNEXPECTED", null, $sformatf("wdata=0x%08h last=%0d with no burst write awaiting data", d, last));
+        return;
+      end
+      t = rob[bw_q[0]];
+      checks++;
+      exp_last = (t.wbeats == t.beats - 1);
+      if (d != t.wdata[t.wbeats] || last != exp_last)
+        err("TB_DRIVER_WBEAT", t, $sformatf("beat=%0d bus=0x%08h/last=%0d exp=0x%08h/last=%0d",
+                                            t.wbeats, d, last, t.wdata[t.wbeats], exp_last));
+      if (t.wbeats != 0 && (cyc - t.last_wbeat_cyc) > 1) begin
+        t.wgap_seen = 1'b1;
+      end
+      t.last_wbeat_cyc = cyc;
+      t.wbeats++;
+      if (t.wbeats == t.beats) void'(bw_q.pop_front());
+    endfunction
+
+    // ------------------------------------------------------------ commit
+    function void on_commit(u32_t src, u32_t id, bit we, u32_t addr, u32_t beat, bit stalled);
+      mc_txn     t;
+      u32_t      exp_a;
+      u32_t      b;
+      u32_t      front;
+      bit        ok;
+      n_commits++;
+      last_progress_cyc = cyc;
+      if (rob.exists(id) == 0) begin
+        err("COMMIT_UNKNOWN_ID", null,
+            $sformatf("untracked SRAM access src=%s id=0x%02h we=%0d addr=0x%03h beat=%0d",
+                      src_tag(src), id, we, addr, beat));
+        return;
+      end
+      t = rob[id];
+      checks++;
+      if (stalled)
+        err("COMMIT_DURING_STALL", t, $sformatf("SRAM access while mem_stall_i asserted (addr=0x%03h)", addr));
+      if (t.state != TS_ACCEPTED)
+        err("COMMIT_BEFORE_ACCEPT", t, "SRAM access for a request not yet accepted");
+      if (src != u32_t'(t.acc))
+        err("COMMIT_SRC", t, $sformatf("trace src=%s expected=%s", src_tag(src), src_tag(u32_t'(t.acc))));
+      if (we != t.we)
+        err("COMMIT_RW", t, $sformatf("trace we=%0d expected=%0d", we, t.we));
+      if (t.exp_commits == 0) begin
+        err("ILLEGAL_COMMIT", t,
+            $sformatf("rejected access reached SRAM: trace addr=0x%03h we=%0d beat=%0d", addr, we, beat));
+        return;
+      end
+      if (t.commits >= t.exp_commits) begin
+        err("EXCESS_COMMIT", t, $sformatf("trace addr=0x%03h beat=%0d", addr, beat));
+        return;
+      end
+      b     = t.commits;
+      exp_a = t.commit_addr(b);
+      if (beat != b)
+        err("COMMIT_BEAT_ORDER", t, $sformatf("trace beat=%0d expected beat=%0d", beat, b));
+      if (addr != exp_a)
+        err("COMMIT_ADDR", t, $sformatf("beat=%0d trace addr=0x%03h expected addr=0x%03h", b, addr, exp_a));
+      if (MC_COMMIT_IN_ORDER) begin
+        front = q_front(src, 1'b0, ok);
+        if (!ok || front != id)
+          err("PORT_COMMIT_ORDER", t, $sformatf("oldest uncommitted on port is id=0x%02h", front));
+      end
+      if (t.acc == ACC_BURST && t.we && t.wbeats <= b)
+        err("COMMIT_BEFORE_WDATA", t, $sformatf("beat %0d committed with only %0d data beats accepted", b, t.wbeats));
+
+      arb_track(src, exp_a, t);
+      commit_coverage(t, exp_a);
+
+      case (t.acc)
+        ACC_SCALAR: begin
+          if (t.we) mdl.write_word(exp_a, t.wdata[0], ACC_SCALAR);
+          else      snapshot(t, 0, exp_a);
+        end
+        ACC_VECTOR: begin
+          if (t.we) mdl.write_vec(exp_a, t.wvec());
+          else for (int l = 0; l < MC_LANES; l++) snapshot(t, u32_t'(l), exp_a + u32_t'(l));
+        end
+        default: begin
+          if (t.we) mdl.write_word(exp_a, t.wdata[b], ACC_BURST);
+          else      snapshot(t, b, exp_a);
+        end
+      endcase
+
+      if (t.we && t.acc == ACC_SCALAR) last_scalar_wr = int'(exp_a);
+      prev_we   = t.we;
+      prev_addr = exp_a;
+      t.commits++;
+      if (t.commits == t.exp_commits) begin
+        pending[src]--;
+        q_del(src, 1'b0, id);
+      end
+      if (sig_on) begin
+        sig_mix({16'(cyc - sig_base), 2'(src), 8'(id), 1'(we), 12'(exp_a), 4'(b), 21'(sig_cnt)});
+        sig_cnt++;
+      end
+    endfunction
+
+    local function void snapshot(mc_txn t, u32_t idx, u32_t a);
+      bit [31:0] d;
+      if (!mdl.read_word(a, d))
+        err("TB_UNINIT_READ", t, $sformatf("stimulus read of uninitialised word 0x%03h", a));
+      t.exp_rdata[idx]     = d;
+      t.exp_rdata_vld[idx] = 1'b1;
+    endfunction
+
+    local function void commit_coverage(mc_txn t, u32_t a);
+      mc_txn  o;
+      u32_t   lo;
+      u32_t   hi;
+      u32_t   n;
+      int     w;
+      n = (t.acc == ACC_VECTOR) ? MC_LANES : 1;
+      if (t.acc == ACC_SCALAR && t.we && last_scalar_wr == int'(a)) cov.hit("scalar.overwrite_b2b");
+      if (t.acc == ACC_SCALAR && !t.we && prev_we && prev_addr == a && prev_src >= 0) cov.hit("scalar.raw_b2b");
+      if (!t.we) begin
+        for (u32_t k = 0; k < n; k++) begin
+          w = mdl.last_writer(a + k);
+          if (w >= 0) cov.hit($sformatf("xview.%s_after_%s", src_tag(u32_t'(t.acc)), src_tag(u32_t'(w))));
+        end
+        if (t.acc != ACC_BURST) begin
+          foreach (cmt_q_b[i]) begin
+            o = rob[cmt_q_b[i]];
+            if (o.we && o.commits > 0 && o.commits < o.exp_commits) begin
+              lo = o.addr;
+              hi = o.addr + o.beats - 1;
+              if (a + n - 1 >= lo && a <= hi) cov.hit("burst.partial_observed");
+            end
+          end
+        end
+      end
+    endfunction
+
+    // --------------------------------------------------------- arbitration
+    local function void arb_track(u32_t src, u32_t a, mc_txn t);
+      u32_t npend;
+      npend = 0;
+      for (int s = 0; s < MC_NUM_SRC; s++) if (pending[s] != 0) npend++;
+      if (npend >= 1) cov.hit($sformatf("arb.pending_src%0d", npend));
+      if (prev_src >= 0) begin
+        cov.hit($sformatf("arb.xfer.%s_to_%s", src_tag(u32_t'(prev_src)), src_tag(src)));
+        if (u32_t'(prev_src) != src && (a / MC_LANES) == prev_row) cov.hit("arb.same_row_conflict");
+      end
+      if (strict) begin
+        for (int s = 0; s < MC_NUM_SRC; s++) begin
+          if (u32_t'(s) == src) begin
+            foreign[s] = 0;
+          end else if (pending[s] == 0) begin
+            foreign[s] = 0;
+          end else begin
+            foreign[s]++;
+            if (foreign[s] > max_foreign[s]) max_foreign[s] = foreign[s];
+            if (foreign[s] == MC_ARB_MAX_WAIT + 1)
+              err("ARB_STARVATION", t,
+                  $sformatf("source %s has pending work and has been bypassed by %0d consecutive grants (limit %0d)",
+                            src_tag(u32_t'(s)), foreign[s], MC_ARB_MAX_WAIT));
+          end
+        end
+        if (npend == MC_NUM_SRC) begin
+          share_gnt[src]++;
+          share_total++;
+        end
+      end
+      prev_src = int'(src);
+      prev_row = a / MC_LANES;
+    endfunction
+
+    function void open_strict();
+      strict      = 1'b1;
+      share_total = 0;
+      for (int s = 0; s < MC_NUM_SRC; s++) begin
+        foreign[s]     = 0;
+        max_foreign[s] = 0;
+        share_gnt[s]   = 0;
+      end
+    endfunction
+
+    function void close_strict(string ctx);
+      u32_t pct;
+      strict = 1'b0;
+      $display("[MC-ARB] %s: contended grants=%0d share s/v/b=%0d/%0d/%0d max bypass s/v/b=%0d/%0d/%0d",
+               ctx, share_total, share_gnt[0], share_gnt[1], share_gnt[2],
+               max_foreign[0], max_foreign[1], max_foreign[2]);
+      if (share_total < MC_ARB_MIN_SAMPLES) begin
+        err("ARB_NO_CONTENTION", null,
+            $sformatf("%s produced only %0d fully-contended grants (need %0d)", ctx, share_total, MC_ARB_MIN_SAMPLES));
+        return;
+      end
+      for (int s = 0; s < MC_NUM_SRC; s++) begin
+        pct = (share_gnt[s] * 100) / share_total;
+        if (pct < MC_ARB_MIN_SHARE_PCT)
+          err("ARB_UNFAIR", null, $sformatf("%s: source %s received %0d%% of contended grants (min %0d%%)",
+                                            ctx, src_tag(u32_t'(s)), pct, MC_ARB_MIN_SHARE_PCT));
+      end
+    endfunction
+
+    // ------------------------------------------------------- signature
+    function void sig_open();
+      sig_on   = 1'b1;
+      sig_base = cyc;
+      sig      = 64'hCBF2_9CE4_8422_2325;
+      sig_cnt  = 0;
+    endfunction
+
+    local function void sig_mix(bit [63:0] v);
+      sig = (sig ^ v) * 64'h0000_0100_0000_01B3;
+      sig = sig ^ (sig >> 29);
+    endfunction
+
+    function bit [63:0] sig_close(output u32_t count);
+      sig_on = 1'b0;
+      count  = sig_cnt;
+      return sig;
+    endfunction
+
+    // ---------------------------------------------------------- response
+    function void on_response(u32_t port, u32_t id, bit [127:0] rdata, logic [1:0] status, bit last);
+      mc_txn     t;
+      u32_t      b;
+      u32_t      front;
+      bit        ok;
+      bit        fin;
+      bit        chk;
+      bit [127:0] exp_d;
+      bit [127:0] mask;
+      string     dd;
+      n_rsp_beats++;
+      last_progress_cyc = cyc;
+      if (rob.exists(id) == 0) begin
+        err("RSP_UNKNOWN_ID", null, $sformatf("port=%s id=0x%02h status=%s rdata=0x%032h last=%0d",
+                                              acc_name(acc_e'(port)), id, st_name(status), rdata, last));
+        return;
+      end
+      t = rob[id];
+      checks++;
+      if (port != u32_t'(t.acc))
+        err("RSP_WRONG_PORT", t, $sformatf("response returned on %s port", acc_name(acc_e'(port))));
+      if (t.state != TS_ACCEPTED)
+        err("RSP_BEFORE_ACCEPT", t, "response for a request that was never accepted");
+      if (MC_RSP_IN_ORDER) begin
+        front = q_front(port, 1'b1, ok);
+        if (!ok || front != id)
+          err("RSP_ORDER", t, $sformatf("port response order violated: expected id=0x%02h", front));
+      end
+      b = t.rsp_beats;
+      if (b >= t.exp_rsp_beats) begin
+        err("RSP_EXCESS_BEATS", t, $sformatf("unexpected response beat %0d", b));
+        return;
+      end
+      fin = (b == t.exp_rsp_beats - 1);
+
+      if (status !== t.exp_status)
+        err("RSP_STATUS", t, $sformatf("beat=%0d expected=%s actual=%s", b, st_name(t.exp_status), st_name(status)));
+
+      if (t.exp_status == MC_ST_OKAY) begin
+        if (!t.we && t.commits <= b)
+          err("RSP_BEFORE_COMMIT", t, $sformatf("read beat %0d returned before its SRAM access", b));
+        if (t.we && t.commits != t.exp_commits)
+          err("WRITE_RSP_BEFORE_COMMIT", t, $sformatf("write acknowledged with %0d/%0d beats committed",
+                                                      t.commits, t.exp_commits));
+      end
+      if (t.acc == ACC_BURST && t.we && t.wbeats != t.beats)
+        err("WRITE_RSP_BEFORE_DATA", t, $sformatf("write acknowledged with %0d/%0d data beats accepted",
+                                                  t.wbeats, t.beats));
+
+      chk   = 1'b1;
+      exp_d = '0;
+      mask  = (t.acc == ACC_VECTOR) ? {128{1'b1}} : {96'h0, 32'hFFFF_FFFF};
+      if (t.exp_status == MC_ST_OKAY && !t.we) begin
+        if (t.acc == ACC_VECTOR) begin
+          for (int l = 0; l < MC_LANES; l++) begin
+            exp_d[l*32 +: 32] = t.exp_rdata[l];
+            if (!t.exp_rdata_vld[l]) chk = 1'b0;
+          end
+        end else begin
+          exp_d[31:0] = t.exp_rdata[(t.acc == ACC_BURST) ? b : 0];
+          if (!t.exp_rdata_vld[(t.acc == ACC_BURST) ? b : 0]) chk = 1'b0;
+        end
+        if (!chk) err("TB_NO_SNAPSHOT", t, $sformatf("no golden snapshot for beat %0d", b));
+      end else if (!MC_ZERO_NONREAD_DATA) begin
+        chk = 1'b0;
+      end
+
+      if (chk && ((rdata & mask) !== exp_d)) begin
+        dd = $sformatf("DATA MISMATCH beat=%0d", b);
+        if (t.acc == ACC_VECTOR) begin
+          for (int l = 0; l < MC_LANES; l++)
+            dd = {dd, $sformatf("\n      lane%0d addr=0x%03h expected=0x%08h actual=0x%08h %s", l,
+                                t.commit_addr(0) + u32_t'(l), exp_d[l*32 +: 32], rdata[l*32 +: 32],
+                                (exp_d[l*32 +: 32] == rdata[l*32 +: 32]) ? "" : "<-- MISMATCH")};
+        end else begin
+          dd = {dd, $sformatf("\n      addr=0x%03h expected=0x%08h actual=0x%08h xor=0x%08h",
+                              t.commit_addr(b), exp_d[31:0], rdata[31:0], exp_d[31:0] ^ rdata[31:0])};
+          if (t.acc == ACC_BURST)
+            dd = {dd, $sformatf("\n      burst context: beat %0d of %0d, start=0x%03h, committed=%0d, returned=%0d",
+                                b, t.beats, t.addr, t.commits, t.rsp_beats)};
+        end
+        err("DATA_MISMATCH", t, dd);
+      end
+
+      if (t.dir_exp_vld && t.exp_status == MC_ST_OKAY && !t.we) begin
+        if (t.acc == ACC_VECTOR) begin
+          for (int l = 0; l < MC_LANES; l++)
+            if (t.dir_exp[l] != t.exp_rdata[l])
+              err("MODEL_DIVERGENCE", t, $sformatf("lane%0d directed=0x%08h model=0x%08h dut=0x%08h",
+                                                   l, t.dir_exp[l], t.exp_rdata[l], rdata[l*32 +: 32]));
+        end else begin
+          if (t.dir_exp[(t.acc == ACC_BURST) ? b : 0] != t.exp_rdata[(t.acc == ACC_BURST) ? b : 0])
+            err("MODEL_DIVERGENCE", t, $sformatf("beat=%0d directed=0x%08h model=0x%08h dut=0x%08h", b,
+                                                 t.dir_exp[(t.acc == ACC_BURST) ? b : 0],
+                                                 t.exp_rdata[(t.acc == ACC_BURST) ? b : 0], rdata[31:0]));
+        end
+      end
+
+      if (port == u32_t'(ACC_BURST) && last != fin)
+        err("RSP_LAST_FLAG", t, $sformatf("beat %0d of %0d: last=%0d expected=%0d", b, t.exp_rsp_beats, last, fin));
+
+      t.rsp_beats++;
+      if (fin) retire(t, port);
+    endfunction
+
+    function void note_rsp_stall(u32_t port, u32_t id);
+      if (port == u32_t'(ACC_BURST) && rob.exists(id) != 0) begin
+        if (!rob[id].we && rob[id].rsp_beats > 0 && rob[id].rsp_beats < rob[id].exp_rsp_beats)
+          cov.hit("burst.rd_rsp_stall_mid");
+      end
+    endfunction
+
+    local function void retire(mc_txn t, u32_t port);
+      longint lat;
+      if (t.commits != t.exp_commits)
+        err("RETIRE_COMMIT_COUNT", t, $sformatf("completed with %0d/%0d SRAM accesses", t.commits, t.exp_commits));
+      t.state    = TS_DONE;
+      t.done_cyc = cyc;
+      lat = t.done_cyc - t.accept_cyc;
+      lat_sum[port] += lat;
+      lat_cnt[port]++;
+      if (lat < lat_min[port]) lat_min[port] = lat;
+      if (lat > lat_max[port]) lat_max[port] = lat;
+      if (lat <= 4)       cov.hit($sformatf("lat.%s.le4", src_tag(port)));
+      else if (lat <= 16) cov.hit($sformatf("lat.%s.le16", src_tag(port)));
+      else if (lat <= 64) cov.hit($sformatf("lat.%s.le64", src_tag(port)));
+      else                cov.hit($sformatf("lat.%s.gt64", src_tag(port)));
+      retire_coverage(t);
+      q_del(port, 1'b1, t.id);
+      if (t.commits != t.exp_commits) begin
+        if (t.exp_commits != 0 && pending[port] != 0) pending[port]--;
+        q_del(port, 1'b0, t.id);
+      end
+      q_remove(bw_q, t.id);
+      rob.delete(t.id);
+      free_ids.push_back(t.id);
+      n_retired++;
+    endfunction
+
+    local function void retire_coverage(mc_txn t);
+      string r;
+      bit    distinct;
+      bit [31:0] lanes[MC_LANES];
+      r = rw_tag(t.we);
+      case (t.acc)
+        ACC_SCALAR: begin
+          cov.hit($sformatf("scalar.%s.oct%0d", r, t.addr / (MC_WORDS / 8)));
+          if (t.addr == 0)            cov.hit({"scalar.", r, ".addr_min"});
+          if (t.addr == MC_WORDS - 1) cov.hit({"scalar.", r, ".addr_max"});
+        end
+        ACC_VECTOR: begin
+          if ((t.addr % MC_LANES) != 0) begin
+            cov.hit($sformatf("misalign.off%0d.%s", t.addr % MC_LANES, r));
+            if (t.addr >= MC_WORDS - MC_LANES) cov.hit("misalign.top_row");
+          end
+          if (t.exp_status == MC_ST_OKAY) begin
+            if ((t.addr % MC_LANES) == 0) cov.hit({"vector.", r, ".aligned"});
+            if (t.commit_addr(0) == 0) cov.hit({"vector.", r, ".row_min"});
+            if (t.commit_addr(0) == MC_WORDS - MC_LANES) cov.hit({"vector.", r, ".row_max"});
+            for (int l = 0; l < MC_LANES; l++) lanes[l] = t.we ? t.wdata[l] : t.exp_rdata[l];
+            for (int l = 0; l < MC_LANES; l++) begin
+              distinct = 1'b1;
+              for (int m = 0; m < MC_LANES; m++) if (m != l && lanes[m] == lanes[l]) distinct = 1'b0;
+              if (distinct) cov.hit($sformatf("vector.lane%0d.%s", l, r));
+            end
+          end
+        end
+        default: begin
+          if (t.exp_status == MC_ST_OKAY) begin
+            cov.hit($sformatf("burst.len%02d.%s", t.beats, r));
+            if (t.addr + t.beats == MC_WORDS) cov.hit({"burst.", r, ".end_at_top"});
+            if ((t.addr % MC_LANES) != 0)     cov.hit({"burst.", r, ".unaligned_start"});
+            if (t.we && t.wgap_seen)          cov.hit("burst.wr_data_gap");
+          end else begin
+            cov.hit({"range.", r});
+            if (t.beats == MC_MAX_BEATS) cov.hit("range.len_max");
+          end
+        end
+      endcase
+    endfunction
+
+    // -------------------------------------------------------- watchdogs
+    function void scan_timeouts();
+      foreach (rob[k]) begin
+        if (!rob[k].timed_out && (cyc - rob[k].issue_cyc) > longint'(MC_TXN_TIMEOUT)) begin
+          rob[k].timed_out = 1'b1;
+          err("TXN_TIMEOUT", rob[k],
+              $sformatf("no completion %0d cycles after issue: lost request, deadlock or starvation", MC_TXN_TIMEOUT));
+        end
+      end
+    endfunction
+
+    function bit no_progress(longint window);
+      return (rob.num() != 0) && ((cyc - last_progress_cyc) > window);
+    endfunction
+
+    function void dump_inflight(string ctx);
+      u32_t n;
+      n = 0;
+      $display("[MC-SB] in-flight dump (%s): %0d transactions", ctx, rob.num());
+      foreach (rob[k]) begin
+        if (n < 16) $display("      %s", rob[k].sprint());
+        n++;
+      end
+    endfunction
+
+    function void final_check(string ctx);
+      if (rob.num() != 0) begin
+        err("INFLIGHT_AT_END", null, $sformatf("%s: %0d transactions never completed", ctx, rob.num()));
+        dump_inflight(ctx);
+      end
+      if (free_ids.size() != MC_NUM_IDS)
+        err("ID_LEAK", null, $sformatf("%s: %0d of %0d IDs returned", ctx, free_ids.size(), MC_NUM_IDS));
+      for (int s = 0; s < MC_NUM_SRC; s++)
+        if (pending[s] != 0)
+          err("PENDING_RESIDUE", null, $sformatf("%s: source %s pending=%0d", ctx, src_tag(u32_t'(s)), pending[s]));
+      if (rsp_q_s.size() + rsp_q_v.size() + rsp_q_b.size() + cmt_q_s.size() + cmt_q_v.size() + cmt_q_b.size()
+          + bw_q.size() != 0)
+        err("QUEUE_RESIDUE", null, $sformatf("%s: ordering queues not empty", ctx));
+    endfunction
+  endclass
+
+endpackage : mc_tb_pkg
+
+//==============================================================================
+// Top-level verification harness
+//==============================================================================
+module tb_memory_controller;
+  import mc_tb_pkg::*;
+
+  localparam time CLK_HALF = 1ns;
+
+  //--------------------------------------------------------------------------
+  // Clock, reset, cycle counter
+  //--------------------------------------------------------------------------
+  logic   clk;
+  logic   rst_n;
+  longint cyc = 0;
+
+  initial begin
+    clk = 1'b0;
+    forever #(CLK_HALF) clk = ~clk;
+  end
+
+  always @(negedge clk) cyc <= cyc + 1;
+
+  //--------------------------------------------------------------------------
+  // DUT interface signals
+  //--------------------------------------------------------------------------
+  logic                  s_req_valid, s_req_ready, s_req_we;
+  logic [MC_ADDR_W-1:0]  s_req_addr;
+  logic [31:0]           s_req_wdata;
+  logic [MC_ID_W-1:0]    s_req_id;
+  logic                  s_rsp_valid, s_rsp_ready;
+  logic [MC_ID_W-1:0]    s_rsp_id;
+  logic [31:0]           s_rsp_rdata;
+  logic [1:0]            s_rsp_status;
+
+  logic                  v_req_valid, v_req_ready, v_req_we;
+  logic [MC_ADDR_W-1:0]  v_req_addr;
+  logic [127:0]          v_req_wdata;
+  logic [MC_ID_W-1:0]    v_req_id;
+  logic                  v_rsp_valid, v_rsp_ready;
+  logic [MC_ID_W-1:0]    v_rsp_id;
+  logic [127:0]          v_rsp_rdata;
+  logic [1:0]            v_rsp_status;
+
+  logic                  b_req_valid, b_req_ready, b_req_we;
+  logic [MC_ADDR_W-1:0]  b_req_addr;
+  logic [MC_BLEN_W-1:0]  b_req_len;
+  logic [MC_ID_W-1:0]    b_req_id;
+  logic                  b_wvalid, b_wready, b_wlast;
+  logic [31:0]           b_wdata;
+  logic                  b_rsp_valid, b_rsp_ready, b_rsp_last;
+  logic [MC_ID_W-1:0]    b_rsp_id;
+  logic [31:0]           b_rsp_rdata;
+  logic [1:0]            b_rsp_status;
+
+  logic                  mem_stall;
+
+  logic                  trc_valid, trc_we;
+  logic [1:0]            trc_src;
+  logic [MC_ID_W-1:0]    trc_id;
+  logic [MC_ADDR_W-1:0]  trc_addr;
+  logic [MC_BLEN_W-1:0]  trc_beat;
+
+  //--------------------------------------------------------------------------
+  // Device under test
+  //--------------------------------------------------------------------------
+  memory_controller #(
+    .ADDR_W        (MC_ADDR_W),
+    .ID_W          (MC_ID_W),
+    .BLEN_W        (MC_BLEN_W),
+    .MISALIGN_MODE (MC_MISALIGN_MODE)
+  ) dut (
+    .clk_i          (clk),
+    .rst_ni         (rst_n),
+    .s_req_valid_i  (s_req_valid),
+    .s_req_ready_o  (s_req_ready),
+    .s_req_we_i     (s_req_we),
+    .s_req_addr_i   (s_req_addr),
+    .s_req_wdata_i  (s_req_wdata),
+    .s_req_id_i     (s_req_id),
+    .s_rsp_valid_o  (s_rsp_valid),
+    .s_rsp_ready_i  (s_rsp_ready),
+    .s_rsp_id_o     (s_rsp_id),
+    .s_rsp_rdata_o  (s_rsp_rdata),
+    .s_rsp_status_o (s_rsp_status),
+    .v_req_valid_i  (v_req_valid),
+    .v_req_ready_o  (v_req_ready),
+    .v_req_we_i     (v_req_we),
+    .v_req_addr_i   (v_req_addr),
+    .v_req_wdata_i  (v_req_wdata),
+    .v_req_id_i     (v_req_id),
+    .v_rsp_valid_o  (v_rsp_valid),
+    .v_rsp_ready_i  (v_rsp_ready),
+    .v_rsp_id_o     (v_rsp_id),
+    .v_rsp_rdata_o  (v_rsp_rdata),
+    .v_rsp_status_o (v_rsp_status),
+    .b_req_valid_i  (b_req_valid),
+    .b_req_ready_o  (b_req_ready),
+    .b_req_we_i     (b_req_we),
+    .b_req_addr_i   (b_req_addr),
+    .b_req_len_i    (b_req_len),
+    .b_req_id_i     (b_req_id),
+    .b_wvalid_i     (b_wvalid),
+    .b_wready_o     (b_wready),
+    .b_wdata_i      (b_wdata),
+    .b_wlast_i      (b_wlast),
+    .b_rsp_valid_o  (b_rsp_valid),
+    .b_rsp_ready_i  (b_rsp_ready),
+    .b_rsp_id_o     (b_rsp_id),
+    .b_rsp_rdata_o  (b_rsp_rdata),
+    .b_rsp_status_o (b_rsp_status),
+    .b_rsp_last_o   (b_rsp_last),
+    .mem_stall_i    (mem_stall),
+    .trc_valid_o    (trc_valid),
+    .trc_src_o      (trc_src),
+    .trc_id_o       (trc_id),
+    .trc_we_o       (trc_we),
+    .trc_addr_o     (trc_addr),
+    .trc_beat_o     (trc_beat)
+  );
+
+  //--------------------------------------------------------------------------
+  // Environment components
+  //--------------------------------------------------------------------------
+  mc_ref_model       mdl;
+  mc_coverage        cov;
+  mc_scoreboard      sb;
+  mc_rng             rng_stim;
+  mc_rng             rng_junk;
+  mc_rng             rng_stall;
+  mc_rng             rng_bp[MC_NUM_SRC];
+  bit [63:0]         seed;
+  bit                env_up;
+  bit                in_reset;
+
+  mailbox #(mc_txn)  s_mbx;
+  mailbox #(mc_txn)  v_mbx;
+  mailbox #(mc_txn)  b_mbx;
+  mailbox #(mc_txn)  bw_mbx;
+  bit                s_busy, v_busy, b_busy, bw_busy;
+
+  bp_mode_e          rsp_mode[MC_NUM_SRC];
+  u32_t              rsp_pct[MC_NUM_SRC];
+  bit                rsp_cur[MC_NUM_SRC];
+  u32_t              rsp_hold[MC_NUM_SRC];
+  bp_mode_e          stall_mode;
+  u32_t              stall_pct;
+  bit                stall_cur;
+  u32_t              stall_hold;
+
+  function automatic void reseed_all(bit [63:0] s);
+    rng_stim.reseed(s ^ 64'h0000_0000_0000_0001);
+    rng_junk.reseed(s ^ 64'h0000_0000_0000_0002);
+    rng_stall.reseed(s ^ 64'h0000_0000_0000_0003);
+    for (int p = 0; p < MC_NUM_SRC; p++) begin
+      rng_bp[p].reseed(s ^ (64'h0000_0000_0000_0010 + 64'(p)));
+      rsp_cur[p]  = 1'b1;
+      rsp_hold[p] = 0;
+    end
+    stall_cur  = 1'b0;
+    stall_hold = 0;
+  endfunction
+
+  function automatic void set_rsp_mode(bp_mode_e m, u32_t pct);
+    for (int p = 0; p < MC_NUM_SRC; p++) begin
+      rsp_mode[p] = m;
+      rsp_pct[p]  = pct;
+    end
+  endfunction
+
+  function automatic void set_stall_mode(bp_mode_e m, u32_t pct);
+    stall_mode = m;
+    stall_pct  = pct;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // Drivers: inputs change on the falling edge, DUT samples on the rising edge
+  //--------------------------------------------------------------------------
+  task automatic idle_s_bus();
+    s_req_valid = 1'b0;
+    s_req_we    = rng_junk.chance(50);
+    s_req_addr  = MC_ADDR_W'(rng_junk.next32());
+    s_req_wdata = rng_junk.next32();
+    s_req_id    = MC_ID_W'(rng_junk.next32());
+  endtask
+
+  task automatic idle_v_bus();
+    v_req_valid = 1'b0;
+    v_req_we    = rng_junk.chance(50);
+    v_req_addr  = MC_ADDR_W'(rng_junk.next32());
+    for (int l = 0; l < MC_LANES; l++) v_req_wdata[l*32 +: 32] = rng_junk.next32();
+    v_req_id    = MC_ID_W'(rng_junk.next32());
+  endtask
+
+  task automatic idle_b_bus();
+    b_req_valid = 1'b0;
+    b_req_we    = rng_junk.chance(50);
+    b_req_addr  = MC_ADDR_W'(rng_junk.next32());
+    b_req_len   = MC_BLEN_W'(rng_junk.next32());
+    b_req_id    = MC_ID_W'(rng_junk.next32());
+  endtask
+
+  task automatic idle_w_bus();
+    b_wvalid = 1'b0;
+    b_wdata  = rng_junk.next32();
+    b_wlast  = rng_junk.chance(50);
+  endtask
+
+  task automatic drv_scalar();
+    mc_txn t;
+    u32_t  id;
+    forever begin
+      @(negedge clk);
+      if (s_mbx.try_get(t) == 0) begin
+        s_busy = 1'b0;
+        idle_s_bus();
+        continue;
+      end
+      s_busy = 1'b1;
+      for (u32_t i = 0; i < t.idle_before; i++) begin
+        idle_s_bus();
+        @(negedge clk);
+      end
+      while (!sb.try_alloc_id(id)) begin
+        idle_s_bus();
+        @(negedge clk);
+      end
+      t.id = id;
+      sb.on_issue(t);
+      s_req_valid = 1'b1;
+      s_req_we    = t.we;
+      s_req_addr  = MC_ADDR_W'(t.addr);
+      s_req_wdata = t.wdata[0];
+      s_req_id    = MC_ID_W'(id);
+      do @(posedge clk); while (!s_req_ready);
+    end
+  endtask
+
+  task automatic drv_vector();
+    mc_txn t;
+    u32_t  id;
+    forever begin
+      @(negedge clk);
+      if (v_mbx.try_get(t) == 0) begin
+        v_busy = 1'b0;
+        idle_v_bus();
+        continue;
+      end
+      v_busy = 1'b1;
+      for (u32_t i = 0; i < t.idle_before; i++) begin
+        idle_v_bus();
+        @(negedge clk);
+      end
+      while (!sb.try_alloc_id(id)) begin
+        idle_v_bus();
+        @(negedge clk);
+      end
+      t.id = id;
+      sb.on_issue(t);
+      v_req_valid = 1'b1;
+      v_req_we    = t.we;
+      v_req_addr  = MC_ADDR_W'(t.addr);
+      v_req_wdata = t.wvec();
+      v_req_id    = MC_ID_W'(id);
+      do @(posedge clk); while (!v_req_ready);
+    end
+  endtask
+
+  task automatic drv_burst_cmd();
+    mc_txn t;
+    u32_t  id;
+    forever begin
+      @(negedge clk);
+      if (b_mbx.try_get(t) == 0) begin
+        b_busy = 1'b0;
+        idle_b_bus();
+        continue;
+      end
+      b_busy = 1'b1;
+      for (u32_t i = 0; i < t.idle_before; i++) begin
+        idle_b_bus();
+        @(negedge clk);
+      end
+      while (!sb.try_alloc_id(id)) begin
+        idle_b_bus();
+        @(negedge clk);
+      end
+      t.id = id;
+      sb.on_issue(t);
+      b_req_valid = 1'b1;
+      b_req_we    = t.we;
+      b_req_addr  = MC_ADDR_W'(t.addr);
+      b_req_len   = MC_BLEN_W'(t.beats - 1);
+      b_req_id    = MC_ID_W'(id);
+      do @(posedge clk); while (!b_req_ready);
+      if (t.we) bw_mbx.put(t);
+    end
+  endtask
+
+  task automatic drv_burst_wdata();
+    mc_txn t;
+    forever begin
+      @(negedge clk);
+      if (bw_mbx.try_get(t) == 0) begin
+        bw_busy = 1'b0;
+        idle_w_bus();
+        continue;
+      end
+      bw_busy = 1'b1;
+      for (u32_t b = 0; b < t.beats; b++) begin
+        if (b != 0) @(negedge clk);
+        for (u32_t g = 0; g < t.wgap[b]; g++) begin
+          idle_w_bus();
+          @(negedge clk);
+        end
+        b_wvalid = 1'b1;
+        b_wdata  = t.wdata[b];
+        b_wlast  = (b == t.beats - 1);
+        do @(posedge clk); while (!b_wready);
+      end
+    end
+  endtask
+
+  task automatic drv_rsp_ready(int p, mc_rng g);
+    bit r;
+    forever begin
+      @(negedge clk);
+      case (rsp_mode[p])
+        BP_ALWAYS: r = 1'b1;
+        BP_HOLD:   r = 1'b0;
+        BP_RANDOM: r = g.chance(rsp_pct[p]);
+        default: begin
+          if (rsp_hold[p] == 0) begin
+            rsp_cur[p]  = ~rsp_cur[p];
+            rsp_hold[p] = rsp_cur[p] ? g.range(1, 24) : g.range(1, rsp_pct[p]);
+          end
+          rsp_hold[p]--;
+          r = rsp_cur[p];
+        end
+      endcase
+      case (p)
+        0:       s_rsp_ready = r;
+        1:       v_rsp_ready = r;
+        default: b_rsp_ready = r;
+      endcase
+    end
+  endtask
+
+  task automatic drv_mem_stall();
+    bit r;
+    forever begin
+      @(negedge clk);
+      case (stall_mode)
+        BP_ALWAYS: r = 1'b0;
+        BP_HOLD:   r = 1'b1;
+        BP_RANDOM: r = rng_stall.chance(stall_pct);
+        default: begin
+          if (stall_hold == 0) begin
+            stall_cur  = ~stall_cur;
+            stall_hold = stall_cur ? rng_stall.range(1, stall_pct) : rng_stall.range(4, 48);
+          end
+          stall_hold--;
+          r = stall_cur;
+        end
+      endcase
+      mem_stall = in_reset ? 1'b0 : r;
+    end
+  endtask
+
+  //--------------------------------------------------------------------------
+  // Monitor: handshakes, commit trace, responses, protocol, X, coverage
+  //--------------------------------------------------------------------------
+  logic                 p_s_rsp_valid, p_s_rsp_ready, p_v_rsp_valid, p_v_rsp_ready, p_b_rsp_valid, p_b_rsp_ready;
+  logic [MC_ID_W-1:0]   p_s_rsp_id, p_v_rsp_id, p_b_rsp_id;
+  logic [31:0]          p_s_rsp_rdata, p_b_rsp_rdata;
+  logic [127:0]         p_v_rsp_rdata;
+  logic [1:0]           p_s_rsp_status, p_v_rsp_status, p_b_rsp_status;
+  logic                 p_b_rsp_last;
+  logic                 p_s_req_valid, p_s_req_ready, p_v_req_valid, p_v_req_ready, p_b_req_valid, p_b_req_ready;
+  logic                 p_b_wvalid, p_b_wready;
+  logic [MC_ADDR_W+32+MC_ID_W:0]      p_s_req_pl;
+  logic [MC_ADDR_W+128+MC_ID_W:0]     p_v_req_pl;
+  logic [MC_ADDR_W+MC_BLEN_W+MC_ID_W:0] p_b_req_pl;
+  logic [32:0]          p_b_w_pl;
+  u32_t                 stall_run;
+  u32_t                 hold_cnt[MC_NUM_SRC];
+  bit                   deadlock_flagged;
+  bit                   rst_seen;
+
+  function automatic void mon_reset_checks();
+    if (rst_seen && (s_rsp_valid !== 1'b0 || v_rsp_valid !== 1'b0 || b_rsp_valid !== 1'b0 || trc_valid !== 1'b0))
+      sb.err("RESET_STATE", null, $sformatf("outputs active in reset: s_rsp_valid=%b v_rsp_valid=%b b_rsp_valid=%b trc_valid=%b",
+                                            s_rsp_valid, v_rsp_valid, b_rsp_valid, trc_valid));
+    rst_seen = 1'b1;
+  endfunction
+
+  function automatic void mon_x_checks();
+    if ($isunknown({s_req_ready, v_req_ready, b_req_ready, b_wready, s_rsp_valid, v_rsp_valid, b_rsp_valid, trc_valid}))
+      sb.err("X_ON_CONTROL", null, "unknown value on DUT handshake/trace control output");
+    if (s_rsp_valid === 1'b1 && $isunknown({s_rsp_id, s_rsp_rdata, s_rsp_status}))
+      sb.err("X_ON_PAYLOAD", null, "unknown value on scalar response payload");
+    if (v_rsp_valid === 1'b1 && $isunknown({v_rsp_id, v_rsp_rdata, v_rsp_status}))
+      sb.err("X_ON_PAYLOAD", null, "unknown value on vector response payload");
+    if (b_rsp_valid === 1'b1 && $isunknown({b_rsp_id, b_rsp_rdata, b_rsp_status, b_rsp_last}))
+      sb.err("X_ON_PAYLOAD", null, "unknown value on burst response payload");
+    if (trc_valid === 1'b1 && $isunknown({trc_src, trc_id, trc_we, trc_addr, trc_beat}))
+      sb.err("X_ON_PAYLOAD", null, "unknown value on commit trace payload");
+  endfunction
+
+  function automatic void mon_protocol_checks();
+    if (p_s_rsp_valid && !p_s_rsp_ready) begin
+      if (!s_rsp_valid)
+        sb.err("RSP_PROTOCOL_DROP", null, $sformatf("scalar rsp valid withdrawn before handshake (id=0x%02h)", p_s_rsp_id));
+      else if ({s_rsp_id, s_rsp_rdata, s_rsp_status} !== {p_s_rsp_id, p_s_rsp_rdata, p_s_rsp_status})
+        sb.err("RSP_PAYLOAD_UNSTABLE", null,
+               $sformatf("scalar rsp changed under backpressure: id 0x%02h->0x%02h rdata 0x%08h->0x%08h status %s->%s",
+                         p_s_rsp_id, s_rsp_id, p_s_rsp_rdata, s_rsp_rdata, st_name(p_s_rsp_status), st_name(s_rsp_status)));
+    end
+    if (p_v_rsp_valid && !p_v_rsp_ready) begin
+      if (!v_rsp_valid)
+        sb.err("RSP_PROTOCOL_DROP", null, $sformatf("vector rsp valid withdrawn before handshake (id=0x%02h)", p_v_rsp_id));
+      else if ({v_rsp_id, v_rsp_rdata, v_rsp_status} !== {p_v_rsp_id, p_v_rsp_rdata, p_v_rsp_status})
+        sb.err("RSP_PAYLOAD_UNSTABLE", null,
+               $sformatf("vector rsp changed under backpressure: id 0x%02h->0x%02h rdata 0x%032h->0x%032h",
+                         p_v_rsp_id, v_rsp_id, p_v_rsp_rdata, v_rsp_rdata));
+    end
+    if (p_b_rsp_valid && !p_b_rsp_ready) begin
+      if (!b_rsp_valid)
+        sb.err("RSP_PROTOCOL_DROP", null, $sformatf("burst rsp valid withdrawn before handshake (id=0x%02h)", p_b_rsp_id));
+      else if ({b_rsp_id, b_rsp_rdata, b_rsp_status, b_rsp_last} !== {p_b_rsp_id, p_b_rsp_rdata, p_b_rsp_status, p_b_rsp_last})
+        sb.err("RSP_PAYLOAD_UNSTABLE", null,
+               $sformatf("burst rsp changed under backpressure: id 0x%02h->0x%02h rdata 0x%08h->0x%08h last %0d->%0d",
+                         p_b_rsp_id, b_rsp_id, p_b_rsp_rdata, b_rsp_rdata, p_b_rsp_last, b_rsp_last));
+    end
+    if (p_s_req_valid && !p_s_req_ready && (!s_req_valid || {s_req_we, s_req_addr, s_req_wdata, s_req_id} !== p_s_req_pl))
+      sb.err("TB_REQ_PROTOCOL", null, "scalar request changed before handshake");
+    if (p_v_req_valid && !p_v_req_ready && (!v_req_valid || {v_req_we, v_req_addr, v_req_wdata, v_req_id} !== p_v_req_pl))
+      sb.err("TB_REQ_PROTOCOL", null, "vector request changed before handshake");
+    if (p_b_req_valid && !p_b_req_ready && (!b_req_valid || {b_req_we, b_req_addr, b_req_len, b_req_id} !== p_b_req_pl))
+      sb.err("TB_REQ_PROTOCOL", null, "burst command changed before handshake");
+    if (p_b_wvalid && !p_b_wready && (!b_wvalid || {b_wlast, b_wdata} !== p_b_w_pl))
+      sb.err("TB_REQ_PROTOCOL", null, "burst write data changed before handshake");
+  endfunction
+
+  function automatic void mon_handshakes();
+    if (s_req_valid && s_req_ready)
+      sb.on_accept(u32_t'(ACC_SCALAR), u32_t'(s_req_id), s_req_we, u32_t'(s_req_addr), 1, {96'h0, s_req_wdata});
+    if (v_req_valid && v_req_ready)
+      sb.on_accept(u32_t'(ACC_VECTOR), u32_t'(v_req_id), v_req_we, u32_t'(v_req_addr), 1, v_req_wdata);
+    if (b_req_valid && b_req_ready)
+      sb.on_accept(u32_t'(ACC_BURST), u32_t'(b_req_id), b_req_we, u32_t'(b_req_addr), u32_t'(b_req_len) + 1, '0);
+    if (b_wvalid && b_wready)
+      sb.on_wdata(b_wdata, b_wlast);
+  endfunction
+
+  function automatic void mon_commit();
+    bit stalled;
+    stalled = (stall_run > u32_t'(MC_STALL_HALT_LAT));
+    if (trc_valid)
+      sb.on_commit(u32_t'(trc_src), u32_t'(trc_id), trc_we, u32_t'(trc_addr), u32_t'(trc_beat), stalled);
+  endfunction
+
+  function automatic void mon_responses();
+    if (s_rsp_valid && s_rsp_ready)
+      sb.on_response(u32_t'(ACC_SCALAR), u32_t'(s_rsp_id), {96'h0, s_rsp_rdata}, s_rsp_status, 1'b1);
+    if (v_rsp_valid && v_rsp_ready)
+      sb.on_response(u32_t'(ACC_VECTOR), u32_t'(v_rsp_id), v_rsp_rdata, v_rsp_status, 1'b1);
+    if (b_rsp_valid && b_rsp_ready)
+      sb.on_response(u32_t'(ACC_BURST), u32_t'(b_rsp_id), {96'h0, b_rsp_rdata}, b_rsp_status, b_rsp_last);
+  endfunction
+
+  function automatic void mon_cycle_coverage();
+    if (s_req_valid && !s_req_ready) cov.hit("bp.req_stall.s");
+    if (v_req_valid && !v_req_ready) cov.hit("bp.req_stall.v");
+    if (b_req_valid && !b_req_ready) cov.hit("bp.req_stall.b");
+    if (b_wvalid && !b_wready)       cov.hit("bp.wdata_stall");
+    if (s_rsp_valid && !s_rsp_ready) cov.hit("bp.rsp_stall.s");
+    if (v_rsp_valid && !v_rsp_ready) cov.hit("bp.rsp_stall.v");
+    if (b_rsp_valid && !b_rsp_ready) begin
+      cov.hit("bp.rsp_stall.b");
+      sb.note_rsp_stall(u32_t'(ACC_BURST), u32_t'(b_rsp_id));
+    end
+    hold_cnt[0] = (s_rsp_valid && !s_rsp_ready) ? hold_cnt[0] + 1 : 0;
+    hold_cnt[1] = (v_rsp_valid && !v_rsp_ready) ? hold_cnt[1] + 1 : 0;
+    hold_cnt[2] = (b_rsp_valid && !b_rsp_ready) ? hold_cnt[2] + 1 : 0;
+    if (hold_cnt[0] == 16 || hold_cnt[1] == 16 || hold_cnt[2] == 16) cov.hit("bp.rsp_hold16");
+    if (mem_stall && sb.rob.num() != 0) cov.hit("bp.mem_stall_pending");
+    if (mem_stall && (!s_req_ready || !v_req_ready || !b_req_ready)) cov.hit("bp.mem_stall_req_full");
+    if (s_req_valid && v_req_valid && b_req_valid) cov.hit("arb.all_req_valid");
+  endfunction
+
+  function automatic void mon_capture();
+    p_s_rsp_valid  = s_rsp_valid;  p_s_rsp_ready = s_rsp_ready;  p_s_rsp_id = s_rsp_id;
+    p_s_rsp_rdata  = s_rsp_rdata;  p_s_rsp_status = s_rsp_status;
+    p_v_rsp_valid  = v_rsp_valid;  p_v_rsp_ready = v_rsp_ready;  p_v_rsp_id = v_rsp_id;
+    p_v_rsp_rdata  = v_rsp_rdata;  p_v_rsp_status = v_rsp_status;
+    p_b_rsp_valid  = b_rsp_valid;  p_b_rsp_ready = b_rsp_ready;  p_b_rsp_id = b_rsp_id;
+    p_b_rsp_rdata  = b_rsp_rdata;  p_b_rsp_status = b_rsp_status; p_b_rsp_last = b_rsp_last;
+    p_s_req_valid  = s_req_valid;  p_s_req_ready = s_req_ready;
+    p_v_req_valid  = v_req_valid;  p_v_req_ready = v_req_ready;
+    p_b_req_valid  = b_req_valid;  p_b_req_ready = b_req_ready;
+    p_b_wvalid     = b_wvalid;     p_b_wready    = b_wready;
+    p_s_req_pl     = {s_req_we, s_req_addr, s_req_wdata, s_req_id};
+    p_v_req_pl     = {v_req_we, v_req_addr, v_req_wdata, v_req_id};
+    p_b_req_pl     = {b_req_we, b_req_addr, b_req_len, b_req_id};
+    p_b_w_pl       = {b_wlast, b_wdata};
+  endfunction
+
+  task automatic mon_thread();
+    forever begin
+      @(posedge clk);
+      sb.cyc    = cyc;
+      stall_run = mem_stall ? stall_run + 1 : 0;
+      if (!rst_n) begin
+        mon_reset_checks();
+        p_s_rsp_valid = 1'b0; p_v_rsp_valid = 1'b0; p_b_rsp_valid = 1'b0;
+        p_s_req_valid = 1'b0; p_v_req_valid = 1'b0; p_b_req_valid = 1'b0; p_b_wvalid = 1'b0;
+      end else begin
+        mon_x_checks();
+        mon_protocol_checks();
+        mon_handshakes();
+        mon_commit();
+        mon_responses();
+        mon_cycle_coverage();
+        mon_capture();
+        if ((cyc & 64'd255) == 0) sb.scan_timeouts();
+        if (sb.no_progress(longint'(MC_DEADLOCK_CYCLES))) begin
+          if (!deadlock_flagged) begin
+            sb.err("DEADLOCK", null, $sformatf("no commit or response for %0d cycles with %0d transactions outstanding",
+                                               MC_DEADLOCK_CYCLES, sb.rob.num()));
+            sb.dump_inflight("deadlock");
+          end
+          deadlock_flagged = 1'b1;
+        end else begin
+          deadlock_flagged = 1'b0;
+        end
+      end
+    end
+  endtask
+
+  //--------------------------------------------------------------------------
+  // Sequence utilities
+  //--------------------------------------------------------------------------
+  function automatic mc_txn mk(acc_e acc, bit we, u32_t addr, u32_t beats, string tag);
+    mc_txn t;
+    t = sb.create(acc, we, addr, beats, tag);
+    foreach (t.wdata[i]) t.wdata[i] = rng_stim.next32();
+    return t;
+  endfunction
+
+  task automatic send(mc_txn t);
+    case (t.acc)
+      ACC_SCALAR: s_mbx.put(t);
+      ACC_VECTOR: v_mbx.put(t);
+      default:    b_mbx.put(t);
+    endcase
+  endtask
+
+  function automatic bit env_idle();
+    return (s_mbx.num() == 0) && (v_mbx.num() == 0) && (b_mbx.num() == 0) && (bw_mbx.num() == 0) &&
+           !s_busy && !v_busy && !b_busy && !bw_busy && (sb.rob.num() == 0);
+  endfunction
+
+  task automatic abort_run(string why);
+    sb.dump_inflight(why);
+    report();
+    $fatal(1, "[MC-TB] ABORT: %s", why);
+  endtask
+
+  task automatic wait_drain(string ctx);
+    longint t0;
+    t0 = cyc;
+    while (!env_idle()) begin
+      @(posedge clk);
+      if ((cyc - t0) > longint'(MC_DRAIN_LIMIT) || sb.no_progress(2 * longint'(MC_DEADLOCK_CYCLES))) begin
+        sb.err("DRAIN_TIMEOUT", null, $sformatf("%s: environment failed to drain within %0d cycles", ctx, MC_DRAIN_LIMIT));
+        abort_run(ctx);
+      end
+    end
+    @(posedge clk);
+  endtask
+
+  task automatic wait_outstanding_below(u32_t n);
+    while (u32_t'(sb.rob.num()) + u32_t'(s_mbx.num()) + u32_t'(v_mbx.num()) + u32_t'(b_mbx.num()) >= n)
+      @(posedge clk);
+  endtask
+
+  task automatic wait_cycles(u32_t n);
+    for (u32_t i = 0; i < n; i++) @(posedge clk);
+  endtask
+
+  function automatic bit [31:0] init_word(u32_t a, bit [31:0] salt);
+    bit [31:0] x;
+    x = (a * 32'h9E37_79B1) ^ salt;
+    x = x ^ (x >> 15) ^ {a[15:0], ~a[15:0]};
+    return x;
+  endfunction
+
+  function automatic void rand_wgaps(mc_txn t, u32_t pct, u32_t max_gap);
+    foreach (t.wgap[i]) t.wgap[i] = rng_stim.chance(pct) ? rng_stim.range(1, max_gap) : 0;
+  endfunction
+
+  function automatic u32_t legal_burst_base(u32_t a, u32_t n);
+    return (a + n > MC_WORDS) ? (MC_WORDS - n) : a;
+  endfunction
+
+  function automatic mc_txn rand_scalar(string tag);
+    bit   we;
+    u32_t a;
+    we = rng_stim.chance(50);
+    a  = rng_stim.range(0, MC_WORDS - 1);
+    return mk(ACC_SCALAR, we, a, 1, tag);
+  endfunction
+
+  function automatic mc_txn rand_vector_aligned(string tag);
+    bit   we;
+    u32_t a;
+    we = rng_stim.chance(50);
+    a  = rng_stim.range(0, MC_WORDS / MC_LANES - 1) * MC_LANES;
+    return mk(ACC_VECTOR, we, a, 1, tag);
+  endfunction
+
+  function automatic mc_txn rand_burst_legal(string tag);
+    bit   we;
+    u32_t a;
+    u32_t n;
+    we = rng_stim.chance(50);
+    n  = rng_stim.range(1, MC_MAX_BEATS);
+    a  = legal_burst_base(rng_stim.range(0, MC_WORDS - 1), n);
+    return mk(ACC_BURST, we, a, n, tag);
+  endfunction
+
+  function automatic mc_txn rand_txn(string tag, u32_t p_s, u32_t p_v, u32_t p_mis, u32_t p_rng,
+                                     u32_t hot_base, u32_t hot_pct, u32_t max_idle);
+    mc_txn t;
+    u32_t  sel;
+    u32_t  a;
+    u32_t  n;
+    bit    we;
+    sel = rng_stim.range(0, 99);
+    we  = rng_stim.chance(50);
+    a   = rng_stim.chance(hot_pct) ? ((hot_base + rng_stim.range(0, 63)) % MC_WORDS) : rng_stim.range(0, MC_WORDS - 1);
+    if (sel < p_s) begin
+      t = mk(ACC_SCALAR, we, a, 1, tag);
+    end else if (sel < p_s + p_v) begin
+      if (rng_stim.chance(p_mis)) a = (a & ~u32_t'(3)) | rng_stim.range(1, 3);
+      else                        a = a & ~u32_t'(3);
+      t = mk(ACC_VECTOR, we, a, 1, tag);
+    end else begin
+      if (rng_stim.chance(p_rng)) begin
+        n = rng_stim.range(2, MC_MAX_BEATS);
+        a = MC_WORDS - rng_stim.range(1, n - 1);
+      end else begin
+        n = rng_stim.range(1, MC_MAX_BEATS);
+        a = legal_burst_base(a, n);
+      end
+      t = mk(ACC_BURST, we, a, n, tag);
+      if (we) rand_wgaps(t, 15, 3);
+    end
+    t.idle_before = (max_idle == 0) ? 0 : (rng_stim.chance(60) ? 0 : rng_stim.range(1, max_idle));
+    return t;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // Reset and initialisation
+  //--------------------------------------------------------------------------
+  task automatic do_reset(u32_t cycles);
+    @(negedge clk);
+    in_reset    = 1'b1;
+    rst_seen    = 1'b0;
+    rst_n       = 1'b0;
+    mem_stall   = 1'b0;
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    for (u32_t i = 0; i < cycles; i++) @(negedge clk);
+    sb.flush();
+    mdl.invalidate();
+    rst_n = 1'b1;
+    @(negedge clk);
+    in_reset = 1'b0;
+    @(posedge clk);
+  endtask
+
+  task automatic init_memory(bit [31:0] salt);
+    mc_txn t;
+    for (u32_t row = 0; row < MC_WORDS; row += MC_LANES) begin
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "init");
+      for (int l = 0; l < MC_LANES; l++) t.wdata[l] = init_word(row + u32_t'(l), salt);
+      send(t);
+    end
+    wait_drain("init_memory");
+    if (mdl.known_words() != MC_WORDS)
+      sb.err("INIT_INCOMPLETE", null, $sformatf("golden model initialised %0d/%0d words", mdl.known_words(), MC_WORDS));
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T00: reset state, frontdoor initialisation, scalar view of init image
+  //--------------------------------------------------------------------------
+  task automatic t00_reset_init();
+    mc_txn t;
+    sb.test_begin("T00_reset_init");
+    do_reset(16);
+    init_memory(32'hC0DE_0000);
+    for (u32_t a = 0; a < MC_WORDS; a++) begin
+      t = mk(ACC_SCALAR, 1'b0, a, 1, "init_sweep");
+      t.expect_word(0, init_word(a, 32'hC0DE_0000));
+      send(t);
+    end
+    wait_drain("T00");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T01: scalar access
+  //--------------------------------------------------------------------------
+  task automatic t01_scalar();
+    mc_txn     t;
+    u32_t      a;
+    bit [31:0] d;
+    bit [31:0] shadow[u32_t];
+    u32_t      addrs[$];
+    bit [31:0] pats[$];
+    sb.test_begin("T01_scalar");
+
+    for (int i = 0; i < 96; i++) begin
+      a = rng_stim.range(0, MC_WORDS - 1);
+      t = mk(ACC_SCALAR, 1'b1, a, 1, "s_wr_rd");
+      d = t.wdata[0];
+      send(t);
+      t = mk(ACC_SCALAR, 1'b0, a, 1, "s_wr_rd");
+      t.expect_word(0, d);
+      send(t);
+    end
+    wait_drain("T01.wr_rd");
+
+    addrs.push_back(0);
+    addrs.push_back(MC_WORDS - 1);
+    for (int k = 0; k < MC_ADDR_W; k++) begin
+      addrs.push_back(u32_t'(1) << k);
+      addrs.push_back((MC_WORDS - 1) ^ (u32_t'(1) << k));
+    end
+    foreach (addrs[i]) begin
+      t = mk(ACC_SCALAR, 1'b1, addrs[i], 1, "s_addr_walk");
+      t.wdata[0] = {4'hA, 4'(i), 12'(addrs[i]), ~12'(addrs[i])};
+      shadow[addrs[i]] = t.wdata[0];
+      send(t);
+    end
+    foreach (addrs[i]) begin
+      t = mk(ACC_SCALAR, 1'b0, addrs[i], 1, "s_addr_walk");
+      t.expect_word(0, shadow[addrs[i]]);
+      send(t);
+    end
+    wait_drain("T01.addr_walk");
+
+    pats.push_back(32'h0000_0000);
+    pats.push_back(32'hFFFF_FFFF);
+    pats.push_back(32'hAAAA_AAAA);
+    pats.push_back(32'h5555_5555);
+    pats.push_back(32'h0F0F_0F0F);
+    pats.push_back(32'hF0F0_F0F0);
+    for (int k = 0; k < 32; k++) begin
+      pats.push_back(32'h1 << k);
+      pats.push_back(~(32'h1 << k));
+    end
+    a = rng_stim.range(0, MC_WORDS - 1);
+    foreach (pats[i]) begin
+      t = mk(ACC_SCALAR, 1'b1, a, 1, "s_data_pat");
+      t.wdata[0] = pats[i];
+      send(t);
+      t = mk(ACC_SCALAR, 1'b0, a, 1, "s_data_pat");
+      t.expect_word(0, pats[i]);
+      send(t);
+      a = (a + 37) % MC_WORDS;
+    end
+    wait_drain("T01.data_patterns");
+
+    for (int r = 0; r < 8; r++) begin
+      a = rng_stim.range(0, MC_WORDS - 1);
+      for (int k = 0; k < 16; k++) begin
+        t = mk(ACC_SCALAR, 1'b1, a, 1, "s_overwrite");
+        d = t.wdata[0];
+        send(t);
+      end
+      t = mk(ACC_SCALAR, 1'b0, a, 1, "s_overwrite");
+      t.expect_word(0, d);
+      send(t);
+      for (int k = 0; k < 8; k++) begin
+        t = mk(ACC_SCALAR, 1'b1, a, 1, "s_raw_war");
+        d = t.wdata[0];
+        send(t);
+        t = mk(ACC_SCALAR, 1'b0, a, 1, "s_raw_war");
+        t.expect_word(0, d);
+        send(t);
+      end
+    end
+    wait_drain("T01.overwrite");
+
+    shadow.delete();
+    for (u32_t aa = 0; aa < MC_WORDS; aa++) begin
+      t = mk(ACC_SCALAR, 1'b1, aa, 1, "s_sweep");
+      shadow[aa] = t.wdata[0];
+      send(t);
+    end
+    for (u32_t aa = 0; aa < MC_WORDS; aa++) begin
+      t = mk(ACC_SCALAR, 1'b0, MC_WORDS - 1 - aa, 1, "s_sweep");
+      t.expect_word(0, shadow[MC_WORDS - 1 - aa]);
+      send(t);
+    end
+    wait_drain("T01.sweep");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T02: vector access and scalar/vector view consistency
+  //--------------------------------------------------------------------------
+  task automatic t02_vector();
+    mc_txn      t;
+    u32_t       row;
+    u32_t       rows[$];
+    bit [127:0] v;
+    bit [127:0] vv[$];
+    bit [31:0]  d;
+    bit         used[u32_t];
+    sb.test_begin("T02_vector");
+
+    for (int i = 0; i < 64; i++) begin
+      row = rng_stim.range(0, MC_WORDS / MC_LANES - 1) * MC_LANES;
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "v_wr_rd");
+      v = t.wvec();
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "v_wr_rd");
+      t.expect_vec(v);
+      send(t);
+    end
+    wait_drain("T02.wr_rd");
+
+    for (int i = 0; i < 32; i++) begin
+      do row = rng_stim.range(0, MC_WORDS / MC_LANES - 1) * MC_LANES; while (used.exists(row) != 0);
+      used[row] = 1'b1;
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "v_to_s");
+      rows.push_back(row);
+      vv.push_back(t.wvec());
+      send(t);
+    end
+    wait_drain("T02.v_to_s.wr");
+    foreach (rows[i]) begin
+      for (int l = 0; l < MC_LANES; l++) begin
+        t = mk(ACC_SCALAR, 1'b0, rows[i] + u32_t'(l), 1, "v_to_s");
+        t.expect_word(0, vv[i][l*32 +: 32]);
+        send(t);
+      end
+    end
+    wait_drain("T02.v_to_s.rd");
+
+    rows.delete();
+    vv.delete();
+    used.delete();
+    for (int i = 0; i < 32; i++) begin
+      do row = rng_stim.range(0, MC_WORDS / MC_LANES - 1) * MC_LANES; while (used.exists(row) != 0);
+      used[row] = 1'b1;
+      rows.push_back(row);
+      v = '0;
+      for (int l = 0; l < MC_LANES; l++) begin
+        t = mk(ACC_SCALAR, 1'b1, row + u32_t'(l), 1, "s_to_v");
+        v[l*32 +: 32] = t.wdata[0];
+        send(t);
+      end
+      vv.push_back(v);
+    end
+    wait_drain("T02.s_to_v.wr");
+    foreach (rows[i]) begin
+      t = mk(ACC_VECTOR, 1'b0, rows[i], 1, "s_to_v");
+      t.expect_vec(vv[i]);
+      send(t);
+    end
+    wait_drain("T02.s_to_v.rd");
+
+    for (int l = 0; l < MC_LANES; l++) begin
+      for (int i = 0; i < 8; i++) begin
+        row = rng_stim.range(1, MC_WORDS / MC_LANES - 2) * MC_LANES;
+        t = mk(ACC_VECTOR, 1'b1, row, 1, "v_lane_iso");
+        v = t.wvec();
+        send(t);
+        wait_drain("T02.lane_iso.v");
+        t = mk(ACC_SCALAR, 1'b1, row + u32_t'(l), 1, "v_lane_iso");
+        d = t.wdata[0];
+        v[l*32 +: 32] = d;
+        send(t);
+        wait_drain("T02.lane_iso.s");
+        t = mk(ACC_VECTOR, 1'b0, row, 1, "v_lane_iso");
+        t.expect_vec(v);
+        send(t);
+        t = mk(ACC_VECTOR, 1'b0, row - MC_LANES, 1, "v_lane_iso_nbr");
+        send(t);
+        t = mk(ACC_VECTOR, 1'b0, row + MC_LANES, 1, "v_lane_iso_nbr");
+        send(t);
+        wait_drain("T02.lane_iso.rd");
+      end
+    end
+
+    row = 0;
+    repeat (2) begin
+      for (int k = 0; k < 4; k++) begin
+        t = mk(ACC_VECTOR, 1'b1, row, 1, "v_bound_row");
+        v = t.wvec();
+        send(t);
+        t = mk(ACC_VECTOR, 1'b0, row, 1, "v_bound_row");
+        t.expect_vec(v);
+        send(t);
+      end
+      row = MC_WORDS - MC_LANES;
+    end
+    wait_drain("T02.boundary_rows");
+
+    row = rng_stim.range(0, MC_WORDS / MC_LANES - 1) * MC_LANES;
+    for (int k = 0; k < 128; k++) begin
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "v_walk1");
+      v = 128'h1 << k;
+      for (int l = 0; l < MC_LANES; l++) t.wdata[l] = v[l*32 +: 32];
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "v_walk1");
+      t.expect_vec(v);
+      send(t);
+    end
+    for (int l = 0; l < MC_LANES; l++) begin
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "v_lane_unique");
+      for (int m = 0; m < MC_LANES; m++) t.wdata[m] = (m == l) ? 32'hFFFF_FFFF : 32'h0000_0000;
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "v_lane_unique");
+      send(t);
+    end
+    wait_drain("T02.walk");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T03: burst sequencing and integrity
+  //--------------------------------------------------------------------------
+  task automatic t03_burst();
+    mc_txn     t;
+    mc_txn     w;
+    u32_t      a;
+    u32_t      n;
+    u32_t      lens[$];
+    sb.test_begin("T03_burst");
+
+    for (u32_t len = 1; len <= MC_MAX_BEATS; len++) begin
+      for (int rep = 0; rep < 2; rep++) begin
+        a = legal_burst_base(rng_stim.range(0, MC_WORDS - 1), len);
+        if (rep == 1 && (a % MC_LANES) == 0 && a + len < MC_WORDS) a = a + 1;
+        w = mk(ACC_BURST, 1'b1, a, len, "b_len_sweep");
+        send(w);
+        t = mk(ACC_BURST, 1'b0, a, len, "b_len_sweep");
+        for (u32_t b = 0; b < len; b++) t.expect_word(b, w.wdata[b]);
+        send(t);
+        wait_drain("T03.len_sweep.burst");
+        for (u32_t b = 0; b < len; b++) begin
+          t = mk(ACC_SCALAR, 1'b0, a + b, 1, "b_len_sweep_xview");
+          t.expect_word(0, w.wdata[b]);
+          send(t);
+        end
+        for (u32_t r = (a & ~u32_t'(3)); r <= ((a + len - 1) & ~u32_t'(3)); r += MC_LANES) begin
+          t = mk(ACC_VECTOR, 1'b0, r, 1, "b_len_sweep_xview");
+          send(t);
+        end
+        wait_drain("T03.len_sweep.xview");
+      end
+    end
+
+    lens.push_back(1);
+    lens.push_back(4);
+    lens.push_back(7);
+    lens.push_back(MC_MAX_BEATS);
+    foreach (lens[i]) begin
+      a = MC_WORDS - lens[i];
+      w = mk(ACC_BURST, 1'b1, a, lens[i], "b_top_edge");
+      send(w);
+      t = mk(ACC_BURST, 1'b0, a, lens[i], "b_top_edge");
+      for (u32_t b = 0; b < lens[i]; b++) t.expect_word(b, w.wdata[b]);
+      send(t);
+    end
+    wait_drain("T03.top_edge");
+
+    for (int i = 0; i < 16; i++) begin
+      n = rng_stim.range(4, MC_MAX_BEATS);
+      a = legal_burst_base(rng_stim.range(0, MC_WORDS - 1), n);
+      w = mk(ACC_BURST, 1'b1, a, n, "b_partial");
+      rand_wgaps(w, 40, 6);
+      w.wgap[n / 2] = 40;
+      send(w);
+      wait_cycles(12 + 2 * (n / 2));
+      for (u32_t b = 0; b < n; b++) begin
+        t = mk(ACC_SCALAR, 1'b0, a + b, 1, "b_partial_probe");
+        send(t);
+      end
+      t = mk(ACC_VECTOR, 1'b0, (a + n / 2) & ~u32_t'(3), 1, "b_partial_probe");
+      send(t);
+      wait_drain("T03.partial");
+      t = mk(ACC_BURST, 1'b0, a, n, "b_partial_check");
+      for (u32_t b = 0; b < n; b++) t.expect_word(b, w.wdata[b]);
+      send(t);
+      wait_drain("T03.partial.check");
+    end
+
+    rsp_mode[ACC_BURST] = BP_RANDOM;
+    rsp_pct[ACC_BURST]  = 40;
+    for (int i = 0; i < 48; i++) begin
+      n = rng_stim.range(2, MC_MAX_BEATS);
+      a = legal_burst_base(rng_stim.range(0, MC_WORDS - 1), n);
+      t = mk(ACC_BURST, 1'b0, a, n, "b_rd_backpressure");
+      send(t);
+    end
+    wait_drain("T03.rd_backpressure");
+    rsp_mode[ACC_BURST] = BP_ALWAYS;
+
+    a = rng_stim.range(0, MC_WORDS / 2);
+    for (int i = 0; i < 128; i++) begin
+      n = rng_stim.range(1, MC_MAX_BEATS);
+      t = mk(ACC_BURST, (i % 2) == 0, (a + rng_stim.range(0, 200)) % (MC_WORDS - MC_MAX_BEATS), n, "b_b2b_stress");
+      send(t);
+    end
+    wait_drain("T03.b2b_stress");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T04: misaligned vector and out-of-range burst handling
+  //--------------------------------------------------------------------------
+  task automatic t04_misaligned();
+    mc_txn t;
+    u32_t  a;
+    u32_t  row;
+    u32_t  n;
+    u32_t  k;
+    sb.test_begin("T04_misaligned_range");
+
+    for (u32_t off = 1; off < MC_LANES; off++) begin
+      for (int w = 0; w < 2; w++) begin
+        for (int i = 0; i < 12; i++) begin
+          row = (i == 0) ? (MC_WORDS - MC_LANES) : rng_stim.range(0, MC_WORDS / MC_LANES - 2) * MC_LANES;
+          a   = row + off;
+          t   = mk(ACC_VECTOR, w != 0, a, 1, "mis_vec");
+          send(t);
+          wait_drain("T04.mis.issue");
+          t = mk(ACC_VECTOR, 1'b0, row, 1, "mis_vec_probe");
+          send(t);
+          if (row + MC_LANES < MC_WORDS) begin
+            t = mk(ACC_VECTOR, 1'b0, row + MC_LANES, 1, "mis_vec_probe");
+            send(t);
+          end
+          for (u32_t j = 0; j < 2 * MC_LANES && row + j < MC_WORDS; j++) begin
+            t = mk(ACC_SCALAR, 1'b0, row + j, 1, "mis_vec_probe");
+            send(t);
+          end
+          wait_drain("T04.mis.probe");
+        end
+      end
+    end
+
+    for (int i = 0; i < 16; i++) begin
+      row = rng_stim.range(0, MC_WORDS / MC_LANES - 2) * MC_LANES;
+      a   = row + rng_stim.range(1, 3);
+      for (int r = 0; r < 4; r++) begin
+        t = mk(ACC_VECTOR, 1'b0, a, 1, "mis_repeat");
+        send(t);
+      end
+      t = mk(ACC_VECTOR, 1'b1, a, 1, "mis_interleave");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "mis_interleave_legal");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b1, a, 1, "mis_interleave");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "mis_interleave_legal");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, a, 1, "mis_interleave");
+      send(t);
+    end
+    wait_drain("T04.mis.repeat");
+
+    for (int w = 0; w < 2; w++) begin
+      for (int i = 0; i < 24; i++) begin
+        n = (i < 4) ? MC_MAX_BEATS : rng_stim.range(2, MC_MAX_BEATS);
+        k = (i % 2 == 0) ? 1 : rng_stim.range(1, n - 1);
+        a = MC_WORDS - k;
+        t = mk(ACC_BURST, w != 0, a, n, "range_burst");
+        if (w != 0) rand_wgaps(t, 30, 4);
+        send(t);
+      end
+      wait_drain("T04.range");
+      for (u32_t j = MC_WORDS - MC_MAX_BEATS; j < MC_WORDS; j++) begin
+        t = mk(ACC_SCALAR, 1'b0, j, 1, "range_probe");
+        send(t);
+      end
+      t = mk(ACC_BURST, 1'b0, 0, MC_MAX_BEATS, "range_probe_wrap");
+      send(t);
+      wait_drain("T04.range.probe");
+    end
+
+    for (int i = 0; i < 400; i++) begin
+      t = rand_txn("illegal_storm", 30, 40, 70, 60, 0, 0, 2);
+      send(t);
+    end
+    wait_drain("T04.storm");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T05: arbitration under contention
+  //--------------------------------------------------------------------------
+  task automatic t05_contention();
+    mc_txn t;
+    u32_t  a;
+    u32_t  row;
+    sb.test_begin("T05_arbitration");
+
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    sb.open_strict();
+    for (int i = 0; i < 400; i++) begin
+      t = rand_scalar("arb_sat");
+      send(t);
+      t = rand_vector_aligned("arb_sat");
+      send(t);
+      if (i % 3 == 0) begin
+        t = rand_burst_legal("arb_sat");
+        send(t);
+      end
+    end
+    wait_drain("T05.saturation");
+    sb.close_strict("T05.saturation");
+
+    for (int r = 0; r < 48; r++) begin
+      row = rng_stim.range(1, MC_WORDS / MC_LANES - 3) * MC_LANES;
+      t = mk(ACC_SCALAR, 1'b1, row + rng_stim.range(0, 3), 1, "arb_conflict");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b1, row, 1, "arb_conflict");
+      send(t);
+      t = mk(ACC_BURST, 1'b1, row - 2, 8, "arb_conflict");
+      send(t);
+      t = mk(ACC_SCALAR, 1'b0, row + rng_stim.range(0, 3), 1, "arb_conflict");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "arb_conflict");
+      send(t);
+      t = mk(ACC_BURST, 1'b0, row - 2, 8, "arb_conflict");
+      send(t);
+      t = mk(ACC_SCALAR, 1'b1, row + rng_stim.range(0, 3), 1, "arb_conflict");
+      send(t);
+      t = mk(ACC_VECTOR, 1'b0, row + MC_LANES, 1, "arb_conflict");
+      send(t);
+    end
+    wait_drain("T05.conflict");
+
+    a = rng_stim.range(0, MC_WORDS - 64) & ~u32_t'(3);
+    for (int i = 0; i < 900; i++) begin
+      t = rand_txn("arb_hot", 40, 35, 0, 0, a, 90, 0);
+      send(t);
+    end
+    wait_drain("T05.hotspot");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T06: deterministic replay of a contended, back-pressured scenario
+  //--------------------------------------------------------------------------
+  task automatic t06_determinism();
+    mc_txn     t;
+    bit [63:0] sig[2];
+    u32_t      cnt[2];
+    bit [63:0] rs;
+    sb.test_begin("T06_determinism");
+    rs = seed ^ 64'hD37E_4A11_5EED_0006;
+    for (int run = 0; run < 2; run++) begin
+      do_reset(8);
+      init_memory(32'h0DE7_0006);
+      reseed_all(rs);
+      set_rsp_mode(BP_RANDOM, 70);
+      set_stall_mode(BP_RANDOM, 15);
+      sb.sig_open();
+      for (int i = 0; i < 700; i++) begin
+        t = rand_txn("replay", 40, 35, 5, 5, 128, 50, 1);
+        send(t);
+      end
+      wait_drain("T06.replay");
+      sig[run] = sb.sig_close(cnt[run]);
+      set_rsp_mode(BP_ALWAYS, 100);
+      set_stall_mode(BP_ALWAYS, 0);
+      $display("[MC-ARB] replay run %0d: commits=%0d signature=0x%016h", run, cnt[run], sig[run]);
+    end
+    if (sig[0] != sig[1] || cnt[0] != cnt[1])
+      sb.err("NONDETERMINISTIC_ARBITRATION", null,
+             $sformatf("identical stimulus produced different commit traces: run0=0x%016h/%0d run1=0x%016h/%0d",
+                       sig[0], cnt[0], sig[1], cnt[1]));
+    else if (cnt[0] != 0)
+      cov.hit("arb.replay_identical");
+    reseed_all(seed ^ 64'h0000_0000_0000_0606);
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T07: backpressure, downstream stall, queue saturation
+  //--------------------------------------------------------------------------
+  task automatic t07_backpressure();
+    mc_txn  t;
+    u32_t   n0;
+    sb.test_begin("T07_backpressure");
+
+    set_rsp_mode(BP_RANDOM, 30);
+    for (int i = 0; i < 700; i++) begin
+      t = rand_txn("bp_rsp_random", 40, 35, 0, 0, 512, 40, 0);
+      send(t);
+    end
+    wait_drain("T07.rsp_random");
+
+    set_rsp_mode(BP_HOLD, 0);
+    for (int i = 0; i < 40; i++) begin
+      t = rand_scalar("bp_rsp_hold");
+      send(t);
+      t = rand_vector_aligned("bp_rsp_hold");
+      send(t);
+      t = rand_burst_legal("bp_rsp_hold");
+      send(t);
+    end
+    wait_cycles(300);
+    set_rsp_mode(BP_ALWAYS, 100);
+    wait_drain("T07.rsp_hold");
+
+    set_stall_mode(BP_HOLD, 0);
+    wait_cycles(2);
+    for (int i = 0; i < 40; i++) begin
+      t = rand_scalar("bp_mem_stall");
+      send(t);
+      t = rand_vector_aligned("bp_mem_stall");
+      send(t);
+      t = rand_burst_legal("bp_mem_stall");
+      send(t);
+    end
+    n0 = sb.n_commits;
+    wait_cycles(400);
+    if (sb.n_commits != n0)
+      sb.err("COMMIT_DURING_HOLD_STALL", null, $sformatf("%0d SRAM accesses during a sustained downstream stall",
+                                                         sb.n_commits - n0));
+    set_stall_mode(BP_ALWAYS, 0);
+    wait_drain("T07.mem_stall_hold");
+
+    set_rsp_mode(BP_RANDOM, 50);
+    set_stall_mode(BP_RANDOM, 30);
+    for (int i = 0; i < 900; i++) begin
+      t = rand_txn("bp_mixed_random", 35, 35, 5, 3, 1024, 50, 1);
+      if (t.acc == ACC_BURST && t.we) rand_wgaps(t, 30, 5);
+      send(t);
+    end
+    wait_drain("T07.mixed_random");
+
+    set_rsp_mode(BP_WINDOW, 40);
+    set_stall_mode(BP_WINDOW, 32);
+    for (int i = 0; i < 700; i++) begin
+      t = rand_txn("bp_windows", 35, 35, 5, 3, 2048, 50, 0);
+      send(t);
+    end
+    wait_drain("T07.windows");
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T08: randomized mixed traffic with profile switching
+  //--------------------------------------------------------------------------
+  task automatic t08_random_mixed();
+    mc_txn t;
+    u32_t  hot;
+    sb.test_begin("T08_random_mixed");
+    for (int phase = 0; phase < 8; phase++) begin
+      hot = rng_stim.range(0, MC_WORDS - 64) & ~u32_t'(3);
+      case (phase % 4)
+        0: begin set_rsp_mode(BP_ALWAYS, 100); set_stall_mode(BP_ALWAYS, 0);  end
+        1: begin set_rsp_mode(BP_RANDOM, 60);  set_stall_mode(BP_ALWAYS, 0);  end
+        2: begin set_rsp_mode(BP_ALWAYS, 100); set_stall_mode(BP_RANDOM, 25); end
+        default: begin set_rsp_mode(BP_WINDOW, 30); set_stall_mode(BP_WINDOW, 20); end
+      endcase
+      for (int i = 0; i < 500; i++) begin
+        t = rand_txn($sformatf("mixed_p%0d", phase), 45, 30, 5, 3, hot, 50, 3);
+        send(t);
+        if ((i % 64) == 63) wait_outstanding_below(96);
+      end
+      wait_drain("T08.phase");
+    end
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // T09: full-memory consistency through all three views
+  //--------------------------------------------------------------------------
+  task automatic t09_final_sweep();
+    mc_txn t;
+    sb.test_begin("T09_final_consistency");
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    for (u32_t row = 0; row < MC_WORDS; row += MC_LANES) begin
+      t = mk(ACC_VECTOR, 1'b0, row, 1, "final_vec");
+      send(t);
+    end
+    for (u32_t a = 0; a < MC_WORDS; a += MC_MAX_BEATS) begin
+      t = mk(ACC_BURST, 1'b0, a, MC_MAX_BEATS, "final_burst");
+      send(t);
+    end
+    for (u32_t a = 0; a < MC_WORDS; a++) begin
+      t = mk(ACC_SCALAR, 1'b0, a, 1, "final_scalar");
+      send(t);
+    end
+    wait_drain("T09");
+    sb.final_check("T09");
+    sb.test_end();
+  endtask
+
+  //--------------------------------------------------------------------------
+  // Reporting
+  //--------------------------------------------------------------------------
+  task automatic report();
+    $display("==============================================================================");
+    $display(" MEMORY CONTROLLER VERIFICATION SUMMARY   seed=0x%016h", seed);
+    $display("==============================================================================");
+    foreach (sb.test_log[i]) $display("%s", sb.test_log[i]);
+    $display("------------------------------------------------------------------------------");
+    $display(" accepted=%0d retired=%0d commits=%0d rsp_beats=%0d wdata_beats=%0d checks=%0d",
+             sb.n_accepted, sb.n_retired, sb.n_commits, sb.n_rsp_beats, sb.n_wbeats, sb.checks);
+    $display(" max outstanding=%0d", sb.max_outstanding);
+    for (int s = 0; s < MC_NUM_SRC; s++) begin
+      if (sb.lat_cnt[s] != 0)
+        $display(" latency %-6s n=%-7d min=%-4d avg=%-6.1f max=%0d", acc_name(acc_e'(s)), sb.lat_cnt[s],
+                 sb.lat_min[s], real'(sb.lat_sum[s]) / real'(sb.lat_cnt[s]), sb.lat_max[s]);
+    end
+    cov.report();
+    $display("==============================================================================");
+  endtask
+
+  //--------------------------------------------------------------------------
+  // Main
+  //--------------------------------------------------------------------------
+  initial begin
+    rst_n       = 1'b0;
+    in_reset    = 1'b1;
+    env_up      = 1'b0;
+    rst_seen    = 1'b0;
+    s_req_valid = 1'b0; s_req_we = 1'b0; s_req_addr = '0; s_req_wdata = '0; s_req_id = '0;
+    v_req_valid = 1'b0; v_req_we = 1'b0; v_req_addr = '0; v_req_wdata = '0; v_req_id = '0;
+    b_req_valid = 1'b0; b_req_we = 1'b0; b_req_addr = '0; b_req_len = '0; b_req_id = '0;
+    b_wvalid    = 1'b0; b_wdata = '0; b_wlast = 1'b0;
+    s_rsp_ready = 1'b0; v_rsp_ready = 1'b0; b_rsp_ready = 1'b0;
+    mem_stall   = 1'b0;
+    stall_run   = 0;
+    hold_cnt    = '{default: 0};
+    deadlock_flagged = 1'b0;
+    s_busy = 1'b0; v_busy = 1'b0; b_busy = 1'b0; bw_busy = 1'b0;
+
+    seed = MC_DEFAULT_SEED;
+    if ($value$plusargs("MC_SEED=%h", seed)) $display("[MC-TB] seed override from plusarg");
+    $display("[MC-TB] tb_memory_controller seed=0x%016h words=%0d ids=%0d max_beats=%0d misalign_mode=%0d",
+             seed, MC_WORDS, MC_NUM_IDS, MC_MAX_BEATS, MC_MISALIGN_MODE);
+
+    mdl       = new();
+    cov       = new();
+    sb        = new(mdl, cov);
+    rng_stim  = new(64'h0);
+    rng_junk  = new(64'h0);
+    rng_stall = new(64'h0);
+    for (int p = 0; p < MC_NUM_SRC; p++) rng_bp[p] = new(64'h0);
+    reseed_all(seed);
+    set_rsp_mode(BP_ALWAYS, 100);
+    set_stall_mode(BP_ALWAYS, 0);
+    s_mbx  = new();
+    v_mbx  = new();
+    b_mbx  = new();
+    bw_mbx = new();
+    env_up = 1'b1;
+
+    fork
+      drv_scalar();
+      drv_vector();
+      drv_burst_cmd();
+      drv_burst_wdata();
+      drv_rsp_ready(0, rng_bp[0]);
+      drv_rsp_ready(1, rng_bp[1]);
+      drv_rsp_ready(2, rng_bp[2]);
+      drv_mem_stall();
+      mon_thread();
+    join_none
+
+    t00_reset_init();
+    t01_scalar();
+    t02_vector();
+    t03_burst();
+    t04_misaligned();
+    t05_contention();
+    t06_determinism();
+    t07_backpressure();
+    t08_random_mixed();
+    t09_final_sweep();
+
+    if (MC_ENFORCE_COVERAGE && (cov.holes() != 0 || cov.undefined_hits != 0))
+      sb.err("COVERAGE_HOLE", null, $sformatf("%0d mandatory bins unhit, %0d undefined samples",
+                                              cov.holes(), cov.undefined_hits));
+    report();
+    if (sb.errors == 0) begin
+      $display("[MC-TB] *** TEST PASSED *** checks=%0d transactions=%0d", sb.checks, sb.n_retired);
+      $finish;
+    end else begin
+      $fatal(1, "[MC-TB] *** TEST FAILED *** errors=%0d", sb.errors);
+    end
+  end
+
+  initial begin
+    #(64'd50_000_000 * CLK_HALF);
+    $display("[MC-TB] global simulation timeout");
+    if (env_up) report();
+    $fatal(1, "[MC-TB] *** TEST FAILED *** global timeout");
+  end
+
+endmodule : tb_memory_controller
