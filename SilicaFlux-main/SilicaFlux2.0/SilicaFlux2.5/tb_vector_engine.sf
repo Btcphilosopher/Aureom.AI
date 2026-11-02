@@ -1,0 +1,1374 @@
+//==============================================================================
+//  tb_vector_engine.sf
+//------------------------------------------------------------------------------
+//  Self-checking verification environment for the SilicaFlux SIMD vector unit
+//  vector_engine.sf.  Silica Flux-2017 (IEEE 1800-2017 language semantics).
+//
+//  Environment structure
+//    stimulus   : directed KAT / boundary / lane-isolation / mask / opcode
+//                 transition / random / saturation / reset / determinism
+//    driver     : valid-ready transaction driver, idle-cycle bus scrambling
+//    monitor    : single pin-level sampling point for acceptance + completion
+//                 (race-free for zero-latency through deep pipelines)
+//    reference  : exact behavioural golden model (signed, wide, mask-aware),
+//                 itself validated against closed-form known answers
+//    scoreboard : in-order expected queue, latency alignment, lane-level diff
+//    coverage   : explicit-bin functional coverage with closure enforcement
+//
+//  DUT contract (vector_engine.sf)
+//    parameters : LANES, LANE_W, ACC_W, OP_W, LATENCY, MASK_MODE
+//    clk, rst_n                         active-low reset
+//    in_valid  -> / <- in_ready         accept = in_valid & in_ready
+//    in_op     [OP_W-1:0]               opcode, encodings mirrored by OPC_*
+//    in_a/in_b [LANES*LANE_W-1:0]       lane i occupies [i*LANE_W +: LANE_W]
+//    in_scalar [LANE_W-1:0]             BROADCAST source
+//    in_mask   [LANES-1:0]              lane enable, 1 = active
+//    out_valid                          one strobe per accepted op, issue order
+//    out_vec   [LANES*LANE_W-1:0]       lane result (VADD/VSUB/VMUL/BCAST)
+//    out_scalar[ACC_W-1:0]              reduction result (DOT/REDUCE)
+//
+//  Arithmetic contract (two's-complement signed lanes)
+//    VADD   r[i] = trunc_W( A[i] + B[i] )
+//    VSUB   r[i] = trunc_W( A[i] - B[i] )
+//    VMUL   r[i] = trunc_W( A[i] * B[i] )                 low LANE_W bits
+//    DOT    s    = trunc_ACC( SUM{m[i]} A[i] * B[i] )      exact 2W-bit products
+//    REDUCE s    = trunc_ACC( SUM{m[i]} A[i] )
+//    BCAST  r[i] = SCALAR
+//    m[i]=0 : MASK_MODE 0 -> r[i] = 0 ; MASK_MODE 1 -> r[i] = A[i]
+//    unused result field (out_scalar on lane ops, out_vec on reductions) = 0
+//
+//  Compile-time      : +define+VE_DUT_NO_MASK  for a DUT built without in_mask
+//                    (all lanes active, MASK_MODE not passed)
+//  Run-time plusargs : +SEED=<n> +VERBOSE=<0..3> +NUM_RANDOM=<n> +NUM_STRESS=<n>
+//==============================================================================
+`timescale 1ns/1ps
+`default_nettype none
+
+module tb_vector_engine #(
+  // ---------------------------------------------------------- DUT mirror
+  parameter int                LANES                 = 8,
+  parameter int                LANE_W                = 16,
+  parameter int                ACC_W                 = 2*LANE_W + $clog2(LANES),
+  parameter int                OP_W                  = 3,
+  parameter int                DUT_LATENCY           = 3,
+  parameter int                MASK_MODE             = 0,
+  parameter logic [OP_W-1:0]   OPC_VADD              = OP_W'(0),
+  parameter logic [OP_W-1:0]   OPC_VSUB              = OP_W'(1),
+  parameter logic [OP_W-1:0]   OPC_VMUL              = OP_W'(2),
+  parameter logic [OP_W-1:0]   OPC_DOT               = OP_W'(3),
+  parameter logic [OP_W-1:0]   OPC_REDUCE            = OP_W'(4),
+  parameter logic [OP_W-1:0]   OPC_BCAST             = OP_W'(5),
+  // ---------------------------------------------------------- environment
+  parameter int                EXP_LATENCY           = DUT_LATENCY,  // <0: learn from first completion
+  parameter bit                FIXED_LATENCY         = 1'b1,         // 0: variable latency, bounded only
+  parameter int                MAX_LATENCY           = 64,
+  parameter bit                CHECK_UNUSED          = 1'b1,
+  parameter int                CLK_PERIOD            = 10,
+  parameter int                DRIVE_SKEW            = 1,
+  parameter int                RESET_CYCLES          = 8,
+  parameter int                MIN_RESET_CYCLES      = 2,
+  parameter longint unsigned   DEFAULT_SEED          = 64'h5F1C_A0F1_0E57_2017,
+  parameter int                NUM_RANDOM            = 6000,
+  parameter int                NUM_STRESS            = 3000,
+  parameter int                NUM_DETERM            = 600,
+  parameter int                RANDOM_MASKS          = 192,
+  parameter int                MASK_EXHAUSTIVE_LANES = 8,
+  parameter int                BUBBLE_PCT            = 20,
+  parameter bit                IDLE_SCRAMBLE         = 1'b1,
+  parameter bit                COV_ENFORCE           = 1'b1,
+  parameter int                MAX_ERR_REPORTS       = 16,
+  parameter int                ABORT_ERRORS          = 500,
+  parameter longint unsigned   TIMEOUT_CYCLES        = 64'd4_000_000
+);
+
+  //============================================================================
+  // Derived configuration and types
+  //============================================================================
+`ifdef VE_DUT_NO_MASK
+  localparam bit HAS_MASK    = 1'b0;   // DUT built without a lane-mask port
+`else
+  localparam bit HAS_MASK    = 1'b1;
+`endif
+  localparam int NUM_OPS     = 6;
+  localparam int NUM_CORNERS = 7;
+  localparam int NUM_OCLS    = 5;
+  localparam int NUM_MCLS    = 4;
+  localparam int NUM_GRP     = 12;
+  localparam int PROD_W      = 2 * LANE_W;
+  localparam int GROW_W      = (LANES > 1) ? $clog2(LANES) : 1;
+  localparam int EXACT_W     = PROD_W + GROW_W + 1;
+  localparam int REF_W       = (EXACT_W > ACC_W) ? EXACT_W : ACC_W;
+  localparam int ACC_PAD_W   = ((ACC_W + 63) / 64) * 64;
+  localparam int MAX_GAP     = (EXP_LATENCY > 8) ? 8 : ((EXP_LATENCY > 0) ? EXP_LATENCY : 2);
+  localparam logic [63:0] GOLDEN_GAMMA = 64'h9E37_79B9_7F4A_7C15;
+
+  typedef longint unsigned                     u64_t;
+  typedef logic        [LANES*LANE_W-1:0]      vflat_t;
+  typedef logic        [LANE_W-1:0]            lane_t;
+  typedef logic        [LANES-1:0][LANE_W-1:0] vec_t;
+  typedef logic        [LANES-1:0]             mask_t;
+  typedef logic        [ACC_W-1:0]             acc_t;
+  typedef logic signed [REF_W-1:0]             wide_t;
+
+  localparam lane_t LANE_MAX_POS = {1'b0, {(LANE_W-1){1'b1}}};
+  localparam lane_t LANE_MAX_NEG = {1'b1, {(LANE_W-1){1'b0}}};
+
+  typedef enum logic [2:0] {
+    IX_VADD = 0, IX_VSUB = 1, IX_VMUL = 2, IX_DOT = 3, IX_REDUCE = 4, IX_BCAST = 5, IX_NONE = 6
+  } op_ix_e;
+
+  typedef enum logic [2:0] {
+    OC_MAX_NEG = 0, OC_NEG = 1, OC_ZERO = 2, OC_POS = 3, OC_MAX_POS = 4
+  } opnd_cls_e;
+
+  typedef enum logic [1:0] {
+    MC_NONE = 0, MC_SINGLE = 1, MC_PARTIAL = 2, MC_FULL = 3
+  } mask_cls_e;
+
+  typedef enum logic [3:0] {
+    G_OP = 0, G_TRANS = 1, G_MASK = 2, G_LACT = 3, G_LMSK = 4, G_OPA = 5,
+    G_OPB = 6, G_SCL = 7, G_MULX = 8, G_WRAP = 9, G_RED = 10, G_PIPE = 11
+  } cov_grp_e;
+
+  typedef struct packed {
+    logic [OP_W-1:0] op;
+    vec_t            a;
+    vec_t            b;
+    lane_t           scalar;
+    mask_t           mask;
+  } txn_t;
+
+  typedef struct packed {
+    vec_t vec;
+    acc_t scalar;
+  } result_t;
+
+  typedef struct packed {
+    int              id;
+    longint unsigned issue_cyc;
+    txn_t            txn;
+    result_t         exp;
+  } sb_entry_t;
+
+  //============================================================================
+  // DUT interface signals
+  //============================================================================
+  logic            clk = 1'b0;
+  logic            rst_n;
+  logic            in_valid;
+  logic            in_ready;
+  logic [OP_W-1:0] in_op;
+  vflat_t          in_a;
+  vflat_t          in_b;
+  lane_t           in_scalar;
+  mask_t           in_mask;
+  logic            out_valid;
+  vflat_t          out_vec;
+  acc_t            out_scalar;
+
+  //============================================================================
+  // Environment state
+  //============================================================================
+  longint unsigned cyc = 0;
+  longint unsigned master_seed;
+  logic [63:0]     stim_state;
+  logic [63:0]     junk_state;
+  int              verbosity = 1;
+  int              num_random;
+  int              num_stress;
+  bit              env_armed = 1'b0;
+  bit              abort_req = 1'b0;
+  bit              finished  = 1'b0;
+  string           cur_test  = "init";
+
+  sb_entry_t       exp_q[$];
+  int              n_driven, n_accepted, n_completed, n_flushed, n_lost, n_spurious;
+  int              n_errors, n_model_errors, n_stall_cycles, n_tests;
+  int              t_err0, t_acc0;
+  longint unsigned lat_min = '1, lat_max = 0, lat_sum = 0;
+  int              obs_latency = -1;
+  int              rst_low_cycles = 0;
+  bit              have_prev = 1'b0;
+  op_ix_e          prev_ix   = IX_NONE;
+  longint unsigned prev_accept_cyc = 0;
+  int              max_inflight = 0;
+  logic [63:0]     sig_hash = '0;
+  longint unsigned sig_epoch_cyc = 0;
+
+  // functional coverage bins
+  int          cov_op       [NUM_OPS];
+  int          cov_trans    [NUM_OPS][NUM_OPS];
+  int          cov_mask     [NUM_OPS][NUM_MCLS];
+  int          cov_lane_act [NUM_OPS][LANES];
+  int          cov_lane_msk [NUM_OPS][LANES];
+  int          cov_opnd_a   [NUM_OPS][NUM_OCLS];
+  int          cov_opnd_b   [NUM_OPS][NUM_OCLS];
+  int          cov_scalar   [NUM_OCLS];
+  int          cov_mulx     [2][NUM_OCLS][NUM_OCLS];
+  int          cov_wrap     [3][2];
+  int          cov_red      [2][4];
+  int          cov_reset_inflight = 0;
+  int          grp_bins     [NUM_GRP];
+  int          grp_hits     [NUM_GRP];
+  int          cov_holes_printed = 0;
+
+  //============================================================================
+  // Deterministic PRNG (SplitMix64): simulator-independent stimulus streams.
+  // stim_*: test stimulus, reseeded per test.  junk_*: idle-bus scrambling.
+  //============================================================================
+  function automatic logic [63:0] mix64(input logic [63:0] x);
+    logic [63:0] z;
+    z = x;
+    z = (z ^ (z >> 30)) * 64'hBF58_476D_1CE4_E5B9;
+    z = (z ^ (z >> 27)) * 64'h94D0_49BB_1331_11EB;
+    return z ^ (z >> 31);
+  endfunction
+
+  function automatic logic [63:0] stim_u64();
+    stim_state = stim_state + GOLDEN_GAMMA;
+    return mix64(stim_state);
+  endfunction
+
+  function automatic logic [63:0] junk_u64();
+    junk_state = junk_state + GOLDEN_GAMMA;
+    return mix64(junk_state);
+  endfunction
+
+  function automatic int stim_range(input int n);
+    return int'(stim_u64() % 64'(unsigned'(n)));
+  endfunction
+
+  function automatic bit stim_pct(input int pct);
+    return stim_range(100) < pct;
+  endfunction
+
+  //============================================================================
+  // Opcode mapping and operation properties
+  //============================================================================
+  function automatic logic [OP_W-1:0] op_enc(input op_ix_e ix);
+    case (ix)
+      IX_VADD:   return OPC_VADD;
+      IX_VSUB:   return OPC_VSUB;
+      IX_VMUL:   return OPC_VMUL;
+      IX_DOT:    return OPC_DOT;
+      IX_REDUCE: return OPC_REDUCE;
+      default:   return OPC_BCAST;
+    endcase
+  endfunction
+
+  function automatic op_ix_e op_ix(input logic [OP_W-1:0] enc);
+    if (enc === OPC_VADD)   return IX_VADD;
+    if (enc === OPC_VSUB)   return IX_VSUB;
+    if (enc === OPC_VMUL)   return IX_VMUL;
+    if (enc === OPC_DOT)    return IX_DOT;
+    if (enc === OPC_REDUCE) return IX_REDUCE;
+    if (enc === OPC_BCAST)  return IX_BCAST;
+    return IX_NONE;
+  endfunction
+
+  function automatic string op_name(input op_ix_e ix);
+    case (ix)
+      IX_VADD:   return "VADD";
+      IX_VSUB:   return "VSUB";
+      IX_VMUL:   return "VMUL";
+      IX_DOT:    return "DOT";
+      IX_REDUCE: return "REDUCE";
+      IX_BCAST:  return "BCAST";
+      default:   return "RESERVED";
+    endcase
+  endfunction
+
+  function automatic bit is_red(input op_ix_e ix);
+    return (ix == IX_DOT) || (ix == IX_REDUCE);
+  endfunction
+
+  function automatic bit uses_a(input op_ix_e ix);
+    return (ix != IX_BCAST) && (ix != IX_NONE);
+  endfunction
+
+  function automatic bit uses_b(input op_ix_e ix);
+    return (ix == IX_VADD) || (ix == IX_VSUB) || (ix == IX_VMUL) || (ix == IX_DOT);
+  endfunction
+
+  function automatic mask_t eff_mask(input mask_t m);
+    return HAS_MASK ? m : '1;
+  endfunction
+
+  //============================================================================
+  // Golden reference model (testbench-only, exact arithmetic in REF_W bits)
+  //============================================================================
+  function automatic wide_t sx(input lane_t v);
+    return wide_t'({{(REF_W-LANE_W){v[LANE_W-1]}}, v});
+  endfunction
+
+  function automatic bit fits_signed(input wide_t v, input int w);
+    wide_t lim;
+    lim = wide_t'(1) <<< (w - 1);
+    return (v >= -lim) && (v < lim);
+  endfunction
+
+  // exact (untruncated) per-lane value of an operation
+  function automatic wide_t ref_lane_exact(input op_ix_e ix, input lane_t a, input lane_t b,
+                                           input lane_t s);
+    case (ix)
+      IX_VADD:         return sx(a) + sx(b);
+      IX_VSUB:         return sx(a) - sx(b);
+      IX_VMUL, IX_DOT: return sx(a) * sx(b);
+      IX_REDUCE:       return sx(a);
+      IX_BCAST:        return sx(s);
+      default:         return '0;
+    endcase
+  endfunction
+
+  // exact (untruncated) reduction over active lanes
+  function automatic wide_t ref_exact_acc(input txn_t t);
+    op_ix_e ix;
+    mask_t  m;
+    wide_t  acc;
+    ix  = op_ix(t.op);
+    m   = eff_mask(t.mask);
+    acc = '0;
+    for (int i = 0; i < LANES; i++)
+      if (m[i]) acc = acc + ref_lane_exact(ix, t.a[i], t.b[i], t.scalar);
+    return acc;
+  endfunction
+
+  function automatic lane_t masked_lane(input lane_t a);
+    return (MASK_MODE == 1) ? a : '0;
+  endfunction
+
+  function automatic result_t ref_model(input txn_t t);
+    result_t r;
+    op_ix_e  ix;
+    mask_t   m;
+    ix = op_ix(t.op);
+    m  = eff_mask(t.mask);
+    r  = '0;
+    if (is_red(ix)) begin
+      r.scalar = acc_t'(ref_exact_acc(t));
+    end else begin
+      for (int i = 0; i < LANES; i++)
+        r.vec[i] = m[i] ? lane_t'(ref_lane_exact(ix, t.a[i], t.b[i], t.scalar))
+                        : masked_lane(t.a[i]);
+    end
+    return r;
+  endfunction
+
+  //============================================================================
+  // Operand / mask classification (coverage)
+  //============================================================================
+  function automatic opnd_cls_e opnd_cls(input lane_t v);
+    if (v == LANE_MAX_NEG) return OC_MAX_NEG;
+    if (v == LANE_MAX_POS) return OC_MAX_POS;
+    if (v == '0)           return OC_ZERO;
+    return v[LANE_W-1] ? OC_NEG : OC_POS;
+  endfunction
+
+  function automatic mask_cls_e mask_cls(input mask_t m);
+    int n;
+    n = $countones(m);
+    if (n == 0)     return MC_NONE;
+    if (n == LANES) return MC_FULL;
+    if (n == 1)     return MC_SINGLE;
+    return MC_PARTIAL;
+  endfunction
+
+  function automatic logic [1:0] sign_cls(input wide_t v);
+    if (v < 0)  return 2'd0;
+    if (v == 0) return 2'd1;
+    return 2'd2;
+  endfunction
+
+  //============================================================================
+  // Logging / error accounting
+  //============================================================================
+  function automatic void log_msg(input int lvl, input string msg);
+    if (verbosity >= lvl)
+      $display("[%0t] [cyc %0d] [%s] %s", $time, cyc, cur_test, msg);
+  endfunction
+
+  function automatic void tb_error(input string msg);
+    n_errors++;
+    if (n_errors <= MAX_ERR_REPORTS)
+      $display("[%0t] [cyc %0d] [%s] ERROR: %s", $time, cyc, cur_test, msg);
+    else if (n_errors == MAX_ERR_REPORTS + 1)
+      $display("[%0t] [cyc %0d] [%s] ERROR: report limit (%0d) reached, further errors counted only",
+               $time, cyc, cur_test, MAX_ERR_REPORTS);
+    if (n_errors >= ABORT_ERRORS) abort_req = 1'b1;
+  endfunction
+
+  function automatic string fmt_lane(input lane_t v);
+    return $sformatf("0x%h(%0d)", v, $signed(v));
+  endfunction
+
+  function automatic string fmt_acc(input acc_t v);
+    return $sformatf("0x%h(%0d)", v, $signed(v));
+  endfunction
+
+  // explicit column padding (independent of simulator field-width support)
+  function automatic string pad_r(input string s, input int w);
+    string r;
+    r = s;
+    while (r.len() < w) r = {r, " "};
+    return r;
+  endfunction
+
+  function automatic string pad_l(input string s, input int w);
+    string r;
+    r = s;
+    while (r.len() < w) r = {" ", r};
+    return r;
+  endfunction
+
+  //============================================================================
+  // Functional coverage sampling (accepted transactions)
+  //============================================================================
+  function automatic void cov_sample(input txn_t t, input bit b2b, input op_ix_e pix);
+    op_ix_e ix;
+    mask_t  m;
+    wide_t  full;
+    wide_t  acc;
+    opnd_cls_e  ca, cb, cs;
+    mask_cls_e  cm;
+    logic [1:0] rs;
+    bit         k, dir;
+    ix = op_ix(t.op);
+    m  = eff_mask(t.mask);
+    cm = mask_cls(m);
+    k  = (ix == IX_DOT);
+    cov_op[ix] += 1;
+    if (b2b) cov_trans[pix][ix] += 1;
+    cov_mask[ix][cm] += 1;
+    for (int i = 0; i < LANES; i++) begin
+      if (m[i]) begin
+        ca = opnd_cls(t.a[i]);
+        cb = opnd_cls(t.b[i]);
+        cov_lane_act[ix][i] += 1;
+        if (uses_a(ix)) cov_opnd_a[ix][ca] += 1;
+        if (uses_b(ix)) cov_opnd_b[ix][cb] += 1;
+        if (ix == IX_VMUL || ix == IX_DOT) cov_mulx[k][ca][cb] += 1;
+        if (ix == IX_VADD || ix == IX_VSUB || ix == IX_VMUL) begin
+          full = ref_lane_exact(ix, t.a[i], t.b[i], t.scalar);
+          dir  = (full < 0);
+          if (!fits_signed(full, LANE_W)) cov_wrap[2'(ix)][dir] += 1;
+        end
+      end else begin
+        cov_lane_msk[ix][i] += 1;
+      end
+    end
+    if (ix == IX_BCAST && m != '0) begin
+      cs = opnd_cls(t.scalar);
+      cov_scalar[cs] += 1;
+    end
+    if (is_red(ix)) begin
+      k   = (ix == IX_REDUCE);
+      acc = ref_exact_acc(t);
+      rs  = sign_cls(acc);
+      cov_red[k][rs] += 1;
+      if (!fits_signed(acc, (ix == IX_DOT) ? PROD_W : LANE_W)) cov_red[k][3] += 1;
+    end
+  endfunction
+
+  //============================================================================
+  // Scoreboard
+  //============================================================================
+  function automatic void sb_accept();
+    sb_entry_t e;
+    op_ix_e    ix;
+    bit        b2b;
+    e.txn.op     = in_op;
+    e.txn.a      = vec_t'(in_a);
+    e.txn.b      = vec_t'(in_b);
+    e.txn.scalar = in_scalar;
+    e.txn.mask   = eff_mask(in_mask);
+    ix = op_ix(in_op);
+    if (ix == IX_NONE || $isunknown(e.txn)) begin
+      tb_error($sformatf("accepted transaction with reserved/unknown content op=0x%h", in_op));
+      return;
+    end
+    e.id        = n_accepted;
+    e.issue_cyc = cyc;
+    e.exp       = ref_model(e.txn);
+    b2b         = have_prev && (cyc == prev_accept_cyc + 1);
+    cov_sample(e.txn, b2b, prev_ix);
+    have_prev       = 1'b1;
+    prev_ix         = ix;
+    prev_accept_cyc = cyc;
+    exp_q.push_back(e);
+    n_accepted++;
+    if (verbosity >= 2)
+      log_msg(2, $sformatf("issue  id=%0d op=%s mask=%b", e.id, pad_r(op_name(ix), 6), e.txn.mask));
+  endfunction
+
+  function automatic void latency_check(input int id, input op_ix_e ix, input longint unsigned lat);
+    if (lat < lat_min) lat_min = lat;
+    if (lat > lat_max) lat_max = lat;
+    lat_sum += lat;
+    if (!FIXED_LATENCY) return;
+    if (EXP_LATENCY >= 0) begin
+      if (lat != u64_t'(EXP_LATENCY))
+        tb_error($sformatf("PIPELINE MISALIGNMENT id=%0d op=%s: completed after %0d cycles, expected %0d",
+                           id, op_name(ix), lat, EXP_LATENCY));
+    end else if (obs_latency < 0) begin
+      obs_latency = int'(lat);
+      log_msg(1, $sformatf("learned DUT latency = %0d cycles", obs_latency));
+    end else if (lat != u64_t'(obs_latency)) begin
+      tb_error($sformatf("PIPELINE MISALIGNMENT id=%0d op=%s: completed after %0d cycles, learned %0d",
+                         id, op_name(ix), lat, obs_latency));
+    end
+  endfunction
+
+  function automatic void report_mismatch(input sb_entry_t e, input vec_t act_vec, input acc_t act_sc,
+                                          input bit vec_bad, input bit sc_bad,
+                                          input longint unsigned lat);
+    op_ix_e ix;
+    mask_t  m;
+    string  xz_note;
+    ix = op_ix(e.txn.op);
+    m  = e.txn.mask;
+    if ($isunknown(act_vec) || $isunknown(act_sc)) xz_note = " [X/Z on result]";
+    else                                            xz_note = "";
+    tb_error($sformatf("MISMATCH id=%0d op=%s issue_cyc=%0d latency=%0d mask=%b%s",
+                       e.id, op_name(ix), e.issue_cyc, lat, m, xz_note));
+    if (n_errors > MAX_ERR_REPORTS) return;
+    if (vec_bad) begin
+      for (int i = 0; i < LANES; i++) begin
+        if (act_vec[i] !== e.exp.vec[i])
+          $display("      lane %s : A=%s B=%s S=%s m=%b | exp=%s act=%s xor=0x%h",
+                   pad_l($sformatf("%0d", i), 2), fmt_lane(e.txn.a[i]), fmt_lane(e.txn.b[i]),
+                   fmt_lane(e.txn.scalar), m[i], fmt_lane(e.exp.vec[i]), fmt_lane(act_vec[i]),
+                   e.exp.vec[i] ^ act_vec[i]);
+      end
+    end
+    if (sc_bad) begin
+      $display("      scalar  : exp=%s act=%s xor=0x%h",
+               fmt_acc(e.exp.scalar), fmt_acc(act_sc), e.exp.scalar ^ act_sc);
+      for (int i = 0; i < LANES; i++)
+        $display("      lane %s : A=%s B=%s m=%b", pad_l($sformatf("%0d", i), 2),
+                 fmt_lane(e.txn.a[i]), fmt_lane(e.txn.b[i]), m[i]);
+    end
+  endfunction
+
+  function automatic void sb_check(input vec_t act_vec, input acc_t act_sc);
+    sb_entry_t       e;
+    op_ix_e          ix;
+    longint unsigned lat;
+    bit              vec_bad;
+    bit              sc_bad;
+    logic [ACC_PAD_W-1:0] sc_pad;
+    sc_pad = ACC_PAD_W'(act_sc);
+    if (exp_q.size() == 0) begin
+      n_spurious++;
+      tb_error($sformatf("SPURIOUS out_valid with no transaction in flight (vec=0x%h scalar=0x%h)",
+                         act_vec, act_sc));
+      return;
+    end
+    e   = exp_q.pop_front();
+    ix  = op_ix(e.txn.op);
+    lat = cyc - e.issue_cyc;
+    n_completed++;
+    latency_check(e.id, ix, lat);
+    vec_bad = (!is_red(ix) || CHECK_UNUSED) && (act_vec !== e.exp.vec);
+    sc_bad  = ( is_red(ix) || CHECK_UNUSED) && (act_sc  !== e.exp.scalar);
+    if (vec_bad || sc_bad)
+      report_mismatch(e, act_vec, act_sc, vec_bad, sc_bad, lat);
+    else if (verbosity >= 3)
+      log_msg(3, $sformatf("pass   id=%0d op=%s latency=%0d", e.id, pad_r(op_name(ix), 6), lat));
+    // determinism signature: relative completion time + checked result fields
+    sig_hash = mix64(sig_hash ^ (cyc - sig_epoch_cyc));
+    if (!is_red(ix) || CHECK_UNUSED)
+      for (int i = 0; i < LANES; i++) sig_hash = mix64(sig_hash ^ 64'(act_vec[i]));
+    if (is_red(ix) || CHECK_UNUSED)
+      for (int k = 0; k < ACC_PAD_W; k += 64) sig_hash = mix64(sig_hash ^ sc_pad[k +: 64]);
+  endfunction
+
+  //============================================================================
+  // DUT
+  //============================================================================
+  vector_engine #(
+    .LANES      (LANES),
+    .LANE_W     (LANE_W),
+    .ACC_W      (ACC_W),
+    .OP_W       (OP_W),
+`ifndef VE_DUT_NO_MASK
+    .MASK_MODE  (MASK_MODE),
+`endif
+    .LATENCY    (DUT_LATENCY)
+  ) u_dut (
+    .clk        (clk),
+    .rst_n      (rst_n),
+    .in_valid   (in_valid),
+    .in_ready   (in_ready),
+    .in_op      (in_op),
+    .in_a       (in_a),
+    .in_b       (in_b),
+    .in_scalar  (in_scalar),
+`ifndef VE_DUT_NO_MASK
+    .in_mask    (in_mask),
+`endif
+    .out_valid  (out_valid),
+    .out_vec    (out_vec),
+    .out_scalar (out_scalar)
+  );
+
+  //============================================================================
+  // Clock, monitor (sole owner of the cycle counter), watchdogs
+  //============================================================================
+  initial forever #(CLK_PERIOD / 2) clk = ~clk;
+
+  // Single sampling process at the active clock edge.  Acceptance is recorded
+  // before completion is checked so a zero-latency DUT aligns in one edge.
+  initial forever begin : p_monitor
+    @(posedge clk);
+    cyc++;
+    if (rst_n !== 1'b1) begin
+      rst_low_cycles++;
+      if (exp_q.size() != 0) begin
+        n_flushed += exp_q.size();
+        cov_reset_inflight++;
+        exp_q.delete();
+      end
+      have_prev = 1'b0;
+      if (rst_low_cycles >= 2 && out_valid !== 1'b0)
+        tb_error($sformatf("out_valid=%b while reset held for %0d cycles", out_valid, rst_low_cycles));
+    end else if (env_armed && !finished) begin
+      rst_low_cycles = 0;
+      if ($isunknown(in_ready) || $isunknown(out_valid))
+        tb_error($sformatf("X/Z on handshake after reset: in_ready=%b out_valid=%b", in_ready, out_valid));
+      if (in_valid === 1'b1 && in_ready !== 1'b1) n_stall_cycles++;
+      if (in_valid === 1'b1 && in_ready === 1'b1) sb_accept();
+      if (out_valid === 1'b1) sb_check(vec_t'(out_vec), out_scalar);
+      if (exp_q.size() > max_inflight) max_inflight = exp_q.size();
+      if (exp_q.size() != 0 && (cyc - exp_q[0].issue_cyc) > u64_t'(MAX_LATENCY)) begin
+        n_lost++;
+        tb_error($sformatf("LOST TRANSACTION id=%0d op=%s issued at cyc %0d: no result within %0d cycles",
+                           exp_q[0].id, op_name(op_ix(exp_q[0].txn.op)), exp_q[0].issue_cyc, MAX_LATENCY));
+        void'(exp_q.pop_front());
+      end
+    end
+    if (!finished && cyc >= TIMEOUT_CYCLES) begin
+      tb_error($sformatf("GLOBAL TIMEOUT after %0d cycles", cyc));
+      finish_test();
+    end else if (!finished && abort_req) begin
+      $display("[%0t] [cyc %0d] aborting: error budget (%0d) exhausted", $time, cyc, ABORT_ERRORS);
+      finish_test();
+    end
+  end
+
+  //============================================================================
+  // Driver - inputs change DRIVE_SKEW after the active edge and are sampled
+  // at the edge, so no drive ever coincides with a sampling event in any
+  // simulator scheduler.  Every driver task returns at edge + DRIVE_SKEW.
+  //============================================================================
+  function automatic vec_t junk_vec();
+    vec_t v;
+    for (int i = 0; i < LANES; i++) v[i] = lane_t'(junk_u64());
+    return v;
+  endfunction
+
+  task automatic scramble_idle_bus();
+    if (IDLE_SCRAMBLE) begin
+      in_op     = OP_W'(junk_u64());
+      in_a      = vflat_t'(junk_vec());
+      in_b      = vflat_t'(junk_vec());
+      in_scalar = lane_t'(junk_u64());
+      in_mask   = mask_t'(junk_u64());
+    end
+  endtask
+
+  task automatic next_cycle();
+    @(posedge clk);
+    #(DRIVE_SKEW);
+  endtask
+
+  task automatic drive_txn(input txn_t t);
+    in_valid  = 1'b1;
+    in_op     = t.op;
+    in_a      = vflat_t'(t.a);
+    in_b      = vflat_t'(t.b);
+    in_scalar = t.scalar;
+    in_mask   = eff_mask(t.mask);
+    do @(posedge clk); while (in_ready !== 1'b1);
+    #(DRIVE_SKEW);
+    in_valid  = 1'b0;
+    n_driven++;
+  endtask
+
+  task automatic idle(input int n);
+    in_valid = 1'b0;
+    repeat (n) begin
+      scramble_idle_bus();
+      next_cycle();
+    end
+  endtask
+
+  task automatic drain();
+    int guard;
+    guard = 0;
+    while (exp_q.size() != 0 && guard <= MAX_LATENCY + 4) begin
+      idle(1);
+      guard++;
+    end
+    if (exp_q.size() != 0)
+      tb_error($sformatf("drain timeout: %0d transactions still in flight", exp_q.size()));
+    idle(2);
+  endtask
+
+  task automatic apply_reset(input int n_cycles);
+    rst_n    = 1'b0;
+    in_valid = 1'b0;
+    repeat (n_cycles) begin
+      scramble_idle_bus();
+      next_cycle();
+    end
+    rst_n     = 1'b1;
+    env_armed = 1'b1;
+    next_cycle();
+  endtask
+
+  //============================================================================
+  // Stimulus construction
+  //============================================================================
+  function automatic lane_t corner(input int k);
+    case (k % NUM_CORNERS)
+      0:       return LANE_MAX_NEG;
+      1:       return LANE_MAX_NEG + lane_t'(1);
+      2:       return '1;
+      3:       return '0;
+      4:       return lane_t'(1);
+      5:       return LANE_MAX_POS - lane_t'(1);
+      default: return LANE_MAX_POS;
+    endcase
+  endfunction
+
+  function automatic lane_t rand_lane(input int corner_pct);
+    int r;
+    r = stim_range(100);
+    if (r < corner_pct)      return corner(stim_range(NUM_CORNERS));
+    if (r < corner_pct + 25) return lane_t'(stim_range(32)) - lane_t'(16);
+    return lane_t'(stim_u64());
+  endfunction
+
+  function automatic vec_t rand_vec(input int corner_pct);
+    vec_t v;
+    for (int i = 0; i < LANES; i++) v[i] = rand_lane(corner_pct);
+    return v;
+  endfunction
+
+  function automatic mask_t rand_mask();
+    int r;
+    if (!HAS_MASK) return '1;
+    r = stim_range(100);
+    if (r < 35) return '1;
+    if (r < 40) return '0;
+    if (r < 52) return mask_t'(1) << stim_range(LANES);
+    if (r < 64) return ~(mask_t'(1) << stim_range(LANES));
+    return mask_t'(stim_u64());
+  endfunction
+
+  function automatic op_ix_e rand_op();
+    return op_ix_e'(stim_range(NUM_OPS));
+  endfunction
+
+  function automatic vec_t vec_fill(input lane_t v);
+    vec_t r;
+    for (int i = 0; i < LANES; i++) r[i] = v;
+    return r;
+  endfunction
+
+  function automatic vec_t vec_ramp(input int base, input int step);
+    vec_t r;
+    for (int i = 0; i < LANES; i++) r[i] = lane_t'(base + step * i);
+    return r;
+  endfunction
+
+  function automatic vec_t vec_onehot(input int j, input lane_t v, input lane_t bg);
+    vec_t r;
+    r    = vec_fill(bg);
+    r[j] = v;
+    return r;
+  endfunction
+
+  function automatic mask_t mask_onehot(input int j);
+    return mask_t'(1) << j;
+  endfunction
+
+  function automatic mask_t mask_alt(input bit phase);
+    mask_t m;
+    for (int i = 0; i < LANES; i++) m[i] = ((i % 2) == int'(phase));
+    return m;
+  endfunction
+
+  function automatic txn_t mk_txn(input op_ix_e ix, input vec_t a, input vec_t b, input lane_t s,
+                                  input mask_t m);
+    txn_t t;
+    t.op     = op_enc(ix);
+    t.a      = a;
+    t.b      = b;
+    t.scalar = s;
+    t.mask   = eff_mask(m);
+    return t;
+  endfunction
+
+  task automatic send(input op_ix_e ix, input vec_t a, input vec_t b, input lane_t s, input mask_t m);
+    drive_txn(mk_txn(ix, a, b, s, m));
+  endtask
+
+  // operands drawn in fixed statement order (argument evaluation order is
+  // not defined by the language; this keeps streams simulator-independent)
+  task automatic send_op_random(input op_ix_e ix, input int corner_pct);
+    vec_t  a;
+    vec_t  b;
+    lane_t s;
+    mask_t m;
+    a = rand_vec(corner_pct);
+    b = rand_vec(corner_pct);
+    s = rand_lane(corner_pct);
+    m = rand_mask();
+    send(ix, a, b, s, m);
+  endtask
+
+  task automatic send_random(input int corner_pct);
+    op_ix_e ix;
+    ix = rand_op();
+    send_op_random(ix, corner_pct);
+  endtask
+
+  //============================================================================
+  // Test infrastructure
+  //============================================================================
+  task automatic test_begin(input string name);
+    n_tests++;
+    cur_test   = name;
+    stim_state = mix64(master_seed ^ (64'(unsigned'(n_tests)) * GOLDEN_GAMMA));
+    t_err0     = n_errors;
+    t_acc0     = n_accepted;
+    log_msg(1, "begin");
+  endtask
+
+  task automatic test_end();
+    drain();
+    log_msg(1, $sformatf("end    : %0d transactions, %0d new errors",
+                         n_accepted - t_acc0, n_errors - t_err0));
+  endtask
+
+  // Golden-model known-answer check: closed-form expectation vs. reference
+  // model, then the same transaction is issued to the DUT.
+  task automatic kat(input string name, input txn_t t, input result_t golden);
+    result_t r;
+    r = ref_model(t);
+    if (r !== golden) begin
+      n_model_errors++;
+      tb_error($sformatf({"REFERENCE MODEL KAT '%s' FAILED: model{vec=0x%h scalar=0x%h} ",
+                          "closed-form{vec=0x%h scalar=0x%h}"},
+                         name, r.vec, r.scalar, golden.vec, golden.scalar));
+    end
+    log_msg(2, $sformatf("KAT %s", name));
+    drive_txn(t);
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T0: post-reset quiescence and liveness
+  //----------------------------------------------------------------------------
+  task automatic test_reset_quiescence();
+    int waited;
+    test_begin("reset_quiescence");
+    idle(16 + 2 * ((EXP_LATENCY > 0) ? EXP_LATENCY : 8));
+    waited = 0;
+    while (in_ready !== 1'b1 && waited < MAX_LATENCY) begin
+      idle(1);
+      waited++;
+    end
+    if (in_ready !== 1'b1)
+      tb_error($sformatf("in_ready not asserted within %0d idle cycles after reset", MAX_LATENCY));
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T1: closed-form known answers (validates golden model and DUT)
+  //----------------------------------------------------------------------------
+  task automatic test_known_answer();
+    result_t g;
+    vec_t    a;
+    mask_t   m;
+    wide_t   maxp;
+    lane_t   v;
+    int      n_sq, n_tri, n_half;
+    test_begin("known_answer");
+    maxp   = (wide_t'(1) <<< (LANE_W - 1)) - wide_t'(1);
+    n_sq   = LANES * (LANES + 1) * (2 * LANES + 1) / 6;
+    n_tri  = LANES * (LANES + 1) / 2;
+    n_half = LANES / 2;
+
+    g = '0; g.vec = vec_ramp(1, -1);
+    kat("VADD ramp: (i+1) + (-2i) = 1-i",
+        mk_txn(IX_VADD, vec_ramp(1, 1), vec_ramp(0, -2), '0, '1), g);
+
+    g = '0; g.vec = vec_fill(LANE_MAX_POS);
+    kat("VSUB wrap: MIN - 1 = MAX",
+        mk_txn(IX_VSUB, vec_fill(LANE_MAX_NEG), vec_fill(lane_t'(1)), '0, '1), g);
+
+    g = '0; g.vec = vec_fill('1);
+    kat("VSUB borrow: 0 - 1 = -1",
+        mk_txn(IX_VSUB, vec_fill('0), vec_fill(lane_t'(1)), '0, '1), g);
+
+    g = '0; g.vec = vec_fill(LANE_MAX_NEG);
+    kat("VMUL wrap: MIN * -1 = MIN",
+        mk_txn(IX_VMUL, vec_fill(LANE_MAX_NEG), vec_fill('1), '0, '1), g);
+
+    g = '0; g.vec = vec_ramp(0, -3);
+    kat("VMUL ramp: -3 * i",
+        mk_txn(IX_VMUL, vec_fill(lane_t'(-3)), vec_ramp(0, 1), '0, '1), g);
+
+    g = '0; g.vec = vec_fill(lane_t'(1));
+    kat("VMUL low bits: MAX * MAX = 1 (mod 2^W)",
+        mk_txn(IX_VMUL, vec_fill(LANE_MAX_POS), vec_fill(LANE_MAX_POS), '0, '1), g);
+
+    g = '0; g.scalar = acc_t'(wide_t'(n_sq));
+    kat("DOT sum of squares",
+        mk_txn(IX_DOT, vec_ramp(1, 1), vec_ramp(1, 1), '0, '1), g);
+
+    g = '0; g.scalar = acc_t'(wide_t'(LANES) <<< (2 * LANE_W - 2));
+    kat("DOT accumulator growth: N * MIN^2",
+        mk_txn(IX_DOT, vec_fill(LANE_MAX_NEG), vec_fill(LANE_MAX_NEG), '0, '1), g);
+
+    for (int i = 0; i < LANES; i++) a[i] = (i % 2 == 0) ? LANE_MAX_POS : LANE_MAX_NEG;
+    g = '0; g.scalar = acc_t'(-(wide_t'(n_half) * maxp));
+    kat("DOT alternating sign: -(N/2) * MAX",
+        mk_txn(IX_DOT, vec_fill(LANE_MAX_POS), a, '0, '1), g);
+
+    g = '0; g.scalar = acc_t'(wide_t'(n_tri));
+    kat("REDUCE ramp: N(N+1)/2",
+        mk_txn(IX_REDUCE, vec_ramp(1, 1), '0, '0, '1), g);
+
+    g = '0; g.scalar = acc_t'(-(wide_t'(LANES) <<< (LANE_W - 1)));
+    kat("REDUCE floor: N * MIN",
+        mk_txn(IX_REDUCE, vec_fill(LANE_MAX_NEG), '0, '0, '1), g);
+
+    g = '0; g.vec = vec_fill(LANE_MAX_NEG);
+    kat("BCAST MIN, all lanes",
+        mk_txn(IX_BCAST, vec_ramp(1, 1), '0, LANE_MAX_NEG, '1), g);
+
+    if (HAS_MASK) begin
+      m = mask_onehot(LANES - 1);
+      g = '0; g.scalar = acc_t'(wide_t'(LANES));
+      kat("REDUCE top lane only",
+          mk_txn(IX_REDUCE, vec_ramp(1, 1), '0, '0, m), g);
+
+      g = '0;
+      kat("DOT empty mask = 0",
+          mk_txn(IX_DOT, vec_fill(LANE_MAX_NEG), vec_fill(LANE_MAX_NEG), '0, '0), g);
+
+      m = mask_alt(1'b0);
+      a = vec_ramp(1, 1);
+      g = '0;
+      for (int i = 0; i < LANES; i++) g.vec[i] = m[i] ? LANE_MAX_NEG : ((MASK_MODE == 1) ? a[i] : '0);
+      kat("BCAST MIN, even lanes",
+          mk_txn(IX_BCAST, a, '0, LANE_MAX_NEG, m), g);
+
+      m = mask_alt(1'b1);
+      v = LANE_MAX_NEG + lane_t'(6);
+      g = '0;
+      for (int i = 0; i < LANES; i++) g.vec[i] = m[i] ? v : ((MASK_MODE == 1) ? lane_t'(7) : '0);
+      kat("VADD masked wrap: 7 + MAX = MIN+6, odd lanes",
+          mk_txn(IX_VADD, vec_fill(lane_t'(7)), vec_fill(LANE_MAX_POS), '0, m), g);
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T2: boundary operand matrix (all corner pairs, all opcodes)
+  //----------------------------------------------------------------------------
+  task automatic test_boundary_matrix();
+    vec_t a;
+    vec_t b;
+    test_begin("boundary_matrix");
+    for (int o = 0; o < NUM_OPS; o++)
+      for (int ca = 0; ca < NUM_CORNERS; ca++)
+        for (int cb = 0; cb < NUM_CORNERS; cb++)
+          send(op_ix_e'(o), vec_fill(corner(ca)), vec_fill(corner(cb)), corner(cb), '1);
+    for (int o = 0; o < NUM_OPS; o++)
+      for (int k = 0; k < NUM_CORNERS; k++) begin
+        for (int i = 0; i < LANES; i++) begin
+          a[i] = corner(i + k);
+          b[i] = corner(3 * i + k + 1);
+        end
+        send(op_ix_e'(o), a, b, corner(k), '1);
+      end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T3: lane independence (carry/borrow/product containment, lane select)
+  //----------------------------------------------------------------------------
+  task automatic test_lane_isolation();
+    vec_t  a;
+    vec_t  b;
+    lane_t s;
+    test_begin("lane_isolation");
+    for (int j = 0; j < LANES; j++) begin
+      send(IX_VADD, vec_fill('1), vec_onehot(j, lane_t'(1), '0), '0, '1);
+      send(IX_VADD, vec_fill(LANE_MAX_POS), vec_onehot(j, lane_t'(1), '0), '0, '1);
+      send(IX_VSUB, vec_fill('0), vec_onehot(j, lane_t'(1), '0), '0, '1);
+      send(IX_VSUB, vec_onehot(j, LANE_MAX_NEG, '1), vec_fill(lane_t'(1)), '0, '1);
+      send(IX_VMUL, vec_onehot(j, LANE_MAX_POS, '0), vec_onehot(j, LANE_MAX_POS, '0), '0, '1);
+      send(IX_VMUL, vec_fill(LANE_MAX_NEG), vec_onehot(j, LANE_MAX_NEG, lane_t'(1)), '0, '1);
+      send(IX_DOT, vec_onehot(j, LANE_MAX_NEG, '0), vec_onehot(j, LANE_MAX_POS, '0), '0, '1);
+      a = rand_vec(30); a[j] = LANE_MAX_NEG;
+      b = rand_vec(30); b[j] = LANE_MAX_NEG;
+      send(IX_DOT, a, b, '0, mask_onehot(j));
+      send(IX_REDUCE, vec_onehot(j, LANE_MAX_NEG, '0), '0, '0, '1);
+      a = rand_vec(30);
+      send(IX_REDUCE, a, '0, '0, mask_onehot(j));
+      a = rand_vec(30);
+      s = rand_lane(30);
+      send(IX_BCAST, a, '0, s, mask_onehot(j));
+      a = rand_vec(30);
+      s = rand_lane(30);
+      send(IX_BCAST, a, '0, s, ~mask_onehot(j));
+      a = rand_vec(30);
+      b = rand_vec(30);
+      send(IX_VMUL, a, b, '0, ~mask_onehot(j));
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T4: lane-mask permutations (exhaustive for narrow engines)
+  //----------------------------------------------------------------------------
+  task automatic test_mask_permutations();
+    mask_t mset[$];
+    test_begin("mask_permutations");
+    if (!HAS_MASK) begin
+      log_msg(1, "DUT has no lane mask: test not applicable");
+      test_end();
+      return;
+    end
+    if (LANES <= MASK_EXHAUSTIVE_LANES) begin
+      for (longint unsigned mv = 0; mv < (u64_t'(1) << LANES); mv++)
+        mset.push_back(mask_t'(mv));
+    end else begin
+      for (int j = 0; j < LANES; j++) begin
+        mset.push_back(mask_onehot(j));
+        mset.push_back(~mask_onehot(j));
+      end
+      for (int k = 0; k <= LANES; k++) begin
+        mset.push_back(mask_t'((64'd1 << k) - 64'd1));
+        mset.push_back(~mask_t'((64'd1 << k) - 64'd1));
+      end
+      mset.push_back(mask_alt(1'b0));
+      mset.push_back(mask_alt(1'b1));
+      for (int r = 0; r < RANDOM_MASKS; r++) mset.push_back(mask_t'(stim_u64()));
+    end
+    log_msg(1, $sformatf("%0d mask patterns x %0d opcodes", mset.size(), NUM_OPS));
+    foreach (mset[k]) begin
+      for (int o = 0; o < NUM_OPS; o++) begin
+        vec_t  a;
+        vec_t  b;
+        lane_t s;
+        a = rand_vec(20);
+        b = rand_vec(20);
+        s = rand_lane(20);
+        send(op_ix_e'(o), a, b, s, mset[k]);
+      end
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T5: opcode transition matrix at every issue distance up to pipe depth
+  //----------------------------------------------------------------------------
+  task automatic test_opcode_transitions();
+    test_begin("opcode_transitions");
+    for (int gap = 0; gap <= MAX_GAP; gap++) begin
+      for (int p = 0; p < NUM_OPS; p++) begin
+        for (int q = 0; q < NUM_OPS; q++) begin
+          send_op_random(op_ix_e'(p), 25);
+          if (gap != 0) idle(gap);
+          send_op_random(op_ix_e'(q), 25);
+          if (gap != 0) idle(gap);
+        end
+      end
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T6: constrained-random streaming with bubbles
+  //----------------------------------------------------------------------------
+  task automatic test_random_stream();
+    test_begin("random_stream");
+    for (int n = 0; n < num_random; n++) begin
+      if (stim_pct(BUBBLE_PCT)) idle(1 + stim_range(3));
+      send_random(15);
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T7: pipeline saturation - back-to-back, opcode changes every beat
+  //----------------------------------------------------------------------------
+  task automatic test_pipeline_saturation();
+    op_ix_e ix;
+    test_begin("pipeline_saturation");
+    ix = rand_op();
+    for (int n = 0; n < num_stress; n++) begin
+      ix = op_ix_e'((int'(ix) + 1 + stim_range(NUM_OPS - 1)) % NUM_OPS);
+      send_op_random(ix, 40);
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T8: reset with operations in flight; pipeline must flush cleanly
+  //----------------------------------------------------------------------------
+  task automatic test_reset_in_flight();
+    int depth;
+    test_begin("reset_in_flight");
+    for (int rep = 0; rep < 4; rep++) begin
+      depth = ((EXP_LATENCY > 0) ? EXP_LATENCY : 1) + stim_range(3);
+      for (int n = 0; n < depth; n++) send_random(25);
+      apply_reset(MIN_RESET_CYCLES + 3 * rep);
+      for (int n = 0; n < 4 * NUM_OPS; n++) send_random(25);
+      drain();
+    end
+    test_end();
+  endtask
+
+  //----------------------------------------------------------------------------
+  // T9: determinism - identical post-reset stream gives identical results
+  //     and identical completion timing
+  //----------------------------------------------------------------------------
+  task automatic test_determinism();
+    logic [63:0] sig[2];
+    int cnt[2];
+    int c0;
+    test_begin("determinism");
+    for (int pass = 0; pass < 2; pass++) begin
+      apply_reset(RESET_CYCLES);
+      stim_state    = mix64(master_seed ^ 64'hD37E_2A11_C0DE_0001);
+      junk_state    = mix64(master_seed ^ 64'hD37E_2A11_C0DE_0002);
+      sig_hash      = '0;
+      sig_epoch_cyc = cyc;
+      c0            = n_completed;
+      for (int n = 0; n < NUM_DETERM; n++) begin
+        if (stim_pct(BUBBLE_PCT)) idle(1 + stim_range(3));
+        send_random(20);
+      end
+      drain();
+      sig[pass] = sig_hash;
+      cnt[pass] = n_completed - c0;
+      log_msg(1, $sformatf("pass %0d: %0d results, signature 0x%h", pass, cnt[pass], sig[pass]));
+    end
+    if (sig[0] !== sig[1] || cnt[0] != cnt[1])
+      tb_error($sformatf("NON-DETERMINISTIC DUT: signature 0x%h/%0d vs 0x%h/%0d for identical stimulus",
+                         sig[0], cnt[0], sig[1], cnt[1]));
+    test_end();
+  endtask
+
+  //============================================================================
+  // Coverage closure and final report
+  //============================================================================
+  function automatic void cov_bin(input cov_grp_e g, input int hits, input string what);
+    grp_bins[g]++;
+    if (hits != 0) begin
+      grp_hits[g]++;
+    end else if (cov_holes_printed < 24) begin
+      cov_holes_printed++;
+      $display("  coverage hole: %s", what);
+    end
+  endfunction
+
+  function automatic string grp_name(input cov_grp_e g);
+    case (g)
+      G_OP:    return "opcode";
+      G_TRANS: return "opcode transition (b2b)";
+      G_MASK:  return "op x mask class";
+      G_LACT:  return "op x lane active";
+      G_LMSK:  return "op x lane masked";
+      G_OPA:   return "op x operand A class";
+      G_OPB:   return "op x operand B class";
+      G_SCL:   return "broadcast scalar class";
+      G_MULX:  return "VMUL/DOT sign cross";
+      G_WRAP:  return "lane overflow wrap";
+      G_RED:   return "DOT/REDUCE result";
+      default: return "pipeline";
+    endcase
+  endfunction
+
+  function automatic bit report_coverage(input int lat_eff);
+    int    tb_bins;
+    int    tb_hits;
+    int    g_hit;
+    int    g_bin;
+    string gname;
+    tb_bins = 0;
+    tb_hits = 0;
+    for (int o = 0; o < NUM_OPS; o++)
+      cov_bin(G_OP, cov_op[o], op_name(op_ix_e'(o)));
+    for (int p = 0; p < NUM_OPS; p++)
+      for (int q = 0; q < NUM_OPS; q++)
+        cov_bin(G_TRANS, cov_trans[p][q],
+                $sformatf("%s->%s", op_name(op_ix_e'(p)), op_name(op_ix_e'(q))));
+    for (int o = 0; o < NUM_OPS; o++)
+      for (int c = 0; c < NUM_MCLS; c++)
+        if (HAS_MASK || c == int'(MC_FULL))
+          cov_bin(G_MASK, cov_mask[o][c], $sformatf("%s mask class %0d", op_name(op_ix_e'(o)), c));
+    for (int o = 0; o < NUM_OPS; o++)
+      for (int i = 0; i < LANES; i++) begin
+        cov_bin(G_LACT, cov_lane_act[o][i], $sformatf("%s lane %0d active", op_name(op_ix_e'(o)), i));
+        if (HAS_MASK)
+          cov_bin(G_LMSK, cov_lane_msk[o][i], $sformatf("%s lane %0d masked", op_name(op_ix_e'(o)), i));
+      end
+    for (int o = 0; o < NUM_OPS; o++)
+      for (int c = 0; c < NUM_OCLS; c++) begin
+        if (uses_a(op_ix_e'(o)))
+          cov_bin(G_OPA, cov_opnd_a[o][c], $sformatf("%s A class %0d", op_name(op_ix_e'(o)), c));
+        if (uses_b(op_ix_e'(o)))
+          cov_bin(G_OPB, cov_opnd_b[o][c], $sformatf("%s B class %0d", op_name(op_ix_e'(o)), c));
+      end
+    for (int c = 0; c < NUM_OCLS; c++)
+      cov_bin(G_SCL, cov_scalar[c], $sformatf("BCAST scalar class %0d", c));
+    for (int k = 0; k < 2; k++)
+      for (int ca = 0; ca < NUM_OCLS; ca++)
+        for (int cb = 0; cb < NUM_OCLS; cb++)
+          cov_bin(G_MULX, cov_mulx[k][ca][cb],
+                  $sformatf("%s A class %0d x B class %0d", (k == 0) ? "VMUL" : "DOT", ca, cb));
+    for (int o = 0; o < 3; o++)
+      for (int d = 0; d < 2; d++)
+        cov_bin(G_WRAP, cov_wrap[o][d],
+                $sformatf("%s %s overflow", op_name(op_ix_e'(o)), (d == 0) ? "positive" : "negative"));
+    for (int k = 0; k < 2; k++)
+      for (int c = 0; c < 4; c++)
+        cov_bin(G_RED, cov_red[k][c], $sformatf("%s result bin %0d", (k == 0) ? "DOT" : "REDUCE", c));
+    if (lat_eff > 0) begin
+      cov_bin(G_PIPE, (max_inflight >= lat_eff) ? 1 : 0, "pipeline fully occupied");
+      cov_bin(G_PIPE, cov_reset_inflight, "reset with operations in flight");
+    end
+    $display("  %s %s %s %s", pad_r("coverage group", 26), pad_l("hit", 8), pad_l("bins", 8),
+             pad_l("percent", 9));
+    for (int g = 0; g < NUM_GRP; g++) begin
+      if (grp_bins[g] != 0) begin
+        gname = grp_name(cov_grp_e'(g));
+        g_hit = grp_hits[g];
+        g_bin = grp_bins[g];
+        $display("  %s %s %s %s%%", pad_r(gname, 26), pad_l($sformatf("%0d", g_hit), 8),
+                 pad_l($sformatf("%0d", g_bin), 8),
+                 pad_l($sformatf("%0.2f", 100.0 * real'(g_hit) / real'(g_bin)), 8));
+        tb_bins += g_bin;
+        tb_hits += g_hit;
+      end
+    end
+    $display("  %s %s %s %s%%", pad_r("TOTAL", 26), pad_l($sformatf("%0d", tb_hits), 8),
+             pad_l($sformatf("%0d", tb_bins), 8),
+             pad_l($sformatf("%0.2f", 100.0 * real'(tb_hits) / real'(tb_bins)), 8));
+    return tb_hits == tb_bins;
+  endfunction
+
+  task automatic finish_test();
+    int  lat_eff;
+    bit  cov_closed;
+    bit  acct_ok;
+    if (finished) return;
+    finished = 1'b1;
+    cur_test = "report";
+    lat_eff  = (EXP_LATENCY >= 0) ? EXP_LATENCY : ((n_completed != 0) ? int'(lat_min) : 0);
+    $display("==========================================================================");
+    $display(" tb_vector_engine  LANES=%0d LANE_W=%0d ACC_W=%0d LATENCY=%0d MASK=%0d/%0d",
+             LANES, LANE_W, ACC_W, lat_eff, HAS_MASK, MASK_MODE);
+    $display("--------------------------------------------------------------------------");
+    cov_closed = report_coverage(lat_eff);
+    acct_ok    = (n_driven == n_accepted) &&
+                 (n_accepted == n_completed + n_flushed + n_lost + exp_q.size());
+    if (!acct_ok)
+      tb_error($sformatf({"transaction accounting broken: driven=%0d accepted=%0d completed=%0d ",
+                          "flushed=%0d lost=%0d pending=%0d"},
+                         n_driven, n_accepted, n_completed, n_flushed, n_lost, exp_q.size()));
+    if (n_completed == 0)
+      tb_error("no transaction completed");
+    if (COV_ENFORCE && !cov_closed)
+      tb_error("functional coverage closure not reached");
+    $display("--------------------------------------------------------------------------");
+    $display("  seed                 : %0d  (reproduce with +SEED=%0d)", master_seed, master_seed);
+    $display("  tests run            : %0d", n_tests);
+    $display("  driven / accepted    : %0d / %0d", n_driven, n_accepted);
+    $display("  checked / flushed    : %0d / %0d", n_completed, n_flushed);
+    $display("  lost / spurious      : %0d / %0d", n_lost, n_spurious);
+    $display("  input stall cycles   : %0d", n_stall_cycles);
+    $display("  latency min/max/avg  : %0d / %0d / %0.2f", (n_completed != 0) ? lat_min : 0, lat_max,
+             (n_completed != 0) ? real'(lat_sum) / real'(n_completed) : 0.0);
+    $display("  peak in-flight       : %0d", max_inflight);
+    $display("  errors (model KAT)   : %0d (%0d)", n_errors, n_model_errors);
+    $display("  simulated cycles     : %0d", cyc);
+    $display("==========================================================================");
+    if (n_errors == 0) begin
+      $display("*** TEST PASSED ***");
+      $finish;
+    end else begin
+      $fatal(1, "*** TEST FAILED *** (%0d errors)", n_errors);
+    end
+  endtask
+
+  //============================================================================
+  // Configuration checks and main sequence
+  //============================================================================
+  task automatic init_env();
+    logic [OP_W-1:0] encs[NUM_OPS];
+    if (LANES < 2 || LANES > 64)       $fatal(1, "LANES=%0d outside supported range 2..64", LANES);
+    if (LANE_W < 8 || LANE_W > 64)     $fatal(1, "LANE_W=%0d outside supported range 8..64", LANE_W);
+    if (ACC_W < LANE_W)                $fatal(1, "ACC_W=%0d narrower than LANE_W=%0d", ACC_W, LANE_W);
+    if (DRIVE_SKEW <= 0 || 2 * DRIVE_SKEW >= CLK_PERIOD)
+      $fatal(1, "DRIVE_SKEW=%0d must lie inside the first clock half-period", DRIVE_SKEW);
+    if (MASK_MODE != 0 && MASK_MODE != 1) $fatal(1, "MASK_MODE=%0d unsupported", MASK_MODE);
+    if (MASK_EXHAUSTIVE_LANES > 20)
+      $fatal(1, "MASK_EXHAUSTIVE_LANES=%0d too large", MASK_EXHAUSTIVE_LANES);
+    if (FIXED_LATENCY && EXP_LATENCY > MAX_LATENCY)
+      $fatal(1, "EXP_LATENCY=%0d exceeds MAX_LATENCY=%0d", EXP_LATENCY, MAX_LATENCY);
+    for (int o = 0; o < NUM_OPS; o++) encs[o] = op_enc(op_ix_e'(o));
+    for (int p = 0; p < NUM_OPS; p++)
+      for (int q = p + 1; q < NUM_OPS; q++)
+        if (encs[p] == encs[q])
+          $fatal(1, "opcode encodings %s and %s collide (0x%h)",
+                 op_name(op_ix_e'(p)), op_name(op_ix_e'(q)), encs[p]);
+
+    master_seed = DEFAULT_SEED;
+    num_random  = NUM_RANDOM;
+    num_stress  = NUM_STRESS;
+    void'($value$plusargs("SEED=%d", master_seed));
+    void'($value$plusargs("VERBOSE=%d", verbosity));
+    void'($value$plusargs("NUM_RANDOM=%d", num_random));
+    void'($value$plusargs("NUM_STRESS=%d", num_stress));
+    stim_state = mix64(master_seed);
+    junk_state = mix64(~master_seed);
+
+    rst_n     = 1'b0;
+    in_valid  = 1'b0;
+    in_op     = '0;
+    in_a      = '0;
+    in_b      = '0;
+    in_scalar = '0;
+    in_mask   = '0;
+    $display({"[%0t] tb_vector_engine: LANES=%0d LANE_W=%0d ACC_W=%0d DUT_LATENCY=%0d ",
+              "EXP_LATENCY=%0d MASK_MODE=%0d HAS_MASK=%0d seed=%0d"},
+             $time, LANES, LANE_W, ACC_W, DUT_LATENCY, EXP_LATENCY, MASK_MODE, HAS_MASK, master_seed);
+  endtask
+
+  initial begin : p_main
+    init_env();
+    apply_reset(RESET_CYCLES);
+    test_reset_quiescence();
+    test_known_answer();
+    test_boundary_matrix();
+    test_lane_isolation();
+    test_mask_permutations();
+    test_opcode_transitions();
+    test_random_stream();
+    test_pipeline_saturation();
+    test_reset_in_flight();
+    test_determinism();
+    finish_test();
+  end
+
+endmodule
+
+`default_nettype wire
