@@ -1,0 +1,1403 @@
+// =============================================================================
+//  SilicaFlux Heterogeneous Compute Architecture
+// -----------------------------------------------------------------------------
+//  File        : tile_interface.sf
+//  Module      : tile_interface
+//  Language    : Silica Flux-2017
+//  Layer       : Chiplet / tile boundary interface
+//  Upstream    : compute_tile.sf      (tile clock domain, wide typed packets)
+//  Downstream  : noc_interconnect.sf  (NoC clock domain, flit transport)
+// =============================================================================
+//
+//  FUNCTION
+//  --------
+//  CDC-safe boundary adapter between a compute tile and the mesh NoC. Wide,
+//  strongly typed tile packets (execute / memory request / memory response /
+//  tensor) are framed and serialised into an ordered flit stream on egress,
+//  and an ordered flit stream is validated, reassembled and re-typed on
+//  ingress. Every signal that crosses the tile/NoC boundary is either a Gray
+//  coded pointer or a single-bit level, launched from a flop and captured by
+//  an explicit two-flop synchroniser. No combinational path crosses domains.
+//
+//  MICROARCHITECTURE
+//  -----------------
+//
+//                tile_clk_i domain                 ||           noc_clk_i domain
+//                                                  ||
+// tile_tx_* -->[ TX ping-pong ]-->[ framer /    ]--||-->[ TX CDC FIFO ]-->[ egress   ]--> noc_tx_*
+//              [ pkt buffer   ]   [ serialiser  ]  ||   [ flit + par  ]   [ register ]
+//              [ spec squash  ]        wgray ------||--[2FF]--> (TX read side)
+//                     (TX write side) <--[2FF]-----||-- rgray
+//                                                  ||
+// tile_rx_* <--[ egress pkt   ]<--[ deserialiser]<-||---[ RX CDC FIFO ]<--[ admission]<-- noc_rx_*
+//              [ register     ]   [ validator   ]  ||   [ flit + par  ]   [ credits  ]
+//                      (RX read side) <--[2FF]-----||-- wgray
+//                                       rgray -----||--[2FF]--> (RX write side)
+//                                                  ||
+// pg_req_i --->[ link FSM     ]--- link_active ----||--[2FF]--> noc_link_active_o
+//              [              ]--- rx_block_req ---||--[2FF]--> [ packet-boundary RX block ]
+//              [              ]<--[2FF]------------||-- rx_block_ack -- [ quiesce + ack ]
+//              [              ]<--[2FF]------------||-- noc_alive ----- [ reset beacon  ]
+//
+//  Serialisation and reassembly run in the tile domain; the CDC FIFOs carry
+//  flit-granular beats so the asynchronous storage is sized by the NoC flit
+//  width rather than the wide packet width. Both FIFOs present a registered
+//  first-word-fall-through output whose read pointer advances only when the
+//  consumer accepts the beat, so the Gray read pointer observed by the
+//  writer always equals the number of beats fully consumed downstream.
+//
+//  LINK FRAME FORMAT
+//  -----------------
+//    flit 0         : HEAD  data[LINK_HDR_W-1:0] = { SOF, beat_count, sf_pkt_hdr_t, CRC-8 }
+//                           data[FLIT_DATA_W-1:LINK_HDR_W] reserved, transmitted as zero
+//    flit 1..N-1    : BODY  payload beat k-1 (FLIT_DATA_W bits, least significant first)
+//    flit N         : TAIL  final payload beat
+//
+//    N (beat_count) is fixed per packet class by the bit width of the class
+//    struct in silicaflux_pkg; payload bits above the class width are forced
+//    to zero on egress and masked on ingress. All flits of a packet carry the
+//    same vc_id and dst_id. One even-parity bit accompanies every flit end to
+//    end, through both CDC FIFOs, on noc_tx_par_o / noc_rx_par_i.
+//
+//  INGRESS VALIDATION
+//  ------------------
+//    Flit parity, SOF marker, reserved-bit zero check, header CRC-8, packet
+//    class legality, beat count versus class, destination node, BODY/TAIL
+//    ordering, orphan BODY/TAIL, truncated packets (HEAD inside a packet) and
+//    beat overrun. A packet failing any check is discarded whole; the event
+//    is recorded in sticky error flags and a saturating drop counter. A HEAD
+//    always resynchronises the deserialiser.
+//
+//  CDC CROSSING INVENTORY (all launched from flops, captured by 2-FF)
+//  ----------------------
+//    txf_wgray      tile -> noc   Gray pointer  TX FIFO write pointer
+//    txf_rgray      noc  -> tile  Gray pointer  TX FIFO read pointer (consumed)
+//    rxf_wgray      noc  -> tile  Gray pointer  RX FIFO write pointer
+//    rxf_rgray      tile -> noc   Gray pointer  RX FIFO read pointer (consumed)
+//    link_active    tile -> noc   level         tile link active indication
+//    rx_block_req   tile -> noc   level         4-phase power-gate quiesce request
+//    rx_block_ack   noc  -> tile  level         4-phase power-gate quiesce acknowledge
+//    noc_alive      noc  -> tile  level         NoC-side reset release beacon
+//    rst_link_n     both          async assert, 2-FF synchronised deassert per domain
+//    FIFO storage is written in the source domain and read in the destination
+//    domain only at addresses whose occupancy is proven by a synchronised
+//    pointer; the destination captures it into a destination-domain register.
+//
+//  RESET ARCHITECTURE
+//  ------------------
+//    The boundary reset is the conjunction of both domain resets. Assertion
+//    is asynchronous into both domains simultaneously, so the two halves of
+//    every CDC FIFO are always reset together. Deassertion is synchronised
+//    independently in each domain by a 2-FF reset synchroniser. The tile
+//    link FSM leaves LS_RESET only after the NoC-side reset-release beacon
+//    has been observed through its own 2-FF synchroniser.
+//
+//  POWER-GATE HANDSHAKE
+//  --------------------
+//    pg_req_i -> LS_DRAIN : ingress from tile closed, buffered packets are
+//    serialised and drained to the NoC, RX block requested. The NoC side
+//    admits flits only until the current packet's TAIL, then quiesces and
+//    acknowledges after two further NoC cycles so the final RX write pointer
+//    is guaranteed to reach the tile ahead of the acknowledge. LS_GATED is
+//    entered once both directions are empty; pg_ack_o asserts. Releasing
+//    pg_req_i completes the four-phase handshake through LS_WAKE.
+//
+//  INTEGRATION CONSTRAINTS
+//  -----------------------
+//    * Same-clock deployments connect tile_clk_i and noc_clk_i to one clock;
+//      the synchronisers then act as boundary retiming stages.
+//    * Gray pointer buses: set_max_delay -datapath_only <= min(Ttile, Tnoc),
+//      bus skew bounded to one destination period.
+//    * FIFO storage to destination register paths: set_max_delay
+//      -datapath_only <= one destination period.
+//    * ASYNC_REG flops are placed adjacently and excluded from retiming.
+//    * pg_req_i, cfg_tx_gap_i, spec_squash_* and err_clr_i are tile-domain
+//      synchronous inputs.
+//    * The NoC ejection channel delivers the flits of a packet contiguously
+//      (wormhole lock on the local port); interleaving is reported as a
+//      framing error.
+//
+//  SILICAFLUX_PKG CONTRACT
+//  -----------------------
+//    SF_FLIT_DATA_W, SF_TILE_PAYLOAD_W                   int unsigned
+//    sf_node_id_t, sf_vc_id_t, sf_spec_tag_t             logic vectors
+//    sf_pkt_class_e  : SF_PKT_EXEC, SF_PKT_MEM_REQ, SF_PKT_MEM_RSP, SF_PKT_TENSOR
+//    sf_exec_pkt_t, sf_mem_req_t, sf_mem_rsp_t, sf_tensor_pkt_t   packed structs
+//    sf_pkt_hdr_t    : .pkt_class .dst_id .spec_valid .spec_tag (+ src_id, txn_id, ...)
+//    sf_tile_pkt_t   : .hdr (sf_pkt_hdr_t) .payload [SF_TILE_PAYLOAD_W]
+//    sf_flit_type_e  : SF_FLIT_HEAD, SF_FLIT_BODY, SF_FLIT_TAIL
+//    sf_noc_flit_t   : .flit_type .vc_id .dst_id .data [SF_FLIT_DATA_W]
+//    Header fields beyond those named are carried transparently and covered
+//    by the header CRC, preserving transaction ID and speculative tag
+//    integrity across the link.
+//
+//  EXTENSION ARCHITECTURE
+//  ----------------------
+//    Lane scaling     : beats are indexed by MAX_BEATS / FLIT_DATA_W only;
+//                       widening SF_FLIT_DATA_W or striping link_beat_t over
+//                       parallel CDC FIFOs (one per lane, common Gray pointer
+//                       pair) scales bandwidth without touching framing.
+//    ECC              : link_beat_t.par is the single protection field of a
+//                       beat; replacing it with a SECDED syndrome vector keeps
+//                       the end-to-end FIFO path unchanged.
+//    Credit flow      : noc_rx_credits_o publishes a conservative free-slot
+//                       count of the RX FIFO in the NoC domain, ready to back
+//                       a credit-return channel in place of noc_rx_ready_o.
+//    Bandwidth shaping: cfg_tx_gap_i inserts idle cycles between egress flits;
+//                       a DVFS or congestion controller drives it at runtime.
+//    Multi-VC         : vc_id is assigned per class (request / response
+//                       separation). Per-VC RX contexts replicate the RX FIFO
+//                       and deserialiser state selected by vc_id.
+//    Power gating     : LS_GATED with pg_ack_o is the safe isolation point
+//                       for clamp / retention control of the boundary.
+//
+// =============================================================================
+
+module tile_interface
+  import silicaflux_pkg::*;
+#(
+  // Mesh node identifier of this tile; ingress packets addressed elsewhere are rejected.
+  parameter sf_node_id_t LOCAL_NODE_ID  = sf_node_id_t'(0),
+  // CDC FIFO depths in flits; power of two, minimum 4.
+  parameter int unsigned TX_FIFO_DEPTH  = 16,
+  parameter int unsigned RX_FIFO_DEPTH  = 16,
+  // End-to-end even parity on every flit through both CDC FIFOs.
+  parameter bit          EN_FLIT_PARITY = 1'b1,
+  // Ingress destination check against LOCAL_NODE_ID.
+  parameter bit          EN_DST_CHECK   = 1'b1,
+  // Packet class to virtual channel assignment (request / response separation).
+  parameter sf_vc_id_t   VC_EXEC        = sf_vc_id_t'(0),
+  parameter sf_vc_id_t   VC_MEM_REQ     = sf_vc_id_t'(0),
+  parameter sf_vc_id_t   VC_MEM_RSP     = sf_vc_id_t'(1),
+  parameter sf_vc_id_t   VC_TENSOR      = sf_vc_id_t'(1),
+  // Width of the programmable egress inter-flit gap.
+  parameter int unsigned TX_GAP_W       = 4,
+  // Width of the saturating ingress packet-drop counter.
+  parameter int unsigned DROP_CNT_W     = 16
+) (
+  // ---------------------------------------------------------------------------
+  //  Tile clock domain
+  // ---------------------------------------------------------------------------
+  input  logic                          tile_clk_i,
+  input  logic                          tile_rst_ni,
+
+  // TX ingress from compute_tile
+  input  logic                          tile_tx_valid_i,
+  output logic                          tile_tx_ready_o,
+  input  sf_tile_pkt_t                  tile_tx_pkt_i,
+
+  // RX egress to compute_tile
+  output logic                          tile_rx_valid_o,
+  input  logic                          tile_rx_ready_i,
+  output sf_tile_pkt_t                  tile_rx_pkt_o,
+
+  // Speculative squash of not-yet-transmitted egress packets
+  input  logic                          spec_squash_valid_i,
+  input  sf_spec_tag_t                  spec_squash_tag_i,
+
+  // Link control and status
+  input  logic [TX_GAP_W-1:0]           cfg_tx_gap_i,
+  input  logic                          pg_req_i,
+  output logic                          pg_ack_o,
+  output logic                          link_up_o,
+
+  // Error reporting
+  input  logic                          err_clr_i,
+  output logic                          err_rx_parity_o,
+  output logic                          err_rx_frame_o,
+  output logic                          err_rx_misroute_o,
+  output logic                          err_tx_class_o,
+  output logic [DROP_CNT_W-1:0]         rx_drop_cnt_o,
+
+  // ---------------------------------------------------------------------------
+  //  NoC clock domain
+  // ---------------------------------------------------------------------------
+  input  logic                          noc_clk_i,
+  input  logic                          noc_rst_ni,
+
+  // TX egress to noc_interconnect
+  output logic                          noc_tx_valid_o,
+  input  logic                          noc_tx_ready_i,
+  output sf_noc_flit_t                  noc_tx_flit_o,
+  output logic                          noc_tx_par_o,
+
+  // RX ingress from noc_interconnect
+  input  logic                          noc_rx_valid_i,
+  output logic                          noc_rx_ready_o,
+  input  sf_noc_flit_t                  noc_rx_flit_i,
+  input  logic                          noc_rx_par_i,
+  output logic [$clog2(RX_FIFO_DEPTH):0] noc_rx_credits_o,
+
+  // NoC-domain view of the tile link state
+  output logic                          noc_link_active_o
+);
+
+  // ===========================================================================
+  //  Local parameters
+  // ===========================================================================
+
+  localparam int unsigned FLIT_DATA_W   = SF_FLIT_DATA_W;
+  localparam int unsigned PAYLOAD_W     = SF_TILE_PAYLOAD_W;
+  localparam int unsigned MAX_BEATS     = (PAYLOAD_W + FLIT_DATA_W - 1) / FLIT_DATA_W;
+  localparam int unsigned BEAT_IDX_W    = $clog2(MAX_BEATS + 1);
+  localparam int unsigned BEAT_SEL_W    = (MAX_BEATS > 1) ? $clog2(MAX_BEATS) : 1;
+  localparam int unsigned PAD_PAYLOAD_W = MAX_BEATS * FLIT_DATA_W;
+
+  localparam int unsigned TXB_SLOTS     = 2;
+
+  localparam int unsigned TXF_AW        = $clog2(TX_FIFO_DEPTH);
+  localparam int unsigned RXF_AW        = $clog2(RX_FIFO_DEPTH);
+
+  localparam int unsigned LINK_SOF_W    = 8;
+  localparam int unsigned LINK_CRC_W    = 8;
+  localparam logic [LINK_SOF_W-1:0] LINK_SOF      = 8'hA5;
+  localparam logic [LINK_CRC_W-1:0] LINK_CRC_POLY = 8'h07;
+  localparam logic [LINK_CRC_W-1:0] LINK_CRC_SEED = 8'hFF;
+
+  localparam int unsigned EXEC_BITS     = $bits(sf_exec_pkt_t);
+  localparam int unsigned MEM_REQ_BITS  = $bits(sf_mem_req_t);
+  localparam int unsigned MEM_RSP_BITS  = $bits(sf_mem_rsp_t);
+  localparam int unsigned TENSOR_BITS   = $bits(sf_tensor_pkt_t);
+
+  localparam int unsigned EXEC_BEATS    = (EXEC_BITS    + FLIT_DATA_W - 1) / FLIT_DATA_W;
+  localparam int unsigned MEM_REQ_BEATS = (MEM_REQ_BITS + FLIT_DATA_W - 1) / FLIT_DATA_W;
+  localparam int unsigned MEM_RSP_BEATS = (MEM_RSP_BITS + FLIT_DATA_W - 1) / FLIT_DATA_W;
+  localparam int unsigned TENSOR_BEATS  = (TENSOR_BITS  + FLIT_DATA_W - 1) / FLIT_DATA_W;
+
+  localparam logic [PAYLOAD_W-1:0] EXEC_MASK    = {PAYLOAD_W{1'b1}} >> (PAYLOAD_W - EXEC_BITS);
+  localparam logic [PAYLOAD_W-1:0] MEM_REQ_MASK = {PAYLOAD_W{1'b1}} >> (PAYLOAD_W - MEM_REQ_BITS);
+  localparam logic [PAYLOAD_W-1:0] MEM_RSP_MASK = {PAYLOAD_W{1'b1}} >> (PAYLOAD_W - MEM_RSP_BITS);
+  localparam logic [PAYLOAD_W-1:0] TENSOR_MASK  = {PAYLOAD_W{1'b1}} >> (PAYLOAD_W - TENSOR_BITS);
+
+  // ===========================================================================
+  //  Local types
+  // ===========================================================================
+
+  typedef logic [FLIT_DATA_W-1:0]   flit_data_t;
+  typedef logic [BEAT_IDX_W-1:0]    beat_idx_t;
+  typedef logic [BEAT_SEL_W-1:0]    beat_sel_t;
+  typedef logic [PAYLOAD_W-1:0]     payload_t;
+  typedef logic [PAD_PAYLOAD_W-1:0] pad_payload_t;
+  typedef logic [TXF_AW:0]          txf_ptr_t;
+  typedef logic [RXF_AW:0]          rxf_ptr_t;
+
+  // Link-layer header carried in the data field of every HEAD flit.
+  typedef struct packed {
+    logic [LINK_SOF_W-1:0] sof;
+    beat_idx_t             beat_count;
+    sf_pkt_hdr_t           pkt_hdr;
+  } link_hdr_body_t;
+
+  typedef struct packed {
+    link_hdr_body_t        body;
+    logic [LINK_CRC_W-1:0] crc;
+  } link_hdr_t;
+
+  // Unit of storage in both CDC FIFOs: one flit plus its stream parity.
+  typedef struct packed {
+    sf_noc_flit_t          flit;
+    logic                  par;
+  } link_beat_t;
+
+  typedef enum logic [2:0] {
+    LS_RESET  = 3'd0,
+    LS_ACTIVE = 3'd1,
+    LS_DRAIN  = 3'd2,
+    LS_GATED  = 3'd3,
+    LS_WAKE   = 3'd4
+  } link_state_e;
+
+  localparam int unsigned LINK_HDR_W      = $bits(link_hdr_t);
+  localparam int unsigned LINK_HDR_BODY_W = $bits(link_hdr_body_t);
+  localparam flit_data_t  LINK_HDR_MASK   = {FLIT_DATA_W{1'b1}} >> (FLIT_DATA_W - LINK_HDR_W);
+
+  typedef logic [LINK_HDR_BODY_W-1:0] crc_tap_t;
+
+  // ===========================================================================
+  //  Elaboration-time configuration checks
+  // ===========================================================================
+
+  if ((TX_FIFO_DEPTH < 4) || ((TX_FIFO_DEPTH & (TX_FIFO_DEPTH - 1)) != 0)) begin : g_chk_tx_fifo_depth
+    $error("tile_interface: TX_FIFO_DEPTH must be a power of two and at least 4");
+  end
+
+  if ((RX_FIFO_DEPTH < 4) || ((RX_FIFO_DEPTH & (RX_FIFO_DEPTH - 1)) != 0)) begin : g_chk_rx_fifo_depth
+    $error("tile_interface: RX_FIFO_DEPTH must be a power of two and at least 4");
+  end
+
+  if (LINK_HDR_W > FLIT_DATA_W) begin : g_chk_link_hdr_fit
+    $error("tile_interface: link header does not fit in one flit data field");
+  end
+
+  if ((EXEC_BITS > PAYLOAD_W) || (MEM_REQ_BITS > PAYLOAD_W) ||
+      (MEM_RSP_BITS > PAYLOAD_W) || (TENSOR_BITS > PAYLOAD_W)) begin : g_chk_class_fit
+    $error("tile_interface: a packet class struct exceeds SF_TILE_PAYLOAD_W");
+  end
+
+  if ((TX_GAP_W == 0) || (DROP_CNT_W == 0)) begin : g_chk_widths
+    $error("tile_interface: TX_GAP_W and DROP_CNT_W must be non-zero");
+  end
+
+  // ===========================================================================
+  //  Functions
+  // ===========================================================================
+
+  function automatic logic class_known (input sf_pkt_class_e pkt_class);
+    logic known;
+    case (pkt_class)
+      SF_PKT_EXEC,
+      SF_PKT_MEM_REQ,
+      SF_PKT_MEM_RSP,
+      SF_PKT_TENSOR  : known = 1'b1;
+      default        : known = 1'b0;
+    endcase
+    return known;
+  endfunction
+
+  function automatic beat_idx_t class_beats (input sf_pkt_class_e pkt_class);
+    beat_idx_t beats;
+    case (pkt_class)
+      SF_PKT_EXEC    : beats = beat_idx_t'(EXEC_BEATS);
+      SF_PKT_MEM_REQ : beats = beat_idx_t'(MEM_REQ_BEATS);
+      SF_PKT_MEM_RSP : beats = beat_idx_t'(MEM_RSP_BEATS);
+      SF_PKT_TENSOR  : beats = beat_idx_t'(TENSOR_BEATS);
+      default        : beats = '0;
+    endcase
+    return beats;
+  endfunction
+
+  function automatic payload_t class_mask (input sf_pkt_class_e pkt_class);
+    payload_t mask;
+    case (pkt_class)
+      SF_PKT_EXEC    : mask = EXEC_MASK;
+      SF_PKT_MEM_REQ : mask = MEM_REQ_MASK;
+      SF_PKT_MEM_RSP : mask = MEM_RSP_MASK;
+      SF_PKT_TENSOR  : mask = TENSOR_MASK;
+      default        : mask = '0;
+    endcase
+    return mask;
+  endfunction
+
+  function automatic sf_vc_id_t class_vc (input sf_pkt_class_e pkt_class);
+    sf_vc_id_t vc;
+    case (pkt_class)
+      SF_PKT_EXEC    : vc = VC_EXEC;
+      SF_PKT_MEM_REQ : vc = VC_MEM_REQ;
+      SF_PKT_MEM_RSP : vc = VC_MEM_RSP;
+      SF_PKT_TENSOR  : vc = VC_TENSOR;
+      default        : vc = VC_EXEC;
+    endcase
+    return vc;
+  endfunction
+
+  // Header CRC-8 (x^8 + x^2 + x + 1, MSB first, seeded) in parallel form.
+  // Elaboration-time constant functions unroll the serial LFSR into one XOR
+  // tree per check bit: crc[k] = ^(body & link_crc_tap(k)) ^ LINK_CRC_CONST[k].
+  function automatic crc_tap_t link_crc_tap (input int bit_idx);
+    crc_tap_t mat [LINK_CRC_W];
+    crc_tap_t fb;
+    crc_tap_t tap;
+    for (int k = 0; k < LINK_CRC_W; k++) begin
+      mat[k] = '0;
+    end
+    for (int i = LINK_HDR_BODY_W - 1; i >= 0; i--) begin
+      fb    = mat[LINK_CRC_W-1];
+      fb[i] = ~fb[i];
+      for (int k = LINK_CRC_W - 1; k > 0; k--) begin
+        mat[k] = mat[k-1] ^ (LINK_CRC_POLY[k] ? fb : '0);
+      end
+      mat[0] = LINK_CRC_POLY[0] ? fb : '0;
+    end
+    tap = '0;
+    for (int k = 0; k < LINK_CRC_W; k++) begin
+      if (k == bit_idx) begin
+        tap = mat[k];
+      end
+    end
+    return tap;
+  endfunction
+
+  function automatic logic [LINK_CRC_W-1:0] link_crc_const ();
+    logic [LINK_CRC_W-1:0] crc;
+    logic                  fb;
+    crc = LINK_CRC_SEED;
+    for (int i = 0; i < LINK_HDR_BODY_W; i++) begin
+      fb  = crc[LINK_CRC_W-1];
+      crc = {crc[LINK_CRC_W-2:0], 1'b0} ^ ({LINK_CRC_W{fb}} & LINK_CRC_POLY);
+    end
+    return crc;
+  endfunction
+
+  localparam logic [LINK_CRC_W-1:0] LINK_CRC_CONST = link_crc_const();
+
+  function automatic logic spec_hit (input logic         spec_valid,
+                                     input sf_spec_tag_t spec_tag,
+                                     input logic         squash_vld,
+                                     input sf_spec_tag_t squash_tag);
+    return squash_vld && spec_valid && (spec_tag == squash_tag);
+  endfunction
+
+  function automatic rxf_ptr_t rxf_gray2bin (input rxf_ptr_t gray);
+    rxf_ptr_t bin;
+    for (int i = 0; i <= RXF_AW; i++) begin
+      bin[i] = ^(gray >> i);
+    end
+    return bin;
+  endfunction
+
+  // ===========================================================================
+  //  Signal declarations
+  // ===========================================================================
+
+  // ---- Reset bridging -------------------------------------------------------
+  logic                       rst_link_n;
+  (* ASYNC_REG = "TRUE" *) logic tile_rst_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic tile_rst_sync_q;
+  (* ASYNC_REG = "TRUE" *) logic noc_rst_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic noc_rst_sync_q;
+  logic                       tile_rst_n;
+  logic                       noc_rst_n;
+
+  // ---- Tile domain : link control -------------------------------------------
+  link_state_e                link_state_q;
+  link_state_e                link_state_d;
+  logic                       link_active_q;
+  logic                       rx_block_req_q;
+  logic                       pg_ack_q;
+  logic                       tx_path_idle;
+  logic                       rx_path_idle;
+  (* ASYNC_REG = "TRUE" *) logic noc_alive_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic noc_alive_sync_q;
+  (* ASYNC_REG = "TRUE" *) logic rx_block_ack_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic rx_block_ack_sync_q;
+
+  // ---- Tile domain : TX ingress buffer --------------------------------------
+  sf_tile_pkt_t               txb_pkt_q [TXB_SLOTS];
+  logic [TXB_SLOTS-1:0]       txb_vld_q;
+  logic [TXB_SLOTS-1:0]       txb_kill_q;
+  logic [TXB_SLOTS-1:0]       txb_kill_set;
+  logic [TXB_SLOTS-1:0]       txb_spec_vld_q;
+  sf_spec_tag_t               txb_spec_tag_q [TXB_SLOTS];
+  logic                       txb_wr_ptr_q;
+  logic                       txb_rd_ptr_q;
+  logic                       txb_push;
+  logic                       txb_in_kill;
+
+  // ---- Tile domain : framer / serialiser ------------------------------------
+  beat_idx_t                  ser_beat_q;
+  logic [TX_GAP_W-1:0]        ser_gap_q;
+  sf_tile_pkt_t               ser_pkt;
+  logic                       ser_vld;
+  logic                       ser_kill;
+  logic                       ser_class_ok;
+  beat_idx_t                  ser_nbeats;
+  beat_sel_t                  ser_pay_sel;
+  logic                       ser_head;
+  logic                       ser_last;
+  logic                       ser_skip;
+  logic                       ser_emit;
+  logic                       ser_pop;
+  link_hdr_body_t             ser_hdr_body;
+  logic [LINK_CRC_W-1:0]      ser_hdr_crc;
+  link_hdr_t                  ser_link_hdr;
+  flit_data_t                 ser_head_data;
+  pad_payload_t               ser_payload_pad;
+  flit_data_t                 ser_beat_data [MAX_BEATS];
+  sf_noc_flit_t               ser_flit;
+  link_beat_t                 ser_beat_ent;
+  logic                       ev_tx_class;
+
+  // ---- TX CDC FIFO : tile-domain write side ---------------------------------
+  link_beat_t                 txf_mem_q [TX_FIFO_DEPTH];
+  txf_ptr_t                   txf_wbin_q;
+  txf_ptr_t                   txf_wgray_q;
+  txf_ptr_t                   txf_wbin_d;
+  txf_ptr_t                   txf_wgray_d;
+  logic                       txf_full_q;
+  logic                       txf_full_d;
+  (* ASYNC_REG = "TRUE" *) txf_ptr_t txf_rgray_meta_q;
+  (* ASYNC_REG = "TRUE" *) txf_ptr_t txf_rgray_sync_q;
+
+  // ---- TX CDC FIFO : NoC-domain read side / egress register -----------------
+  txf_ptr_t                   txf_rbin_q;
+  txf_ptr_t                   txf_rgray_q;
+  txf_ptr_t                   txf_rbin_d;
+  txf_ptr_t                   txf_rgray_d;
+  logic                       txf_empty_d;
+  logic                       txf_pop;
+  logic                       txf_load;
+  logic                       txf_out_vld_q;
+  link_beat_t                 txf_out_q;
+  (* ASYNC_REG = "TRUE" *) txf_ptr_t txf_wgray_meta_q;
+  (* ASYNC_REG = "TRUE" *) txf_ptr_t txf_wgray_sync_q;
+
+  // ---- NoC domain : RX admission / control ----------------------------------
+  logic                       noc_alive_q;
+  logic                       rx_in_pkt_q;
+  logic                       rx_quiesce_q;
+  logic                       rx_block_ack_q;
+  logic                       rx_admit;
+  link_beat_t                 rxf_in_ent;
+  (* ASYNC_REG = "TRUE" *) logic rx_block_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic rx_block_sync_q;
+  (* ASYNC_REG = "TRUE" *) logic link_active_meta_q;
+  (* ASYNC_REG = "TRUE" *) logic link_active_sync_q;
+
+  // ---- RX CDC FIFO : NoC-domain write side ----------------------------------
+  link_beat_t                 rxf_mem_q [RX_FIFO_DEPTH];
+  rxf_ptr_t                   rxf_wbin_q;
+  rxf_ptr_t                   rxf_wgray_q;
+  rxf_ptr_t                   rxf_wbin_d;
+  rxf_ptr_t                   rxf_wgray_d;
+  logic                       rxf_full_q;
+  logic                       rxf_full_d;
+  logic                       rxf_push;
+  rxf_ptr_t                   rxf_rbin_sync;
+  rxf_ptr_t                   rxf_used_d;
+  rxf_ptr_t                   rx_credits_q;
+  (* ASYNC_REG = "TRUE" *) rxf_ptr_t rxf_rgray_meta_q;
+  (* ASYNC_REG = "TRUE" *) rxf_ptr_t rxf_rgray_sync_q;
+
+  // ---- RX CDC FIFO : tile-domain read side ----------------------------------
+  rxf_ptr_t                   rxf_rbin_q;
+  rxf_ptr_t                   rxf_rgray_q;
+  rxf_ptr_t                   rxf_rbin_d;
+  rxf_ptr_t                   rxf_rgray_d;
+  logic                       rxf_empty_d;
+  logic                       rxf_pop;
+  logic                       rxf_load;
+  logic                       rxf_out_vld_q;
+  link_beat_t                 rxf_out_q;
+  (* ASYNC_REG = "TRUE" *) rxf_ptr_t rxf_wgray_meta_q;
+  (* ASYNC_REG = "TRUE" *) rxf_ptr_t rxf_wgray_sync_q;
+
+  // ---- Tile domain : deserialiser / validator -------------------------------
+  sf_noc_flit_t               rx_flit;
+  logic                       rx_par_err;
+  logic                       rx_is_head;
+  logic                       rx_is_body;
+  logic                       rx_is_tail;
+  link_hdr_t                  rx_link_hdr;
+  logic [LINK_CRC_W-1:0]      rx_hdr_crc;
+  logic                       rx_hdr_rsvd_err;
+  logic                       rx_hdr_sof_err;
+  logic                       rx_hdr_crc_err;
+  logic                       rx_hdr_class_err;
+  logic                       rx_hdr_len_err;
+  logic                       rx_hdr_bad;
+  logic                       rx_misroute;
+  logic [BEAT_IDX_W:0]        rx_beat_inc;
+  logic                       rx_beat_final;
+  logic                       rx_out_free;
+  logic                       rx_beat_wr;
+  logic                       rx_commit;
+  logic                       rx_drop;
+  pad_payload_t               rx_asm_vec;
+  sf_tile_pkt_t               rx_commit_pkt;
+
+  logic                       rx_asm_active_q;
+  logic                       rx_asm_active_d;
+  logic                       rx_asm_err_q;
+  logic                       rx_asm_err_d;
+  beat_idx_t                  rx_asm_beat_q;
+  beat_idx_t                  rx_asm_beat_d;
+  beat_idx_t                  rx_asm_nbeats_q;
+  beat_idx_t                  rx_asm_nbeats_d;
+  sf_pkt_hdr_t                rx_asm_hdr_q;
+  sf_pkt_hdr_t                rx_asm_hdr_d;
+  flit_data_t                 rx_beat_buf_q [MAX_BEATS];
+
+  logic                       rx_pkt_vld_q;
+  sf_tile_pkt_t               rx_pkt_q;
+
+  // ---- Tile domain : error / status -----------------------------------------
+  logic                       ev_rx_parity;
+  logic                       ev_rx_frame;
+  logic                       ev_rx_misroute;
+  logic                       err_rx_parity_q;
+  logic                       err_rx_frame_q;
+  logic                       err_rx_misroute_q;
+  logic                       err_tx_class_q;
+  logic [DROP_CNT_W-1:0]      rx_drop_cnt_q;
+
+  // ===========================================================================
+  //  RESET BRIDGING
+  //  Asynchronous assertion into both domains, 2-FF synchronised deassertion
+  //  per domain. Neither half of a CDC FIFO can run while the other is held.
+  // ===========================================================================
+
+  assign rst_link_n = tile_rst_ni & noc_rst_ni;
+
+  always_ff @(posedge tile_clk_i or negedge rst_link_n) begin : tile_rst_sync
+    if (!rst_link_n) begin
+      tile_rst_meta_q <= 1'b0;
+      tile_rst_sync_q <= 1'b0;
+    end else begin
+      tile_rst_meta_q <= 1'b1;
+      tile_rst_sync_q <= tile_rst_meta_q;
+    end
+  end
+
+  always_ff @(posedge noc_clk_i or negedge rst_link_n) begin : noc_rst_sync
+    if (!rst_link_n) begin
+      noc_rst_meta_q <= 1'b0;
+      noc_rst_sync_q <= 1'b0;
+    end else begin
+      noc_rst_meta_q <= 1'b1;
+      noc_rst_sync_q <= noc_rst_meta_q;
+    end
+  end
+
+  assign tile_rst_n = tile_rst_sync_q;
+  assign noc_rst_n  = noc_rst_sync_q;
+
+  // ===========================================================================
+  //  TILE DOMAIN : LINK CONTROL
+  // ===========================================================================
+
+  // ---- 2-FF synchronisers : NoC -> tile control levels ----------------------
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : tile_ctrl_sync
+    if (!tile_rst_n) begin
+      noc_alive_meta_q    <= 1'b0;
+      noc_alive_sync_q    <= 1'b0;
+      rx_block_ack_meta_q <= 1'b0;
+      rx_block_ack_sync_q <= 1'b0;
+    end else begin
+      noc_alive_meta_q    <= noc_alive_q;
+      noc_alive_sync_q    <= noc_alive_meta_q;
+      rx_block_ack_meta_q <= rx_block_ack_q;
+      rx_block_ack_sync_q <= rx_block_ack_meta_q;
+    end
+  end
+
+  // ---- Quiescence detection -------------------------------------------------
+  always_comb begin : link_idle_detect
+    tx_path_idle = (txb_vld_q == '0)
+                && (ser_beat_q == '0)
+                && (txf_wgray_q == txf_rgray_sync_q);
+    rx_path_idle = rx_block_ack_sync_q
+                && (rxf_rgray_q == rxf_wgray_sync_q)
+                && !rxf_out_vld_q
+                && !rx_asm_active_q
+                && !rx_pkt_vld_q;
+  end
+
+  // ---- Link state machine ---------------------------------------------------
+  always_comb begin : link_fsm_next
+    link_state_d = link_state_q;
+    case (link_state_q)
+      LS_RESET  : if (noc_alive_sync_q)                     link_state_d = LS_ACTIVE;
+      LS_ACTIVE : if (pg_req_i)                             link_state_d = LS_DRAIN;
+      LS_DRAIN  : if (rx_block_ack_sync_q) begin
+                    if (!pg_req_i)                          link_state_d = LS_WAKE;
+                    else if (tx_path_idle && rx_path_idle)  link_state_d = LS_GATED;
+                  end
+      LS_GATED  : if (!pg_req_i)                            link_state_d = LS_WAKE;
+      LS_WAKE   : if (!rx_block_ack_sync_q)                 link_state_d = LS_ACTIVE;
+      default   :                                           link_state_d = LS_RESET;
+    endcase
+  end
+
+  // Every control level that leaves the tile domain is a dedicated flop.
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : link_fsm_reg
+    if (!tile_rst_n) begin
+      link_state_q   <= LS_RESET;
+      link_active_q  <= 1'b0;
+      rx_block_req_q <= 1'b0;
+      pg_ack_q       <= 1'b0;
+    end else begin
+      link_state_q   <= link_state_d;
+      link_active_q  <= (link_state_d == LS_ACTIVE);
+      rx_block_req_q <= (link_state_d == LS_DRAIN) || (link_state_d == LS_GATED);
+      pg_ack_q       <= (link_state_d == LS_GATED);
+    end
+  end
+
+  // ===========================================================================
+  //  TX PATH : TILE DOMAIN
+  // ===========================================================================
+
+  // ---- Ingress ping-pong buffer with registered ready -----------------------
+  assign tile_tx_ready_o = link_active_q && !txb_vld_q[txb_wr_ptr_q];
+  assign txb_push        = tile_tx_valid_i && tile_tx_ready_o;
+
+  // ---- Speculative squash: entries whose HEAD has not left are killed -------
+  //  Speculative tags are mirrored into a narrow side array so the squash
+  //  compare never fans out from the wide packet storage.
+  always_comb begin : tx_squash
+    txb_in_kill = spec_hit(tile_tx_pkt_i.hdr.spec_valid, tile_tx_pkt_i.hdr.spec_tag,
+                           spec_squash_valid_i, spec_squash_tag_i);
+    for (int unsigned s = 0; s < TXB_SLOTS; s++) begin
+      txb_kill_set[s] = txb_vld_q[s]
+                     && spec_hit(txb_spec_vld_q[s], txb_spec_tag_q[s],
+                                 spec_squash_valid_i, spec_squash_tag_i)
+                     && !((1'(s) == txb_rd_ptr_q) && (!ser_head || ser_emit));
+    end
+  end
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : txb_ctrl_reg
+    if (!tile_rst_n) begin
+      txb_vld_q    <= '0;
+      txb_kill_q   <= '0;
+      txb_wr_ptr_q <= 1'b0;
+      txb_rd_ptr_q <= 1'b0;
+    end else begin
+      for (int unsigned s = 0; s < TXB_SLOTS; s++) begin
+        if (txb_kill_set[s]) begin
+          txb_kill_q[s] <= 1'b1;
+        end
+      end
+      if (ser_pop) begin
+        txb_vld_q[txb_rd_ptr_q]  <= 1'b0;
+        txb_kill_q[txb_rd_ptr_q] <= 1'b0;
+        txb_rd_ptr_q             <= ~txb_rd_ptr_q;
+      end
+      if (txb_push) begin
+        txb_vld_q[txb_wr_ptr_q]  <= 1'b1;
+        txb_kill_q[txb_wr_ptr_q] <= txb_in_kill;
+        txb_wr_ptr_q             <= ~txb_wr_ptr_q;
+      end
+    end
+  end
+
+  always_ff @(posedge tile_clk_i) begin : txb_data_reg
+    if (txb_push) begin
+      txb_pkt_q[txb_wr_ptr_q]      <= tile_tx_pkt_i;
+      txb_spec_vld_q[txb_wr_ptr_q] <= tile_tx_pkt_i.hdr.spec_valid;
+      txb_spec_tag_q[txb_wr_ptr_q] <= tile_tx_pkt_i.hdr.spec_tag;
+    end
+  end
+
+  // ---- Framer / serialiser --------------------------------------------------
+  //  ser_beat_q : 0 = HEAD flit, 1..ser_nbeats = payload beats (last = TAIL).
+  always_comb begin : ser_control
+    ser_pkt      = txb_pkt_q[txb_rd_ptr_q];
+    ser_vld      = txb_vld_q[txb_rd_ptr_q];
+    ser_kill     = txb_kill_q[txb_rd_ptr_q];
+    ser_class_ok = class_known(ser_pkt.hdr.pkt_class);
+    ser_nbeats   = class_beats(ser_pkt.hdr.pkt_class);
+    ser_head     = (ser_beat_q == '0);
+    ser_last     = (ser_beat_q == ser_nbeats);
+    ser_pay_sel  = ser_head ? '0 : beat_sel_t'(ser_beat_q - 1'b1);
+    ser_skip     = ser_vld && ser_head && (ser_kill || !ser_class_ok);
+    ser_emit     = ser_vld && !ser_skip && !txf_full_q && (ser_gap_q == '0);
+    ser_pop      = ser_skip || (ser_emit && ser_last);
+    ev_tx_class  = ser_vld && ser_head && !ser_kill && !ser_class_ok;
+  end
+
+  always_comb begin : ser_hdr_build
+    ser_hdr_body.sof        = LINK_SOF;
+    ser_hdr_body.beat_count = ser_nbeats;
+    ser_hdr_body.pkt_hdr    = ser_pkt.hdr;
+  end
+
+  always_comb begin : ser_pack
+    ser_link_hdr.body               = ser_hdr_body;
+    ser_link_hdr.crc                = ser_hdr_crc;
+
+    ser_head_data                   = '0;
+    ser_head_data[LINK_HDR_W-1:0]   = ser_link_hdr;
+
+    ser_payload_pad                 = '0;
+    ser_payload_pad[PAYLOAD_W-1:0]  = ser_pkt.payload & class_mask(ser_pkt.hdr.pkt_class);
+
+    for (int unsigned b = 0; b < MAX_BEATS; b++) begin
+      ser_beat_data[b] = ser_payload_pad[b*FLIT_DATA_W +: FLIT_DATA_W];
+    end
+
+    ser_flit                        = '0;
+    ser_flit.vc_id                  = class_vc(ser_pkt.hdr.pkt_class);
+    ser_flit.dst_id                 = ser_pkt.hdr.dst_id;
+    if (ser_head) begin
+      ser_flit.flit_type            = SF_FLIT_HEAD;
+      ser_flit.data                 = ser_head_data;
+    end else begin
+      ser_flit.flit_type            = ser_last ? SF_FLIT_TAIL : SF_FLIT_BODY;
+      ser_flit.data                 = ser_beat_data[ser_pay_sel];
+    end
+
+    ser_beat_ent.flit               = ser_flit;
+    ser_beat_ent.par                = EN_FLIT_PARITY ? (^ser_flit) : 1'b0;
+  end
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : ser_reg
+    if (!tile_rst_n) begin
+      ser_beat_q <= '0;
+      ser_gap_q  <= '0;
+    end else begin
+      if (ser_pop) begin
+        ser_beat_q <= '0;
+      end else if (ser_emit) begin
+        ser_beat_q <= ser_beat_q + 1'b1;
+      end
+      if (ser_emit) begin
+        ser_gap_q <= cfg_tx_gap_i;
+      end else if (ser_gap_q != '0) begin
+        ser_gap_q <= ser_gap_q - 1'b1;
+      end
+    end
+  end
+
+  // ---- TX CDC FIFO write side -----------------------------------------------
+  always_comb begin : txf_wr_next
+    txf_wbin_d  = txf_wbin_q + txf_ptr_t'(ser_emit);
+    txf_wgray_d = txf_wbin_d ^ (txf_wbin_d >> 1);
+    txf_full_d  = (txf_wgray_d == {~txf_rgray_sync_q[TXF_AW -: 2], txf_rgray_sync_q[TXF_AW-2:0]});
+  end
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : txf_wr_reg
+    if (!tile_rst_n) begin
+      txf_wbin_q       <= '0;
+      txf_wgray_q      <= '0;
+      txf_full_q       <= 1'b0;
+      txf_rgray_meta_q <= '0;
+      txf_rgray_sync_q <= '0;
+    end else begin
+      txf_wbin_q       <= txf_wbin_d;
+      txf_wgray_q      <= txf_wgray_d;
+      txf_full_q       <= txf_full_d;
+      // 2-FF synchroniser : TX read pointer, NoC -> tile
+      txf_rgray_meta_q <= txf_rgray_q;
+      txf_rgray_sync_q <= txf_rgray_meta_q;
+    end
+  end
+
+  always_ff @(posedge tile_clk_i) begin : txf_mem_wr
+    if (ser_emit) begin
+      txf_mem_q[txf_wbin_q[TXF_AW-1:0]] <= ser_beat_ent;
+    end
+  end
+
+  // ===========================================================================
+  //  TX PATH : NOC DOMAIN
+  // ===========================================================================
+
+  // Registered FWFT egress: the read pointer advances only on NoC acceptance.
+  always_comb begin : txf_rd_next
+    txf_pop     = txf_out_vld_q && noc_tx_ready_i;
+    txf_rbin_d  = txf_rbin_q + txf_ptr_t'(txf_pop);
+    txf_rgray_d = txf_rbin_d ^ (txf_rbin_d >> 1);
+    txf_empty_d = (txf_rgray_d == txf_wgray_sync_q);
+    txf_load    = !txf_empty_d && (txf_pop || !txf_out_vld_q);
+  end
+
+  always_ff @(posedge noc_clk_i or negedge noc_rst_n) begin : txf_rd_reg
+    if (!noc_rst_n) begin
+      txf_rbin_q       <= '0;
+      txf_rgray_q      <= '0;
+      txf_out_vld_q    <= 1'b0;
+      txf_out_q        <= '0;
+      txf_wgray_meta_q <= '0;
+      txf_wgray_sync_q <= '0;
+    end else begin
+      txf_rbin_q       <= txf_rbin_d;
+      txf_rgray_q      <= txf_rgray_d;
+      txf_out_vld_q    <= !txf_empty_d;
+      if (txf_load) begin
+        txf_out_q      <= txf_mem_q[txf_rbin_d[TXF_AW-1:0]];
+      end
+      // 2-FF synchroniser : TX write pointer, tile -> NoC
+      txf_wgray_meta_q <= txf_wgray_q;
+      txf_wgray_sync_q <= txf_wgray_meta_q;
+    end
+  end
+
+  assign noc_tx_valid_o = txf_out_vld_q;
+  assign noc_tx_flit_o  = txf_out_q.flit;
+  assign noc_tx_par_o   = txf_out_q.par;
+
+  // ===========================================================================
+  //  RX PATH : NOC DOMAIN
+  // ===========================================================================
+
+  // ---- 2-FF synchronisers : tile -> NoC control levels ----------------------
+  always_ff @(posedge noc_clk_i or negedge noc_rst_n) begin : noc_ctrl_sync
+    if (!noc_rst_n) begin
+      rx_block_meta_q    <= 1'b0;
+      rx_block_sync_q    <= 1'b0;
+      link_active_meta_q <= 1'b0;
+      link_active_sync_q <= 1'b0;
+    end else begin
+      rx_block_meta_q    <= rx_block_req_q;
+      rx_block_sync_q    <= rx_block_meta_q;
+      link_active_meta_q <= link_active_q;
+      link_active_sync_q <= link_active_meta_q;
+    end
+  end
+
+  // ---- Admission: a block request closes ingress only at a packet boundary --
+  assign rx_admit       = !rx_block_sync_q || rx_in_pkt_q;
+  assign noc_rx_ready_o = !rxf_full_q && rx_admit;
+  assign rxf_push       = noc_rx_valid_i && noc_rx_ready_o;
+
+  always_comb begin : rxf_in_pack
+    rxf_in_ent.flit = noc_rx_flit_i;
+    rxf_in_ent.par  = noc_rx_par_i;
+  end
+
+  // ---- Packet-boundary tracking, quiesce and acknowledge --------------------
+  //  The acknowledge trails the final admitted write by two NoC cycles so the
+  //  last RX write pointer update is launched ahead of it.
+  always_ff @(posedge noc_clk_i or negedge noc_rst_n) begin : rx_boundary_reg
+    if (!noc_rst_n) begin
+      noc_alive_q    <= 1'b0;
+      rx_in_pkt_q    <= 1'b0;
+      rx_quiesce_q   <= 1'b0;
+      rx_block_ack_q <= 1'b0;
+    end else begin
+      noc_alive_q    <= 1'b1;
+      if (rxf_push) begin
+        case (noc_rx_flit_i.flit_type)
+          SF_FLIT_HEAD : rx_in_pkt_q <= 1'b1;
+          SF_FLIT_BODY : rx_in_pkt_q <= rx_in_pkt_q;
+          default      : rx_in_pkt_q <= 1'b0;
+        endcase
+      end
+      rx_quiesce_q   <= rx_block_sync_q && !rx_in_pkt_q;
+      rx_block_ack_q <= rx_block_sync_q && rx_quiesce_q;
+    end
+  end
+
+  // ---- RX CDC FIFO write side -----------------------------------------------
+  always_comb begin : rxf_wr_next
+    rxf_wbin_d    = rxf_wbin_q + rxf_ptr_t'(rxf_push);
+    rxf_wgray_d   = rxf_wbin_d ^ (rxf_wbin_d >> 1);
+    rxf_full_d    = (rxf_wgray_d == {~rxf_rgray_sync_q[RXF_AW -: 2], rxf_rgray_sync_q[RXF_AW-2:0]});
+    rxf_rbin_sync = rxf_gray2bin(rxf_rgray_sync_q);
+    rxf_used_d    = rxf_wbin_d - rxf_rbin_sync;
+  end
+
+  always_ff @(posedge noc_clk_i or negedge noc_rst_n) begin : rxf_wr_reg
+    if (!noc_rst_n) begin
+      rxf_wbin_q       <= '0;
+      rxf_wgray_q      <= '0;
+      rxf_full_q       <= 1'b0;
+      rx_credits_q     <= rxf_ptr_t'(RX_FIFO_DEPTH);
+      rxf_rgray_meta_q <= '0;
+      rxf_rgray_sync_q <= '0;
+    end else begin
+      rxf_wbin_q       <= rxf_wbin_d;
+      rxf_wgray_q      <= rxf_wgray_d;
+      rxf_full_q       <= rxf_full_d;
+      rx_credits_q     <= rxf_ptr_t'(RX_FIFO_DEPTH) - rxf_used_d;
+      // 2-FF synchroniser : RX read pointer, tile -> NoC
+      rxf_rgray_meta_q <= rxf_rgray_q;
+      rxf_rgray_sync_q <= rxf_rgray_meta_q;
+    end
+  end
+
+  always_ff @(posedge noc_clk_i) begin : rxf_mem_wr
+    if (rxf_push) begin
+      rxf_mem_q[rxf_wbin_q[RXF_AW-1:0]] <= rxf_in_ent;
+    end
+  end
+
+  assign noc_rx_credits_o  = rx_credits_q;
+  assign noc_link_active_o = link_active_sync_q;
+
+  // ===========================================================================
+  //  RX PATH : TILE DOMAIN
+  // ===========================================================================
+
+  // ---- RX CDC FIFO read side (registered FWFT) ------------------------------
+  always_comb begin : rxf_rd_next
+    rxf_rbin_d  = rxf_rbin_q + rxf_ptr_t'(rxf_pop);
+    rxf_rgray_d = rxf_rbin_d ^ (rxf_rbin_d >> 1);
+    rxf_empty_d = (rxf_rgray_d == rxf_wgray_sync_q);
+    rxf_load    = !rxf_empty_d && (rxf_pop || !rxf_out_vld_q);
+  end
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : rxf_rd_reg
+    if (!tile_rst_n) begin
+      rxf_rbin_q       <= '0;
+      rxf_rgray_q      <= '0;
+      rxf_out_vld_q    <= 1'b0;
+      rxf_out_q        <= '0;
+      rxf_wgray_meta_q <= '0;
+      rxf_wgray_sync_q <= '0;
+    end else begin
+      rxf_rbin_q       <= rxf_rbin_d;
+      rxf_rgray_q      <= rxf_rgray_d;
+      rxf_out_vld_q    <= !rxf_empty_d;
+      if (rxf_load) begin
+        rxf_out_q      <= rxf_mem_q[rxf_rbin_d[RXF_AW-1:0]];
+      end
+      // 2-FF synchroniser : RX write pointer, NoC -> tile
+      rxf_wgray_meta_q <= rxf_wgray_q;
+      rxf_wgray_sync_q <= rxf_wgray_meta_q;
+    end
+  end
+
+  // ---- Flit decode and header validation ------------------------------------
+  assign rx_flit     = rxf_out_q.flit;
+  assign rx_link_hdr = rx_flit.data[LINK_HDR_W-1:0];
+
+  // ---- Parallel header CRC networks (egress generate, ingress check) --------
+  for (genvar k = 0; k < LINK_CRC_W; k++) begin : g_hdr_crc
+    localparam crc_tap_t TAP = link_crc_tap(k);
+    assign ser_hdr_crc[k] = (^(ser_hdr_body     & TAP)) ^ LINK_CRC_CONST[k];
+    assign rx_hdr_crc[k]  = (^(rx_link_hdr.body & TAP)) ^ LINK_CRC_CONST[k];
+  end
+
+  always_comb begin : rx_decode
+    rx_par_err       = EN_FLIT_PARITY && ((^rx_flit) != rxf_out_q.par);
+    rx_is_head       = (rx_flit.flit_type == SF_FLIT_HEAD);
+    rx_is_body       = (rx_flit.flit_type == SF_FLIT_BODY);
+    rx_is_tail       = (rx_flit.flit_type == SF_FLIT_TAIL);
+
+    rx_hdr_rsvd_err  = |(rx_flit.data & ~LINK_HDR_MASK);
+    rx_hdr_sof_err   = (rx_link_hdr.body.sof != LINK_SOF);
+    rx_hdr_crc_err   = (rx_link_hdr.crc != rx_hdr_crc);
+    rx_hdr_class_err = !class_known(rx_link_hdr.body.pkt_hdr.pkt_class);
+    rx_hdr_len_err   = (rx_link_hdr.body.beat_count != class_beats(rx_link_hdr.body.pkt_hdr.pkt_class));
+    rx_hdr_bad       = rx_hdr_rsvd_err || rx_hdr_sof_err || rx_hdr_crc_err
+                    || rx_hdr_class_err || rx_hdr_len_err;
+    rx_misroute      = EN_DST_CHECK
+                    && ((rx_flit.dst_id != LOCAL_NODE_ID)
+                     || (rx_link_hdr.body.pkt_hdr.dst_id != LOCAL_NODE_ID));
+
+    rx_beat_inc      = {1'b0, rx_asm_beat_q} + 1'b1;
+    rx_beat_final    = (rx_beat_inc == {1'b0, rx_asm_nbeats_q});
+
+    // Only a TAIL waits for the egress register; all other flits drain freely.
+    rx_out_free      = !rx_pkt_vld_q || tile_rx_ready_i;
+    rxf_pop          = rxf_out_vld_q && (!rx_is_tail || rx_out_free);
+  end
+
+  // ---- Reassembly view: buffered beats with the arriving TAIL substituted ---
+  always_comb begin : rx_assemble
+    for (int unsigned b = 0; b < MAX_BEATS; b++) begin
+      rx_asm_vec[b*FLIT_DATA_W +: FLIT_DATA_W] =
+        (beat_idx_t'(b) == rx_asm_beat_q) ? rx_flit.data : rx_beat_buf_q[b];
+    end
+    rx_commit_pkt.hdr     = rx_asm_hdr_q;
+    rx_commit_pkt.payload = rx_asm_vec[PAYLOAD_W-1:0] & class_mask(rx_asm_hdr_q.pkt_class);
+  end
+
+  // ---- Deserialiser state machine -------------------------------------------
+  always_comb begin : rx_deser_next
+    rx_asm_active_d = rx_asm_active_q;
+    rx_asm_err_d    = rx_asm_err_q;
+    rx_asm_beat_d   = rx_asm_beat_q;
+    rx_asm_nbeats_d = rx_asm_nbeats_q;
+    rx_asm_hdr_d    = rx_asm_hdr_q;
+    rx_beat_wr      = 1'b0;
+    rx_commit       = 1'b0;
+    rx_drop         = 1'b0;
+    ev_rx_parity    = 1'b0;
+    ev_rx_frame     = 1'b0;
+    ev_rx_misroute  = 1'b0;
+
+    if (rxf_pop) begin
+      ev_rx_parity = rx_par_err;
+
+      if (rx_is_head) begin
+        // A HEAD inside a packet truncates the predecessor and resynchronises.
+        if (rx_asm_active_q) begin
+          rx_drop     = 1'b1;
+          ev_rx_frame = 1'b1;
+        end
+        if (rx_hdr_bad) begin
+          ev_rx_frame = 1'b1;
+        end
+        ev_rx_misroute  = rx_misroute;
+        rx_asm_active_d = 1'b1;
+        rx_asm_err_d    = rx_hdr_bad || rx_misroute || rx_par_err;
+        rx_asm_beat_d   = '0;
+        rx_asm_nbeats_d = rx_link_hdr.body.beat_count;
+        rx_asm_hdr_d    = rx_link_hdr.body.pkt_hdr;
+
+      end else if (rx_is_body) begin
+        if (!rx_asm_active_q) begin
+          ev_rx_frame = 1'b1;
+        end else begin
+          rx_beat_wr = (rx_asm_beat_q < beat_idx_t'(MAX_BEATS));
+          if (rx_asm_beat_q != beat_idx_t'(MAX_BEATS)) begin
+            rx_asm_beat_d = rx_asm_beat_q + 1'b1;
+          end
+          if (rx_beat_inc >= {1'b0, rx_asm_nbeats_q}) begin
+            rx_asm_err_d = 1'b1;
+            ev_rx_frame  = 1'b1;
+          end
+          if (rx_par_err) begin
+            rx_asm_err_d = 1'b1;
+          end
+        end
+
+      end else if (rx_is_tail) begin
+        if (!rx_asm_active_q) begin
+          ev_rx_frame = 1'b1;
+        end else begin
+          rx_asm_active_d = 1'b0;
+          if (!rx_asm_err_q && !rx_par_err && rx_beat_final) begin
+            rx_commit = 1'b1;
+          end else begin
+            rx_drop = 1'b1;
+            if (!rx_beat_final) begin
+              ev_rx_frame = 1'b1;
+            end
+          end
+        end
+
+      end else begin
+        ev_rx_frame = 1'b1;
+        if (rx_asm_active_q) begin
+          rx_asm_err_d = 1'b1;
+        end
+      end
+    end
+  end
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : rx_deser_reg
+    if (!tile_rst_n) begin
+      rx_asm_active_q <= 1'b0;
+      rx_asm_err_q    <= 1'b0;
+      rx_asm_beat_q   <= '0;
+      rx_asm_nbeats_q <= '0;
+      rx_asm_hdr_q    <= '0;
+    end else begin
+      rx_asm_active_q <= rx_asm_active_d;
+      rx_asm_err_q    <= rx_asm_err_d;
+      rx_asm_beat_q   <= rx_asm_beat_d;
+      rx_asm_nbeats_q <= rx_asm_nbeats_d;
+      rx_asm_hdr_q    <= rx_asm_hdr_d;
+    end
+  end
+
+  always_ff @(posedge tile_clk_i) begin : rx_beat_buf_wr
+    if (rx_beat_wr) begin
+      rx_beat_buf_q[beat_sel_t'(rx_asm_beat_q)] <= rx_flit.data;
+    end
+  end
+
+  // ---- Egress packet register to compute_tile -------------------------------
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : rx_out_reg
+    if (!tile_rst_n) begin
+      rx_pkt_vld_q <= 1'b0;
+      rx_pkt_q     <= '0;
+    end else if (rx_commit) begin
+      rx_pkt_vld_q <= 1'b1;
+      rx_pkt_q     <= rx_commit_pkt;
+    end else if (tile_rx_ready_i) begin
+      rx_pkt_vld_q <= 1'b0;
+    end
+  end
+
+  assign tile_rx_valid_o = rx_pkt_vld_q;
+  assign tile_rx_pkt_o   = rx_pkt_q;
+
+  // ===========================================================================
+  //  TILE DOMAIN : ERROR AND STATUS
+  //  Sticky flags; an event coincident with err_clr_i is retained.
+  // ===========================================================================
+
+  always_ff @(posedge tile_clk_i or negedge tile_rst_n) begin : err_reg
+    if (!tile_rst_n) begin
+      err_rx_parity_q   <= 1'b0;
+      err_rx_frame_q    <= 1'b0;
+      err_rx_misroute_q <= 1'b0;
+      err_tx_class_q    <= 1'b0;
+      rx_drop_cnt_q     <= '0;
+    end else begin
+      err_rx_parity_q   <= ev_rx_parity   || (err_rx_parity_q   && !err_clr_i);
+      err_rx_frame_q    <= ev_rx_frame    || (err_rx_frame_q    && !err_clr_i);
+      err_rx_misroute_q <= ev_rx_misroute || (err_rx_misroute_q && !err_clr_i);
+      err_tx_class_q    <= ev_tx_class    || (err_tx_class_q    && !err_clr_i);
+      if (err_clr_i) begin
+        rx_drop_cnt_q   <= DROP_CNT_W'(rx_drop);
+      end else if (rx_drop && (rx_drop_cnt_q != '1)) begin
+        rx_drop_cnt_q   <= rx_drop_cnt_q + 1'b1;
+      end
+    end
+  end
+
+  assign err_rx_parity_o   = err_rx_parity_q;
+  assign err_rx_frame_o    = err_rx_frame_q;
+  assign err_rx_misroute_o = err_rx_misroute_q;
+  assign err_tx_class_o    = err_tx_class_q;
+  assign rx_drop_cnt_o     = rx_drop_cnt_q;
+  assign link_up_o         = link_active_q;
+  assign pg_ack_o          = pg_ack_q;
+
+  // ===========================================================================
+  //  ASSERTIONS
+  // ===========================================================================
+`ifndef SYNTHESIS
+
+  function automatic txf_ptr_t txf_gray2bin (input txf_ptr_t gray);
+    txf_ptr_t bin;
+    for (int i = 0; i <= TXF_AW; i++) begin
+      bin[i] = ^(gray >> i);
+    end
+    return bin;
+  endfunction
+
+  // Serial reference model of the header CRC-8 for the parallel XOR network.
+  function automatic logic [LINK_CRC_W-1:0] ref_hdr_crc (input link_hdr_body_t body);
+    logic [LINK_HDR_BODY_W-1:0] msg;
+    logic [LINK_CRC_W-1:0]      crc;
+    logic                       fb;
+    msg = body;
+    crc = LINK_CRC_SEED;
+    for (int i = LINK_HDR_BODY_W - 1; i >= 0; i--) begin
+      fb  = crc[LINK_CRC_W-1] ^ msg[i];
+      crc = {crc[LINK_CRC_W-2:0], 1'b0} ^ ({LINK_CRC_W{fb}} & LINK_CRC_POLY);
+    end
+    return crc;
+  endfunction
+
+  // ---- Egress framing monitor (NoC domain) ----------------------------------
+  logic        mon_tx_in_pkt_q;
+  sf_vc_id_t   mon_tx_vc_q;
+  sf_node_id_t mon_tx_dst_q;
+
+  always_ff @(posedge noc_clk_i or negedge noc_rst_n) begin : mon_tx_framing
+    if (!noc_rst_n) begin
+      mon_tx_in_pkt_q <= 1'b0;
+      mon_tx_vc_q     <= '0;
+      mon_tx_dst_q    <= '0;
+    end else if (noc_tx_valid_o && noc_tx_ready_i) begin
+      mon_tx_in_pkt_q <= (noc_tx_flit_o.flit_type != SF_FLIT_TAIL);
+      if (noc_tx_flit_o.flit_type == SF_FLIT_HEAD) begin
+        mon_tx_vc_q   <= noc_tx_flit_o.vc_id;
+        mon_tx_dst_q  <= noc_tx_flit_o.dst_id;
+      end
+    end
+  end
+
+  // ---- Reset synchronisation invariants -------------------------------------
+  a_rst_bridge_tile : assert property (@(posedge tile_clk_i) !rst_link_n |-> !tile_rst_n)
+    else $error("tile_interface: tile boundary logic out of reset while link reset asserted");
+  a_rst_bridge_noc  : assert property (@(posedge noc_clk_i) !rst_link_n |-> !noc_rst_n)
+    else $error("tile_interface: NoC boundary logic out of reset while link reset asserted");
+  a_rst_sync_order_tile : assert property (@(posedge tile_clk_i) $rose(tile_rst_sync_q) |-> $past(tile_rst_meta_q))
+    else $error("tile_interface: tile reset released without passing the 2-FF synchroniser");
+  a_rst_sync_order_noc  : assert property (@(posedge noc_clk_i) $rose(noc_rst_sync_q) |-> $past(noc_rst_meta_q))
+    else $error("tile_interface: NoC reset released without passing the 2-FF synchroniser");
+
+  // ---- CDC pointer discipline: at most one Gray bit changes per launch ------
+  a_txf_wgray_step : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                      $onehot0(txf_wgray_q ^ $past(txf_wgray_q)))
+    else $error("tile_interface: TX write Gray pointer changed by more than one bit");
+  a_txf_rgray_step : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                      $onehot0(txf_rgray_q ^ $past(txf_rgray_q)))
+    else $error("tile_interface: TX read Gray pointer changed by more than one bit");
+  a_rxf_wgray_step : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                      $onehot0(rxf_wgray_q ^ $past(rxf_wgray_q)))
+    else $error("tile_interface: RX write Gray pointer changed by more than one bit");
+  a_rxf_rgray_step : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                      $onehot0(rxf_rgray_q ^ $past(rxf_rgray_q)))
+    else $error("tile_interface: RX read Gray pointer changed by more than one bit");
+
+  // ---- Buffer overflow detection --------------------------------------------
+  a_txf_no_overflow : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                       (txf_wbin_q - txf_gray2bin(txf_rgray_sync_q)) <= txf_ptr_t'(TX_FIFO_DEPTH))
+    else $error("tile_interface: TX CDC FIFO overflow");
+  a_rxf_no_overflow : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                       (rxf_wbin_q - rxf_gray2bin(rxf_rgray_sync_q)) <= rxf_ptr_t'(RX_FIFO_DEPTH))
+    else $error("tile_interface: RX CDC FIFO overflow");
+  a_txf_push_not_full : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                         ser_emit |-> !txf_full_q)
+    else $error("tile_interface: TX CDC FIFO written while full");
+  a_rxf_push_not_full : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                         rxf_push |-> !rxf_full_q)
+    else $error("tile_interface: RX CDC FIFO written while full");
+  a_txb_no_overwrite : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                        txb_push |-> !txb_vld_q[txb_wr_ptr_q])
+    else $error("tile_interface: TX ingress buffer slot overwritten");
+  a_rx_credit_bound : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                       noc_rx_credits_o <= rxf_ptr_t'(RX_FIFO_DEPTH))
+    else $error("tile_interface: RX credit count exceeds FIFO depth");
+  a_rx_beat_bound : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                     rx_asm_beat_q <= beat_idx_t'(MAX_BEATS))
+    else $error("tile_interface: RX reassembly beat index out of range");
+
+  // ---- Handshake stability and data/valid alignment -------------------------
+  a_noc_tx_hold : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                   noc_tx_valid_o && !noc_tx_ready_i |=>
+                                   noc_tx_valid_o && $stable(noc_tx_flit_o) && $stable(noc_tx_par_o))
+    else $error("tile_interface: NoC egress flit changed while stalled");
+  a_noc_tx_known : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                    noc_tx_valid_o |-> !$isunknown({noc_tx_flit_o, noc_tx_par_o}))
+    else $error("tile_interface: NoC egress valid with unknown flit");
+  a_noc_tx_par_align : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                        EN_FLIT_PARITY && noc_tx_valid_o |->
+                                        ((^noc_tx_flit_o) == noc_tx_par_o))
+    else $error("tile_interface: NoC egress data/parity misaligned across CDC FIFO");
+  a_tile_rx_hold : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                    tile_rx_valid_o && !tile_rx_ready_i |=>
+                                    tile_rx_valid_o && $stable(tile_rx_pkt_o))
+    else $error("tile_interface: tile RX packet changed while stalled");
+  a_tile_rx_known : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                     tile_rx_valid_o |-> !$isunknown(tile_rx_pkt_o))
+    else $error("tile_interface: tile RX valid with unknown packet");
+  a_tile_rx_class : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                     tile_rx_valid_o |-> class_known(tile_rx_pkt_o.hdr.pkt_class))
+    else $error("tile_interface: tile RX packet with illegal class");
+  a_tile_rx_dst : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                   EN_DST_CHECK && tile_rx_valid_o |->
+                                   (tile_rx_pkt_o.hdr.dst_id == LOCAL_NODE_ID))
+    else $error("tile_interface: tile RX packet delivered to wrong node");
+  a_tile_rx_masked : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                      tile_rx_valid_o |->
+                                      ((tile_rx_pkt_o.payload & ~class_mask(tile_rx_pkt_o.hdr.pkt_class)) == '0))
+    else $error("tile_interface: tile RX payload bits beyond class width not cleared");
+
+  // ---- Packet alignment on the serialised stream ----------------------------
+  a_noc_tx_framing : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                      noc_tx_valid_o |->
+                                      ((noc_tx_flit_o.flit_type == SF_FLIT_HEAD) ? !mon_tx_in_pkt_q :
+                                       ((noc_tx_flit_o.flit_type == SF_FLIT_BODY) ||
+                                        (noc_tx_flit_o.flit_type == SF_FLIT_TAIL)) && mon_tx_in_pkt_q))
+    else $error("tile_interface: NoC egress flit sequence breaks packet framing");
+  a_noc_tx_meta_aligned : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                           noc_tx_valid_o && mon_tx_in_pkt_q |->
+                                           (noc_tx_flit_o.vc_id == mon_tx_vc_q) &&
+                                           (noc_tx_flit_o.dst_id == mon_tx_dst_q))
+    else $error("tile_interface: vc_id / dst_id changed inside a packet");
+  a_hdr_crc_ref : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                   ser_emit && ser_head |-> (ser_hdr_crc == ref_hdr_crc(ser_hdr_body)))
+    else $error("tile_interface: parallel header CRC disagrees with serial reference");
+  a_ser_no_abort : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                    !ser_head |-> ser_vld)
+    else $error("tile_interface: serialiser lost its packet mid-frame");
+
+  // ---- CDC handshake correctness --------------------------------------------
+  a_rx_block_boundary : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                         rx_block_sync_q && !rx_in_pkt_q |-> !noc_rx_ready_o)
+    else $error("tile_interface: RX admitted a new packet while blocked");
+  a_rx_ack_needs_req : assert property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                        rx_block_ack_q |-> rx_block_sync_q || $past(rx_block_sync_q))
+    else $error("tile_interface: RX quiesce acknowledged without request");
+  a_link_ack_rise : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                     $rose(rx_block_ack_sync_q) |-> rx_block_req_q)
+    else $error("tile_interface: quiesce acknowledge rose without outstanding request");
+  a_pg_ack_drained : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                      pg_ack_o |-> tx_path_idle && rx_path_idle && !tile_tx_ready_o)
+    else $error("tile_interface: power-gate acknowledged with traffic in flight");
+  a_tx_ready_link : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                     tile_tx_ready_o |-> link_up_o)
+    else $error("tile_interface: TX ingress open while link not active");
+  a_link_state_legal : assert property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                        link_state_q inside {LS_RESET, LS_ACTIVE, LS_DRAIN, LS_GATED, LS_WAKE})
+    else $error("tile_interface: illegal link state encoding");
+
+  // ---- Environment obligations ----------------------------------------------
+  m_tile_tx_hold : assume property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                    tile_tx_valid_i && !tile_tx_ready_o |=>
+                                    tile_tx_valid_i && $stable(tile_tx_pkt_i))
+    else $error("tile_interface: compute_tile withdrew or changed a stalled TX packet");
+  m_noc_rx_hold : assume property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                   noc_rx_valid_i && !noc_rx_ready_o |=>
+                                   noc_rx_valid_i && $stable(noc_rx_flit_i) && $stable(noc_rx_par_i))
+    else $error("tile_interface: NoC withdrew or changed a stalled RX flit");
+  m_noc_rx_known : assume property (@(posedge noc_clk_i) disable iff (!noc_rst_n)
+                                    !$isunknown(noc_rx_valid_i) && !$isunknown(noc_tx_ready_i))
+    else $error("tile_interface: unknown NoC handshake input");
+  m_tile_known : assume property (@(posedge tile_clk_i) disable iff (!tile_rst_n)
+                                  !$isunknown({tile_tx_valid_i, tile_rx_ready_i, pg_req_i}))
+    else $error("tile_interface: unknown tile handshake input");
+
+`endif
+
+endmodule : tile_interface
