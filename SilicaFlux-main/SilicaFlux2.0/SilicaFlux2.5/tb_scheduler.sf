@@ -1,0 +1,3551 @@
+//==============================================================================
+//  tb_scheduler.sf
+//------------------------------------------------------------------------------
+//  SilicaFlux dataflow scheduler - cycle-accurate, self-checking verification
+//  environment.                                          Language: Silica Flux-2017
+//
+//  DUT ......... scheduler   (scheduler.sf)
+//  Top ......... tb_scheduler
+//
+//  Topology
+//  --------
+//   sf_stim_gen -> sf_program -> sf_dispatch_driver (+ sf_tag_renamer) --dispatch--> DUT
+//   DUT --issue[ALU0,ALU1,VEC,TNS,MEM]--> sf_fu_bfm[5] --completion/wakeup--> DUT
+//   sf_obs (monitor) -> sf_scoreboard <-> sf_ref_model (golden scheduler)
+//                            |-> sf_coverage (bins + covergroups)
+//                            '-> sf_lifecycle_tracker (mailbox) -> audit, latency stats
+//
+//  DUT interface contract (rising edge of clk_i)
+//  ---------------------------------------------
+//   Issue ports : 0,1 = ALU   2 = VECTOR   3 = TENSOR   4 = MEM
+//   Opcode      : opcode[5:4] selects the FU class (00 ALU, 01 VEC, 10 TNS,
+//                 11 MEM), except 6'h3F = DFSYNC, which is never issued.
+//   T1 A dispatch fires in cycle t when disp_valid_i && disp_ready_o.
+//      disp_ready_o == (iq_count_o < NUM_ENTRIES), registered state only.
+//      A dispatched uop is visible to select from cycle t+1.
+//   T2 The physical-tag ready table (RT) resets to all-ready. A dispatch with
+//      disp_dst_valid_i clears RT[dst] from t+1. A completion with
+//      cmpl_dst_valid_i sets RT[tag] and wakes matching operands from t+1.
+//   T3 A source dispatched in cycle t is ready iff !src_valid || RT[tag] ||
+//      a completion broadcasts that tag in cycle t (dispatch wakeup bypass).
+//   T4 eligible(e) := valid && !DFSYNC && all sources ready && no unreleased
+//      DFSYNC older than e. Per FU class, eligible entries are granted
+//      oldest-first to that class's ports whose fu_ready_i is set, in
+//      ascending port order. iss_valid_o[p] implies fu_ready_i[p]. Granted
+//      entries are freed at the end of cycle t.
+//   T5 DFSYNC: no younger uop issues while it is unreleased. bar_rel_valid_o
+//      fires in cycle t iff the oldest unreleased DFSYNC has no older uop in
+//      the queue and inflight_count_o == 0. One release per cycle, program
+//      order. The barrier entry frees at the end of t; younger uops are
+//      eligible from t+1. bar_active_o = any unreleased DFSYNC is queued.
+//   T6 iq_count_o = occupied entries (uops + DFSYNC); inflight_count_o =
+//      issued-not-completed uops. Both are registered state.
+//   T7 At most one completion per port per cycle, >= 1 cycle after issue.
+//   T8 rst_ni is active low; outputs are quiescent from the 2nd reset cycle.
+//
+//  Checking: strict mode (default) compares every grant, release and
+//  dispatch-ready against the golden model each cycle. +SF_RELAXED keeps all
+//  legality / integrity / liveness checks and drops exact-timing equivalence.
+//
+//  Plusargs : +SEED=<n> +SF_RELAXED +SF_VERBOSE=<0..3> +SF_RANDOM_ITERS=<n>
+//             +SF_TEST=<name> +SF_MAX_ERRORS=<n> +SF_NO_COV_CLOSURE
+//  Defines  : SF_TB_NO_COVERGROUPS  (omit covergroup constructs)
+//==============================================================================
+
+`timescale 1ns/1ps
+`default_nettype none
+
+//==============================================================================
+// Shared parameters, opcode map and port map
+//==============================================================================
+package sf_sched_params_pkg;
+
+  localparam int unsigned SF_NUM_ENTRIES   = 32;
+  localparam int unsigned SF_NUM_SRCS      = 3;
+  localparam int unsigned SF_PTAG_W        = 7;
+  localparam int unsigned SF_NUM_PTAGS     = 1 << SF_PTAG_W;
+  localparam int unsigned SF_NUM_ARCH_TAGS = 16;
+  localparam int unsigned SF_ID_W          = 16;
+  localparam int unsigned SF_OPC_W         = 6;
+  localparam int unsigned SF_BAR_ID_W      = 8;
+  localparam int unsigned SF_NUM_PORTS     = 5;
+  localparam int unsigned SF_NUM_CLASSES   = 4;
+  localparam int unsigned SF_CNT_W         = $clog2(SF_NUM_ENTRIES + 1);
+  localparam int unsigned SF_INFL_W        = 8;
+
+  typedef enum logic [1:0] {
+    FU_ALU = 2'd0,
+    FU_VEC = 2'd1,
+    FU_TNS = 2'd2,
+    FU_MEM = 2'd3
+  } sf_fu_e;
+
+  typedef enum logic [SF_OPC_W-1:0] {
+    OP_ADD    = 6'h00, OP_SUB   = 6'h01, OP_AND   = 6'h02, OP_OR    = 6'h03,
+    OP_XOR    = 6'h04, OP_SHL   = 6'h05, OP_SHR   = 6'h06, OP_CMP   = 6'h07,
+    OP_MOV    = 6'h08, OP_SEL   = 6'h09,
+    OP_VADD   = 6'h10, OP_VMUL  = 6'h11, OP_VFMA  = 6'h12, OP_VRED  = 6'h13,
+    OP_VPERM  = 6'h14, OP_VCVT  = 6'h15,
+    OP_TMMA   = 6'h20, OP_TCONV = 6'h21, OP_TTRANS = 6'h22, OP_TACC = 6'h23,
+    OP_LD     = 6'h30, OP_ST    = 6'h31, OP_LDV   = 6'h32, OP_PREF  = 6'h33,
+    OP_AMO    = 6'h34,
+    OP_DFSYNC = 6'h3F
+  } sf_opcode_e;
+
+  function automatic sf_fu_e sf_port_class(int unsigned port);
+    case (port)
+      0, 1:    return FU_ALU;
+      2:       return FU_VEC;
+      3:       return FU_TNS;
+      default: return FU_MEM;
+    endcase
+  endfunction
+
+  function automatic int unsigned sf_class_num_ports(sf_fu_e cls);
+    int unsigned n = 0;
+    for (int unsigned p = 0; p < SF_NUM_PORTS; p++) begin
+      if (sf_port_class(p) == cls) n++;
+    end
+    return n;
+  endfunction
+
+  function automatic sf_fu_e sf_decode_fu(sf_opcode_e opc);
+    return sf_fu_e'(opc[5:4]);
+  endfunction
+
+  function automatic int unsigned sf_op_num_srcs(sf_opcode_e opc);
+    case (opc)
+      OP_DFSYNC:                                                  return 0;
+      OP_MOV, OP_VRED, OP_VCVT, OP_TTRANS, OP_LD, OP_LDV, OP_PREF: return 1;
+      OP_SEL, OP_VFMA, OP_TMMA:                                   return 3;
+      default:                                                    return 2;
+    endcase
+  endfunction
+
+  function automatic bit sf_op_has_dst(sf_opcode_e opc);
+    return !(opc inside {OP_ST, OP_PREF, OP_DFSYNC});
+  endfunction
+
+  function automatic int unsigned sf_class_num_opcodes(sf_fu_e cls);
+    case (cls)
+      FU_ALU:  return 10;
+      FU_VEC:  return 6;
+      FU_TNS:  return 4;
+      default: return 5;
+    endcase
+  endfunction
+
+  function automatic sf_opcode_e sf_class_opcode(sf_fu_e cls, int unsigned idx);
+    return sf_opcode_e'({cls, 4'(idx)});
+  endfunction
+
+endpackage : sf_sched_params_pkg
+
+//==============================================================================
+// Signal bundle between the environment and the DUT
+//==============================================================================
+interface sf_sched_if (input logic clk);
+  import sf_sched_params_pkg::*;
+
+  logic                                                     rst_n;
+
+  logic                                                     disp_valid;
+  logic                                                     disp_ready;
+  logic [SF_ID_W-1:0]                                       disp_id;
+  logic [SF_OPC_W-1:0]                                      disp_opcode;
+  logic [SF_NUM_SRCS-1:0]                                   disp_src_valid;
+  logic [SF_NUM_SRCS-1:0][SF_PTAG_W-1:0]                    disp_src_tag;
+  logic                                                     disp_dst_valid;
+  logic [SF_PTAG_W-1:0]                                     disp_dst_tag;
+  logic [SF_BAR_ID_W-1:0]                                   disp_bar_id;
+
+  logic [SF_NUM_PORTS-1:0]                                  fu_ready;
+  logic [SF_NUM_PORTS-1:0]                                  iss_valid;
+  logic [SF_NUM_PORTS-1:0][SF_ID_W-1:0]                     iss_id;
+  logic [SF_NUM_PORTS-1:0][SF_OPC_W-1:0]                    iss_opcode;
+  logic [SF_NUM_PORTS-1:0][SF_NUM_SRCS-1:0]                 iss_src_valid;
+  logic [SF_NUM_PORTS-1:0][SF_NUM_SRCS-1:0][SF_PTAG_W-1:0]  iss_src_tag;
+  logic [SF_NUM_PORTS-1:0]                                  iss_dst_valid;
+  logic [SF_NUM_PORTS-1:0][SF_PTAG_W-1:0]                   iss_dst_tag;
+
+  logic [SF_NUM_PORTS-1:0]                                  cmpl_valid;
+  logic [SF_NUM_PORTS-1:0][SF_ID_W-1:0]                     cmpl_id;
+  logic [SF_NUM_PORTS-1:0]                                  cmpl_dst_valid;
+  logic [SF_NUM_PORTS-1:0][SF_PTAG_W-1:0]                   cmpl_dst_tag;
+
+  logic                                                     bar_active;
+  logic                                                     bar_rel_valid;
+  logic [SF_BAR_ID_W-1:0]                                   bar_rel_id;
+  logic [SF_CNT_W-1:0]                                      iq_count;
+  logic [SF_INFL_W-1:0]                                     inflight_count;
+
+  //----------------------------------------------------------------------------
+  // Monitor view: the whole boundary captured at the rising edge (values of
+  // the cycle that is ending), then mon_ev. The environment samples only this
+  // view and drives the live signals with nonblocking assignments.
+  //----------------------------------------------------------------------------
+  event                                                     mon_ev;
+  logic                                                     mon_rst_n;
+  logic                                                     mon_disp_valid;
+  logic                                                     mon_disp_ready;
+  logic [SF_NUM_PORTS-1:0]                                  mon_fu_ready;
+  logic [SF_NUM_PORTS-1:0]                                  mon_iss_valid;
+  logic [SF_NUM_PORTS-1:0][SF_ID_W-1:0]                     mon_iss_id;
+  logic [SF_NUM_PORTS-1:0][SF_OPC_W-1:0]                    mon_iss_opcode;
+  logic [SF_NUM_PORTS-1:0][SF_NUM_SRCS-1:0]                 mon_iss_src_valid;
+  logic [SF_NUM_PORTS-1:0][SF_NUM_SRCS-1:0][SF_PTAG_W-1:0]  mon_iss_src_tag;
+  logic [SF_NUM_PORTS-1:0]                                  mon_iss_dst_valid;
+  logic [SF_NUM_PORTS-1:0][SF_PTAG_W-1:0]                   mon_iss_dst_tag;
+  logic [SF_NUM_PORTS-1:0]                                  mon_cmpl_valid;
+  logic                                                     mon_bar_active;
+  logic                                                     mon_bar_rel_valid;
+  logic [SF_BAR_ID_W-1:0]                                   mon_bar_rel_id;
+  logic [SF_CNT_W-1:0]                                      mon_iq_count;
+  logic [SF_INFL_W-1:0]                                     mon_inflight_count;
+
+  always @(posedge clk) begin : p_monitor
+    mon_rst_n          = rst_n;
+    mon_disp_valid     = disp_valid;
+    mon_disp_ready     = disp_ready;
+    mon_fu_ready       = fu_ready;
+    mon_iss_valid      = iss_valid;
+    mon_iss_id         = iss_id;
+    mon_iss_opcode     = iss_opcode;
+    mon_iss_src_valid  = iss_src_valid;
+    mon_iss_src_tag    = iss_src_tag;
+    mon_iss_dst_valid  = iss_dst_valid;
+    mon_iss_dst_tag    = iss_dst_tag;
+    mon_cmpl_valid     = cmpl_valid;
+    mon_bar_active     = bar_active;
+    mon_bar_rel_valid  = bar_rel_valid;
+    mon_bar_rel_id     = bar_rel_id;
+    mon_iq_count       = iq_count;
+    mon_inflight_count = inflight_count;
+    -> mon_ev;
+  end
+
+endinterface : sf_sched_if
+
+//==============================================================================
+// Verification package
+//==============================================================================
+package sf_sched_tb_pkg;
+  import sf_sched_params_pkg::*;
+
+  //----------------------------------------------------------------------------
+  // Enumerations
+  //----------------------------------------------------------------------------
+  typedef enum int unsigned { SRC_NONE, SRC_ARCH, SRC_PROD, SRC_TAG } sf_src_kind_e;
+
+  typedef enum int unsigned {
+    U_NEW, U_PRESENTED, U_QUEUED, U_INFLIGHT, U_DONE, U_RELEASED, U_FLUSHED
+  } sf_uop_state_e;
+
+  typedef enum int unsigned {
+    E_PROTOCOL,          // handshake rule broken (issue without FU ready, ...)
+    E_XPROP,             // unknown value on a control output
+    E_PHANTOM_ISSUE,     // issued ID was never dispatched
+    E_DOUBLE_ISSUE,      // same uop issued twice
+    E_STALE_ISSUE,       // pre-reset uop issued after reset
+    E_BARRIER_ISSUED,    // DFSYNC sent to a functional unit
+    E_FU_ROUTING,        // uop issued on a port of the wrong FU class
+    E_PAYLOAD,           // issued opcode/operands/destination differ from dispatch
+    E_RAW_HAZARD,        // issued with an unresolved source operand
+    E_DFSYNC_VIOLATION,  // issued while an older DFSYNC is unreleased
+    E_ISSUE_MISMATCH,    // strict: grant differs from golden model
+    E_WORK_CONSERVATION, // strict: port idle while golden model grants a uop
+    E_STARVATION,        // eligible uop repeatedly passed over with idle ports
+    E_RELEASE_MISMATCH,  // strict: DFSYNC release cycle differs from golden model
+    E_PREMATURE_RELEASE, // DFSYNC released with older uops outstanding
+    E_RELEASE_ORDER,     // DFSYNC released out of order / unknown barrier
+    E_DISP_READY,        // strict: disp_ready differs from golden model
+    E_IQ_OVERFLOW,       // dispatch accepted with a full queue
+    E_COUNT_MISMATCH,    // iq_count / inflight_count differ from golden model
+    E_BAR_ACTIVE,        // bar_active differs from golden model
+    E_RESET,             // reset behaviour / stale state after reset
+    E_DEADLOCK,          // no forward progress with work outstanding
+    E_LOST_UOP,          // uop never issued / completed / released
+    E_AUDIT,             // post-run lifecycle audit failure
+    E_DETERMINISM,       // identical replay produced a different schedule
+    E_COVERAGE,          // mandatory coverage bin not reached
+    E_SVA,               // concurrent assertion failure
+    E_TB_INTERNAL,       // environment self-consistency failure
+    E_NUM_CATEGORIES
+  } sf_err_e;
+
+  // Concurrent-assertion failure counter, updated from the top-level SVA.
+  int unsigned sf_sva_failures = 0;
+
+  function automatic void sf_sva_fail(string msg);
+    sf_sva_failures++;
+    $display("[SF-SVA] %s", msg);
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Utilities
+  //----------------------------------------------------------------------------
+  function automatic bit [63:0] sf_hash_str(string s, bit [63:0] salt);
+    bit [63:0] h = 64'hCBF2_9CE4_8422_2325 ^ salt;
+    for (int i = 0; i < s.len(); i++) begin
+      h = h ^ 64'(s[i]);
+      h = h * 64'h0000_0100_0000_01B3;
+    end
+    return h;
+  endfunction
+
+  function automatic string sf_pick(bit c, string a, string b);
+    return c ? a : b;
+  endfunction
+
+  // Left-justify a field to 'w' characters for tabular reports.
+  function automatic string sf_pad(string s, int unsigned w);
+    string r = s;
+    while (r.len() < int'(w)) r = {r, " "};
+    return r;
+  endfunction
+
+  function automatic string sf_fu_name(sf_fu_e c);
+    case (c)
+      FU_ALU:  return "ALU";
+      FU_VEC:  return "VEC";
+      FU_TNS:  return "TNS";
+      default: return "MEM";
+    endcase
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Run configuration
+  //----------------------------------------------------------------------------
+  class sf_tb_cfg;
+    bit [63:0]   seed;
+    bit          strict;
+    int unsigned verbosity;
+    int unsigned max_errors;
+    int unsigned random_iters;
+    int unsigned deadlock_cycles;
+    int unsigned starvation_window;
+    longint      program_timeout;
+    string       only_test;
+    bit          cov_closure;
+
+    function new();
+      seed              = 64'd18002017;
+      strict            = 1'b1;
+      verbosity         = 1;
+      max_errors        = 25;
+      random_iters      = 10;
+      deadlock_cycles   = 4000;
+      starvation_window = 512;
+      program_timeout   = 400000;
+      only_test         = "";
+      cov_closure       = 1'b1;
+    endfunction
+
+    function void load_plusargs();
+      longint unsigned s;
+      int unsigned     v;
+      string           t;
+      if ($value$plusargs("SEED=%d", s))           seed         = s;
+      if ($test$plusargs("SF_RELAXED"))             strict       = 1'b0;
+      if ($value$plusargs("SF_VERBOSE=%d", v))      verbosity    = v;
+      if ($value$plusargs("SF_RANDOM_ITERS=%d", v)) random_iters = v;
+      if ($value$plusargs("SF_MAX_ERRORS=%d", v))   max_errors   = (v == 0) ? 1 : v;
+      if ($value$plusargs("SF_TEST=%s", t))         only_test    = t;
+      if ($test$plusargs("SF_NO_COV_CLOSURE"))      cov_closure  = 1'b0;
+    endfunction
+  endclass : sf_tb_cfg
+
+  //----------------------------------------------------------------------------
+  // Deterministic PRNG (xoshiro128**, splitmix64 seeding). Simulator-agnostic:
+  // identical streams on every tool for a given seed.
+  //----------------------------------------------------------------------------
+  class sf_prng;
+    local bit [31:0] st[4];
+
+    function new(bit [63:0] seed = 64'h5F3A_9C21_D00D_F00D);
+      reseed(seed);
+    endfunction
+
+    local function bit [63:0] mix64(bit [63:0] z);
+      z = (z ^ (z >> 30)) * 64'hBF58_476D_1CE4_E5B9;
+      z = (z ^ (z >> 27)) * 64'h94D0_49BB_1331_11EB;
+      return z ^ (z >> 31);
+    endfunction
+
+    local function bit [31:0] rotl(bit [31:0] x, int unsigned k);
+      return (x << k) | (x >> (32 - k));
+    endfunction
+
+    function void reseed(bit [63:0] seed);
+      bit [63:0] z = seed;
+      bit [63:0] m;
+      for (int i = 0; i < 4; i++) begin
+        z     = z + 64'h9E37_79B9_7F4A_7C15;
+        m     = mix64(z);
+        st[i] = m[31:0] ^ m[63:32];
+      end
+      if ((st[0] | st[1] | st[2] | st[3]) == 32'd0) st[0] = 32'h1;
+    endfunction
+
+    function bit [31:0] next32();
+      bit [31:0] result = rotl(st[1] * 32'd5, 7) * 32'd9;
+      bit [31:0] t      = st[1] << 9;
+      st[2] = st[2] ^ st[0];
+      st[3] = st[3] ^ st[1];
+      st[1] = st[1] ^ st[2];
+      st[0] = st[0] ^ st[3];
+      st[2] = st[2] ^ t;
+      st[3] = rotl(st[3], 11);
+      return result;
+    endfunction
+
+    // Uniform integer in [lo:hi] (inclusive).
+    function int unsigned range(int unsigned lo, int unsigned hi);
+      bit [63:0] span;
+      bit [63:0] prod;
+      if (hi <= lo) return lo;
+      span = 64'(hi) - 64'(lo) + 64'd1;
+      prod = 64'(next32()) * span;
+      return lo + prod[63:32];
+    endfunction
+
+    function bit permille(int unsigned p);
+      return range(0, 999) < p;
+    endfunction
+
+    function sf_fu_e pick_class(int unsigned w[SF_NUM_CLASSES]);
+      int unsigned total = 0;
+      int unsigned r;
+      foreach (w[i]) total += w[i];
+      if (total == 0) return FU_ALU;
+      r = range(0, total - 1);
+      for (int i = 0; i < SF_NUM_CLASSES; i++) begin
+        if (r < w[i]) return sf_fu_e'(i);
+        r -= w[i];
+      end
+      return FU_MEM;
+    endfunction
+  endclass : sf_prng
+
+  //----------------------------------------------------------------------------
+  // Instruction transaction: static program content + full lifecycle record
+  //----------------------------------------------------------------------------
+  class sf_uop;
+    // program content
+    int unsigned          uid;
+    int unsigned          pidx;
+    bit [SF_ID_W-1:0]     id;
+    sf_opcode_e           opcode;
+    sf_fu_e               fu;
+    bit                   is_bar;
+    bit [SF_BAR_ID_W-1:0] bar_id;
+    sf_src_kind_e         src_kind [SF_NUM_SRCS];
+    int                   src_pidx [SF_NUM_SRCS];
+    bit [SF_PTAG_W-1:0]   src_tag  [SF_NUM_SRCS];
+    sf_uop                src_prod [$];
+    bit                   dst_valid;
+    bit [SF_PTAG_W-1:0]   dst_tag;
+    int unsigned          exec_lat;
+    int unsigned          pre_bubbles;
+    int unsigned          depth;
+    int unsigned          n_consumers;
+
+    // lifecycle (owned by driver / reference model / FU models)
+    sf_uop_state_e        state;
+    longint unsigned      seq;
+    bit                   src_rdy        [SF_NUM_SRCS];
+    bit                   src_rdy_bypass [SF_NUM_SRCS];
+    int unsigned          consumers_issued;
+    int unsigned          not_rdy_at_dispatch;
+    int unsigned          older_outstanding;
+    int unsigned          missed_opps;
+    longint               present_cycle;
+    longint               dispatch_cycle;
+    longint               eligible_cycle;
+    longint               exp_issue_cycle;
+    longint               issue_cycle;
+    longint               sched_cmpl_cycle;
+    longint               complete_cycle;
+    longint               exp_release_cycle;
+    longint               release_cycle;
+    int                   issue_port;
+    int unsigned          issue_count;
+    int unsigned          complete_count;
+    int unsigned          release_count;
+    bit                   flagged;
+
+    function new();
+      src_prod.delete();
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        src_prod.push_back(null);
+        src_kind[s]       = SRC_NONE;
+        src_pidx[s]       = -1;
+        src_tag[s]        = '0;
+        src_rdy[s]        = 1'b0;
+        src_rdy_bypass[s] = 1'b0;
+      end
+      uid = 0; pidx = 0; id = '0; opcode = OP_ADD; fu = FU_ALU; is_bar = 1'b0; bar_id = '0;
+      dst_valid = 1'b0; dst_tag = '0; exec_lat = 1; pre_bubbles = 0; depth = 0; n_consumers = 0;
+      reset_lifecycle();
+    endfunction
+
+    function void reset_lifecycle();
+      state               = U_NEW;
+      seq                 = 0;
+      consumers_issued    = 0;
+      not_rdy_at_dispatch = 0;
+      older_outstanding   = 0;
+      missed_opps         = 0;
+      present_cycle       = -1;
+      dispatch_cycle      = -1;
+      eligible_cycle      = -1;
+      exp_issue_cycle     = -1;
+      issue_cycle         = -1;
+      sched_cmpl_cycle    = -1;
+      complete_cycle      = -1;
+      exp_release_cycle   = -1;
+      release_cycle       = -1;
+      issue_port          = -1;
+      issue_count         = 0;
+      complete_count      = 0;
+      release_count       = 0;
+      flagged             = 1'b0;
+    endfunction
+
+    function bit src_valid(int unsigned s);
+      return src_kind[s] != SRC_NONE;
+    endfunction
+
+    function bit [SF_NUM_SRCS-1:0] src_valid_vec();
+      bit [SF_NUM_SRCS-1:0] v;
+      for (int s = 0; s < SF_NUM_SRCS; s++) v[s] = src_valid(s);
+      return v;
+    endfunction
+
+    function bit all_src_ready();
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        if (src_valid(s) && !src_rdy[s]) return 1'b0;
+      end
+      return 1'b1;
+    endfunction
+
+    function string brief();
+      return $sformatf("uid=%0d id=0x%04h %s/%s", uid, id, opcode.name(),
+                       sf_pick(is_bar, "DFSYNC", sf_fu_name(fu)));
+    endfunction
+
+    function string lifecycle();
+      return $sformatf("disp@%0d elig@%0d exp_iss@%0d iss@%0d(p%0d) sched_done@%0d done@%0d exp_rel@%0d rel@%0d",
+                       dispatch_cycle, eligible_cycle, exp_issue_cycle, issue_cycle, issue_port,
+                       sched_cmpl_cycle, complete_cycle, exp_release_cycle, release_cycle);
+    endfunction
+
+    function string convert2string();
+      string s = $sformatf("%s pidx=%0d state=%s", brief(), pidx, state.name());
+      for (int k = 0; k < SF_NUM_SRCS; k++) begin
+        if (src_valid(k)) s = {s, $sformatf(" s%0d=%s:%0d%s", k, src_kind[k].name(), src_tag[k], sf_pick(src_rdy[k], "+", "-"))};
+      end
+      if (dst_valid) s = {s, $sformatf(" dst=%0d", dst_tag)};
+      if (is_bar)    s = {s, $sformatf(" bar_id=%0d", bar_id)};
+      return {s, " lat=", $sformatf("%0d ", exec_lat), lifecycle()};
+    endfunction
+  endclass : sf_uop
+
+  //----------------------------------------------------------------------------
+  // Program: ordered instruction stream with symbolic dataflow edges
+  //----------------------------------------------------------------------------
+  class sf_program;
+    string       name;
+    sf_uop       uops[$];
+    int unsigned n_barriers;
+    int unsigned max_depth;
+    int unsigned n_edges;
+
+    function new(string prog_name);
+      name = prog_name;
+    endfunction
+
+    function void add(sf_uop u);
+      u.pidx = uops.size();
+      uops.push_back(u);
+    endfunction
+
+    function int unsigned size();
+      return uops.size();
+    endfunction
+
+    function int last_producer();
+      for (int i = uops.size() - 1; i >= 0; i--) begin
+        if (uops[i].dst_valid) return i;
+      end
+      return -1;
+    endfunction
+
+    // Derive consumer counts and dependency depth; validate the DAG.
+    function void finalize();
+      n_barriers = 0;
+      max_depth  = 0;
+      n_edges    = 0;
+      foreach (uops[i]) begin
+        uops[i].n_consumers = 0;
+        uops[i].depth       = 0;
+      end
+      foreach (uops[i]) begin
+        sf_uop u = uops[i];
+        if (u.is_bar) n_barriers++;
+        for (int s = 0; s < SF_NUM_SRCS; s++) begin
+          if (u.src_kind[s] == SRC_PROD) begin
+            sf_uop p;
+            if (u.src_pidx[s] < 0 || u.src_pidx[s] >= i)
+              $fatal(1, "[SF-TB] program '%s': uop %0d src%0d references non-older producer %0d", name, i, s, u.src_pidx[s]);
+            p = uops[u.src_pidx[s]];
+            if (!p.dst_valid)
+              $fatal(1, "[SF-TB] program '%s': uop %0d src%0d references producer %0d without destination", name, i, s, u.src_pidx[s]);
+            p.n_consumers++;
+            n_edges++;
+            if (p.depth + 1 > u.depth) u.depth = p.depth + 1;
+          end
+        end
+        if (u.depth > max_depth) max_depth = u.depth;
+      end
+    endfunction
+  endclass : sf_program
+
+  //----------------------------------------------------------------------------
+  // Knobs: DAG shape, dispatch pacing and FU back-pressure for one program
+  //----------------------------------------------------------------------------
+  class sf_dag_knobs;
+    int unsigned n_uops;
+    int unsigned cls_w[SF_NUM_CLASSES];
+    int unsigned dep_pm;
+    int unsigned dep_window;
+    int unsigned barrier_pm;
+    int unsigned miss_pm;
+
+    function new();
+      n_uops     = 400;
+      cls_w[0]   = 40; cls_w[1] = 25; cls_w[2] = 10; cls_w[3] = 25;
+      dep_pm     = 500;
+      dep_window = 12;
+      barrier_pm = 15;
+      miss_pm    = 200;
+    endfunction
+  endclass : sf_dag_knobs
+
+  class sf_test_knobs;
+    int unsigned bubble_pm;
+    int unsigned max_bubble;
+    int unsigned stall_pm   [SF_NUM_PORTS];
+    int unsigned stall_min  [SF_NUM_PORTS];
+    int unsigned stall_max  [SF_NUM_PORTS];
+    int unsigned capacity   [SF_NUM_PORTS];
+    int unsigned ii         [SF_NUM_PORTS];
+    int          win_port   [$];   // forced FU stall windows (port, or -1 for all), relative to program start
+    longint      win_from   [$];
+    longint      win_to     [$];
+
+    function new();
+      bubble_pm  = 0;
+      max_bubble = 1;
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        stall_pm[p]  = 0;
+        stall_min[p] = 1;
+        stall_max[p] = 1;
+        case (sf_port_class(p))
+          FU_ALU:  begin capacity[p] = 4; ii[p] = 1; end
+          FU_VEC:  begin capacity[p] = 4; ii[p] = 1; end
+          FU_TNS:  begin capacity[p] = 2; ii[p] = 4; end
+          default: begin capacity[p] = 6; ii[p] = 1; end
+        endcase
+      end
+    endfunction
+
+    function void set_stall_all(int unsigned pm, int unsigned smin, int unsigned smax);
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        stall_pm[p] = pm; stall_min[p] = smin; stall_max[p] = smax;
+      end
+    endfunction
+
+    // port < 0 : all ports
+    function void add_window(int port, longint from, longint to);
+      win_port.push_back(port);
+      win_from.push_back(from);
+      win_to.push_back(to);
+    endfunction
+  endclass : sf_test_knobs
+
+  //----------------------------------------------------------------------------
+  // Stimulus generator: directed patterns and randomized dataflow graphs
+  //----------------------------------------------------------------------------
+  class sf_stim_gen;
+    sf_prng      rng;
+    int unsigned next_uid;
+    int unsigned next_bar_id;
+    int unsigned miss_pm;
+
+    function new(sf_prng rng_h);
+      rng         = rng_h;
+      next_uid    = 1;
+      next_bar_id = 0;
+      miss_pm     = 200;
+    endfunction
+
+    function int unsigned pick_latency(sf_opcode_e opc);
+      case (sf_decode_fu(opc))
+        FU_ALU: return rng.range(1, 2);
+        FU_VEC: return rng.range(1, 3);
+        FU_TNS: return rng.range(18, 22);
+        default: begin
+          case (opc)
+            OP_ST:   return rng.range(1, 2);
+            OP_PREF: return 2;
+            OP_AMO:  return rng.range(6, 30);
+            OP_LDV:  return rng.permille(miss_pm) ? rng.range(12, 40) : 4;
+            default: return rng.permille(miss_pm) ? rng.range(12, 40) : 3;
+          endcase
+        end
+      endcase
+    endfunction
+
+    function void set_arch(sf_uop u, int unsigned s);
+      u.src_kind[s] = SRC_ARCH;
+      u.src_pidx[s] = -1;
+      u.src_tag[s]  = SF_PTAG_W'(rng.range(0, SF_NUM_ARCH_TAGS - 1));
+    endfunction
+
+    function void set_prod(sf_uop u, int unsigned s, int pidx);
+      u.src_kind[s] = SRC_PROD;
+      u.src_pidx[s] = pidx;
+    endfunction
+
+    function void set_tag(sf_uop u, int unsigned s, bit [SF_PTAG_W-1:0] tag);
+      u.src_kind[s] = SRC_TAG;
+      u.src_pidx[s] = -1;
+      u.src_tag[s]  = tag;
+    endfunction
+
+    function sf_uop new_uop(sf_opcode_e opc);
+      sf_uop u = new();
+      u.uid       = next_uid;
+      next_uid++;
+      u.id        = SF_ID_W'(u.uid);
+      u.opcode    = opc;
+      u.is_bar    = (opc == OP_DFSYNC);
+      u.fu        = u.is_bar ? FU_MEM : sf_decode_fu(opc);
+      u.dst_valid = sf_op_has_dst(opc);
+      u.exec_lat  = u.is_bar ? 0 : pick_latency(opc);
+      if (u.is_bar) begin
+        u.bar_id = SF_BAR_ID_W'(next_bar_id);
+        next_bar_id++;
+      end
+      for (int unsigned s = 0; s < sf_op_num_srcs(opc); s++) set_arch(u, s);
+      return u;
+    endfunction
+
+    function sf_uop new_barrier();
+      return new_uop(OP_DFSYNC);
+    endfunction
+
+    function sf_opcode_e pick_opcode(sf_fu_e cls);
+      return sf_class_opcode(cls, rng.range(0, sf_class_num_opcodes(cls) - 1));
+    endfunction
+
+    function sf_opcode_e pick_producer_opcode(sf_fu_e cls);
+      sf_opcode_e opc;
+      do opc = pick_opcode(cls); while (!sf_op_has_dst(opc));
+      return opc;
+    endfunction
+
+    // Most recent producer within the window before position 'pos'.
+    function int pick_producer(sf_program p, int pos, int unsigned window);
+      int lo = (pos - int'(window) < 0) ? 0 : pos - int'(window);
+      int start;
+      if (pos <= 0) return -1;
+      start = int'(rng.range(lo, pos - 1));
+      for (int i = start; i >= lo; i--) if (p.uops[i].dst_valid) return i;
+      for (int i = start + 1; i < pos; i++) if (p.uops[i].dst_valid) return i;
+      return -1;
+    endfunction
+
+    function sf_program clone(sf_program src, string name);
+      sf_program dst = new(name);
+      foreach (src.uops[i]) begin
+        sf_uop o = src.uops[i];
+        sf_uop u = new();
+        u.uid         = next_uid;
+        next_uid++;
+        u.id          = SF_ID_W'(u.uid);
+        u.opcode      = o.opcode;
+        u.fu          = o.fu;
+        u.is_bar      = o.is_bar;
+        u.bar_id      = o.bar_id;
+        u.dst_valid   = o.dst_valid;
+        u.exec_lat    = o.exec_lat;
+        u.pre_bubbles = o.pre_bubbles;
+        for (int s = 0; s < SF_NUM_SRCS; s++) begin
+          u.src_kind[s] = o.src_kind[s];
+          u.src_pidx[s] = o.src_pidx[s];
+          u.src_tag[s]  = (o.src_kind[s] == SRC_PROD) ? '0 : o.src_tag[s];
+        end
+        dst.add(u);
+      end
+      dst.finalize();
+      return dst;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // A -> B -> C ... (src0 of each uop consumes its predecessor)
+    //--------------------------------------------------------------------------
+    function sf_program gen_chain(string name, int unsigned len, sf_fu_e only_cls, bit mixed);
+      sf_program p = new(name);
+      int unsigned w[SF_NUM_CLASSES];
+      w[0] = 40; w[1] = 30; w[2] = 10; w[3] = 20;
+      for (int unsigned i = 0; i < len; i++) begin
+        sf_fu_e cls = mixed ? rng.pick_class(w) : only_cls;
+        sf_uop  u   = new_uop(pick_producer_opcode(cls));
+        if (i > 0) set_prod(u, 0, int'(i) - 1);
+        p.add(u);
+      end
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Independent streams: every operand is a committed (always ready) value
+    //--------------------------------------------------------------------------
+    function sf_program gen_independent(string name, int unsigned n, int unsigned w[SF_NUM_CLASSES]);
+      sf_program p = new(name);
+      for (int unsigned i = 0; i < n; i++) p.add(new_uop(pick_opcode(rng.pick_class(w))));
+      p.finalize();
+      return p;
+    endfunction
+
+    function sf_program gen_contention(string name, sf_fu_e cls, int unsigned n);
+      sf_program p = new(name);
+      for (int unsigned i = 0; i < n; i++) p.add(new_uop(pick_opcode(cls)));
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Fan-out / fan-in: one long-latency producer feeding many consumers,
+    // joined by a 3-input reduction.
+    //--------------------------------------------------------------------------
+    function sf_program gen_fanout(string name, int unsigned fan);
+      sf_program p = new(name);
+      sf_uop     root, ld, jn, st;
+      int        first_c;
+      root = new_uop(OP_TMMA);
+      p.add(root);
+      ld = new_uop(OP_LD);
+      ld.exec_lat = 30;
+      p.add(ld);
+      first_c = int'(p.size());
+      for (int unsigned i = 0; i < fan; i++) begin
+        sf_fu_e cls = sf_fu_e'(i % SF_NUM_CLASSES);
+        sf_uop  u   = new_uop(pick_producer_opcode(cls));
+        set_prod(u, 0, (i % 3 == 2) ? 1 : 0);
+        if (sf_op_num_srcs(u.opcode) > 1 && (i % 2 == 1)) set_prod(u, 1, 1);
+        p.add(u);
+      end
+      jn = new_uop(OP_VFMA);
+      set_prod(jn, 0, first_c);
+      set_prod(jn, 1, first_c + 1);
+      set_prod(jn, 2, first_c + int'(fan) - 1);
+      p.add(jn);
+      st = new_uop(OP_ST);
+      set_prod(st, 0, int'(p.size()) - 1);
+      set_prod(st, 1, 0);
+      p.add(st);
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Dispatch-cycle wakeup probe: consumer arrives 'gap' idle cycles after
+    // its producer; gap == producer latency lands on the bypass window.
+    //--------------------------------------------------------------------------
+    function sf_program gen_wakeup_probe(string name, sf_fu_e pcls, int unsigned lat, int unsigned gap, bit dual);
+      sf_program p = new(name);
+      sf_uop     a, b, c;
+      a = new_uop(pick_producer_opcode(pcls));
+      a.exec_lat = lat;
+      p.add(a);
+      if (dual) begin
+        b = new_uop(pick_producer_opcode(FU_ALU));
+        b.exec_lat = lat;
+        p.add(b);
+      end
+      c = new_uop(dual ? OP_SEL : OP_SUB);
+      set_prod(c, 0, 0);
+      if (dual) set_prod(c, 1, 1);
+      c.pre_bubbles = gap;
+      p.add(c);
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Barrier-separated groups with an embedded long-latency op per group
+    // and cross-group dataflow edges.
+    //--------------------------------------------------------------------------
+    function sf_program gen_barrier_groups(string name, int unsigned groups, int unsigned gsize,
+                                           int unsigned dep_pm, bit trailing);
+      sf_program p = new(name);
+      int unsigned w[SF_NUM_CLASSES];
+      w[0] = 45; w[1] = 25; w[2] = 10; w[3] = 20;
+      for (int unsigned g = 0; g < groups; g++) begin
+        int unsigned long_pos = rng.range(0, gsize - 1);
+        for (int unsigned i = 0; i < gsize; i++) begin
+          sf_uop u;
+          if (i == long_pos) begin
+            u = new_uop(rng.permille(500) ? OP_TMMA : OP_LD);
+            if (u.opcode == OP_LD) u.exec_lat = rng.range(15, 40);
+          end else begin
+            u = new_uop(pick_opcode(rng.pick_class(w)));
+          end
+          for (int unsigned s = 0; s < sf_op_num_srcs(u.opcode); s++) begin
+            if (rng.permille(dep_pm)) begin
+              int prod = pick_producer(p, int'(p.size()), 2 * gsize);
+              if (prod >= 0) set_prod(u, s, prod);
+            end
+          end
+          p.add(u);
+        end
+        if (g + 1 < groups || trailing) p.add(new_barrier());
+      end
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Directed DFSYNC sequences: leading, back-to-back, trailing, empty groups
+    //--------------------------------------------------------------------------
+    function sf_program gen_barrier_patterns(string name);
+      sf_program p = new(name);
+      sf_uop     u;
+      // leading barrier on an empty machine
+      p.add(new_barrier());
+      // three back-to-back barriers
+      p.add(new_barrier());
+      p.add(new_barrier());
+      // long-latency group
+      u = new_uop(OP_TMMA);
+      p.add(u);
+      u = new_uop(OP_LD);
+      u.exec_lat = 35;
+      p.add(u);
+      u = new_uop(OP_ADD);
+      set_prod(u, 0, int'(p.size()) - 1);
+      p.add(u);
+      p.add(new_barrier());
+      // single-uop groups separated by barriers
+      for (int unsigned g = 0; g < 10; g++) begin
+        int unsigned n = rng.range(1, 3);
+        for (int unsigned i = 0; i < n; i++) begin
+          int unsigned w[SF_NUM_CLASSES];
+          w[0] = 30; w[1] = 30; w[2] = 10; w[3] = 30;
+          u = new_uop(pick_opcode(rng.pick_class(w)));
+          if (rng.permille(600)) begin
+            int prod = p.last_producer();
+            if (prod >= 0) set_prod(u, 0, prod);
+          end
+          p.add(u);
+        end
+        p.add(new_barrier());
+        if (g % 3 == 2) p.add(new_barrier());
+      end
+      // barrier-blocked work that would otherwise issue immediately
+      u = new_uop(OP_TCONV);
+      p.add(u);
+      p.add(new_barrier());
+      for (int unsigned i = 0; i < 12; i++) p.add(new_uop(pick_opcode(sf_fu_e'(i % 2))));
+      // trailing barrier
+      p.add(new_barrier());
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Randomized dataflow DAG
+    //--------------------------------------------------------------------------
+    function sf_program gen_random_dag(string name, sf_dag_knobs k);
+      sf_program   p = new(name);
+      int unsigned saved_miss = miss_pm;
+      miss_pm = k.miss_pm;
+      for (int unsigned i = 0; i < k.n_uops; i++) begin
+        sf_uop u;
+        if (i > 0 && k.barrier_pm > 0 && rng.permille(k.barrier_pm)) begin
+          p.add(new_barrier());
+          continue;
+        end
+        u = new_uop(pick_opcode(rng.pick_class(k.cls_w)));
+        for (int unsigned s = 0; s < sf_op_num_srcs(u.opcode); s++) begin
+          if (rng.permille(k.dep_pm)) begin
+            int prod = pick_producer(p, int'(p.size()), k.dep_window);
+            if (prod >= 0) set_prod(u, s, prod);
+          end
+        end
+        p.add(u);
+      end
+      miss_pm = saved_miss;
+      p.finalize();
+      return p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Post-reset probe: consumers of tags that were busy when reset hit
+    //--------------------------------------------------------------------------
+    function sf_program gen_stale_tag_probe(string name, bit [SF_PTAG_W-1:0] tags[$]);
+      sf_program p = new(name);
+      foreach (tags[i]) begin
+        sf_uop u = new_uop(OP_ST);
+        set_tag(u, 0, tags[i]);
+        p.add(u);
+      end
+      p.finalize();
+      return p;
+    endfunction
+  endclass : sf_stim_gen
+
+  //----------------------------------------------------------------------------
+  // Physical tag renamer: free list + consumer reference counting. A tag is
+  // recycled only after its producer completed and every consumer issued.
+  //----------------------------------------------------------------------------
+  class sf_tag_renamer;
+    bit [SF_PTAG_W-1:0] free_q[$];
+    sf_uop              owner[$];
+    int unsigned        n_alloc;
+    int unsigned        n_free;
+
+    function new();
+      reset();
+    endfunction
+
+    function void reset();
+      free_q.delete();
+      owner.delete();
+      for (int unsigned t = 0; t < SF_NUM_PTAGS; t++) begin
+        owner.push_back(null);
+        if (t >= SF_NUM_ARCH_TAGS) free_q.push_back(SF_PTAG_W'(t));
+      end
+      n_alloc = 0;
+      n_free  = 0;
+    endfunction
+
+    function bit can_alloc();
+      return free_q.size() > 0;
+    endfunction
+
+    function int unsigned n_live();
+      return SF_NUM_PTAGS - SF_NUM_ARCH_TAGS - free_q.size();
+    endfunction
+
+    function bit [SF_PTAG_W-1:0] alloc(sf_uop u);
+      bit [SF_PTAG_W-1:0] t = free_q.pop_front();
+      owner[t] = u;
+      n_alloc++;
+      return t;
+    endfunction
+
+    function void try_free(sf_uop p);
+      if (p == null) return;
+      if (!p.dst_valid) return;
+      if (owner[p.dst_tag] != p) return;
+      if (p.complete_count == 0 || p.consumers_issued < p.n_consumers) return;
+      owner[p.dst_tag] = null;
+      free_q.push_back(p.dst_tag);
+      n_free++;
+    endfunction
+
+    function void on_issue(sf_uop u);
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        sf_uop p = u.src_prod[s];
+        if (u.src_kind[s] != SRC_PROD) continue;
+        if (p == null) continue;
+        p.consumers_issued++;
+        try_free(p);
+      end
+    endfunction
+
+    function void on_complete(sf_uop u);
+      try_free(u);
+    endfunction
+  endclass : sf_tag_renamer
+
+  //----------------------------------------------------------------------------
+  // Dispatch driver: in-order presentation, rename at presentation, payload
+  // held stable until accepted, junk on idle payload lanes.
+  //----------------------------------------------------------------------------
+  class sf_dispatch_driver;
+    virtual sf_sched_if vif;
+    sf_prng             rng;
+    sf_tag_renamer      ren;
+    sf_program          prog;
+    sf_uop              cur;
+    int unsigned        next_idx;
+    int unsigned        bubble_cnt;
+    int unsigned        bubble_pm;
+    int unsigned        max_bubble;
+    bit                 active;
+    bit                 full_stall_now;
+    bit                 tag_stall_now;
+    int unsigned        n_dispatched;
+    int unsigned        n_full_stall_cycles;
+    int unsigned        n_tag_stall_cycles;
+    int unsigned        n_bubble_cycles;
+
+    function new(virtual sf_sched_if vif_h, sf_prng rng_h, sf_tag_renamer ren_h);
+      vif = vif_h;
+      rng = rng_h;
+      ren = ren_h;
+      prog     = null;
+      cur      = null;
+      active   = 1'b0;
+      n_dispatched = 0; n_full_stall_cycles = 0; n_tag_stall_cycles = 0; n_bubble_cycles = 0;
+    endfunction
+
+    function void load(sf_program p, int unsigned bubble_permille, int unsigned bubble_max);
+      prog            = p;
+      cur             = null;
+      next_idx        = 0;
+      active          = 1'b1;
+      bubble_pm       = bubble_permille;
+      max_bubble      = (bubble_max == 0) ? 1 : bubble_max;
+      bubble_cnt      = (p.size() > 0) ? p.uops[0].pre_bubbles : 0;
+    endfunction
+
+    function void abort();
+      if (cur != null) cur.state = U_FLUSHED;
+      if (prog != null) begin
+        for (int unsigned i = next_idx; i < prog.size(); i++) prog.uops[i].state = U_FLUSHED;
+      end
+      cur    = null;
+      prog   = null;
+      active = 1'b0;
+    endfunction
+
+    function bit all_presented();
+      if (prog == null) return 1'b1;
+      return next_idx >= prog.size();
+    endfunction
+
+    function bit done();
+      if (cur != null) return 1'b0;
+      return all_presented();
+    endfunction
+
+    // Handshake observation for the current cycle. Returns the accepted uop.
+    function sf_uop observe(bit valid, bit ready);
+      sf_uop u = null;
+      full_stall_now = 1'b0;
+      if (cur == null) return u;
+      if (!valid) return u;
+      if (ready) begin
+        u   = cur;
+        cur = null;
+        n_dispatched++;
+      end else begin
+        full_stall_now = 1'b1;
+        n_full_stall_cycles++;
+      end
+      return u;
+    endfunction
+
+    local function void resolve(sf_uop u, longint cyc);
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        if (u.src_kind[s] == SRC_PROD) begin
+          sf_uop p = prog.uops[u.src_pidx[s]];
+          u.src_prod[s] = p;
+          u.src_tag[s]  = p.dst_tag;
+        end
+      end
+      if (u.dst_valid) u.dst_tag = ren.alloc(u);
+      u.present_cycle = cyc;
+      u.state         = U_PRESENTED;
+    endfunction
+
+    // Select what is presented in cycle 'next_cyc'.
+    function void advance(longint next_cyc);
+      sf_uop u;
+      tag_stall_now = 1'b0;
+      if (!active) return;
+      if (cur != null) return;
+      if (all_presented()) return;
+      if (bubble_cnt > 0) begin
+        bubble_cnt--;
+        n_bubble_cycles++;
+        return;
+      end
+      u = prog.uops[next_idx];
+      if (u.dst_valid && !ren.can_alloc()) begin
+        tag_stall_now = 1'b1;
+        n_tag_stall_cycles++;
+        return;
+      end
+      resolve(u, next_cyc);
+      cur = u;
+      next_idx++;
+      if (next_idx < prog.size()) begin
+        bubble_cnt = prog.uops[next_idx].pre_bubbles;
+        if (bubble_pm > 0 && rng.permille(bubble_pm)) bubble_cnt += rng.range(1, max_bubble);
+      end
+    endfunction
+
+    function void drive();
+      logic [SF_NUM_SRCS-1:0]                src_v;
+      logic [SF_NUM_SRCS-1:0][SF_PTAG_W-1:0] src_t;
+      logic [SF_ID_W-1:0]                    id;
+      logic [SF_OPC_W-1:0]                   opc;
+      logic                                  dst_v;
+      logic [SF_PTAG_W-1:0]                  dst_t;
+      logic [SF_BAR_ID_W-1:0]                bar;
+      // idle lanes carry random junk: the DUT must qualify every field
+      id    = SF_ID_W'(rng.next32());
+      opc   = SF_OPC_W'(rng.next32());
+      dst_v = rng.permille(500);
+      dst_t = SF_PTAG_W'(rng.next32());
+      bar   = SF_BAR_ID_W'(rng.next32());
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        src_v[s] = rng.permille(500);
+        src_t[s] = SF_PTAG_W'(rng.next32());
+      end
+      if (cur != null) begin
+        id    = cur.id;
+        opc   = cur.opcode;
+        dst_v = cur.dst_valid;
+        if (cur.dst_valid) dst_t = cur.dst_tag;
+        if (cur.is_bar)    bar   = cur.bar_id;
+        for (int s = 0; s < SF_NUM_SRCS; s++) begin
+          src_v[s] = cur.src_valid(s);
+          if (cur.src_valid(s)) src_t[s] = cur.src_tag[s];
+        end
+      end
+      vif.disp_valid     <= (cur != null);
+      vif.disp_id        <= id;
+      vif.disp_opcode    <= opc;
+      vif.disp_src_valid <= src_v;
+      vif.disp_src_tag   <= src_t;
+      vif.disp_dst_valid <= dst_v;
+      vif.disp_dst_tag   <= dst_t;
+      vif.disp_bar_id    <= bar;
+    endfunction
+  endclass : sf_dispatch_driver
+
+  //----------------------------------------------------------------------------
+  // Functional-unit execution model (one per issue port): variable latency,
+  // in-flight capacity, initiation interval, random and forced back-pressure,
+  // single completion slot per cycle.
+  //----------------------------------------------------------------------------
+  class sf_fu_bfm;
+    int unsigned port;
+    sf_fu_e      cls;
+    sf_prng      rng;
+    int unsigned capacity;
+    int unsigned ii;
+    int unsigned stall_pm;
+    int unsigned stall_min;
+    int unsigned stall_max;
+    longint      win_from[$];
+    longint      win_to[$];
+    sf_uop       pend[$];
+    bit          slot_busy[longint];
+    longint      last_issue_cycle;
+    int unsigned stall_left;
+    bit          ready_now;
+    bit          at_capacity_now;
+    sf_uop       cmpl_now;
+    int unsigned n_issued;
+    int unsigned n_completed;
+    int unsigned n_notready_cycles;
+    int unsigned n_cap_cycles;
+    int unsigned n_rand_cycles;
+    int unsigned n_forced_cycles;
+    int unsigned max_occ;
+
+    function new(int unsigned port_idx, sf_prng rng_h);
+      port      = port_idx;
+      cls       = sf_port_class(port_idx);
+      rng       = rng_h;
+      capacity  = 4;
+      ii        = 1;
+      stall_pm  = 0;
+      stall_min = 1;
+      stall_max = 1;
+      n_issued = 0; n_completed = 0; n_notready_cycles = 0; n_cap_cycles = 0;
+      n_rand_cycles = 0; n_forced_cycles = 0; max_occ = 0;
+      flush();
+    endfunction
+
+    function void configure(sf_test_knobs k, longint base_cycle);
+      capacity  = (k.capacity[port] == 0) ? 1 : k.capacity[port];
+      ii        = (k.ii[port] == 0) ? 1 : k.ii[port];
+      stall_pm  = k.stall_pm[port];
+      stall_min = (k.stall_min[port] == 0) ? 1 : k.stall_min[port];
+      stall_max = (k.stall_max[port] < stall_min) ? stall_min : k.stall_max[port];
+      win_from.delete();
+      win_to.delete();
+      foreach (k.win_port[i]) begin
+        if (k.win_port[i] < 0 || k.win_port[i] == int'(port)) begin
+          win_from.push_back(base_cycle + k.win_from[i]);
+          win_to.push_back(base_cycle + k.win_to[i]);
+        end
+      end
+    endfunction
+
+    function void flush();
+      foreach (pend[i]) pend[i].state = U_FLUSHED;
+      pend.delete();
+      slot_busy.delete();
+      last_issue_cycle = -1000;
+      stall_left       = 0;
+      cmpl_now         = null;
+      ready_now        = 1'b1;
+      at_capacity_now  = 1'b0;
+    endfunction
+
+    function bit idle();
+      if (cmpl_now != null) return 1'b0;
+      return pend.size() == 0;
+    endfunction
+
+    function void accept(sf_uop u, longint cyc);
+      int unsigned lat = (u.exec_lat == 0) ? 32'd1 : u.exec_lat;
+      longint      c   = cyc + longint'(lat);
+      while (slot_busy.exists(c)) c++;
+      slot_busy[c]       = 1'b1;
+      u.sched_cmpl_cycle = c;
+      pend.push_back(u);
+      last_issue_cycle   = cyc;
+      n_issued++;
+      if (pend.size() > max_occ) max_occ = pend.size();
+    endfunction
+
+    local function bit in_window(longint cyc);
+      foreach (win_from[i]) if (cyc >= win_from[i] && cyc <= win_to[i]) return 1'b1;
+      return 1'b0;
+    endfunction
+
+    // Compute completion and ready for cycle 'cyc'.
+    function void advance(longint cyc);
+      int unsigned occ;
+      bit          cap_ok, ii_ok, forced, rnd;
+      cmpl_now = null;
+      for (int i = 0; i < pend.size(); i++) begin
+        if (pend[i].sched_cmpl_cycle == cyc) begin
+          cmpl_now = pend[i];
+          pend.delete(i);
+          break;
+        end
+      end
+      if (cmpl_now != null) begin
+        slot_busy.delete(cyc);
+        n_completed++;
+      end
+      occ    = pend.size();
+      if (cmpl_now != null) occ++;
+      cap_ok = occ < capacity;
+      ii_ok  = (cyc - last_issue_cycle) >= longint'(ii);
+      forced = in_window(cyc);
+      if (stall_left > 0) begin
+        rnd = 1'b1;
+        stall_left--;
+      end else if (stall_pm > 0 && rng.permille(stall_pm)) begin
+        rnd        = 1'b1;
+        stall_left = rng.range(stall_min, stall_max) - 1;
+      end else begin
+        rnd = 1'b0;
+      end
+      ready_now       = cap_ok && ii_ok && !forced && !rnd;
+      at_capacity_now = !cap_ok;
+      if (!ready_now) n_notready_cycles++;
+      if (!cap_ok)    n_cap_cycles++;
+      if (forced)     n_forced_cycles++;
+      if (rnd)        n_rand_cycles++;
+    endfunction
+  endclass : sf_fu_bfm
+
+  //----------------------------------------------------------------------------
+  // Per-cycle monitor sample of the DUT boundary
+  //----------------------------------------------------------------------------
+  class sf_obs;
+    longint                cyc;
+    bit                    rst_n;
+    bit                    disp_valid;
+    bit                    disp_ready;
+    bit [SF_NUM_PORTS-1:0] fu_ready;
+    bit [SF_NUM_PORTS-1:0] iss_valid;
+    bit [SF_ID_W-1:0]      iss_id        [SF_NUM_PORTS];
+    bit [SF_OPC_W-1:0]     iss_opcode    [SF_NUM_PORTS];
+    bit [SF_NUM_SRCS-1:0]  iss_src_valid [SF_NUM_PORTS];
+    bit [SF_PTAG_W-1:0]    iss_src_tag   [SF_NUM_PORTS][SF_NUM_SRCS];
+    bit                    iss_dst_valid [SF_NUM_PORTS];
+    bit [SF_PTAG_W-1:0]    iss_dst_tag   [SF_NUM_PORTS];
+    bit [SF_NUM_PORTS-1:0] cmpl_valid;
+    bit                    bar_active;
+    bit                    bar_rel_valid;
+    bit [SF_BAR_ID_W-1:0]  bar_rel_id;
+    int unsigned           iq_count;
+    int unsigned           inflight_count;
+    string                 xmsg;
+
+    function void sample(virtual sf_sched_if vif, longint cyc_now);
+      cyc            = cyc_now;
+      rst_n          = (vif.mon_rst_n === 1'b1);
+      xmsg           = "";
+      if ($isunknown(vif.mon_disp_ready))     xmsg = {xmsg, " disp_ready"};
+      if ($isunknown(vif.mon_iss_valid))      xmsg = {xmsg, " iss_valid"};
+      if ($isunknown(vif.mon_bar_active))     xmsg = {xmsg, " bar_active"};
+      if ($isunknown(vif.mon_bar_rel_valid))  xmsg = {xmsg, " bar_rel_valid"};
+      if ($isunknown(vif.mon_iq_count))       xmsg = {xmsg, " iq_count"};
+      if ($isunknown(vif.mon_inflight_count)) xmsg = {xmsg, " inflight_count"};
+      if (vif.mon_bar_rel_valid === 1'b1 && $isunknown(vif.mon_bar_rel_id)) xmsg = {xmsg, " bar_rel_id"};
+      disp_valid     = (vif.mon_disp_valid === 1'b1);
+      disp_ready     = (vif.mon_disp_ready === 1'b1);
+      fu_ready       = vif.mon_fu_ready;
+      iss_valid      = vif.mon_iss_valid;
+      cmpl_valid     = vif.mon_cmpl_valid;
+      bar_active     = (vif.mon_bar_active === 1'b1);
+      bar_rel_valid  = (vif.mon_bar_rel_valid === 1'b1);
+      bar_rel_id     = vif.mon_bar_rel_id;
+      iq_count       = int'(vif.mon_iq_count);
+      inflight_count = int'(vif.mon_inflight_count);
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        if (vif.mon_iss_valid[p] === 1'b1 &&
+            $isunknown({vif.mon_iss_id[p], vif.mon_iss_opcode[p], vif.mon_iss_src_valid[p], vif.mon_iss_dst_valid[p]}))
+          xmsg = {xmsg, $sformatf(" iss_payload[%0d]", p)};
+        iss_id[p]        = vif.mon_iss_id[p];
+        iss_opcode[p]    = vif.mon_iss_opcode[p];
+        iss_src_valid[p] = vif.mon_iss_src_valid[p];
+        iss_dst_valid[p] = vif.mon_iss_dst_valid[p];
+        iss_dst_tag[p]   = vif.mon_iss_dst_tag[p];
+        for (int s = 0; s < SF_NUM_SRCS; s++) iss_src_tag[p][s] = vif.mon_iss_src_tag[p][s];
+      end
+    endfunction
+  endclass : sf_obs
+
+  //----------------------------------------------------------------------------
+  // Accepted events of one cycle (golden model follows the DUT through these)
+  //----------------------------------------------------------------------------
+  class sf_events;
+    sf_uop       disp;
+    sf_uop       iss  [$];
+    sf_uop       cmpl [$];
+    sf_uop       rel;
+    int unsigned n_issued;
+    int unsigned n_woken_srcs;
+    int unsigned n_became_ready;
+    int unsigned n_cmpl_waking;
+    int unsigned max_fanout;
+    bit          cmpl_woke [SF_NUM_PORTS];
+    bit          disp_bypass;
+
+    function new();
+      disp = null;
+      rel  = null;
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        iss.push_back(null);
+        cmpl.push_back(null);
+        cmpl_woke[p] = 1'b0;
+      end
+      n_issued = 0; n_woken_srcs = 0; n_became_ready = 0; n_cmpl_waking = 0; max_fanout = 0;
+      disp_bypass = 1'b0;
+    endfunction
+
+    function bit progress();
+      if (n_issued > 0) return 1'b1;
+      if (disp != null) return 1'b1;
+      if (rel != null)  return 1'b1;
+      foreach (cmpl[p]) if (cmpl[p] != null) return 1'b1;
+      return 1'b0;
+    endfunction
+  endclass : sf_events
+
+  //----------------------------------------------------------------------------
+  // Golden-model prediction for one cycle
+  //----------------------------------------------------------------------------
+  class sf_pred;
+    sf_uop           exp_issue [$];
+    sf_uop           exp_release;
+    sf_uop           elig_all[$];
+    bit              exp_disp_ready;
+    bit              exp_bar_active;
+    int unsigned     exp_iq_count;
+    int unsigned     exp_inflight;
+    int unsigned     n_elig        [SF_NUM_CLASSES];
+    int unsigned     n_ready_ports [SF_NUM_CLASSES];
+    int unsigned     inflight_cls  [SF_NUM_CLASSES];
+    int unsigned     n_bars;
+    int unsigned     n_bar_blocked_ready;
+    int unsigned     n_operand_wait;
+    bit              adjacent_bars;
+    bit              has_instr;
+    longint unsigned oldest_instr_seq;
+
+    function new();
+      for (int p = 0; p < SF_NUM_PORTS; p++) exp_issue.push_back(null);
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        n_elig[c] = 0; n_ready_ports[c] = 0; inflight_cls[c] = 0;
+      end
+      exp_release = null;
+      exp_disp_ready = 1'b0; exp_bar_active = 1'b0; exp_iq_count = 0; exp_inflight = 0;
+      n_bars = 0; n_bar_blocked_ready = 0; n_operand_wait = 0; adjacent_bars = 1'b0;
+      has_instr = 1'b0; oldest_instr_seq = 0;
+    endfunction
+
+    function int unsigned n_exp_issue();
+      int unsigned n = 0;
+      for (int p = 0; p < SF_NUM_PORTS; p++) if (exp_issue[p] != null) n++;
+      return n;
+    endfunction
+  endclass : sf_pred
+
+  //----------------------------------------------------------------------------
+  // Golden scheduler model
+  //   iq        : software issue queue in age order (uops + DFSYNC markers)
+  //   inflight  : issued, not completed
+  //   rt        : physical tag ready table
+  //----------------------------------------------------------------------------
+  class sf_ref_model;
+    sf_uop           iq[$];
+    sf_uop           queued_by_id [bit [SF_ID_W-1:0]];
+    sf_uop           inflight     [bit [SF_ID_W-1:0]];
+    sf_uop           done_by_id   [bit [SF_ID_W-1:0]];
+    bit              stale_ids    [bit [SF_ID_W-1:0]];
+    bit              rt           [SF_NUM_PTAGS];
+    sf_uop           rt_owner     [$];
+    longint unsigned seq_ctr;
+    int unsigned     epoch;
+    int unsigned     n_dispatch;
+    int unsigned     n_issue;
+    int unsigned     n_complete;
+    int unsigned     n_release;
+
+    function new();
+      seq_ctr = 0;
+      epoch   = 0;
+      n_dispatch = 0; n_issue = 0; n_complete = 0; n_release = 0;
+      reset();
+    endfunction
+
+    // Reset: everything live becomes stale; RT returns to all-ready.
+    function void reset();
+      foreach (queued_by_id[k]) begin
+        stale_ids[k] = 1'b1;
+        queued_by_id[k].state = U_FLUSHED;
+      end
+      foreach (inflight[k]) begin
+        stale_ids[k] = 1'b1;
+        inflight[k].state = U_FLUSHED;
+      end
+      iq.delete();
+      queued_by_id.delete();
+      inflight.delete();
+      done_by_id.delete();
+      rt_owner.delete();
+      for (int t = 0; t < SF_NUM_PTAGS; t++) begin
+        rt[t] = 1'b1;
+        rt_owner.push_back(null);
+      end
+      epoch++;
+    endfunction
+
+    function int unsigned outstanding();
+      return iq.size() + inflight.num();
+    endfunction
+
+    function bit empty();
+      return iq.size() == 0 && inflight.num() == 0;
+    endfunction
+
+    function int unsigned n_instr_queued();
+      int unsigned n = 0;
+      foreach (iq[i]) if (!iq[i].is_bar) n++;
+      return n;
+    endfunction
+
+    function sf_uop find_queued(bit [SF_ID_W-1:0] id);
+      return queued_by_id.exists(id) ? queued_by_id[id] : null;
+    endfunction
+
+    function sf_uop oldest_barrier();
+      foreach (iq[i]) if (iq[i].is_bar) return iq[i];
+      return null;
+    endfunction
+
+    function bit older_barrier_exists(sf_uop u);
+      foreach (iq[i]) begin
+        if (iq[i] == u)    return 1'b0;
+        if (iq[i].is_bar)  return 1'b1;
+      end
+      return 1'b0;
+    endfunction
+
+    function bit release_ok();
+      return iq.size() > 0 && iq[0].is_bar && inflight.num() == 0;
+    endfunction
+
+    function void busy_tags(ref bit [SF_PTAG_W-1:0] tags[$]);
+      tags.delete();
+      for (int t = SF_NUM_ARCH_TAGS; t < SF_NUM_PTAGS; t++) if (!rt[t]) tags.push_back(SF_PTAG_W'(t));
+    endfunction
+
+    local function void remove_from_iq(sf_uop u);
+      for (int i = 0; i < iq.size(); i++) begin
+        if (iq[i] == u) begin
+          iq.delete(i);
+          return;
+        end
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Prediction for cycle 'cyc' given the FU ready vector driven this cycle
+    //--------------------------------------------------------------------------
+    function sf_pred predict(bit [SF_NUM_PORTS-1:0] fu_ready, longint cyc);
+      sf_pred      pr = new();
+      bit          bar_seen = 1'b0;
+      bit          prev_bar = 1'b0;
+      int unsigned cursor[SF_NUM_CLASSES];
+      pr.exp_iq_count   = iq.size();
+      pr.exp_inflight   = inflight.num();
+      pr.exp_disp_ready = iq.size() < SF_NUM_ENTRIES;
+      foreach (inflight[k]) pr.inflight_cls[inflight[k].fu]++;
+      foreach (iq[i]) begin
+        sf_uop u = iq[i];
+        if (u.is_bar) begin
+          if (prev_bar) pr.adjacent_bars = 1'b1;
+          bar_seen          = 1'b1;
+          prev_bar          = 1'b1;
+          pr.exp_bar_active = 1'b1;
+          pr.n_bars++;
+          continue;
+        end
+        prev_bar = 1'b0;
+        if (!pr.has_instr) begin
+          pr.has_instr        = 1'b1;
+          pr.oldest_instr_seq = u.seq;
+        end
+        if (!u.all_src_ready()) begin
+          pr.n_operand_wait++;
+          continue;
+        end
+        if (bar_seen) begin
+          pr.n_bar_blocked_ready++;
+          continue;
+        end
+        if (u.eligible_cycle < 0) u.eligible_cycle = cyc;
+        pr.elig_all.push_back(u);
+        pr.n_elig[u.fu]++;
+      end
+      for (int c = 0; c < SF_NUM_CLASSES; c++) cursor[c] = 0;
+      for (int unsigned p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_fu_e c = sf_port_class(p);
+        if (!fu_ready[p]) continue;
+        pr.n_ready_ports[c]++;
+        while (cursor[c] < pr.elig_all.size() && pr.elig_all[cursor[c]].fu != c) cursor[c]++;
+        if (cursor[c] < pr.elig_all.size()) begin
+          pr.exp_issue[p] = pr.elig_all[cursor[c]];
+          cursor[c]++;
+        end
+      end
+      if (release_ok()) pr.exp_release = iq[0];
+      return pr;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Advance the model by the accepted events of cycle 'cyc'
+    //--------------------------------------------------------------------------
+    function void commit(sf_events ev, longint cyc);
+      bit pre_rdy[SF_NUM_SRCS];
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        if (ev.iss[p] != null) begin
+          sf_uop u = ev.iss[p];
+          u.issue_cycle = cyc;
+          u.issue_port  = p;
+          u.issue_count++;
+          u.state       = U_INFLIGHT;
+          remove_from_iq(u);
+          queued_by_id.delete(u.id);
+          inflight[u.id] = u;
+          n_issue++;
+        end
+      end
+      if (ev.rel != null) begin
+        ev.rel.release_cycle = cyc;
+        ev.rel.release_count++;
+        ev.rel.state = U_RELEASED;
+        remove_from_iq(ev.rel);
+        queued_by_id.delete(ev.rel.id);
+        n_release++;
+      end
+      if (ev.disp != null) begin
+        for (int s = 0; s < SF_NUM_SRCS; s++)
+          pre_rdy[s] = !ev.disp.src_valid(s) || rt[ev.disp.src_tag[s]];
+      end
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        if (ev.cmpl[p] != null) begin
+          sf_uop       u    = ev.cmpl[p];
+          int unsigned woke = 0;
+          inflight.delete(u.id);
+          u.complete_cycle = cyc;
+          u.complete_count++;
+          u.state          = U_DONE;
+          done_by_id[u.id] = u;
+          n_complete++;
+          if (u.dst_valid) begin
+            rt[u.dst_tag] = 1'b1;
+            foreach (iq[i]) begin
+              for (int s = 0; s < SF_NUM_SRCS; s++) begin
+                if (iq[i].src_valid(s) && !iq[i].src_rdy[s] && iq[i].src_tag[s] == u.dst_tag) begin
+                  iq[i].src_rdy[s] = 1'b1;
+                  woke++;
+                  ev.n_woken_srcs++;
+                  if (iq[i].all_src_ready()) ev.n_became_ready++;
+                end
+              end
+            end
+          end
+          ev.cmpl_woke[p] = (woke > 0);
+          if (woke > 0) ev.n_cmpl_waking++;
+          if (woke > ev.max_fanout) ev.max_fanout = woke;
+        end
+      end
+      if (ev.disp != null) begin
+        sf_uop u = ev.disp;
+        u.seq                 = seq_ctr;
+        seq_ctr++;
+        u.dispatch_cycle      = cyc;
+        u.state               = U_QUEUED;
+        u.not_rdy_at_dispatch = 0;
+        for (int s = 0; s < SF_NUM_SRCS; s++) begin
+          if (u.src_valid(s)) begin
+            u.src_rdy[s]        = rt[u.src_tag[s]];
+            u.src_rdy_bypass[s] = u.src_rdy[s] && !pre_rdy[s];
+            if (!u.src_rdy[s])       u.not_rdy_at_dispatch++;
+            if (u.src_rdy_bypass[s]) ev.disp_bypass = 1'b1;
+          end else begin
+            u.src_rdy[s]        = 1'b1;
+            u.src_rdy_bypass[s] = 1'b0;
+          end
+        end
+        if (u.is_bar) u.older_outstanding = n_instr_queued() + inflight.num();
+        if (u.dst_valid) begin
+          rt[u.dst_tag]       = 1'b0;
+          rt_owner[u.dst_tag] = u;
+        end
+        iq.push_back(u);
+        queued_by_id[u.id] = u;
+        n_dispatch++;
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Diagnostics
+    //--------------------------------------------------------------------------
+    function string producer_state(sf_uop p, sf_src_kind_e kind);
+      if (p == null) return sf_pick(kind == SRC_ARCH, " committed-arch", " explicit-tag");
+      return $sformatf(" producer{%s %s iss@%0d sched_done@%0d done@%0d}", p.brief(), p.state.name(),
+                       p.issue_cycle, p.sched_cmpl_cycle, p.complete_cycle);
+    endfunction
+
+    function string dep_state(sf_uop u);
+      string s = "";
+      if (u == null) return " -";
+      for (int k = 0; k < SF_NUM_SRCS; k++) begin
+        sf_uop p;
+        if (!u.src_valid(k)) continue;
+        p = u.src_prod[k];
+        s = {s, $sformatf(" [src%0d tag=%0d %s", k, u.src_tag[k], sf_pick(u.src_rdy[k], "READY", "PENDING"))};
+        if (u.src_rdy_bypass[k]) s = {s, " via-dispatch-bypass"};
+        s = {s, producer_state(p, u.src_kind[k]), "]"};
+      end
+      return (s == "") ? " no-sources" : s;
+    endfunction
+
+    function string explain(sf_uop u);
+      if (u == null) return "-";
+      if (u.state != U_QUEUED) return $sformatf("not queued in model (state %s)", u.state.name());
+      if (u.is_bar) return "DFSYNC entry";
+      if (!u.all_src_ready()) return "operand(s) pending";
+      if (older_barrier_exists(u)) return $sformatf("blocked by DFSYNC bar_id=%0d", oldest_barrier().bar_id);
+      return $sformatf("eligible since cycle %0d", u.eligible_cycle);
+    endfunction
+
+    function string barrier_snapshot();
+      sf_uop       b = oldest_barrier();
+      string       s;
+      int unsigned n = 0;
+      int unsigned older_q = 0;
+      if (b == null) return "no DFSYNC active";
+      s = "active DFSYNC:";
+      foreach (iq[i]) begin
+        if (iq[i].is_bar) begin
+          n++;
+          if (n <= 6) s = {s, $sformatf(" bar_id=%0d(uid=%0d disp@%0d)", iq[i].bar_id, iq[i].uid, iq[i].dispatch_cycle)};
+        end
+      end
+      if (n > 6) s = {s, $sformatf(" +%0d more", n - 6)};
+      s = {s, $sformatf(" | oldest bar_id=%0d waits on:", b.bar_id)};
+      foreach (iq[i]) begin
+        if (iq[i] == b) break;
+        older_q++;
+        if (older_q <= 4) s = {s, " Q{", iq[i].brief(), "}"};
+      end
+      s = {s, $sformatf(" [%0d queued]", older_q)};
+      n = 0;
+      foreach (inflight[k]) begin
+        n++;
+        if (n <= 4) s = {s, " F{", inflight[k].brief(), $sformatf(" done@%0d}", inflight[k].sched_cmpl_cycle)};
+      end
+      s = {s, $sformatf(" [%0d in flight]", inflight.num())};
+      return s;
+    endfunction
+
+    function string dump_state();
+      string s = $sformatf("    model: iq=%0d inflight=%0d epoch=%0d\n", iq.size(), inflight.num(), epoch);
+      foreach (iq[i]) s = {s, $sformatf("      IQ[%0d] %s | %s |%s\n", i, iq[i].brief(), explain(iq[i]), dep_state(iq[i]))};
+      foreach (inflight[k]) s = {s, $sformatf("      FL  %s iss@%0d port %0d sched_done@%0d\n", inflight[k].brief(),
+                                              inflight[k].issue_cycle, inflight[k].issue_port, inflight[k].sched_cmpl_cycle)};
+      s = {s, "      ", barrier_snapshot()};
+      return s;
+    endfunction
+  endclass : sf_ref_model
+
+  //----------------------------------------------------------------------------
+  // Scoreboard: legality, integrity and cycle-exact equivalence checking
+  //----------------------------------------------------------------------------
+  class sf_scoreboard;
+    sf_tb_cfg    cfg;
+    sf_ref_model model;
+    int unsigned err_cnt[int'(E_NUM_CATEGORIES)];
+    int unsigned total_errors;
+    bit          abort_req;
+    int unsigned n_cycles_checked;
+    int unsigned n_issues_checked;
+    int unsigned n_releases_checked;
+    int unsigned n_dispatches_checked;
+    int unsigned n_completions_seen;
+
+    function new(sf_tb_cfg cfg_h, sf_ref_model model_h);
+      cfg   = cfg_h;
+      model = model_h;
+      foreach (err_cnt[i]) err_cnt[i] = 0;
+      total_errors = 0;
+      abort_req    = 1'b0;
+      n_cycles_checked = 0; n_issues_checked = 0; n_releases_checked = 0;
+      n_dispatches_checked = 0; n_completions_seen = 0;
+    endfunction
+
+    function void error(sf_err_e cat, longint cyc, string msg);
+      err_cnt[cat]++;
+      total_errors++;
+      $display("[SF-ERR] cyc=%0d %s: %s", cyc, cat.name(), msg);
+      if (total_errors >= cfg.max_errors) abort_req = 1'b1;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Reset cycles: outputs must be quiescent from the second reset cycle
+    //--------------------------------------------------------------------------
+    function void check_reset_cycle(sf_obs o, int unsigned idx);
+      if (idx < 2) return;
+      if (o.iss_valid != '0)
+        error(E_RESET, o.cyc, $sformatf("iss_valid=%b asserted in reset cycle %0d", o.iss_valid, idx));
+      if (o.bar_rel_valid)
+        error(E_RESET, o.cyc, $sformatf("bar_rel_valid asserted in reset cycle %0d", idx));
+    endfunction
+
+    local function string fmt_expected(sf_uop u);
+      if (u == null) return "no grant";
+      return $sformatf("%s expected issue cycle %0d (%s)", u.brief(), u.exp_issue_cycle, model.explain(u));
+    endfunction
+
+    local function string fmt_actual(sf_uop u, bit xfer, bit [SF_ID_W-1:0] raw_id, longint cyc);
+      if (u == null) return xfer ? $sformatf("unresolved id=0x%04h", raw_id) : "no grant";
+      return $sformatf("%s actual issue cycle %0d, model expected %s (%s)", u.brief(), cyc,
+                       (u.exp_issue_cycle < 0) ? "no grant yet" : $sformatf("cycle %0d", u.exp_issue_cycle),
+                       model.explain(u));
+    endfunction
+
+    // Relaxed mode accepts a same-cycle completion as a resolved operand.
+    local function bit operands_ok(sf_uop u, sf_uop cmpl[$]);
+      for (int s = 0; s < SF_NUM_SRCS; s++) begin
+        bit ok;
+        if (!u.src_valid(s) || u.src_rdy[s]) continue;
+        ok = 1'b0;
+        if (!cfg.strict) begin
+          for (int p = 0; p < SF_NUM_PORTS; p++) begin
+            sf_uop c = cmpl[p];
+            if (c != null) begin
+              if (c.dst_valid && c.dst_tag == u.src_tag[s]) ok = 1'b1;
+            end
+          end
+        end
+        if (!ok) return 1'b0;
+      end
+      return 1'b1;
+    endfunction
+
+    // Older unreleased DFSYNC, ignoring one being legally released this cycle (relaxed only).
+    local function bit barrier_blocks(sf_uop u, sf_uop releasing);
+      foreach (model.iq[i]) begin
+        sf_uop e = model.iq[i];
+        bit    exempt;
+        if (e == u) return 1'b0;
+        exempt = (e == releasing);
+        if (cfg.strict) exempt = 1'b0;
+        if (e.is_bar && !exempt) return 1'b1;
+      end
+      return 1'b0;
+    endfunction
+
+    local function void check_issue_legality(sf_obs o, int unsigned p, sf_uop u, sf_uop cmpl[$], sf_uop releasing);
+      string ctx  = $sformatf("port %0d (%s) %s", p, sf_fu_name(sf_port_class(p)), u.brief());
+      string mism = "";
+      if (u.is_bar)
+        error(E_BARRIER_ISSUED, o.cyc, {ctx, " - DFSYNC dispatched to a functional unit\n      barrier: ", model.barrier_snapshot()});
+      else if (sf_port_class(p) != u.fu)
+        error(E_FU_ROUTING, o.cyc, {ctx, $sformatf(" - opcode 0x%02h requires the %s pipe", u.opcode, sf_fu_name(u.fu))});
+      if (o.iss_opcode[p] != u.opcode)
+        mism = {mism, $sformatf(" opcode 0x%02h!=0x%02h", o.iss_opcode[p], u.opcode)};
+      if (o.iss_src_valid[p] != u.src_valid_vec())
+        mism = {mism, $sformatf(" src_valid %b!=%b", o.iss_src_valid[p], u.src_valid_vec())};
+      for (int s = 0; s < SF_NUM_SRCS; s++)
+        if (u.src_valid(s) && o.iss_src_tag[p][s] != u.src_tag[s])
+          mism = {mism, $sformatf(" src%0d_tag %0d!=%0d", s, o.iss_src_tag[p][s], u.src_tag[s])};
+      if (o.iss_dst_valid[p] != u.dst_valid)
+        mism = {mism, $sformatf(" dst_valid %0b!=%0b", o.iss_dst_valid[p], u.dst_valid)};
+      else if (u.dst_valid && o.iss_dst_tag[p] != u.dst_tag)
+        mism = {mism, $sformatf(" dst_tag %0d!=%0d", o.iss_dst_tag[p], u.dst_tag)};
+      if (mism != "")
+        error(E_PAYLOAD, o.cyc, {ctx, " issued payload differs from dispatch (actual!=expected):", mism});
+      if (!u.is_bar && !operands_ok(u, cmpl))
+        error(E_RAW_HAZARD, o.cyc, {ctx, $sformatf(" issued @%0d with unresolved operand(s), dispatched @%0d\n      deps:",
+                                                   o.cyc, u.dispatch_cycle), model.dep_state(u)});
+      if (!u.is_bar && barrier_blocks(u, releasing))
+        error(E_DFSYNC_VIOLATION, o.cyc, {ctx, $sformatf(" issued @%0d past an unreleased older DFSYNC\n      barrier: ", o.cyc),
+                                          model.barrier_snapshot(), "\n      deps:", model.dep_state(u)});
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Main per-cycle check. Produces the accepted events for the model.
+    //--------------------------------------------------------------------------
+    function sf_events check_cycle(sf_obs o, sf_pred pr, sf_uop disp_cand, sf_uop cmpl_drv[$]);
+      sf_events ev = new();
+      bit       claimed[int unsigned];
+      bit       xfer[SF_NUM_PORTS];
+      bit       idle_ready[SF_NUM_CLASSES];
+      sf_uop    releasing = null;
+      n_cycles_checked++;
+
+      if (o.xmsg != "") error(E_XPROP, o.cyc, {"unknown value sampled on:", o.xmsg});
+
+      // ---- registered status vs golden model
+      if (o.iq_count != pr.exp_iq_count)
+        error(E_COUNT_MISMATCH, o.cyc, $sformatf("iq_count=%0d, golden model holds %0d entries\n%s",
+                                                 o.iq_count, pr.exp_iq_count, model.dump_state()));
+      if (o.inflight_count != pr.exp_inflight)
+        error(E_COUNT_MISMATCH, o.cyc, $sformatf("inflight_count=%0d, golden model has %0d uops in flight",
+                                                 o.inflight_count, pr.exp_inflight));
+      if (o.bar_active != pr.exp_bar_active)
+        error(E_BAR_ACTIVE, o.cyc, $sformatf("bar_active=%0b, expected %0b | %s", o.bar_active, pr.exp_bar_active,
+                                             model.barrier_snapshot()));
+
+      // ---- dispatch
+      if (o.disp_ready && !pr.exp_disp_ready)
+        error(E_IQ_OVERFLOW, o.cyc, $sformatf("disp_ready asserted with %0d/%0d entries occupied%s", pr.exp_iq_count,
+                                              SF_NUM_ENTRIES, sf_pick(o.disp_valid, " (dispatch accepted)", "")));
+      else if (cfg.strict && o.disp_ready != pr.exp_disp_ready)
+        error(E_DISP_READY, o.cyc, $sformatf("disp_ready=0 with only %0d/%0d entries occupied",
+                                             pr.exp_iq_count, SF_NUM_ENTRIES));
+      if (o.disp_valid && o.disp_ready) begin
+        if (disp_cand == null)
+          error(E_TB_INTERNAL, o.cyc, "dispatch handshake without a presented uop");
+        else begin
+          ev.disp = disp_cand;
+          n_dispatches_checked++;
+        end
+      end
+
+      // ---- completions driven by the FU models this cycle
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        ev.cmpl[p] = cmpl_drv[p];
+        if (cmpl_drv[p] != null) begin
+          n_completions_seen++;
+          if (!o.cmpl_valid[p]) error(E_TB_INTERNAL, o.cyc, $sformatf("completion for %s not on cmpl_valid[%0d]", cmpl_drv[p].brief(), p));
+          if (!model.inflight.exists(cmpl_drv[p].id))
+            error(E_TB_INTERNAL, o.cyc, $sformatf("completion for %s which the model has not in flight", cmpl_drv[p].brief()));
+        end
+      end
+
+      // ---- DFSYNC release legality
+      if (o.bar_rel_valid) begin
+        sf_uop b = model.oldest_barrier();
+        n_releases_checked++;
+        if (b == null) begin
+          error(E_RELEASE_ORDER, o.cyc, $sformatf("bar_rel_valid with bar_rel_id=%0d but no DFSYNC is active", o.bar_rel_id));
+        end else begin
+          if (b.bar_id != o.bar_rel_id)
+            error(E_RELEASE_ORDER, o.cyc, $sformatf("released bar_id=%0d but the oldest unreleased DFSYNC is bar_id=%0d (%s)\n      barrier: %s",
+                                                    o.bar_rel_id, b.bar_id, b.brief(), model.barrier_snapshot()));
+          if (!model.release_ok())
+            error(E_PREMATURE_RELEASE, o.cyc, $sformatf("%s released @%0d with older work outstanding (dispatched @%0d)\n      barrier: %s",
+                                                        b.brief(), o.cyc, b.dispatch_cycle, model.barrier_snapshot()));
+          else
+            releasing = b;
+          ev.rel = b;
+        end
+      end
+      if (pr.exp_release != null) begin
+        if (pr.exp_release.exp_release_cycle < 0) pr.exp_release.exp_release_cycle = o.cyc;
+      end
+      if (cfg.strict) begin
+        bit exp_rel = (pr.exp_release != null);
+        bit act_rel = (ev.rel != null);
+        if (exp_rel && !o.bar_rel_valid)
+          error(E_RELEASE_MISMATCH, o.cyc, $sformatf("%s expected release cycle %0d (dispatched @%0d), DUT holds it\n      barrier: %s",
+                                                     pr.exp_release.brief(), pr.exp_release.exp_release_cycle,
+                                                     pr.exp_release.dispatch_cycle, model.barrier_snapshot()));
+        else if (!exp_rel && o.bar_rel_valid && act_rel)
+          error(E_RELEASE_MISMATCH, o.cyc, $sformatf("DUT released bar_id=%0d @%0d, golden model holds it\n      barrier: %s",
+                                                     o.bar_rel_id, o.cyc, model.barrier_snapshot()));
+      end
+
+      // ---- issue legality
+      for (int unsigned p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_uop u;
+        xfer[p] = 1'b0;
+        if (!o.iss_valid[p]) continue;
+        if (!o.fu_ready[p]) begin
+          error(E_PROTOCOL, o.cyc, $sformatf("iss_valid[%0d] asserted while fu_ready[%0d]=0 (id=0x%04h)", p, p, o.iss_id[p]));
+          continue;
+        end
+        xfer[p] = 1'b1;
+        u = model.find_queued(o.iss_id[p]);
+        if (u == null) begin
+          bit [SF_ID_W-1:0] id = o.iss_id[p];
+          if (model.inflight.exists(id))
+            error(E_DOUBLE_ISSUE, o.cyc, $sformatf("port %0d re-issued %s; first issue @%0d on port %0d, still in flight",
+                                                   p, model.inflight[id].brief(), model.inflight[id].issue_cycle, model.inflight[id].issue_port));
+          else if (model.done_by_id.exists(id))
+            error(E_DOUBLE_ISSUE, o.cyc, $sformatf("port %0d re-issued %s; first issue @%0d on port %0d, completed @%0d",
+                                                   p, model.done_by_id[id].brief(), model.done_by_id[id].issue_cycle,
+                                                   model.done_by_id[id].issue_port, model.done_by_id[id].complete_cycle));
+          else if (model.stale_ids.exists(id))
+            error(E_STALE_ISSUE, o.cyc, $sformatf("port %0d issued id=0x%04h which was dispatched before the last reset", p, id));
+          else
+            error(E_PHANTOM_ISSUE, o.cyc, $sformatf("port %0d issued id=0x%04h opcode=0x%02h that is not in the issue queue",
+                                                    p, id, o.iss_opcode[p]));
+          continue;
+        end
+        if (claimed.exists(u.uid)) begin
+          error(E_DOUBLE_ISSUE, o.cyc, $sformatf("%s granted on more than one port in the same cycle (port %0d)", u.brief(), p));
+          continue;
+        end
+        claimed[u.uid] = 1'b1;
+        check_issue_legality(o, p, u, cmpl_drv, releasing);
+        ev.iss[p] = u;
+        ev.n_issued++;
+        n_issues_checked++;
+      end
+
+      // ---- golden-model equivalence
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_uop e = pr.exp_issue[p];
+        if (e != null) begin
+          if (e.exp_issue_cycle < 0) e.exp_issue_cycle = o.cyc;
+        end
+      end
+      if (cfg.strict) begin
+        for (int unsigned p = 0; p < SF_NUM_PORTS; p++) begin
+          sf_uop exp = pr.exp_issue[p];
+          sf_uop act = ev.iss[p];
+          bit    idle_port;
+          if (exp == act) continue;
+          idle_port = (act == null);
+          if (xfer[p]) idle_port = 1'b0;
+          if (exp != null) exp.flagged = 1'b1;
+          if (act != null) act.flagged = 1'b1;
+          error(idle_port ? E_WORK_CONSERVATION : E_ISSUE_MISMATCH, o.cyc,
+                $sformatf("port %0d (%s, fu_ready=%0b) grant differs from golden model\n      expected: %s\n      actual  : %s\n      expected deps:%s\n      actual deps  :%s\n      barrier: %s",
+                          p, sf_fu_name(sf_port_class(p)), o.fu_ready[p], fmt_expected(exp), fmt_actual(act, xfer[p], o.iss_id[p], o.cyc),
+                          model.dep_state(exp), model.dep_state(act), model.barrier_snapshot()));
+        end
+      end
+
+      // ---- liveness: eligible uops passed over while a port of their class idles
+      for (int c = 0; c < SF_NUM_CLASSES; c++) idle_ready[c] = 1'b0;
+      for (int unsigned p = 0; p < SF_NUM_PORTS; p++)
+        if (o.fu_ready[p] && !xfer[p]) idle_ready[sf_port_class(p)] = 1'b1;
+      foreach (pr.elig_all[i]) begin
+        sf_uop u = pr.elig_all[i];
+        if (claimed.exists(u.uid) || !idle_ready[u.fu]) continue;
+        u.missed_opps++;
+        if (u.missed_opps == cfg.starvation_window)
+          error(E_STARVATION, o.cyc, $sformatf("%s eligible since @%0d skipped %0d times with an idle ready %s port\n      deps:%s",
+                                               u.brief(), u.eligible_cycle, u.missed_opps, sf_fu_name(u.fu), model.dep_state(u)));
+      end
+      return ev;
+    endfunction
+
+    // Follow-up for uops involved in a mismatch: expected vs actual issue/release cycle.
+    function void post_commit(sf_events ev);
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_uop u = ev.iss[p];
+        if (u == null) continue;
+        if (u.flagged && u.exp_issue_cycle >= 0 && u.exp_issue_cycle != u.issue_cycle)
+          $display("[SF-ERR-DETAIL] %s expected issue cycle %0d, actual issue cycle %0d (slip %0d)",
+                   u.brief(), u.exp_issue_cycle, u.issue_cycle, u.issue_cycle - u.exp_issue_cycle);
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Model-independent lifecycle audit of a drained program
+    //--------------------------------------------------------------------------
+    function void audit_program(sf_program prog, longint cyc);
+      longint last_rel = -1;
+      int unsigned n_err_before = total_errors;
+      foreach (prog.uops[i]) begin
+        sf_uop u = prog.uops[i];
+        if (u.is_bar) begin
+          if (u.release_count != 1)
+            error(E_LOST_UOP, cyc, $sformatf("[%s] %s released %0d times | %s", prog.name, u.brief(), u.release_count, u.lifecycle()));
+          continue;
+        end
+        if (u.issue_count != 1 || u.complete_count != 1) begin
+          error(E_LOST_UOP, cyc, $sformatf("[%s] %s issued %0d / completed %0d times (state %s) | %s", prog.name, u.brief(),
+                                           u.issue_count, u.complete_count, u.state.name(), u.lifecycle()));
+          continue;
+        end
+        if (!(u.dispatch_cycle < u.issue_cycle && u.issue_cycle < u.complete_cycle))
+          error(E_AUDIT, cyc, $sformatf("[%s] %s lifecycle out of order | %s", prog.name, u.brief(), u.lifecycle()));
+        for (int s = 0; s < SF_NUM_SRCS; s++) begin
+          sf_uop p = u.src_prod[s];
+          if (u.src_kind[s] != SRC_PROD) continue;
+          if (p == null) continue;
+          if (p.complete_count != 1) continue;
+          if (cfg.strict ? (u.issue_cycle <= p.complete_cycle) : (u.issue_cycle < p.complete_cycle))
+            error(E_AUDIT, cyc, $sformatf("[%s] RAW order: %s issued @%0d, producer %s completed @%0d", prog.name,
+                                          u.brief(), u.issue_cycle, p.brief(), p.complete_cycle));
+        end
+      end
+      foreach (prog.uops[k]) begin
+        sf_uop b = prog.uops[k];
+        if (!b.is_bar || b.release_count != 1) continue;
+        if (b.release_cycle <= last_rel)
+          error(E_AUDIT, cyc, $sformatf("[%s] %s released @%0d, not after the preceding DFSYNC (@%0d)", prog.name, b.brief(),
+                                        b.release_cycle, last_rel));
+        last_rel = b.release_cycle;
+        for (int j = 0; j < k; j++) begin
+          sf_uop v = prog.uops[j];
+          if (!v.is_bar && v.complete_count == 1 && v.complete_cycle >= b.release_cycle) begin
+            error(E_AUDIT, cyc, $sformatf("[%s] %s released @%0d before older %s completed @%0d", prog.name, b.brief(),
+                                          b.release_cycle, v.brief(), v.complete_cycle));
+            break;
+          end
+        end
+        for (int j = k + 1; j < int'(prog.size()); j++) begin
+          sf_uop v = prog.uops[j];
+          if (!v.is_bar && v.issue_count >= 1 &&
+              (cfg.strict ? (v.issue_cycle <= b.release_cycle) : (v.issue_cycle < b.release_cycle))) begin
+            error(E_AUDIT, cyc, $sformatf("[%s] younger %s issued @%0d, DFSYNC %s released @%0d", prog.name, v.brief(),
+                                          v.issue_cycle, b.brief(), b.release_cycle));
+            break;
+          end
+        end
+      end
+      if (total_errors != n_err_before)
+        $display("[SF-TB] audit of '%s' reported %0d error(s)", prog.name, total_errors - n_err_before);
+    endfunction
+  endclass : sf_scoreboard
+
+  //----------------------------------------------------------------------------
+  // Functional coverage: named bins with closure check + covergroups
+  //----------------------------------------------------------------------------
+  class sf_coverage;
+    int unsigned hits[string];
+    bit          mandatory[string];
+    string       order[$];
+
+`ifndef SF_TB_NO_COVERGROUPS
+    covergroup cg_issue with function sample(int unsigned port, sf_fu_e cls, sf_opcode_e opc, int unsigned depth, bit ooo);
+      option.per_instance = 1;
+      cp_port  : coverpoint port  { bins p[] = {[0:SF_NUM_PORTS-1]}; }
+      cp_cls   : coverpoint cls;
+      cp_opc   : coverpoint opc   { ignore_bins dfsync = {OP_DFSYNC}; }
+      cp_depth : coverpoint depth { bins d0 = {0}; bins d1 = {1}; bins d2 = {2}; bins d3_4 = {[3:4]};
+                                    bins d5_8 = {[5:8]}; bins d9p = {[9:$]}; }
+      cp_ooo   : coverpoint ooo;
+      x_cls_depth : cross cp_cls, cp_depth;
+      x_port_ooo  : cross cp_port, cp_ooo;
+    endgroup
+
+    covergroup cg_cycle with function sample(int unsigned n_issue, int unsigned iq_occ, int unsigned infl,
+                                             bit bar_active, bit iq_full_stall);
+      option.per_instance = 1;
+      cp_width : coverpoint n_issue { bins w[] = {[0:SF_NUM_PORTS]}; }
+      cp_iq    : coverpoint iq_occ  { bins empty = {0}; bins low = {[1:8]}; bins mid = {[9:16]};
+                                      bins high = {[17:SF_NUM_ENTRIES-1]}; bins full = {SF_NUM_ENTRIES}; }
+      cp_infl  : coverpoint infl    { bins none = {0}; bins few = {[1:4]}; bins some = {[5:8]}; bins many = {[9:$]}; }
+      cp_bar   : coverpoint bar_active;
+      cp_stall : coverpoint iq_full_stall;
+      x_iq_bar : cross cp_iq, cp_bar;
+    endgroup
+
+    covergroup cg_stall with function sample(sf_fu_e cls, bit backpressure, bit contention);
+      option.per_instance = 1;
+      cp_cls : coverpoint cls;
+      cp_bp  : coverpoint backpressure;
+      cp_ct  : coverpoint contention;
+      x_bp   : cross cp_cls, cp_bp;
+      x_ct   : cross cp_cls, cp_ct;
+    endgroup
+
+    covergroup cg_wakeup with function sample(int unsigned n_waking, int unsigned fanout, bit disp_bypass,
+                                              int unsigned not_ready);
+      option.per_instance = 1;
+      cp_multi  : coverpoint n_waking  { bins none = {0}; bins one = {1}; bins multi = {[2:SF_NUM_PORTS]}; }
+      cp_fanout : coverpoint fanout    { bins f0 = {0}; bins f1 = {1}; bins f2_3 = {[2:3]}; bins f4p = {[4:$]}; }
+      cp_bypass : coverpoint disp_bypass;
+      cp_nrdy   : coverpoint not_ready { bins n[] = {[0:SF_NUM_SRCS]}; }
+    endgroup
+
+    covergroup cg_barrier with function sample(int unsigned wait_cycles, int unsigned older_at_dispatch);
+      option.per_instance = 1;
+      cp_wait  : coverpoint wait_cycles       { bins immediate = {1}; bins short_w = {[2:8]}; bins med_w = {[9:32]};
+                                                bins long_w = {[33:$]}; }
+      cp_older : coverpoint older_at_dispatch { bins none = {0}; bins few = {[1:7]}; bins many = {[8:$]}; }
+      x_wait_older : cross cp_wait, cp_older;
+    endgroup
+`endif
+
+    function new();
+      define_bins();
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_issue   = new();
+      cg_cycle   = new();
+      cg_stall   = new();
+      cg_wakeup  = new();
+      cg_barrier = new();
+`endif
+    endfunction
+
+    function void declare(string name, bit mand = 1'b1);
+      if (hits.exists(name)) return;
+      hits[name]      = 0;
+      mandatory[name] = mand;
+      order.push_back(name);
+    endfunction
+
+    function void hit(string name);
+      if (!hits.exists(name)) declare(name, 1'b0);
+      hits[name]++;
+    endfunction
+
+    function void define_bins();
+      for (int p = 0; p < SF_NUM_PORTS; p++) declare($sformatf("issue.port[%0d]", p));
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        declare({"issue.class.", sf_fu_name(sf_fu_e'(c))});
+        for (int unsigned i = 0; i < sf_class_num_opcodes(sf_fu_e'(c)); i++)
+          declare({"issue.opcode.", sf_class_opcode(sf_fu_e'(c), i).name()});
+      end
+      for (int w = 1; w <= SF_NUM_PORTS; w++) declare($sformatf("issue.width[%0d]", w));
+      declare("issue.out_of_order");
+      declare("issue.depth.0");   declare("issue.depth.1");   declare("issue.depth.2");
+      declare("issue.depth.3_4"); declare("issue.depth.5_8"); declare("issue.depth.9p");
+      for (int n = 0; n <= SF_NUM_SRCS; n++) declare($sformatf("dispatch.not_ready[%0d]", n));
+      declare("dispatch.bypass_wakeup");
+      declare("dispatch.dfsync");
+      declare("dispatch.iq_full_stall");
+      declare("dispatch.tag_stall", 1'b0);
+      declare("wakeup.single");
+      declare("wakeup.multi_same_cycle");
+      declare("wakeup.became_ready");
+      declare("wakeup.fanout_ge4");
+      for (int p = 0; p < SF_NUM_PORTS; p++) declare($sformatf("wakeup.port[%0d]", p));
+      declare("barrier.dispatch");
+      declare("barrier.release");
+      declare("barrier.release_immediate");
+      declare("barrier.wait.2_8");
+      declare("barrier.wait.9_32");
+      declare("barrier.wait.33p");
+      declare("barrier.back_to_back");
+      declare("barrier.chain_ge3");
+      declare("barrier.blocked_ready");
+      declare("barrier.blocked_ready_ge8");
+      declare("barrier.iq_full");
+      declare("barrier.tensor_inflight");
+      declare("barrier.mem_inflight");
+      declare("barrier.older_outstanding_ge8");
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        declare({"stall.backpressure.", sf_fu_name(sf_fu_e'(c))});
+        declare({"stall.contention.", sf_fu_name(sf_fu_e'(c))});
+      end
+      declare("stall.all_fu_blocked");
+      declare("stall.operand_wait");
+      declare("occupancy.iq.empty");
+      declare("occupancy.iq.1_8");
+      declare("occupancy.iq.9_16");
+      declare("occupancy.iq.17_24");
+      declare("occupancy.iq.25_31");
+      declare("occupancy.iq.full");
+      declare("occupancy.inflight.0");
+      declare("occupancy.inflight.1_4");
+      declare("occupancy.inflight.5_8");
+      declare("occupancy.inflight.9p");
+      declare("occupancy.full_pipeline");
+      declare("occupancy.fu_at_capacity.TNS");
+      declare("occupancy.fu_at_capacity.MEM");
+      declare("reset.with_outstanding");
+      declare("reset.stale_tag_probe");
+    endfunction
+
+    function void sample_cycle(sf_obs o, sf_pred pr, sf_events ev, bit iq_full_stall, bit tag_stall,
+                               bit [SF_NUM_PORTS-1:0] fu_at_cap);
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_uop u = ev.iss[p];
+        bit    ooo;
+        if (u == null) continue;
+        ooo = pr.has_instr && (u.seq > pr.oldest_instr_seq);
+        hit($sformatf("issue.port[%0d]", p));
+        hit({"issue.class.", sf_fu_name(u.fu)});
+        if (!u.is_bar) hit({"issue.opcode.", u.opcode.name()});
+        if (ooo) hit("issue.out_of_order");
+        if      (u.depth == 0) hit("issue.depth.0");
+        else if (u.depth == 1) hit("issue.depth.1");
+        else if (u.depth == 2) hit("issue.depth.2");
+        else if (u.depth <= 4) hit("issue.depth.3_4");
+        else if (u.depth <= 8) hit("issue.depth.5_8");
+        else                   hit("issue.depth.9p");
+`ifndef SF_TB_NO_COVERGROUPS
+        cg_issue.sample(p, u.fu, u.opcode, u.depth, ooo);
+`endif
+      end
+      if (ev.n_issued > 0) hit($sformatf("issue.width[%0d]", ev.n_issued));
+      if (ev.n_issued == SF_NUM_PORTS) hit("occupancy.full_pipeline");
+
+      if (ev.disp != null) begin
+        if (ev.disp.is_bar) begin
+          hit("dispatch.dfsync");
+          hit("barrier.dispatch");
+          if (ev.disp.older_outstanding >= 8) hit("barrier.older_outstanding_ge8");
+        end else begin
+          hit($sformatf("dispatch.not_ready[%0d]", ev.disp.not_rdy_at_dispatch));
+        end
+        if (ev.disp_bypass) hit("dispatch.bypass_wakeup");
+      end
+      if (iq_full_stall) hit("dispatch.iq_full_stall");
+      if (tag_stall)     hit("dispatch.tag_stall");
+
+      if (ev.n_cmpl_waking == 1) hit("wakeup.single");
+      if (ev.n_cmpl_waking >= 2) hit("wakeup.multi_same_cycle");
+      if (ev.n_became_ready > 0) hit("wakeup.became_ready");
+      if (ev.max_fanout >= 4)    hit("wakeup.fanout_ge4");
+      for (int p = 0; p < SF_NUM_PORTS; p++) if (ev.cmpl_woke[p]) hit($sformatf("wakeup.port[%0d]", p));
+`ifndef SF_TB_NO_COVERGROUPS
+      begin
+        int unsigned nrdy = 0;
+        if (ev.disp != null) nrdy = ev.disp.not_rdy_at_dispatch;
+        cg_wakeup.sample(ev.n_cmpl_waking, ev.max_fanout, ev.disp_bypass, nrdy);
+      end
+`endif
+
+      if (pr.exp_bar_active) begin
+        if (pr.adjacent_bars)                       hit("barrier.back_to_back");
+        if (pr.n_bars >= 3)                         hit("barrier.chain_ge3");
+        if (pr.n_bar_blocked_ready > 0)             hit("barrier.blocked_ready");
+        if (pr.n_bar_blocked_ready >= 8)            hit("barrier.blocked_ready_ge8");
+        if (pr.exp_iq_count == SF_NUM_ENTRIES)      hit("barrier.iq_full");
+        if (pr.inflight_cls[FU_TNS] > 0)            hit("barrier.tensor_inflight");
+        if (pr.inflight_cls[FU_MEM] > 0)            hit("barrier.mem_inflight");
+      end
+      if (ev.rel != null) begin
+        longint w = ev.rel.release_cycle - ev.rel.dispatch_cycle;
+        hit("barrier.release");
+        if      (w <= 1)  hit("barrier.release_immediate");
+        else if (w <= 8)  hit("barrier.wait.2_8");
+        else if (w <= 32) hit("barrier.wait.9_32");
+        else              hit("barrier.wait.33p");
+`ifndef SF_TB_NO_COVERGROUPS
+        cg_barrier.sample(int'(w), ev.rel.older_outstanding);
+`endif
+      end
+
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        bit bp = (pr.n_elig[c] > 0 && pr.n_ready_ports[c] == 0);
+        bit ct = (pr.n_ready_ports[c] > 0 && pr.n_elig[c] > pr.n_ready_ports[c]);
+        if (bp) hit({"stall.backpressure.", sf_fu_name(sf_fu_e'(c))});
+        if (ct) hit({"stall.contention.", sf_fu_name(sf_fu_e'(c))});
+`ifndef SF_TB_NO_COVERGROUPS
+        if (pr.n_elig[c] > 0) cg_stall.sample(sf_fu_e'(c), bp, ct);
+`endif
+      end
+      if (o.fu_ready == '0 && pr.elig_all.size() > 0) hit("stall.all_fu_blocked");
+      if (pr.exp_iq_count > 0 && pr.elig_all.size() == 0 && pr.n_operand_wait > 0 && pr.n_bars == 0)
+        hit("stall.operand_wait");
+
+      if      (pr.exp_iq_count == 0)              hit("occupancy.iq.empty");
+      else if (pr.exp_iq_count <= 8)              hit("occupancy.iq.1_8");
+      else if (pr.exp_iq_count <= 16)             hit("occupancy.iq.9_16");
+      else if (pr.exp_iq_count <= 24)             hit("occupancy.iq.17_24");
+      else if (pr.exp_iq_count < SF_NUM_ENTRIES)  hit("occupancy.iq.25_31");
+      else                                        hit("occupancy.iq.full");
+      if      (pr.exp_inflight == 0)              hit("occupancy.inflight.0");
+      else if (pr.exp_inflight <= 4)              hit("occupancy.inflight.1_4");
+      else if (pr.exp_inflight <= 8)              hit("occupancy.inflight.5_8");
+      else                                        hit("occupancy.inflight.9p");
+      for (int p = 0; p < SF_NUM_PORTS; p++)
+        if (fu_at_cap[p] && sf_port_class(p) inside {FU_TNS, FU_MEM})
+          hit({"occupancy.fu_at_capacity.", sf_fu_name(sf_port_class(p))});
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_cycle.sample(ev.n_issued, pr.exp_iq_count, pr.exp_inflight, pr.exp_bar_active, iq_full_stall);
+`endif
+    endfunction
+
+    function void unhit_mandatory(ref string missing[$]);
+      missing.delete();
+      foreach (order[i]) if (mandatory[order[i]] && hits[order[i]] == 0) missing.push_back(order[i]);
+    endfunction
+
+    function void report();
+      int unsigned n_mand = 0;
+      int unsigned n_hit  = 0;
+      $display("[SF-COV] ------------------------------------------------------------");
+      foreach (order[i]) begin
+        string nm = order[i];
+        if (mandatory[nm]) begin
+          n_mand++;
+          if (hits[nm] > 0) n_hit++;
+        end
+        $display("[SF-COV]   %s %10d %s", sf_pad(nm, 36), hits[nm], sf_pick(mandatory[nm] && hits[nm] == 0, "<< UNHIT", ""));
+      end
+      $display("[SF-COV] mandatory bins covered: %0d / %0d", n_hit, n_mand);
+`ifndef SF_TB_NO_COVERGROUPS
+      $display("[SF-COV] covergroups: issue %0.1f%%  cycle %0.1f%%  stall %0.1f%%  wakeup %0.1f%%  barrier %0.1f%%",
+               cg_issue.get_inst_coverage(), cg_cycle.get_inst_coverage(), cg_stall.get_inst_coverage(),
+               cg_wakeup.get_inst_coverage(), cg_barrier.get_inst_coverage());
+`endif
+    endfunction
+  endclass : sf_coverage
+
+  //----------------------------------------------------------------------------
+  // Lifecycle tracker: retired uops arrive through a mailbox; latency stats
+  //----------------------------------------------------------------------------
+  class sf_lifecycle_tracker;
+    mailbox #(sf_uop) mb;
+    int unsigned      n_retired  [SF_NUM_CLASSES];
+    longint           sum_wait   [SF_NUM_CLASSES];
+    longint           max_wait   [SF_NUM_CLASSES];
+    longint           sum_exec   [SF_NUM_CLASSES];
+    int unsigned      n_bar;
+    longint           sum_bar_wait;
+    longint           max_bar_wait;
+    int unsigned      n_slip;
+    longint           max_slip;
+
+    function new();
+      mb = new();
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        n_retired[c] = 0; sum_wait[c] = 0; max_wait[c] = 0; sum_exec[c] = 0;
+      end
+      n_bar = 0; sum_bar_wait = 0; max_bar_wait = 0; n_slip = 0; max_slip = 0;
+    endfunction
+
+    function void post(sf_uop u);
+      void'(mb.try_put(u));
+    endfunction
+
+    function void drain();
+      sf_uop u;
+      while (mb.try_get(u) > 0) begin
+        if (u.is_bar) begin
+          longint w = u.release_cycle - u.dispatch_cycle;
+          n_bar++;
+          sum_bar_wait += w;
+          if (w > max_bar_wait) max_bar_wait = w;
+        end else begin
+          longint w = u.issue_cycle - u.dispatch_cycle;
+          n_retired[u.fu]++;
+          sum_wait[u.fu] += w;
+          if (w > max_wait[u.fu]) max_wait[u.fu] = w;
+          sum_exec[u.fu] += u.complete_cycle - u.issue_cycle;
+          if (u.exp_issue_cycle >= 0 && u.issue_cycle != u.exp_issue_cycle) begin
+            longint sl = u.issue_cycle - u.exp_issue_cycle;
+            n_slip++;
+            if (sl > max_slip) max_slip = sl;
+          end
+        end
+      end
+    endfunction
+
+    function void report();
+      for (int c = 0; c < SF_NUM_CLASSES; c++) begin
+        if (n_retired[c] == 0) continue;
+        $display("[SF-STAT]   %s retired %7d  avg dispatch->issue %6.2f (max %0d)  avg issue->complete %6.2f",
+                 sf_fu_name(sf_fu_e'(c)), n_retired[c], real'(sum_wait[c]) / real'(n_retired[c]), max_wait[c],
+                 real'(sum_exec[c]) / real'(n_retired[c]));
+      end
+      if (n_bar > 0)
+        $display("[SF-STAT]   DFSYNC released %0d  avg dispatch->release %6.2f (max %0d)", n_bar,
+                 real'(sum_bar_wait) / real'(n_bar), max_bar_wait);
+      $display("[SF-STAT]   uops issued off golden-model cycle: %0d (max slip %0d)", n_slip, max_slip);
+    endfunction
+  endclass : sf_lifecycle_tracker
+
+  //----------------------------------------------------------------------------
+  // Environment: cycle orchestration, reset sequencing, program execution,
+  // watchdogs, test bookkeeping and final verdict.
+  //----------------------------------------------------------------------------
+  class sf_env;
+    sf_tb_cfg            cfg;
+    virtual sf_sched_if  vif;
+    sf_prng              rng_gen;
+    sf_prng              rng_drv;
+    sf_prng              rng_fu [$];
+    sf_stim_gen          gen;
+    sf_tag_renamer       ren;
+    sf_dispatch_driver   drv;
+    sf_fu_bfm            fu     [$];
+    sf_ref_model         model;
+    sf_scoreboard        sb;
+    sf_coverage          cov;
+    sf_lifecycle_tracker trk;
+    sf_uop               cmpl_drv [$];
+
+    longint              cyc;
+    longint              last_progress;
+    longint              prog_start;
+    int unsigned         reset_idx;
+    bit                  prog_aborted;
+    int unsigned         total_uops;
+    int unsigned         total_programs;
+    bit                  closure_done;
+    bit                  sva_accounted;
+
+    string               test_names [$];
+    bit                  test_pass  [$];
+    longint              test_cyc   [$];
+    int unsigned         test_uops  [$];
+    int unsigned         test_errs  [$];
+    string               cur_test;
+    int unsigned         test_err_base;
+    longint              test_cyc_base;
+    int unsigned         test_uop_base;
+
+    function new(sf_tb_cfg cfg_h, virtual sf_sched_if vif_h);
+      cfg = cfg_h;
+      vif = vif_h;
+      rng_gen  = new(cfg.seed ^ 64'h0123_4567_89AB_CDEF);
+      rng_drv  = new(cfg.seed ^ 64'hFEDC_BA98_7654_3210);
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        sf_prng   r = new(cfg.seed ^ (64'hA5A5_5A5A_0F0F_F0F0 + 64'(p)));
+        sf_fu_bfm f = new(p, r);
+        rng_fu.push_back(r);
+        fu.push_back(f);
+        cmpl_drv.push_back(null);
+      end
+      gen   = new(rng_gen);
+      ren   = new();
+      drv   = new(vif, rng_drv, ren);
+      model = new();
+      sb    = new(cfg, model);
+      cov   = new();
+      trk   = new();
+      cyc   = 0;
+      last_progress  = 0;
+      prog_start     = 0;
+      reset_idx      = 0;
+      prog_aborted   = 1'b0;
+      total_uops     = 0;
+      total_programs = 0;
+      closure_done   = 1'b0;
+      sva_accounted  = 1'b0;
+      cur_test       = "";
+    endfunction
+
+    function void info(int unsigned lvl, string msg);
+      if (cfg.verbosity >= lvl) $display("[SF-TB] cyc=%0d %s", cyc, msg);
+    endfunction
+
+    function void reseed(string tag);
+      rng_gen.reseed(sf_hash_str(tag, cfg.seed));
+      rng_drv.reseed(sf_hash_str(tag, cfg.seed ^ 64'h00FF_00FF_00FF_00FF));
+      for (int p = 0; p < SF_NUM_PORTS; p++)
+        rng_fu[p].reseed(sf_hash_str(tag, cfg.seed + (64'(p) + 64'd1) * 64'h1000_0000_0000_0001));
+    endfunction
+
+    function void init_signals();
+      vif.rst_n          = 1'b0;
+      vif.disp_valid     = 1'b0;
+      vif.disp_id        = '0;
+      vif.disp_opcode    = '0;
+      vif.disp_src_valid = '0;
+      vif.disp_src_tag   = '0;
+      vif.disp_dst_valid = 1'b0;
+      vif.disp_dst_tag   = '0;
+      vif.disp_bar_id    = '0;
+      vif.fu_ready       = '1;
+      vif.cmpl_valid     = '0;
+      vif.cmpl_id        = '0;
+      vif.cmpl_dst_valid = '0;
+      vif.cmpl_dst_tag   = '0;
+    endfunction
+
+    function bit [SF_NUM_PORTS-1:0] fu_at_capacity();
+      bit [SF_NUM_PORTS-1:0] v;
+      for (int p = 0; p < SF_NUM_PORTS; p++) v[p] = fu[p].at_capacity_now;
+      return v;
+    endfunction
+
+    function bit fus_idle();
+      for (int p = 0; p < SF_NUM_PORTS; p++) if (!fu[p].idle()) return 1'b0;
+      return 1'b1;
+    endfunction
+
+    function void drive_reset_idle();
+      vif.disp_valid <= 1'b0;
+      vif.fu_ready   <= '1;
+      vif.cmpl_valid <= '0;
+      for (int p = 0; p < SF_NUM_PORTS; p++) cmpl_drv[p] = null;
+    endfunction
+
+    // Next-cycle stimulus: dispatch lane, FU ready vector, completion bus.
+    function void drive_next();
+      bit   [SF_NUM_PORTS-1:0]                rdy;
+      logic [SF_NUM_PORTS-1:0]                cv;
+      logic [SF_NUM_PORTS-1:0]                cdv;
+      logic [SF_NUM_PORTS-1:0][SF_ID_W-1:0]   cid;
+      logic [SF_NUM_PORTS-1:0][SF_PTAG_W-1:0] ctag;
+      drv.advance(cyc + 1);
+      drv.drive();
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        fu[p].advance(cyc + 1);
+        rdy[p]      = fu[p].ready_now;
+        cmpl_drv[p] = fu[p].cmpl_now;
+        if (cmpl_drv[p] != null) begin
+          cv[p]   = 1'b1;
+          cid[p]  = cmpl_drv[p].id;
+          cdv[p]  = cmpl_drv[p].dst_valid;
+          ctag[p] = cmpl_drv[p].dst_valid ? cmpl_drv[p].dst_tag : SF_PTAG_W'(rng_drv.next32());
+        end else begin
+          cv[p]   = 1'b0;
+          cid[p]  = SF_ID_W'(rng_drv.next32());
+          cdv[p]  = rng_drv.permille(500);
+          ctag[p] = SF_PTAG_W'(rng_drv.next32());
+        end
+      end
+      vif.fu_ready       <= rdy;
+      vif.cmpl_valid     <= cv;
+      vif.cmpl_id        <= cid;
+      vif.cmpl_dst_valid <= cdv;
+      vif.cmpl_dst_tag   <= ctag;
+    endfunction
+
+    function void reset_cycle(sf_obs o);
+      reset_idx++;
+      if (reset_idx == 1) begin
+        if (model.outstanding() > 0) cov.hit("reset.with_outstanding");
+        model.reset();
+        ren.reset();
+        drv.abort();
+        for (int p = 0; p < SF_NUM_PORTS; p++) fu[p].flush();
+      end
+      sb.check_reset_cycle(o, reset_idx);
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // One clock: sample -> predict -> check -> commit -> stimulate
+    //--------------------------------------------------------------------------
+    task run_cycle();
+      sf_obs    o = new();
+      sf_pred   pr;
+      sf_events ev;
+      sf_uop    cand;
+      @(vif.mon_ev);
+      cyc++;
+      o.sample(vif, cyc);
+      if (!o.rst_n) begin
+        reset_cycle(o);
+        drive_reset_idle();
+        return;
+      end
+      reset_idx = 0;
+      pr   = model.predict(o.fu_ready, cyc);
+      cand = drv.cur;
+      ev   = sb.check_cycle(o, pr, cand, cmpl_drv);
+      void'(drv.observe(o.disp_valid, o.disp_ready));
+      model.commit(ev, cyc);
+      sb.post_commit(ev);
+      if (ev.disp != null) begin
+        if (cfg.verbosity >= 3) info(3, $sformatf("DISPATCH %s", ev.disp.convert2string()));
+      end
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        if (ev.iss[p] != null) begin
+          ren.on_issue(ev.iss[p]);
+          fu[p].accept(ev.iss[p], cyc);
+          if (cfg.verbosity >= 3)
+            info(3, $sformatf("ISSUE p%0d %s", p, ev.iss[p].convert2string()));
+        end
+      end
+      for (int p = 0; p < SF_NUM_PORTS; p++) begin
+        if (ev.cmpl[p] != null) begin
+          ren.on_complete(ev.cmpl[p]);
+          trk.post(ev.cmpl[p]);
+        end
+      end
+      if (ev.rel != null) begin
+        trk.post(ev.rel);
+        if (cfg.verbosity >= 3) info(3, $sformatf("RELEASE %s", ev.rel.convert2string()));
+      end
+      cov.sample_cycle(o, pr, ev, drv.full_stall_now, drv.tag_stall_now, fu_at_capacity());
+      if (ev.progress()) last_progress = cyc;
+      drive_next();
+      if (sb.abort_req) begin
+        $display("[SF-TB] error limit (%0d) reached - aborting", cfg.max_errors);
+        finish();
+      end
+    endtask
+
+    task run_cycles(int unsigned n);
+      repeat (n) run_cycle();
+    endtask
+
+    task reset_dut(int unsigned n);
+      vif.rst_n <= 1'b0;
+      drv.abort();
+      for (int p = 0; p < SF_NUM_PORTS; p++) fu[p].flush();
+      drive_reset_idle();
+      repeat ((n < 2) ? 2 : n) run_cycle();
+      vif.rst_n <= 1'b1;
+    endtask
+
+    function void configure_fus(sf_test_knobs k);
+      for (int p = 0; p < SF_NUM_PORTS; p++) fu[p].configure(k, cyc + 1);
+    endfunction
+
+    task load_program(sf_program prog, sf_test_knobs k);
+      configure_fus(k);
+      drv.load(prog, k.bubble_pm, k.max_bubble);
+      drv.advance(cyc + 1);
+      drv.drive();
+      prog_start    = cyc;
+      last_progress = cyc;
+      prog_aborted  = 1'b0;
+      total_uops   += prog.size();
+      total_programs++;
+      info(1, $sformatf("program '%s': %0d uops, %0d DFSYNC, %0d edges, max depth %0d",
+                        prog.name, prog.size(), prog.n_barriers, prog.n_edges, prog.max_depth));
+    endtask
+
+    task recover(sf_program prog, string why);
+      sb.error(E_DEADLOCK, cyc, $sformatf("program '%s': %s\n%s", prog.name, why, model.dump_state()));
+      foreach (prog.uops[i]) begin
+        if (!prog.uops[i].is_bar && prog.uops[i].complete_count == 0)
+          sb.error(E_LOST_UOP, cyc, $sformatf("[%s] %s never completed (state %s) | %s", prog.name,
+                                              prog.uops[i].brief(), prog.uops[i].state.name(), prog.uops[i].lifecycle()));
+        if (sb.abort_req) break;
+      end
+      prog_aborted = 1'b1;
+      reset_dut(4);
+    endtask
+
+    task drain_program(sf_program prog);
+      while (!(drv.done() && model.empty() && fus_idle())) begin
+        run_cycle();
+        if (cyc - last_progress > longint'(cfg.deadlock_cycles)) begin
+          recover(prog, $sformatf("no dispatch/issue/completion/release for %0d cycles", cfg.deadlock_cycles));
+          break;
+        end
+        if (cyc - prog_start > cfg.program_timeout) begin
+          recover(prog, $sformatf("program exceeded %0d cycles", cfg.program_timeout));
+          break;
+        end
+      end
+      if (!prog_aborted) begin
+        run_cycles(2);
+        sb.audit_program(prog, cyc);
+        info(2, $sformatf("program '%s' drained in %0d cycles", prog.name, cyc - prog_start));
+      end
+      trk.drain();
+    endtask
+
+    task run_program(sf_program prog, sf_test_knobs k);
+      load_program(prog, k);
+      drain_program(prog);
+    endtask
+
+    task idle(int unsigned n, sf_test_knobs k);
+      configure_fus(k);
+      run_cycles(n);
+    endtask
+
+    //--------------------------------------------------------------------------
+    // Test bookkeeping
+    //--------------------------------------------------------------------------
+    task begin_test(string name);
+      sf_test_knobs k = new();
+      cur_test      = name;
+      test_err_base = sb.total_errors;
+      test_cyc_base = cyc;
+      test_uop_base = total_uops;
+      reseed(name);
+      $display("[SF-TB] ==== TEST %s ====", sf_pad(name, 28));
+      configure_fus(k);
+      reset_dut(4);
+    endtask
+
+    function void end_test();
+      int unsigned errs = sb.total_errors - test_err_base;
+      test_names.push_back(cur_test);
+      test_pass.push_back(errs == 0);
+      test_cyc.push_back(cyc - test_cyc_base);
+      test_uops.push_back(total_uops - test_uop_base);
+      test_errs.push_back(errs);
+      $display("[SF-TB] ==== TEST %s %s (%0d cycles, %0d uops, %0d errors)", sf_pad(cur_test, 28),
+               sf_pick(errs == 0, "PASS", "FAIL"), cyc - test_cyc_base, total_uops - test_uop_base, errs);
+    endfunction
+
+    function void final_report();
+      string missing[$];
+      trk.drain();
+      if (!sva_accounted) begin
+        sva_accounted = 1'b1;
+        if (sf_sva_failures > 0) begin
+          sb.err_cnt[E_SVA] += sf_sva_failures;
+          sb.total_errors   += sf_sva_failures;
+        end
+      end
+      if (cfg.cov_closure && cfg.only_test == "" && !sb.abort_req && !closure_done) begin
+        closure_done = 1'b1;
+        cov.unhit_mandatory(missing);
+        foreach (missing[i]) sb.error(E_COVERAGE, cyc, $sformatf("mandatory bin '%s' never hit", missing[i]));
+      end
+      $display("");
+      $display("[SF-TB] ==================================================================");
+      $display("[SF-TB]  SilicaFlux scheduler verification summary");
+      $display("[SF-TB] ==================================================================");
+      $display("[SF-TB]  seed %0d | mode %s | %0d cycles | %0d programs | %0d uops",
+               cfg.seed, sf_pick(cfg.strict, "STRICT (cycle-exact)", "RELAXED (legality+liveness)"),
+               cyc, total_programs, total_uops);
+      $display("[SF-TB]  checked: %0d cycles, %0d dispatches, %0d issues, %0d completions, %0d releases",
+               sb.n_cycles_checked, sb.n_dispatches_checked, sb.n_issues_checked,
+               sb.n_completions_seen, sb.n_releases_checked);
+      foreach (test_names[i])
+        $display("[SF-TB]   %s %s  %8d cycles %7d uops %4d errors", sf_pad(test_names[i], 28),
+                 sf_pick(test_pass[i], "PASS", "FAIL"), test_cyc[i], test_uops[i], test_errs[i]);
+      for (int c = 0; c < int'(E_NUM_CATEGORIES); c++) begin
+        sf_err_e e = sf_err_e'(c);
+        if (sb.err_cnt[c] > 0) $display("[SF-TB]   errors %s %0d", sf_pad(e.name(), 22), sb.err_cnt[c]);
+      end
+      for (int p = 0; p < SF_NUM_PORTS; p++)
+        $display("[SF-STAT]   port %0d %s issued %7d  not-ready %7d (capacity %0d, random %0d, forced %0d)  max occupancy %0d",
+                 p, sf_fu_name(sf_port_class(p)), fu[p].n_issued, fu[p].n_notready_cycles, fu[p].n_cap_cycles,
+                 fu[p].n_rand_cycles, fu[p].n_forced_cycles, fu[p].max_occ);
+      $display("[SF-STAT]   dispatch: %0d accepted, %0d queue-full stall cycles, %0d tag stall cycles, %0d bubbles",
+               drv.n_dispatched, drv.n_full_stall_cycles, drv.n_tag_stall_cycles, drv.n_bubble_cycles);
+      trk.report();
+      cov.report();
+      $display("[SF-TB] ==================================================================");
+    endfunction
+
+    function void finish();
+      final_report();
+      if (sb.total_errors == 0) begin
+        $display("[SF-TB] TB_RESULT: PASS");
+        $finish;
+      end else begin
+        $display("[SF-TB] TB_RESULT: FAIL (%0d errors)", sb.total_errors);
+        $fatal(1, "[SF-TB] scheduler verification FAILED");
+      end
+    endfunction
+  endclass : sf_env
+
+  //----------------------------------------------------------------------------
+  // Test library
+  //----------------------------------------------------------------------------
+  class sf_test_lib;
+    sf_env    env;
+    sf_tb_cfg cfg;
+    int unsigned n_selected;
+
+    function new(sf_env env_h);
+      env        = env_h;
+      cfg        = env_h.cfg;
+      n_selected = 0;
+    endfunction
+
+    function bit selected(string name);
+      bit sel = (cfg.only_test == "") || (cfg.only_test == name);
+      if (sel) n_selected++;
+      return sel;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Directed self-checks layered on top of the scoreboard
+    //--------------------------------------------------------------------------
+    // A -> B -> C on an unloaded machine: each consumer issues the cycle after
+    // its producer completes.
+    function void check_chain(sf_program p);
+      if (!cfg.strict || env.prog_aborted) return;
+      for (int i = 1; i < int'(p.size()); i++) begin
+        sf_uop a = p.uops[i - 1];
+        sf_uop b = p.uops[i];
+        if (b.issue_cycle != a.complete_cycle + 1)
+          env.sb.error(E_AUDIT, env.cyc, $sformatf("[%s] wakeup latency: %s completed @%0d, dependent %s issued @%0d (expected @%0d)",
+                                                   p.name, a.brief(), a.complete_cycle, b.brief(), b.issue_cycle, a.complete_cycle + 1));
+      end
+    endfunction
+
+    // Barrier at index 'bidx': release strictly after every older completion,
+    // every younger issue strictly after release. With 'exact' (unstalled
+    // directed scenarios, strict mode) the release follows the last older
+    // completion by one cycle and the first younger issue follows the release
+    // by one cycle.
+    function void check_barrier(sf_program p, int bidx, bit exact);
+      sf_uop  b             = p.uops[bidx];
+      longint last_older    = -1;
+      longint first_younger = -1;
+      if (env.prog_aborted) return;
+      for (int j = 0; j < bidx; j++)
+        if (!p.uops[j].is_bar && p.uops[j].complete_cycle > last_older) last_older = p.uops[j].complete_cycle;
+      for (int j = bidx + 1; j < int'(p.size()); j++) begin
+        if (p.uops[j].is_bar) break;
+        if (first_younger < 0 || p.uops[j].issue_cycle < first_younger) first_younger = p.uops[j].issue_cycle;
+      end
+      if (b.release_cycle <= last_older)
+        env.sb.error(E_DFSYNC_VIOLATION, env.cyc, $sformatf("[%s] %s released @%0d, last older completion @%0d",
+                                                            p.name, b.brief(), b.release_cycle, last_older));
+      if (first_younger >= 0 && first_younger <= b.release_cycle)
+        env.sb.error(E_DFSYNC_VIOLATION, env.cyc, $sformatf("[%s] younger uop issued @%0d, %s released @%0d",
+                                                            p.name, first_younger, b.brief(), b.release_cycle));
+      if (exact && cfg.strict && last_older >= 0 && b.release_cycle != last_older + 1)
+        env.sb.error(E_RELEASE_MISMATCH, env.cyc, $sformatf("[%s] %s release latency: last older completion @%0d, release @%0d (expected @%0d)",
+                                                            p.name, b.brief(), last_older, b.release_cycle, last_older + 1));
+      if (exact && cfg.strict && first_younger >= 0 && first_younger != b.release_cycle + 1)
+        env.sb.error(E_ISSUE_MISMATCH, env.cyc, $sformatf("[%s] first younger issue @%0d, %s released @%0d (expected @%0d)",
+                                                          p.name, first_younger, b.brief(), b.release_cycle, b.release_cycle + 1));
+    endfunction
+
+    // Cycle relative to a run's origin; unset (-1) stays unset.
+    function longint rel_cyc(longint c, longint t0);
+      return (c < 0) ? -1 : c - t0;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // reset_sanity: idle quiescence, junk on idle lanes, reset under load
+    //--------------------------------------------------------------------------
+    task t_reset_sanity();
+      sf_test_knobs k = new();
+      sf_program    p;
+      int unsigned  w[SF_NUM_CLASSES];
+      env.begin_test("reset_sanity");
+      env.idle(24, k);
+      env.reset_dut(3);
+      env.idle(8, k);
+      w = '{40, 25, 10, 25};
+      p = env.gen.gen_independent("reset.burst", 48, w);
+      env.load_program(p, k);
+      env.run_cycles(14);
+      env.reset_dut(2);
+      env.idle(8, k);
+      p = env.gen.gen_independent("reset.after", 32, w);
+      env.run_program(p, k);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // dep_chain: A -> B -> C dependency chains per class and mixed
+    //--------------------------------------------------------------------------
+    task t_dep_chain();
+      sf_test_knobs k = new();
+      sf_program    p;
+      env.begin_test("dep_chain");
+      p = env.gen.gen_chain("chain.alu", 24, FU_ALU, 1'b0);   env.run_program(p, k); check_chain(p);
+      p = env.gen.gen_chain("chain.vec", 16, FU_VEC, 1'b0);   env.run_program(p, k); check_chain(p);
+      p = env.gen.gen_chain("chain.tns", 6, FU_TNS, 1'b0);    env.run_program(p, k); check_chain(p);
+      p = env.gen.gen_chain("chain.mem", 12, FU_MEM, 1'b0);   env.run_program(p, k); check_chain(p);
+      p = env.gen.gen_chain("chain.mixed", 48, FU_ALU, 1'b1); env.run_program(p, k); check_chain(p);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // independent: no dependencies, peak and full-width issue
+    //--------------------------------------------------------------------------
+    task t_independent();
+      sf_test_knobs k  = new();
+      sf_test_knobs kb = new();
+      sf_program    p;
+      int unsigned  w[SF_NUM_CLASSES];
+      env.begin_test("independent");
+      w = '{40, 25, 10, 25};
+      p = env.gen.gen_independent("indep.mixed", 160, w);   env.run_program(p, k);
+      w = '{50, 50, 0, 0};
+      p = env.gen.gen_independent("indep.alu_vec", 96, w);  env.run_program(p, k);
+      kb.add_window(-1, 0, 48);
+      w = '{40, 20, 20, 20};
+      p = env.gen.gen_independent("indep.burst", 192, w);   env.run_program(p, kb);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // wakeup: dispatch-cycle bypass window sweep, fan-out / fan-in
+    //--------------------------------------------------------------------------
+    task t_wakeup();
+      sf_test_knobs k  = new();
+      sf_test_knobs ks = new();
+      sf_program    p;
+      int unsigned  bypass0;
+      env.begin_test("wakeup");
+      bypass0 = env.cov.hits["dispatch.bypass_wakeup"];
+      for (int unsigned lat = 1; lat <= 3; lat++) begin
+        for (int unsigned gap = 0; gap <= 4; gap++) begin
+          p = env.gen.gen_wakeup_probe($sformatf("wakeup.alu.l%0d.g%0d", lat, gap), FU_ALU, lat, gap, 1'b0);
+          env.run_program(p, k);
+          p = env.gen.gen_wakeup_probe($sformatf("wakeup.vec2.l%0d.g%0d", lat, gap), FU_VEC, lat, gap, 1'b1);
+          env.run_program(p, k);
+        end
+      end
+      p = env.gen.gen_wakeup_probe("wakeup.mem.l3.g3", FU_MEM, 3, 3, 1'b0);
+      env.run_program(p, k);
+      if (env.cov.hits["dispatch.bypass_wakeup"] == bypass0)
+        env.sb.error(E_COVERAGE, env.cyc, "directed probes never landed a dispatch in its producer's completion cycle");
+      p = env.gen.gen_fanout("fanout.16", 16);
+      env.run_program(p, k);
+      ks.stall_pm[4] = 300;
+      ks.stall_max[4] = 4;
+      ks.stall_pm[2] = 200;
+      p = env.gen.gen_fanout("fanout.24", 24);
+      env.run_program(p, ks);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // barrier_basic: directed DFSYNC semantics + barrier-separated groups
+    //--------------------------------------------------------------------------
+    task t_barrier_basic();
+      sf_test_knobs k  = new();
+      sf_test_knobs ks = new();
+      sf_program    p;
+      sf_uop        u;
+      int           b0;
+      int           b1;
+      env.begin_test("barrier_basic");
+      p = new("barrier.basic");
+      p.add(env.gen.new_uop(OP_TMMA));
+      for (int i = 0; i < 4; i++) p.add(env.gen.new_uop(OP_ADD));
+      u = env.gen.new_uop(OP_LD);
+      u.exec_lat = 30;
+      p.add(u);
+      b0 = int'(p.size());
+      p.add(env.gen.new_barrier());
+      for (int i = 0; i < 8; i++) p.add(env.gen.new_uop((i % 2 == 1) ? OP_VMUL : OP_XOR));
+      u = env.gen.new_uop(OP_VADD);
+      env.gen.set_prod(u, 0, 0);
+      p.add(u);
+      b1 = int'(p.size());
+      p.add(env.gen.new_barrier());
+      u = env.gen.new_uop(OP_ST);
+      env.gen.set_prod(u, 0, 5);
+      env.gen.set_prod(u, 1, b1 - 1);
+      p.add(u);
+      p.finalize();
+      env.run_program(p, k);
+      check_barrier(p, b0, 1'b1);
+      check_barrier(p, b1, 1'b1);
+      ks.set_stall_all(80, 1, 4);
+      p = env.gen.gen_barrier_groups("barrier.groups", 8, 10, 400, 1'b1);
+      env.run_program(p, ks);
+      foreach (p.uops[i]) if (p.uops[i].is_bar) check_barrier(p, i, 1'b0);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // barrier_sequence: leading / back-to-back / trailing / barrier trains
+    //--------------------------------------------------------------------------
+    task t_barrier_sequence();
+      sf_test_knobs k  = new();
+      sf_test_knobs kb = new();
+      sf_test_knobs ks = new();
+      sf_program    p;
+      env.begin_test("barrier_sequence");
+      p = env.gen.gen_barrier_patterns("barrier.patterns");
+      env.run_program(p, k);
+      kb.bubble_pm  = 300;
+      kb.max_bubble = 4;
+      p = env.gen.gen_barrier_patterns("barrier.patterns.bubbles");
+      env.run_program(p, kb);
+      ks.set_stall_all(250, 1, 6);
+      p = env.gen.gen_barrier_patterns("barrier.patterns.stall");
+      env.run_program(p, ks);
+      for (int unsigned lat = 1; lat <= 6; lat++) begin
+        sf_uop u = env.gen.new_uop(OP_ADD);
+        u.exec_lat = lat;
+        p = new($sformatf("barrier.short.l%0d", lat));
+        p.add(u);
+        p.add(env.gen.new_barrier());
+        p.add(env.gen.new_uop(OP_XOR));
+        p.finalize();
+        env.run_program(p, k);
+        check_barrier(p, 1, 1'b1);
+      end
+      p = new("barrier.train");
+      for (int i = 0; i < 8; i++) p.add(env.gen.new_barrier());
+      p.finalize();
+      env.run_program(p, k);
+      if (cfg.strict && !env.prog_aborted) begin
+        if (p.uops[0].release_cycle != p.uops[0].dispatch_cycle + 1)
+          env.sb.error(E_RELEASE_MISMATCH, env.cyc, $sformatf("[barrier.train] leading %s dispatched @%0d released @%0d (expected @%0d)",
+                                                              p.uops[0].brief(), p.uops[0].dispatch_cycle, p.uops[0].release_cycle,
+                                                              p.uops[0].dispatch_cycle + 1));
+        for (int i = 1; i < int'(p.size()); i++)
+          if (p.uops[i].release_cycle != p.uops[i - 1].release_cycle + 1)
+            env.sb.error(E_RELEASE_MISMATCH, env.cyc, $sformatf("[barrier.train] %s released @%0d, predecessor released @%0d",
+                                                                p.uops[i].brief(), p.uops[i].release_cycle, p.uops[i - 1].release_cycle));
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // barrier_backpressure: DFSYNC held by stalled long-latency work while the
+    // queue fills with ready-but-blocked uops
+    //--------------------------------------------------------------------------
+    task t_barrier_backpressure();
+      sf_test_knobs k = new();
+      sf_program    p;
+      sf_uop        u;
+      int           b0;
+      int           first_young;
+      env.begin_test("barrier_backpressure");
+      k.add_window(3, 0, 220);
+      k.add_window(4, 20, 160);
+      k.stall_pm[0] = 100;
+      k.stall_pm[1] = 100;
+      p = new("barrier.bp");
+      p.add(env.gen.new_uop(OP_TMMA));
+      p.add(env.gen.new_uop(OP_TCONV));
+      u = env.gen.new_uop(OP_LD);
+      u.exec_lat = 25;
+      p.add(u);
+      b0 = int'(p.size());
+      p.add(env.gen.new_barrier());
+      first_young = int'(p.size());
+      for (int i = 0; i < 40; i++) p.add(env.gen.new_uop((i % 5 == 4) ? OP_VADD : OP_ADD));
+      p.add(env.gen.new_barrier());
+      u = env.gen.new_uop(OP_TACC);
+      env.gen.set_prod(u, 0, first_young);
+      env.gen.set_prod(u, 1, 0);
+      p.add(u);
+      p.add(env.gen.new_uop(OP_PREF));
+      p.finalize();
+      env.run_program(p, k);
+      check_barrier(p, b0, 1'b0);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // barrier_random: randomized DAGs with increasing DFSYNC density
+    //--------------------------------------------------------------------------
+    task t_barrier_random();
+      sf_program p;
+      env.begin_test("barrier_random");
+      for (int i = 0; i < 4; i++) begin
+        sf_dag_knobs  dk = new();
+        sf_test_knobs tk = new();
+        dk.n_uops     = 500;
+        dk.barrier_pm = 40 * (i + 1);
+        dk.dep_pm     = 450;
+        dk.dep_window = 10;
+        tk.set_stall_all(60 * i, 1, 5);
+        tk.bubble_pm  = 100;
+        tk.max_bubble = 3;
+        p = env.gen.gen_random_dag($sformatf("barrier.random.%0d", i), dk);
+        env.run_program(p, tk);
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // structural: per-class oversubscription and port-order arbitration
+    //--------------------------------------------------------------------------
+    task t_structural();
+      sf_program   p;
+      int unsigned w[SF_NUM_CLASSES];
+      int unsigned saved_miss;
+      env.begin_test("structural");
+      begin
+        sf_test_knobs k = new();
+        k.add_window(-1, 0, 40);
+        k.stall_pm[1]  = 300;
+        k.stall_max[1] = 4;
+        p = env.gen.gen_contention("contention.alu", FU_ALU, 128);
+        env.run_program(p, k);
+      end
+      begin
+        sf_test_knobs k = new();
+        k.add_window(-1, 0, 40);
+        k.stall_pm[2]  = 250;
+        k.stall_max[2] = 3;
+        p = env.gen.gen_contention("contention.vec", FU_VEC, 64);
+        env.run_program(p, k);
+      end
+      begin
+        sf_test_knobs k = new();
+        p = env.gen.gen_contention("contention.tns", FU_TNS, 24);
+        env.run_program(p, k);
+      end
+      begin
+        sf_test_knobs k = new();
+        saved_miss      = env.gen.miss_pm;
+        env.gen.miss_pm = 700;
+        p = env.gen.gen_contention("contention.mem", FU_MEM, 64);
+        env.gen.miss_pm = saved_miss;
+        env.run_program(p, k);
+      end
+      begin
+        sf_test_knobs k = new();
+        k.set_stall_all(200, 1, 3);
+        k.add_window(-1, 0, 40);
+        w = '{35, 25, 15, 25};
+        p = env.gen.gen_independent("contention.mixed", 256, w);
+        env.run_program(p, k);
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // iq_full: deep long-latency dependency chains saturate the queue
+    //--------------------------------------------------------------------------
+    task t_iq_full();
+      sf_dag_knobs  dk = new();
+      sf_test_knobs k  = new();
+      sf_program    p;
+      env.begin_test("iq_full");
+      dk.n_uops     = 600;
+      dk.dep_pm     = 900;
+      dk.dep_window = 3;
+      dk.cls_w      = '{30, 20, 30, 20};
+      dk.barrier_pm = 0;
+      dk.miss_pm    = 500;
+      p = env.gen.gen_random_dag("iq_full.deep", dk);
+      env.run_program(p, k);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // backpressure: heavy random stalls, global freezes, single-entry FUs
+    //--------------------------------------------------------------------------
+    task t_backpressure();
+      sf_dag_knobs  dk  = new();
+      sf_test_knobs k   = new();
+      sf_test_knobs k1  = new();
+      sf_program    p;
+      env.begin_test("backpressure");
+      dk.n_uops     = 1200;
+      dk.dep_pm     = 550;
+      dk.dep_window = 16;
+      dk.barrier_pm = 20;
+      dk.miss_pm    = 300;
+      k.set_stall_all(350, 1, 12);
+      k.add_window(-1, 300, 420);
+      k.add_window(-1, 1500, 1580);
+      k.add_window(3, 800, 1100);
+      k.bubble_pm  = 50;
+      k.max_bubble = 2;
+      p = env.gen.gen_random_dag("bp.stress", dk);
+      env.run_program(p, k);
+      dk.n_uops = 600;
+      for (int i = 0; i < SF_NUM_PORTS; i++) begin
+        k1.capacity[i] = 1;
+        k1.ii[i]       = 2;
+      end
+      k1.set_stall_all(200, 1, 3);
+      p = env.gen.gen_random_dag("bp.single_entry", dk);
+      env.run_program(p, k1);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // random_dag: seeded random dataflow graphs with random environment knobs
+    //--------------------------------------------------------------------------
+    task t_random_dag();
+      sf_program p;
+      env.begin_test("random_dag");
+      for (int unsigned it = 0; it < cfg.random_iters; it++) begin
+        sf_dag_knobs  dk = new();
+        sf_test_knobs tk = new();
+        sf_prng       r  = env.gen.rng;
+        dk.n_uops     = r.range(250, 700);
+        dk.dep_pm     = r.range(150, 900);
+        dk.dep_window = r.range(2, 24);
+        dk.barrier_pm = r.permille(400) ? 0 : r.range(5, 60);
+        dk.miss_pm    = r.range(0, 500);
+        for (int c = 0; c < SF_NUM_CLASSES; c++) dk.cls_w[c] = r.range(0, 10) * 10 + ((c == 0) ? 10 : 0);
+        tk.bubble_pm  = r.range(0, 400);
+        tk.max_bubble = r.range(1, 6);
+        for (int q = 0; q < SF_NUM_PORTS; q++) begin
+          tk.stall_pm[q]  = r.range(0, 300);
+          tk.stall_min[q] = 1;
+          tk.stall_max[q] = r.range(1, 10);
+        end
+        if (r.permille(300)) begin
+          longint f = longint'(r.range(50, 300));
+          tk.add_window(-1, f, f + longint'(r.range(10, 120)));
+        end
+        p = env.gen.gen_random_dag($sformatf("random.%0d", it), dk);
+        env.run_program(p, tk);
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // midrun_reset: reset with work in flight, stale-tag probe, clean restart
+    //--------------------------------------------------------------------------
+    task t_midrun_reset();
+      sf_dag_knobs        dk = new();
+      sf_test_knobs       k  = new();
+      sf_test_knobs       k0 = new();
+      sf_program          p;
+      sf_program          probe;
+      bit [SF_PTAG_W-1:0] busy[$];
+      int unsigned        n = 0;
+      env.begin_test("midrun_reset");
+      dk.n_uops     = 400;
+      dk.dep_pm     = 650;
+      dk.barrier_pm = 20;
+      k.set_stall_all(150, 1, 4);
+      p = env.gen.gen_random_dag("reset.victim", dk);
+      env.load_program(p, k);
+      env.run_cycles(60);
+      while (n < 600 && !(env.model.inflight.num() > 0 && env.model.iq.size() > 4)) begin
+        env.run_cycle();
+        n++;
+      end
+      env.model.busy_tags(busy);
+      env.reset_dut(5);
+      env.idle(6, k0);
+      while (busy.size() > 8) void'(busy.pop_back());
+      if (busy.size() == 0) begin
+        env.sb.error(E_TB_INTERNAL, env.cyc, "midrun_reset: no busy physical tag at the reset point");
+      end else begin
+        probe = env.gen.gen_stale_tag_probe("reset.stale_tags", busy);
+        env.run_program(probe, k0);
+        env.cov.hit("reset.stale_tag_probe");
+        if (!env.prog_aborted) begin
+          foreach (probe.uops[i]) begin
+            sf_uop u = probe.uops[i];
+            if (u.issue_cycle - u.dispatch_cycle > (cfg.strict ? 1 : 8))
+              env.sb.error(E_RESET, env.cyc, $sformatf("stale dependency state: %s reads tag %0d (busy at reset), dispatched @%0d issued @%0d",
+                                                       u.brief(), u.src_tag[0], u.dispatch_cycle, u.issue_cycle));
+          end
+        end
+      end
+      dk.n_uops = 300;
+      p = env.gen.gen_random_dag("reset.restart", dk);
+      env.run_program(p, k);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // restart_determinism: identical program + seeds after reset must
+    // reproduce the identical schedule
+    //--------------------------------------------------------------------------
+    task t_restart_determinism();
+      sf_dag_knobs  dk = new();
+      sf_test_knobs tk = new();
+      sf_program    pa;
+      sf_program    pb;
+      longint       ta;
+      longint       tb;
+      env.begin_test("restart_determinism");
+      dk.n_uops     = 500;
+      dk.dep_pm     = 550;
+      dk.barrier_pm = 25;
+      dk.miss_pm    = 300;
+      tk.set_stall_all(200, 1, 6);
+      tk.bubble_pm  = 150;
+      tk.max_bubble = 3;
+      tk.add_window(3, 100, 180);
+      pa = env.gen.gen_random_dag("determinism.A", dk);
+      pb = env.gen.clone(pa, "determinism.B");
+      env.reseed("determinism.replay");
+      env.reset_dut(4);
+      ta = env.cyc;
+      env.run_program(pa, tk);
+      env.reseed("determinism.replay");
+      env.reset_dut(4);
+      tb = env.cyc;
+      env.run_program(pb, tk);
+      foreach (pa.uops[i]) begin
+        sf_uop a = pa.uops[i];
+        sf_uop b = pb.uops[i];
+        if (rel_cyc(a.dispatch_cycle, ta) != rel_cyc(b.dispatch_cycle, tb) ||
+            rel_cyc(a.issue_cycle, ta)    != rel_cyc(b.issue_cycle, tb)    ||
+            rel_cyc(a.complete_cycle, ta) != rel_cyc(b.complete_cycle, tb) ||
+            rel_cyc(a.release_cycle, ta)  != rel_cyc(b.release_cycle, tb)  ||
+            a.issue_port != b.issue_port) begin
+          env.sb.error(E_DETERMINISM, env.cyc, $sformatf("replay diverged at program index %0d:\n      run A (t0=%0d): %s\n      run B (t0=%0d): %s",
+                                                         i, ta, a.convert2string(), tb, b.convert2string()));
+          break;
+        end
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    task run();
+      $display("[SF-TB] SilicaFlux scheduler verification: seed=%0d mode=%s entries=%0d ports=%0d",
+               cfg.seed, sf_pick(cfg.strict, "STRICT", "RELAXED"), SF_NUM_ENTRIES, SF_NUM_PORTS);
+      if (selected("reset_sanity"))         t_reset_sanity();
+      if (selected("dep_chain"))            t_dep_chain();
+      if (selected("independent"))          t_independent();
+      if (selected("wakeup"))               t_wakeup();
+      if (selected("barrier_basic"))        t_barrier_basic();
+      if (selected("barrier_sequence"))     t_barrier_sequence();
+      if (selected("barrier_backpressure")) t_barrier_backpressure();
+      if (selected("barrier_random"))       t_barrier_random();
+      if (selected("structural"))           t_structural();
+      if (selected("iq_full"))              t_iq_full();
+      if (selected("backpressure"))         t_backpressure();
+      if (selected("random_dag"))           t_random_dag();
+      if (selected("midrun_reset"))         t_midrun_reset();
+      if (selected("restart_determinism"))  t_restart_determinism();
+      if (n_selected == 0) env.sb.error(E_TB_INTERNAL, env.cyc, $sformatf("unknown test '%s'", cfg.only_test));
+      env.finish();
+    endtask
+  endclass : sf_test_lib
+
+endpackage : sf_sched_tb_pkg
+
+//==============================================================================
+// Top
+//==============================================================================
+module tb_scheduler;
+  import sf_sched_params_pkg::*;
+  import sf_sched_tb_pkg::*;
+
+  localparam time CLK_HALF = 1ns;
+
+  logic clk = 1'b0;
+  always #(CLK_HALF) clk = ~clk;
+
+  sf_sched_if sif (.clk(clk));
+
+  //----------------------------------------------------------------------------
+  // DUT
+  //----------------------------------------------------------------------------
+  scheduler #(
+    .NUM_ENTRIES (SF_NUM_ENTRIES),
+    .NUM_SRCS    (SF_NUM_SRCS),
+    .PTAG_W      (SF_PTAG_W),
+    .ID_W        (SF_ID_W),
+    .OPC_W       (SF_OPC_W),
+    .BAR_ID_W    (SF_BAR_ID_W),
+    .NUM_PORTS   (SF_NUM_PORTS),
+    .CNT_W       (SF_CNT_W),
+    .INFL_W      (SF_INFL_W)
+  ) u_dut (
+    .clk_i            (clk),
+    .rst_ni           (sif.rst_n),
+    .disp_valid_i     (sif.disp_valid),
+    .disp_ready_o     (sif.disp_ready),
+    .disp_id_i        (sif.disp_id),
+    .disp_opcode_i    (sif.disp_opcode),
+    .disp_src_valid_i (sif.disp_src_valid),
+    .disp_src_tag_i   (sif.disp_src_tag),
+    .disp_dst_valid_i (sif.disp_dst_valid),
+    .disp_dst_tag_i   (sif.disp_dst_tag),
+    .disp_bar_id_i    (sif.disp_bar_id),
+    .fu_ready_i       (sif.fu_ready),
+    .iss_valid_o      (sif.iss_valid),
+    .iss_id_o         (sif.iss_id),
+    .iss_opcode_o     (sif.iss_opcode),
+    .iss_src_valid_o  (sif.iss_src_valid),
+    .iss_src_tag_o    (sif.iss_src_tag),
+    .iss_dst_valid_o  (sif.iss_dst_valid),
+    .iss_dst_tag_o    (sif.iss_dst_tag),
+    .cmpl_valid_i     (sif.cmpl_valid),
+    .cmpl_id_i        (sif.cmpl_id),
+    .cmpl_dst_valid_i (sif.cmpl_dst_valid),
+    .cmpl_dst_tag_i   (sif.cmpl_dst_tag),
+    .bar_active_o     (sif.bar_active),
+    .bar_rel_valid_o  (sif.bar_rel_valid),
+    .bar_rel_id_o     (sif.bar_rel_id),
+    .iq_count_o       (sif.iq_count),
+    .inflight_count_o (sif.inflight_count)
+  );
+
+  //----------------------------------------------------------------------------
+  // Concurrent protocol assertions
+  //----------------------------------------------------------------------------
+  a_issue_needs_fu_ready : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      (sif.iss_valid & ~sif.fu_ready) == '0)
+    else sf_sva_fail($sformatf("%0t a_issue_needs_fu_ready: iss_valid=%b fu_ready=%b", $time,
+               $sampled(sif.iss_valid), $sampled(sif.fu_ready)));
+
+  a_outputs_known : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      !$isunknown({sif.disp_ready, sif.iss_valid, sif.bar_active, sif.bar_rel_valid, sif.iq_count, sif.inflight_count}))
+    else sf_sva_fail($sformatf("%0t a_outputs_known: X/Z on scheduler control outputs", $time));
+
+  a_iq_count_bound : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.iq_count <= SF_CNT_W'(SF_NUM_ENTRIES))
+    else sf_sva_fail($sformatf("%0t a_iq_count_bound: iq_count=%0d", $time, $sampled(sif.iq_count)));
+
+  a_full_blocks_dispatch : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      (sif.iq_count == SF_CNT_W'(SF_NUM_ENTRIES)) |-> !sif.disp_ready)
+    else sf_sva_fail($sformatf("%0t a_full_blocks_dispatch: disp_ready with full queue", $time));
+
+  a_release_needs_active : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.bar_rel_valid |-> sif.bar_active)
+    else sf_sva_fail($sformatf("%0t a_release_needs_active: bar_rel_valid without bar_active", $time));
+
+  a_quiet_in_reset : assert property (@(posedge clk)
+      (!sif.rst_n && $past(!sif.rst_n)) |-> (sif.iss_valid == '0 && !sif.bar_rel_valid))
+    else sf_sva_fail($sformatf("%0t a_quiet_in_reset: activity while reset held", $time));
+
+  for (genvar gp = 0; gp < SF_NUM_PORTS; gp++) begin : g_port_sva
+    a_payload_known : assert property (@(posedge clk) disable iff (!sif.rst_n)
+        sif.iss_valid[gp] |-> !$isunknown({sif.iss_id[gp], sif.iss_opcode[gp], sif.iss_src_valid[gp], sif.iss_dst_valid[gp]}))
+      else sf_sva_fail($sformatf("%0t a_payload_known[%0d]: X/Z on issue payload", $time, gp));
+
+    a_no_dfsync_issue : assert property (@(posedge clk) disable iff (!sif.rst_n)
+        sif.iss_valid[gp] |-> (sif.iss_opcode[gp] != OP_DFSYNC))
+      else sf_sva_fail($sformatf("%0t a_no_dfsync_issue[%0d]: DFSYNC on an issue port", $time, gp));
+
+    a_port_class : assert property (@(posedge clk) disable iff (!sif.rst_n)
+        sif.iss_valid[gp] |-> (sif.iss_opcode[gp][SF_OPC_W-1 -: 2] == sf_port_class(gp)))
+      else sf_sva_fail($sformatf("%0t a_port_class[%0d]: opcode 0x%02h routed to %s port", $time, gp,
+                 $sampled(sif.iss_opcode[gp]), sf_fu_name(sf_port_class(gp))));
+
+    for (genvar gq = gp + 1; gq < SF_NUM_PORTS; gq++) begin : g_pair
+      a_unique_grant : assert property (@(posedge clk) disable iff (!sif.rst_n)
+          !(sif.iss_valid[gp] && sif.iss_valid[gq] && sif.iss_id[gp] == sif.iss_id[gq]))
+        else sf_sva_fail($sformatf("%0t a_unique_grant: ports %0d and %0d granted id 0x%04h", $time, gp, gq,
+                   $sampled(sif.iss_id[gp])));
+    end
+  end
+
+  c_full_width_issue   : cover property (@(posedge clk) disable iff (!sif.rst_n) &sif.iss_valid);
+  c_release_while_full : cover property (@(posedge clk) disable iff (!sif.rst_n)
+                                         sif.bar_rel_valid && sif.iq_count == SF_CNT_W'(SF_NUM_ENTRIES));
+  c_all_fu_stalled     : cover property (@(posedge clk) disable iff (!sif.rst_n)
+                                         sif.fu_ready == '0 && sif.iq_count != '0);
+
+  //----------------------------------------------------------------------------
+  // Environment
+  //----------------------------------------------------------------------------
+  sf_tb_cfg   cfg;
+  sf_env      env;
+  sf_test_lib tests;
+
+  initial begin
+    cfg = new();
+    cfg.load_plusargs();
+    env = new(cfg, sif);
+    env.init_signals();
+    tests = new(env);
+    tests.run();
+  end
+
+endmodule : tb_scheduler
+
+`default_nettype wire

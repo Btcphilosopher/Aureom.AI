@@ -1,0 +1,3847 @@
+// =============================================================================
+//  tb_compute_tile.sf
+// -----------------------------------------------------------------------------
+//  SilicaFlux heterogeneous compute tile : full-system self-checking testbench
+//  Language  : Silica Flux-2017 verification subset (non-synthesizable)
+//  DUT       : compute_tile (compute_tile.sf)
+//                +-- alu.sf                 scalar integer ALU
+//                +-- vector_engine.sf       LANES-wide SIMD engine (+ REDUCE / DOT)
+//                +-- tensor_unit.sf         TDIM x TDIM MATMUL pipeline (~20 cycles)
+//                +-- memory_controller.sf   scratchpad (SPM) + DMA to external memory
+//                +-- routing / issue steering / completion arbitration fabric
+// -----------------------------------------------------------------------------
+//  ENVIRONMENT TOPOLOGY
+//
+//    tile_test_lib --> tile_env (single-threaded cycle kernel, posedge sampled)
+//                        |-- issue driver ......... DUT issue port (tagged, valid/ready)
+//                        |-- control driver ....... stall_i / flush_i / rst_n
+//                        |-- completion sink ...... cpl_ready backpressure shaping
+//                        |-- ext_mem_bfm .......... DUT external memory port (latency/backpressure)
+//                        |-- monitors ------------> tile_scoreboard <---- tile_ref_model (golden)
+//                        |                               |
+//                        +-------------------------------+--> tile_coverage (ledger + covergroups)
+//                  tile_if : interface-resident protocol assertions (SVA)
+// -----------------------------------------------------------------------------
+//  DUT INTEGRATION CONTRACT (each clause is actively checked)
+//   C1  Issue port is valid/ready. issue_ready_o is 0 in every cycle in which
+//       stall_i or flush_i is 1.
+//   C2  issue_op[5:4] selects the executing unit: 0 ALU, 1 VEC, 2 TNS, 3 MEM.
+//   C3  Every accepted op returns exactly one completion carrying its tag and
+//       the executing unit id on cpl_unit_o. Normal (non-killed) completions of
+//       one unit are returned in issue order; units may complete out of order
+//       with respect to each other (tag matched).
+//   C4  Completion port is valid/ready; payload is stable while valid && !ready.
+//   C5  stall_i is a synchronous global freeze. In the cycle following any edge
+//       at which stall_i was sampled 1, no new completion and no new external
+//       memory request is launched and every pipeline holds its state; an
+//       already presented completion/request may still handshake.
+//   C6  flush_i (single cycle, never coincident with stall_i) squashes every
+//       ALU/VEC/TNS op in flight at the flush edge that is not already
+//       presented on the completion port; squashed ops complete with
+//       cpl_killed_o = 1. MEM ops are non-speculative and always complete
+//       normally. Ops accepted after the flush edge are never squashed.
+//   C7  MEM ops (SPM and DMA) have sequential semantics in issue order. A DMA
+//       op completes only after all of its external beats have responded.
+//   C8  Integer arithmetic is DATA_W-bit two's complement and wraps. Products
+//       return the low DATA_W bits of the exact product; REDUCE, DOT and MATMUL
+//       accumulate modulo 2^DATA_W. Shift amounts use operand B[SHAMT_W-1:0].
+//   C9  While rst_n is low all valid outputs are deasserted; after reset the
+//       tile reports idle with no X on any control output. Scratchpad content
+//       after reset is undefined. External memory is owned by the environment.
+// -----------------------------------------------------------------------------
+//  RUNTIME CONTROLS
+//   +SEED=<n>           stimulus seed (default 0x5F1C_A017)
+//   +TEST=<name>        run one test after reset/preload (default: full regression)
+//   +STRESS_OPS=<n>     transactions in the randomized stress test (default 3000)
+//   +MAX_ERRORS=<n>     error limit before abort (default 25)
+//   +FLUSH_RELAXED      relaxed C6: only ops younger than their unit's minimum
+//                       latency must be squashed, older ops may complete
+//   +NO_COV_GATE        do not fail the run on required-coverage holes
+//   +VERBOSE            transaction-level trace
+//   +SIM_LIMIT=<cyc>    absolute cycle limit (default 2_000_000)
+//  COMPILE-TIME
+//   SF_TB_NO_NATIVE_COV excludes native covergroups for tools without covergroup
+//                       support; the self-checking coverage ledger is retained.
+// =============================================================================
+
+`timescale 1ns/1ps
+
+// =============================================================================
+//  tb_tile_base_pkg : geometry, ISA encoding, shared types, reporting services
+// =============================================================================
+package tb_tile_base_pkg;
+
+  // ---------------------------------------------------------------------------
+  // Tile geometry (must match compute_tile parameterisation)
+  // ---------------------------------------------------------------------------
+  localparam int DATA_W        = 32;
+  localparam int LANES         = 8;
+  localparam int TDIM          = 4;
+  localparam int TELEMS        = TDIM * TDIM;
+  localparam int VEC_W         = LANES * DATA_W;
+  localparam int MAT_W         = TELEMS * DATA_W;
+  localparam int SHAMT_W       = $clog2(DATA_W);
+  localparam int LANE_AW       = $clog2(LANES);
+  localparam int ACC_W         = 2 * DATA_W + 8;
+
+  localparam int OP_W          = 6;
+  localparam int UNIT_W        = 2;
+  localparam int NUM_UNITS     = 4;
+  localparam int TAG_W         = 6;
+  localparam int NUM_TAGS      = 1 << TAG_W;
+
+  localparam int SPM_AW        = 10;
+  localparam int SPM_WORDS     = 1 << SPM_AW;
+  localparam int EXT_AW        = 12;
+  localparam int EXT_WORDS     = 1 << EXT_AW;
+  localparam int LEN_W         = 5;
+  localparam int DMA_MAX_BEATS = 16;
+
+  // ---------------------------------------------------------------------------
+  // Latency envelope: issue-handshake edge -> completion-handshake edge,
+  // measured on an uncontended tile (isolated transaction).
+  // ---------------------------------------------------------------------------
+  localparam int ALU_LAT_MIN   = 1;
+  localparam int ALU_LAT_MAX   = 2;
+  localparam int VEC_LAT_MIN   = 1;
+  localparam int VEC_LAT_MAX   = 3;
+  localparam int TNS_LAT_MIN   = 16;
+  localparam int TNS_LAT_NOM   = 20;
+  localparam int TNS_LAT_MAX   = 24;
+  localparam int SPM_LAT_MIN   = 1;
+  localparam int SPM_LAT_MAX   = 4;
+  localparam int DMA_LAT_MIN   = 2;
+  localparam int DMA_SETUP_MAX = 6;
+  localparam int DMA_BEAT_OVH  = 2;
+
+  // ---------------------------------------------------------------------------
+  // Environment limits
+  // ---------------------------------------------------------------------------
+  localparam int unsigned TXN_TIMEOUT = 6000;
+  localparam int unsigned HANG_LIMIT  = 8000;
+  localparam int FLUSH_DRAIN_MAX     = 64;
+  localparam int RESET_IDLE_MAX      = 16;
+  localparam int unsigned IDLE_SETTLE = 8;
+  localparam int EXT_MAX_OUTSTANDING = 8;
+  localparam int HAZ_WINDOW          = 4;
+  localparam int unsigned DRAIN_LIMIT = 40000;
+  localparam int unsigned ISSUE_STARVE_LIMIT = 4000;
+
+  // ---------------------------------------------------------------------------
+  // Shared types
+  // ---------------------------------------------------------------------------
+  typedef logic signed [DATA_W-1:0] word_t;
+  typedef logic signed [ACC_W-1:0]  acc_t;
+  typedef logic [VEC_W-1:0]         vbus_t;
+  typedef logic [MAT_W-1:0]         mbus_t;
+  typedef logic [TAG_W-1:0]         tag_t;
+
+  localparam word_t WORD_MIN = {1'b1, {(DATA_W-1){1'b0}}};
+  localparam word_t WORD_MAX = {1'b0, {(DATA_W-1){1'b1}}};
+
+  typedef enum logic [UNIT_W-1:0] {
+    U_ALU = 2'd0,
+    U_VEC = 2'd1,
+    U_TNS = 2'd2,
+    U_MEM = 2'd3
+  } unit_e;
+
+  // Tile ISA encoding (issue_op). op[5:4] = executing unit.
+  typedef enum logic [OP_W-1:0] {
+    OP_SADD    = 6'h00,  // rd = a + b
+    OP_SSUB    = 6'h01,  // rd = a - b
+    OP_SMUL    = 6'h02,  // rd = (a * b)[DATA_W-1:0]
+    OP_SAND    = 6'h03,
+    OP_SOR     = 6'h04,
+    OP_SXOR    = 6'h05,
+    OP_SSLL    = 6'h06,  // a << b[SHAMT_W-1:0]
+    OP_SSRL    = 6'h07,  // logical right
+    OP_SSRA    = 6'h08,  // arithmetic right
+    OP_SSLT    = 6'h09,  // signed a < b
+    OP_SSLTU   = 6'h0A,  // unsigned a < b
+    OP_SMIN    = 6'h0B,  // signed min
+    OP_SMAX    = 6'h0C,  // signed max
+    OP_VADD    = 6'h10,  // v[i] = a[i] + b[i]
+    OP_VSUB    = 6'h11,  // v[i] = a[i] - b[i]
+    OP_VMUL    = 6'h12,  // v[i] = (a[i] * b[i])[DATA_W-1:0]
+    OP_VBCAST  = 6'h13,  // v[i] = scalar a
+    OP_VREDSUM = 6'h14,  // rd = sum a[i]
+    OP_VREDMAX = 6'h15,  // rd = signed max a[i]
+    OP_VREDMIN = 6'h16,  // rd = signed min a[i]
+    OP_VDOT    = 6'h17,  // rd = sum a[i] * b[i]
+    OP_TMATMUL = 6'h20,  // C = A x B
+    OP_TMATMAC = 6'h21,  // C = A x B + Cin
+    OP_TMATMULT= 6'h22,  // C = A x B^T
+    OP_SLD     = 6'h30,  // rd = SPM[addr]
+    OP_SST     = 6'h31,  // SPM[addr] = a
+    OP_VLD     = 6'h32,  // v[i] = SPM[addr+i]            (addr LANES-aligned)
+    OP_VST     = 6'h33,  // SPM[addr+i] = va[i]           (addr LANES-aligned)
+    OP_DMARD   = 6'h34,  // SPM[addr..] <= EXT[ext_addr..], len beats of LANES words
+    OP_DMAWR   = 6'h35   // EXT[ext_addr..] <= SPM[addr..], len beats of LANES words
+  } op_e;
+
+  localparam int NUM_OPS = 30;
+  localparam op_e ALL_OPS [NUM_OPS] = '{
+    OP_SADD, OP_SSUB, OP_SMUL, OP_SAND, OP_SOR, OP_SXOR, OP_SSLL, OP_SSRL, OP_SSRA,
+    OP_SSLT, OP_SSLTU, OP_SMIN, OP_SMAX,
+    OP_VADD, OP_VSUB, OP_VMUL, OP_VBCAST, OP_VREDSUM, OP_VREDMAX, OP_VREDMIN, OP_VDOT,
+    OP_TMATMUL, OP_TMATMAC, OP_TMATMULT,
+    OP_SLD, OP_SST, OP_VLD, OP_VST, OP_DMARD, OP_DMAWR
+  };
+
+  typedef enum int { RK_SCALAR, RK_VEC, RK_MAT, RK_ACK } res_kind_e;
+
+  // operand classes (stimulus + coverage)
+  typedef enum int {
+    OC_ZERO, OC_ONE, OC_NEG1, OC_MIN, OC_MAX, OC_SPOS, OC_SNEG, OC_LPOS, OC_LNEG
+  } oc_e;
+  localparam int NUM_OC = 9;
+
+  // matrix structure classes (stimulus + coverage)
+  typedef enum int { MC_ZERO, MC_IDENT, MC_DIAG, MC_NEG, MC_DENSE, MC_LARGE } mc_e;
+  localparam int NUM_MC_COV = 5;   // MC_LARGE is a stimulus-only pattern (classified as DENSE/NEG)
+
+  // control events (coverage)
+  typedef enum int {
+    CE_STALL_BUSY, CE_STALL_BLOCK, CE_FLUSH_BLOCK, CE_KILL, CE_SURVIVE, CE_CPL_BP, CE_ISSUE_BP, CE_RESET
+  } ctl_ev_e;
+
+  // memory hazard classes (coverage)
+  typedef enum int {
+    HZ_RAW_SS, HZ_RAW_VS, HZ_RAW_SV, HZ_RAW_VV, HZ_WAW_SV, HZ_WAW_VS,
+    HZ_WAR_VS, HZ_WAR_SV, HZ_RAW_DMA_V, HZ_RAW_V_DMA, HZ_RAW_EXT
+  } haz_e;
+
+  // completion observation (monitor -> scoreboard)
+  typedef struct packed {
+    tag_t              tag;
+    logic [UNIT_W-1:0] unit;
+    logic              killed;
+    logic [DATA_W-1:0] scalar;
+    vbus_t             vec;
+    mbus_t             mat;
+  } cpl_obs_t;
+
+  // ---------------------------------------------------------------------------
+  // ISA helpers
+  // ---------------------------------------------------------------------------
+  function automatic unit_e unit_of(op_e op);
+    return unit_e'(op[OP_W-1 -: UNIT_W]);
+  endfunction
+
+  function automatic res_kind_e res_kind(op_e op);
+    case (op)
+      OP_VADD, OP_VSUB, OP_VMUL, OP_VBCAST, OP_VLD : return RK_VEC;
+      OP_TMATMUL, OP_TMATMAC, OP_TMATMULT          : return RK_MAT;
+      OP_SST, OP_VST, OP_DMARD, OP_DMAWR           : return RK_ACK;
+      default                                      : return RK_SCALAR;
+    endcase
+  endfunction
+
+  function automatic bit is_dma(op_e op);
+    return (op == OP_DMARD) || (op == OP_DMAWR);
+  endfunction
+
+  function automatic bit is_lanewise(op_e op);
+    return (op == OP_VADD) || (op == OP_VSUB) || (op == OP_VMUL) || (op == OP_VBCAST);
+  endfunction
+
+  function automatic bit is_reduce(op_e op);
+    return (op == OP_VREDSUM) || (op == OP_VREDMAX) || (op == OP_VREDMIN) || (op == OP_VDOT);
+  endfunction
+
+  function automatic int unsigned lat_floor(op_e op);
+    case (unit_of(op))
+      U_ALU  : return ALU_LAT_MIN;
+      U_VEC  : return VEC_LAT_MIN;
+      U_TNS  : return TNS_LAT_MIN;
+      default: return is_dma(op) ? DMA_LAT_MIN : SPM_LAT_MIN;
+    endcase
+  endfunction
+
+  function automatic int unsigned unit_lat_floor(unit_e u);
+    case (u)
+      U_ALU  : return ALU_LAT_MIN;
+      U_VEC  : return VEC_LAT_MIN;
+      U_TNS  : return TNS_LAT_MIN;
+      default: return SPM_LAT_MIN;
+    endcase
+  endfunction
+
+  function automatic word_t lane_of(vbus_t v, int i);
+    return word_t'(v[i*DATA_W +: DATA_W]);
+  endfunction
+
+  function automatic word_t elem_of(mbus_t m, int i, int j);
+    return word_t'(m[(i*TDIM+j)*DATA_W +: DATA_W]);
+  endfunction
+
+  function automatic oc_e classify(word_t v);
+    if (v == '0)                return OC_ZERO;
+    if (v == word_t'(1))        return OC_ONE;
+    if (v == word_t'(-1))       return OC_NEG1;
+    if (v == WORD_MIN)          return OC_MIN;
+    if (v == WORD_MAX)          return OC_MAX;
+    if (v > 1 && v <= 255)      return OC_SPOS;
+    if (v < -1 && v >= -256)    return OC_SNEG;
+    if (v > 0)                  return OC_LPOS;
+    return OC_LNEG;
+  endfunction
+
+  function automatic string oc_name(oc_e c);
+    return c.name();
+  endfunction
+
+  function automatic string mc_name(mc_e c);
+    return c.name();
+  endfunction
+
+  function automatic string unit_name(unit_e u);
+    return u.name();
+  endfunction
+
+  function automatic string sign_cls(word_t v);
+    if (v == '0) return "zero";
+    return (v < 0) ? "neg" : "pos";
+  endfunction
+
+  function automatic string fmtw(logic [DATA_W-1:0] w);
+    if ($isunknown(w)) return $sformatf("%h(X)", w);
+    return $sformatf("%h(%0d)", w, $signed(w));
+  endfunction
+
+  function automatic string unit_mask_str(logic [NUM_UNITS-1:0] m);
+    string s;
+    s = "";
+    if (m[U_ALU]) s = {s, "ALU+"};
+    if (m[U_VEC]) s = {s, "VEC+"};
+    if (m[U_TNS]) s = {s, "TNS+"};
+    if (m[U_MEM]) s = {s, "MEM+"};
+    if (s.len() == 0) return "none";
+    return s.substr(0, s.len() - 2);
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // Reporting services (global, deterministic)
+  // ---------------------------------------------------------------------------
+  int unsigned     g_errors     = 0;
+  int unsigned     g_warnings   = 0;
+  int unsigned     g_max_errors = 25;
+  longint unsigned g_cycle      = 0;
+  bit              g_verbose    = 1'b0;
+  string           g_phase      = "init";
+
+  function automatic void tb_info(string id, string msg);
+    $display("[%0t] [cyc %0d] INFO    %s : %s", $time, g_cycle, id, msg);
+  endfunction
+
+  function automatic void tb_trace(string id, string msg);
+    if (g_verbose) $display("[%0t] [cyc %0d] TRACE   %s : %s", $time, g_cycle, id, msg);
+  endfunction
+
+  function automatic void tb_warn(string id, string msg);
+    g_warnings = g_warnings + 1;
+    $display("[%0t] [cyc %0d] WARNING %s : %s", $time, g_cycle, id, msg);
+  endfunction
+
+  function automatic void tb_error(string id, string msg);
+    g_errors = g_errors + 1;
+    $display("[%0t] [cyc %0d] ERROR   %s : %s  {phase=%s}", $time, g_cycle, id, msg, g_phase);
+    if (g_errors >= g_max_errors) begin
+      $display("\n*** tb_compute_tile: error limit (%0d) reached in phase '%s' -- aborting ***\n",
+               g_max_errors, g_phase);
+      $fatal(1, "tb_compute_tile: TEST FAILED (error limit)");
+    end
+  endfunction
+
+  function automatic void sva_fail(string id, string msg);
+    tb_error({"SVA_", id}, msg);
+  endfunction
+
+endpackage : tb_tile_base_pkg
+
+// =============================================================================
+//  tile_if : DUT signal bundle + interface-resident protocol assertions
+// =============================================================================
+interface tile_if (input logic clk);
+  import tb_tile_base_pkg::*;
+
+  // global control
+  logic                  rst_n;
+  logic                  stall;
+  logic                  flush;
+  // issue port
+  logic                  issue_valid;
+  logic                  issue_ready;
+  logic [OP_W-1:0]       issue_op;
+  tag_t                  issue_tag;
+  logic [DATA_W-1:0]     issue_sa;
+  logic [DATA_W-1:0]     issue_sb;
+  vbus_t                 issue_va;
+  vbus_t                 issue_vb;
+  mbus_t                 issue_ma;
+  mbus_t                 issue_mb;
+  mbus_t                 issue_mc;
+  logic [SPM_AW-1:0]     issue_addr;
+  logic [EXT_AW-1:0]     issue_ext_addr;
+  logic [LEN_W-1:0]      issue_len;
+  // completion port
+  logic                  cpl_valid;
+  logic                  cpl_ready;
+  tag_t                  cpl_tag;
+  logic [UNIT_W-1:0]     cpl_unit;
+  logic                  cpl_killed;
+  logic [DATA_W-1:0]     cpl_scalar;
+  vbus_t                 cpl_vec;
+  mbus_t                 cpl_mat;
+  // external memory port (tile is master)
+  logic                  ext_req_valid;
+  logic                  ext_req_ready;
+  logic                  ext_req_we;
+  logic [EXT_AW-1:0]     ext_req_addr;
+  vbus_t                 ext_req_wdata;
+  logic                  ext_rsp_valid;
+  logic                  ext_rsp_ready;
+  logic                  ext_rsp_we;
+  vbus_t                 ext_rsp_rdata;
+  // observability
+  logic [NUM_UNITS-1:0]  unit_busy;
+  logic                  idle;
+
+  // ---------------------------------------------------------------------------
+  // C4 : completion payload held until handshake
+  // ---------------------------------------------------------------------------
+  a_cpl_hold : assert property (@(posedge clk) disable iff (!rst_n)
+      (cpl_valid && !cpl_ready) |=> (cpl_valid && $stable(cpl_tag) && $stable(cpl_unit) &&
+                                     $stable(cpl_killed) && $stable(cpl_scalar) &&
+                                     $stable(cpl_vec) && $stable(cpl_mat)))
+    else sva_fail("C4_CPL_HOLD", "completion valid dropped or payload changed before handshake");
+
+  // external request held until handshake
+  a_ext_req_hold : assert property (@(posedge clk) disable iff (!rst_n)
+      (ext_req_valid && !ext_req_ready) |=> (ext_req_valid && $stable(ext_req_we) &&
+                                             $stable(ext_req_addr) && $stable(ext_req_wdata)))
+    else sva_fail("EXT_REQ_HOLD", "external request dropped or changed before handshake");
+
+  // ---------------------------------------------------------------------------
+  // C1 : no issue acceptance under stall or flush
+  // ---------------------------------------------------------------------------
+  a_issue_gate : assert property (@(posedge clk) disable iff (!rst_n)
+      (stall || flush) |-> !issue_ready)
+    else sva_fail("C1_ISSUE_GATE", "issue_ready asserted while stall_i/flush_i active");
+
+  // ---------------------------------------------------------------------------
+  // C5 : stall freezes completion launch and external request launch
+  // ---------------------------------------------------------------------------
+  a_stall_cpl_freeze : assert property (@(posedge clk) disable iff (!rst_n)
+      stall |=> (!cpl_valid || ($past(cpl_valid) && !$past(cpl_ready) && $stable(cpl_tag))))
+    else sva_fail("C5_STALL_CPL", "new completion launched in a stalled cycle");
+
+  a_stall_ext_freeze : assert property (@(posedge clk) disable iff (!rst_n)
+      stall |=> (!ext_req_valid || ($past(ext_req_valid) && !$past(ext_req_ready) &&
+                                    $stable(ext_req_addr))))
+    else sva_fail("C5_STALL_EXT", "new external request launched in a stalled cycle");
+
+  // ---------------------------------------------------------------------------
+  // C9 / X-propagation : control outputs always known outside reset
+  // ---------------------------------------------------------------------------
+  a_ctrl_known : assert property (@(posedge clk) disable iff (!rst_n)
+      !$isunknown({issue_ready, cpl_valid, ext_req_valid, ext_rsp_ready, unit_busy, idle}))
+    else sva_fail("C9_CTRL_X", "X/Z on a tile control output");
+
+  a_cpl_known : assert property (@(posedge clk) disable iff (!rst_n)
+      cpl_valid |-> !$isunknown({cpl_tag, cpl_unit, cpl_killed}))
+    else sva_fail("C9_CPL_X", "X/Z on completion tag/unit/killed while valid");
+
+  a_ext_req_known : assert property (@(posedge clk) disable iff (!rst_n)
+      ext_req_valid |-> !$isunknown({ext_req_we, ext_req_addr}))
+    else sva_fail("C9_EXT_X", "X/Z on external request control while valid");
+
+  a_ext_wdata_known : assert property (@(posedge clk) disable iff (!rst_n)
+      (ext_req_valid && ext_req_we) |-> !$isunknown(ext_req_wdata))
+    else sva_fail("C9_EXT_WDATA_X", "X/Z on external write data while valid");
+
+  a_ext_addr_aligned : assert property (@(posedge clk) disable iff (!rst_n)
+      ext_req_valid |-> (ext_req_addr[LANE_AW-1:0] == '0))
+    else sva_fail("EXT_ALIGN", "external request address not beat (LANES) aligned");
+
+  // ---------------------------------------------------------------------------
+  // Environment self-checks (driver / BFM protocol compliance)
+  // ---------------------------------------------------------------------------
+  a_env_issue_hold : assert property (@(posedge clk) disable iff (!rst_n)
+      (issue_valid && !issue_ready) |=> (issue_valid && $stable(issue_op) && $stable(issue_tag) &&
+                                         $stable(issue_sa) && $stable(issue_sb) &&
+                                         $stable(issue_va) && $stable(issue_vb) &&
+                                         $stable(issue_ma) && $stable(issue_mb) &&
+                                         $stable(issue_mc) && $stable(issue_addr) &&
+                                         $stable(issue_ext_addr) && $stable(issue_len)))
+    else sva_fail("ENV_ISSUE_HOLD", "environment violated issue valid/ready stability");
+
+  a_env_rsp_hold : assert property (@(posedge clk) disable iff (!rst_n)
+      (ext_rsp_valid && !ext_rsp_ready) |=> (ext_rsp_valid && $stable(ext_rsp_we) &&
+                                             $stable(ext_rsp_rdata)))
+    else sva_fail("ENV_RSP_HOLD", "memory BFM violated response stability");
+
+  a_env_ctl_excl : assert property (@(posedge clk) disable iff (!rst_n)
+      !(stall && flush))
+    else sva_fail("ENV_CTL_EXCL", "environment asserted stall_i and flush_i together");
+
+  // ---------------------------------------------------------------------------
+  // Protocol-level cover points
+  // ---------------------------------------------------------------------------
+  c_stall_with_held_cpl  : cover property (@(posedge clk) disable iff (!rst_n)
+      stall && cpl_valid && !cpl_ready);
+  c_flush_with_held_cpl  : cover property (@(posedge clk) disable iff (!rst_n)
+      flush && cpl_valid && !cpl_ready);
+  c_ext_bp_and_cpl_bp    : cover property (@(posedge clk) disable iff (!rst_n)
+      ext_req_valid && !ext_req_ready && cpl_valid && !cpl_ready);
+  c_all_units_busy       : cover property (@(posedge clk) disable iff (!rst_n)
+      &unit_busy);
+
+endinterface : tile_if
+
+// =============================================================================
+//  tb_compute_tile_pkg : stimulus, golden model, scoreboard, coverage, env, tests
+// =============================================================================
+package tb_compute_tile_pkg;
+  import tb_tile_base_pkg::*;
+
+  // ===========================================================================
+  //  sf_rng : xorshift64* generator. Simulator-independent, fully repeatable
+  //           stimulus stream for a given +SEED.
+  // ===========================================================================
+  class sf_rng;
+    local bit [63:0] state;
+
+    function new(bit [63:0] seed);
+      state = seed ^ 64'h9E37_79B9_7F4A_7C15;
+      if (state == 64'd0) state = 64'h0123_4567_89AB_CDEF;
+      repeat (8) void'(next64());
+    endfunction
+
+    function bit [63:0] next64();
+      state = state ^ (state >> 12);
+      state = state ^ (state << 25);
+      state = state ^ (state >> 27);
+      return state * 64'h2545_F491_4F6C_DD1D;
+    endfunction
+
+    function bit [31:0] next32();
+      bit [63:0] r;
+      r = next64();
+      return r[63:32];
+    endfunction
+
+    // uniform integer in [lo, hi]
+    function int unsigned urange(int unsigned lo, int unsigned hi);
+      bit [63:0] span;
+      bit [63:0] r;
+      if (hi <= lo) return lo;
+      span = 64'(hi) - 64'(lo) + 64'd1;
+      r    = next64() % span;
+      return lo + r[31:0];
+    endfunction
+
+    // true with probability p percent
+    function bit pct(int unsigned p);
+      return (next32() % 100) < p;
+    endfunction
+
+    function word_t word();
+      bit [63:0] r;
+      r = next64();
+      return word_t'(r[DATA_W-1:0]);
+    endfunction
+
+    // uniform signed value in [lo, hi]
+    function word_t srange(longint lo, longint hi);
+      bit [63:0] span;
+      bit [63:0] r;
+      if (hi <= lo) return word_t'(lo);
+      span = $unsigned(hi - lo) + 64'd1;
+      r    = next64() % span;
+      return word_t'(lo + longint'(r));
+    endfunction
+
+    function word_t operand(oc_e c);
+      case (c)
+        OC_ZERO: return '0;
+        OC_ONE : return word_t'(1);
+        OC_NEG1: return word_t'(-1);
+        OC_MIN : return WORD_MIN;
+        OC_MAX : return WORD_MAX;
+        OC_SPOS: return srange(2, 255);
+        OC_SNEG: return srange(-256, -2);
+        OC_LPOS: return srange(256, longint'(WORD_MAX) - 1);
+        default: return srange(longint'(WORD_MIN) + 1, -257);
+      endcase
+    endfunction
+
+    function oc_e any_class();
+      return oc_e'(urange(0, NUM_OC - 1));
+    endfunction
+  endclass : sf_rng
+
+  // ===========================================================================
+  //  tile_txn : one tile operation, its golden result and its life-cycle record
+  // ===========================================================================
+  class tile_txn;
+    static longint unsigned uid_ctr = 1;
+
+    longint unsigned uid;
+    op_e             op;
+    unit_e           unit;
+    tag_t            tag;
+    string           origin;
+    string           pattern;
+
+    // ---- operands ----
+    word_t           sa;
+    word_t           sb;
+    word_t           va [LANES];
+    word_t           vb [LANES];
+    word_t           ma [TDIM][TDIM];
+    word_t           mb [TDIM][TDIM];
+    word_t           mc [TDIM][TDIM];
+    int unsigned     addr;
+    int unsigned     ext_addr;
+    int unsigned     len;
+
+    // ---- golden result (filled by tile_ref_model at issue) ----
+    word_t           exp_s;
+    word_t           exp_v [LANES];
+    word_t           exp_m [TDIM][TDIM];
+    bit              exp_known;
+    bit              wrapped;
+    bit              lane_wrap [LANES];
+
+    // ---- observed result ----
+    word_t           act_s;
+    vbus_t           act_v;
+    mbus_t           act_m;
+    logic            act_killed;
+
+    // ---- life cycle ----
+    bit              accepted;
+    bit              retired;
+    bit              timed_out;
+    longint unsigned issue_cyc;
+    longint unsigned issue_prog;
+    longint unsigned cpl_cyc;
+    int unsigned     epoch;
+    bit              flush_exposed;
+    bit              must_kill;
+    bit              isolated;
+    int              exact_lat;
+    int unsigned     stall_after_accept;
+    int unsigned     flush_after_accept;
+    int unsigned     ext_req_pending;
+    int unsigned     ext_rsp_pending;
+    int unsigned     ext_lat_bound;
+    int unsigned     unit_depth_at_issue;
+    logic [NUM_UNITS-1:0] busy_at_issue;
+
+    function new(op_e o, string org = "", string pat = "");
+      uid_ctr      = uid_ctr + 1;
+      this.uid     = uid_ctr;
+      this.op      = o;
+      this.unit    = unit_of(o);
+      this.origin  = org;
+      this.pattern = pat;
+      this.tag     = '0;
+      this.sa      = '0;
+      this.sb      = '0;
+      this.addr    = 0;
+      this.ext_addr= 0;
+      this.len     = 1;
+      this.exp_s   = '0;
+      this.exp_known = 1'b1;
+      this.wrapped = 1'b0;
+      this.exact_lat = -1;
+      this.act_killed = 1'b0;
+      for (int i = 0; i < LANES; i++) begin
+        va[i] = '0; vb[i] = '0; exp_v[i] = '0; lane_wrap[i] = 1'b0;
+      end
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) begin
+          ma[i][j] = '0; mb[i][j] = '0; mc[i][j] = '0; exp_m[i][j] = '0;
+        end
+    endfunction
+
+    // ---- bus packing ----
+    function vbus_t pack_va();
+      vbus_t b;
+      for (int i = 0; i < LANES; i++) b[i*DATA_W +: DATA_W] = va[i];
+      return b;
+    endfunction
+
+    function vbus_t pack_vb();
+      vbus_t b;
+      for (int i = 0; i < LANES; i++) b[i*DATA_W +: DATA_W] = vb[i];
+      return b;
+    endfunction
+
+    function mbus_t pack_m(int which);
+      mbus_t b;
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++)
+          case (which)
+            0      : b[(i*TDIM+j)*DATA_W +: DATA_W] = ma[i][j];
+            1      : b[(i*TDIM+j)*DATA_W +: DATA_W] = mb[i][j];
+            default: b[(i*TDIM+j)*DATA_W +: DATA_W] = mc[i][j];
+          endcase
+      return b;
+    endfunction
+
+    function word_t m_at(int which, int i, int j);
+      case (which)
+        0      : return ma[i][j];
+        1      : return mb[i][j];
+        2      : return mc[i][j];
+        default: return exp_m[i][j];
+      endcase
+    endfunction
+
+    function void m_set(int which, int i, int j, word_t v);
+      case (which)
+        0      : ma[i][j] = v;
+        1      : mb[i][j] = v;
+        default: mc[i][j] = v;
+      endcase
+    endfunction
+
+    // ---- formatting ----
+    function string vec_str(int which);
+      string s;
+      s = "[";
+      for (int i = 0; i < LANES; i++) begin
+        case (which)
+          0      : s = {s, $sformatf("%0d", va[i])};
+          1      : s = {s, $sformatf("%0d", vb[i])};
+          default: s = {s, $sformatf("%0d", exp_v[i])};
+        endcase
+        if (i != LANES - 1) s = {s, ", "};
+      end
+      return {s, "]"};
+    endfunction
+
+    function string mat_str(int which);
+      string s;
+      s = "[";
+      for (int i = 0; i < TDIM; i++) begin
+        s = {s, "["};
+        for (int j = 0; j < TDIM; j++) begin
+          s = {s, $sformatf("%0d", m_at(which, i, j))};
+          if (j != TDIM - 1) s = {s, ","};
+        end
+        s = {s, "]"};
+      end
+      return {s, "]"};
+    endfunction
+
+    function string inputs_str();
+      case (unit)
+        U_ALU: return $sformatf("a=%s b=%s", fmtw(sa), fmtw(sb));
+        U_VEC: begin
+          if (op == OP_VBCAST) return $sformatf("scalar=%s", fmtw(sa));
+          if (op == OP_VREDSUM || op == OP_VREDMAX || op == OP_VREDMIN)
+            return $sformatf("va=%s", vec_str(0));
+          return $sformatf("va=%s vb=%s", vec_str(0), vec_str(1));
+        end
+        U_TNS: begin
+          if (op == OP_TMATMAC)
+            return $sformatf("A=%s B=%s Cin=%s", mat_str(0), mat_str(1), mat_str(2));
+          return $sformatf("A=%s B=%s", mat_str(0), mat_str(1));
+        end
+        default: begin
+          case (op)
+            OP_SLD  : return $sformatf("spm_addr=0x%0h", addr);
+            OP_SST  : return $sformatf("spm_addr=0x%0h data=%s", addr, fmtw(sa));
+            OP_VLD  : return $sformatf("spm_addr=0x%0h", addr);
+            OP_VST  : return $sformatf("spm_addr=0x%0h data=%s", addr, vec_str(0));
+            default : return $sformatf("spm_addr=0x%0h ext_addr=0x%0h beats=%0d", addr, ext_addr, len);
+          endcase
+        end
+      endcase
+    endfunction
+
+    function string brief();
+      return $sformatf("uid=%0d tag=0x%0h %s", uid, tag, op.name());
+    endfunction
+  endclass : tile_txn
+
+  // ===========================================================================
+  //  tile_ref_model : golden reference. Cycle independent, mathematically exact
+  //  (ACC_W-bit exact accumulation, then DATA_W two's-complement wrap).
+  //  Owns the architectural scratchpad and external memory images; memory
+  //  side effects are applied in issue order (contract C7).
+  // ===========================================================================
+  class tile_ref_model;
+    word_t spm       [SPM_WORDS];
+    bit    spm_known [SPM_WORDS];
+    word_t ext       [EXT_WORDS];
+
+    function new();
+      for (int i = 0; i < SPM_WORDS; i++) begin
+        spm[i] = '0;
+        spm_known[i] = 1'b0;
+      end
+      for (int i = 0; i < EXT_WORDS; i++) ext[i] = '0;
+    endfunction
+
+    // ---- exact arithmetic primitives ----
+    static function word_t trunc(acc_t v);
+      return word_t'(v[DATA_W-1:0]);
+    endfunction
+
+    static function bit wraps(acc_t v);
+      acc_t back;
+      back = acc_t'(trunc(v));
+      return back != v;
+    endfunction
+
+    static function acc_t ext_s(word_t v);
+      return acc_t'(v);
+    endfunction
+
+    // ---- scalar ALU reference ----
+    static function word_t alu(op_e op, word_t a, word_t b);
+      logic [SHAMT_W-1:0]  sh;
+      logic [DATA_W-1:0]   ua;
+      logic [DATA_W-1:0]   ub;
+      sh = b[SHAMT_W-1:0];
+      ua = a;
+      ub = b;
+      case (op)
+        OP_SADD : return trunc(ext_s(a) + ext_s(b));
+        OP_SSUB : return trunc(ext_s(a) - ext_s(b));
+        OP_SMUL : return trunc(ext_s(a) * ext_s(b));
+        OP_SAND : return a & b;
+        OP_SOR  : return a | b;
+        OP_SXOR : return a ^ b;
+        OP_SSLL : return word_t'(ua << sh);
+        OP_SSRL : return word_t'(ua >> sh);
+        OP_SSRA : return a >>> sh;
+        OP_SSLT : return (a < b)   ? word_t'(1) : word_t'(0);
+        OP_SSLTU: return (ua < ub) ? word_t'(1) : word_t'(0);
+        OP_SMIN : return (a < b) ? a : b;
+        OP_SMAX : return (a > b) ? a : b;
+        default : return '0;
+      endcase
+    endfunction
+
+    static function acc_t alu_exact(op_e op, word_t a, word_t b);
+      case (op)
+        OP_SADD : return ext_s(a) + ext_s(b);
+        OP_SSUB : return ext_s(a) - ext_s(b);
+        OP_SMUL : return ext_s(a) * ext_s(b);
+        default : return ext_s(alu(op, a, b));
+      endcase
+    endfunction
+
+    // ---- vector lane reference ----
+    static function acc_t lane_exact(op_e op, word_t a, word_t b, word_t s);
+      case (op)
+        OP_VADD  : return ext_s(a) + ext_s(b);
+        OP_VSUB  : return ext_s(a) - ext_s(b);
+        OP_VMUL  : return ext_s(a) * ext_s(b);
+        default  : return ext_s(s);
+      endcase
+    endfunction
+
+    // ---- prediction entry point (called at issue acceptance, in issue order) ----
+    function void predict(tile_txn t);
+      t.exp_known = 1'b1;
+      t.wrapped   = 1'b0;
+      case (t.unit)
+        U_ALU: begin
+          t.exp_s   = alu(t.op, t.sa, t.sb);
+          t.wrapped = wraps(alu_exact(t.op, t.sa, t.sb));
+        end
+        U_VEC  : predict_vec(t);
+        U_TNS  : predict_tns(t);
+        default: predict_mem(t);
+      endcase
+    endfunction
+
+    local function void predict_vec(tile_txn t);
+      acc_t acc;
+      word_t best;
+      if (is_lanewise(t.op)) begin
+        for (int i = 0; i < LANES; i++) begin
+          acc            = lane_exact(t.op, t.va[i], t.vb[i], t.sa);
+          t.exp_v[i]     = trunc(acc);
+          t.lane_wrap[i] = wraps(acc);
+          t.wrapped      = t.wrapped | t.lane_wrap[i];
+        end
+        return;
+      end
+      case (t.op)
+        OP_VREDSUM: begin
+          acc = '0;
+          for (int i = 0; i < LANES; i++) acc = acc + ext_s(t.va[i]);
+          t.exp_s   = trunc(acc);
+          t.wrapped = wraps(acc);
+        end
+        OP_VDOT: begin
+          acc = '0;
+          for (int i = 0; i < LANES; i++) acc = acc + (ext_s(t.va[i]) * ext_s(t.vb[i]));
+          t.exp_s   = trunc(acc);
+          t.wrapped = wraps(acc);
+        end
+        OP_VREDMAX: begin
+          best = t.va[0];
+          for (int i = 1; i < LANES; i++) if (t.va[i] > best) best = t.va[i];
+          t.exp_s = best;
+        end
+        OP_VREDMIN: begin
+          best = t.va[0];
+          for (int i = 1; i < LANES; i++) if (t.va[i] < best) best = t.va[i];
+          t.exp_s = best;
+        end
+        default: t.exp_s = '0;
+      endcase
+    endfunction
+
+    // C[i][j] = sum_k A[i][k] * B[k][j]          (MATMUL)
+    // C[i][j] = sum_k A[i][k] * B[k][j] + Cin    (MATMAC)
+    // C[i][j] = sum_k A[i][k] * B[j][k]          (MATMULT)
+    local function void predict_tns(tile_txn t);
+      acc_t acc;
+      word_t bkj;
+      for (int i = 0; i < TDIM; i++) begin
+        for (int j = 0; j < TDIM; j++) begin
+          acc = '0;
+          for (int k = 0; k < TDIM; k++) begin
+            bkj = (t.op == OP_TMATMULT) ? t.mb[j][k] : t.mb[k][j];
+            acc = acc + (ext_s(t.ma[i][k]) * ext_s(bkj));
+          end
+          if (t.op == OP_TMATMAC) acc = acc + ext_s(t.mc[i][j]);
+          t.exp_m[i][j] = trunc(acc);
+          t.wrapped     = t.wrapped | wraps(acc);
+        end
+      end
+    endfunction
+
+    local function void predict_mem(tile_txn t);
+      int unsigned a;
+      int unsigned e;
+      case (t.op)
+        OP_SLD: begin
+          a = t.addr % SPM_WORDS;
+          t.exp_s     = spm[a];
+          t.exp_known = spm_known[a];
+        end
+        OP_SST: begin
+          a = t.addr % SPM_WORDS;
+          spm[a]       = t.sa;
+          spm_known[a] = 1'b1;
+        end
+        OP_VLD: begin
+          for (int i = 0; i < LANES; i++) begin
+            a = (t.addr + i) % SPM_WORDS;
+            t.exp_v[i]  = spm[a];
+            t.exp_known = t.exp_known & spm_known[a];
+          end
+        end
+        OP_VST: begin
+          for (int i = 0; i < LANES; i++) begin
+            a = (t.addr + i) % SPM_WORDS;
+            spm[a]       = t.va[i];
+            spm_known[a] = 1'b1;
+          end
+        end
+        OP_DMARD: begin
+          for (int k = 0; k < int'(t.len) * LANES; k++) begin
+            a = (t.addr + k) % SPM_WORDS;
+            e = (t.ext_addr + k) % EXT_WORDS;
+            spm[a]       = ext[e];
+            spm_known[a] = 1'b1;
+          end
+        end
+        OP_DMAWR: begin
+          for (int k = 0; k < int'(t.len) * LANES; k++) begin
+            a = (t.addr + k) % SPM_WORDS;
+            e = (t.ext_addr + k) % EXT_WORDS;
+            ext[e]      = spm[a];
+            t.exp_known = t.exp_known & spm_known[a];
+          end
+        end
+        default: ;
+      endcase
+    endfunction
+
+    function vbus_t ext_beat(int unsigned base);
+      vbus_t b;
+      for (int i = 0; i < LANES; i++) b[i*DATA_W +: DATA_W] = ext[(base + i) % EXT_WORDS];
+      return b;
+    endfunction
+
+    function void invalidate_spm();
+      for (int i = 0; i < SPM_WORDS; i++) spm_known[i] = 1'b0;
+    endfunction
+
+    function bit spm_range_known(int unsigned base, int unsigned words);
+      for (int unsigned i = 0; i < words; i++)
+        if (!spm_known[(base + i) % SPM_WORDS]) return 1'b0;
+      return 1'b1;
+    endfunction
+  endclass : tile_ref_model
+
+  // ===========================================================================
+  //  tile_coverage : functional coverage.
+  //   * ledger  : named bins, two tiers. REQUIRED bins are guaranteed by the
+  //               stimulus plan and gate the verdict; OBSERVED bins depend on
+  //               DUT micro-architecture and are reported only.
+  //   * native  : covergroups mirroring the ledger for tool-level merging.
+  // ===========================================================================
+  class tile_coverage;
+    int unsigned hit_cnt  [string];
+    bit          required [string];
+    string       req_list [$];
+    string       obs_list [$];
+
+`ifndef SF_TB_NO_NATIVE_COV
+    // ---- native covergroup sampling variables ----
+    op_e     cv_op;
+    oc_e     cv_oca;
+    oc_e     cv_ocb;
+    int      cv_lane;
+    int      cv_sign;
+    mc_e     cv_mca;
+    mc_e     cv_mcb;
+    bit      cv_wrap;
+    int      cv_mix;
+    unit_e   cv_unit;
+    int      cv_lat;
+    ctl_ev_e cv_ctl;
+    haz_e    cv_haz;
+    int      cv_len;
+
+    covergroup cg_operands;
+      option.per_instance = 1;
+      cp_op  : coverpoint cv_op {
+        bins alu[] = {OP_SADD, OP_SSUB, OP_SMUL, OP_SAND, OP_SOR, OP_SXOR, OP_SSLL, OP_SSRL,
+                      OP_SSRA, OP_SSLT, OP_SSLTU, OP_SMIN, OP_SMAX};
+        bins vec[] = {OP_VADD, OP_VSUB, OP_VMUL};
+      }
+      cp_oca : coverpoint cv_oca;
+      cp_ocb : coverpoint cv_ocb;
+      x_op_ab: cross cp_op, cp_oca, cp_ocb;
+    endgroup
+
+    covergroup cg_lanes;
+      option.per_instance = 1;
+      cp_op   : coverpoint cv_op {
+        bins lanewise[] = {OP_VADD, OP_VSUB, OP_VMUL, OP_VBCAST, OP_VLD};
+      }
+      cp_lane : coverpoint cv_lane { bins lane[] = {[0:LANES-1]}; }
+      cp_sign : coverpoint cv_sign { bins zero = {0}; bins pos = {1}; bins neg = {2}; }
+      cp_wrap : coverpoint cv_wrap;
+      x_lane_sign : cross cp_op, cp_lane, cp_sign;
+    endgroup
+
+    covergroup cg_tensor;
+      option.per_instance = 1;
+      cp_op   : coverpoint cv_op { bins t[] = {OP_TMATMUL, OP_TMATMAC, OP_TMATMULT}; }
+      cp_a    : coverpoint cv_mca { bins c[] = {MC_ZERO, MC_IDENT, MC_DIAG, MC_NEG, MC_DENSE}; }
+      cp_b    : coverpoint cv_mcb { bins c[] = {MC_ZERO, MC_IDENT, MC_DIAG, MC_NEG, MC_DENSE}; }
+      cp_wrap : coverpoint cv_wrap;
+      x_op_a  : cross cp_op, cp_a;
+      x_op_b  : cross cp_op, cp_b;
+      x_op_w  : cross cp_op, cp_wrap;
+    endgroup
+
+    covergroup cg_mixed;
+      option.per_instance = 1;
+      cp_mix : coverpoint cv_mix {
+        bins multi[] = {3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15};
+      }
+      cp_unit : coverpoint cv_unit;
+      x_mix_unit : cross cp_mix, cp_unit;
+    endgroup
+
+    covergroup cg_memory;
+      option.per_instance = 1;
+      cp_haz : coverpoint cv_haz;
+      cp_len : coverpoint cv_len {
+        bins one = {1};
+        bins mid = {[2:DMA_MAX_BEATS-1]};
+        bins max = {DMA_MAX_BEATS};
+      }
+    endgroup
+
+    covergroup cg_control;
+      option.per_instance = 1;
+      cp_ev   : coverpoint cv_ctl;
+      cp_unit : coverpoint cv_unit;
+      x_ev_unit : cross cp_ev, cp_unit {
+        ignore_bins mem_kill = binsof(cp_ev) intersect {CE_KILL} && binsof(cp_unit) intersect {U_MEM};
+      }
+    endgroup
+
+    covergroup cg_latency;
+      option.per_instance = 1;
+      cp_unit : coverpoint cv_unit;
+      cp_lat  : coverpoint cv_lat {
+        bins l1      = {1};
+        bins l2      = {2};
+        bins l3      = {3};
+        bins l4_15   = {[4:15]};
+        bins l16_19  = {[16:19]};
+        bins l20     = {20};
+        bins l21_24  = {[21:24]};
+        bins l25_63  = {[25:63]};
+        bins l64_up  = {[64:$]};
+      }
+      x_unit_lat : cross cp_unit, cp_lat;
+    endgroup
+`endif
+
+    function new();
+`ifndef SF_TB_NO_NATIVE_COV
+      cg_operands = new();
+      cg_lanes    = new();
+      cg_tensor   = new();
+      cg_mixed    = new();
+      cg_memory   = new();
+      cg_control  = new();
+      cg_latency  = new();
+`endif
+    endfunction
+
+    // ---- ledger primitives ----
+    function void need(string k);
+      if ((required.exists(k) == 0)) begin
+        required[k] = 1'b1;
+        req_list.push_back(k);
+      end
+    endfunction
+
+    function void hit(string k);
+      if (hit_cnt.exists(k) != 0) hit_cnt[k] = hit_cnt[k] + 1;
+      else begin
+        hit_cnt[k] = 1;
+        if ((required.exists(k) == 0)) obs_list.push_back(k);
+      end
+    endfunction
+
+    function int unsigned count(string k);
+      return (hit_cnt.exists(k) != 0) ? hit_cnt[k] : 0;
+    endfunction
+
+    // ---- coverage plan (required tier) ----
+    function void build_plan(bit precise_flush);
+      string hz [11];
+      hz = '{"RAW_SS", "RAW_VS", "RAW_SV", "RAW_VV", "WAW_SV", "WAW_VS", "WAR_VS", "WAR_SV",
+             "RAW_DMA_V", "RAW_V_DMA", "RAW_EXT"};
+      foreach (ALL_OPS[i]) begin
+        need({"op:",   ALL_OPS[i].name()});
+        need({"done:", ALL_OPS[i].name()});
+      end
+      foreach (ALL_OPS[i]) begin
+        if (unit_of(ALL_OPS[i]) == U_ALU ||
+            ALL_OPS[i] == OP_VADD || ALL_OPS[i] == OP_VSUB || ALL_OPS[i] == OP_VMUL)
+          for (int a = 0; a < NUM_OC; a++)
+            for (int b = 0; b < NUM_OC; b++)
+              need($sformatf("ab:%s:%s:%s", ALL_OPS[i].name(), oc_name(oc_e'(a)), oc_name(oc_e'(b))));
+      end
+      for (int c = 0; c < NUM_OC; c++) need($sformatf("bcast:%s", oc_name(oc_e'(c))));
+      begin
+        string lw [5];
+        string sg [3];
+        lw = '{"OP_VADD", "OP_VSUB", "OP_VMUL", "OP_VBCAST", "OP_VLD"};
+        sg = '{"zero", "pos", "neg"};
+        foreach (lw[o])
+          for (int l = 0; l < LANES; l++)
+            foreach (sg[s]) need($sformatf("lane:%s:%0d:%s", lw[o], l, sg[s]));
+        for (int l = 0; l < LANES; l++) begin
+          need($sformatf("lanewrap:OP_VADD:%0d", l));
+          need($sformatf("lanewrap:OP_VSUB:%0d", l));
+          need($sformatf("lanewrap:OP_VMUL:%0d", l));
+        end
+      end
+      begin
+        string rp [5];
+        string ro [4];
+        rp = '{"zero", "all_pos", "all_neg", "mixed", "extreme"};
+        ro = '{"OP_VREDSUM", "OP_VREDMAX", "OP_VREDMIN", "OP_VDOT"};
+        foreach (ro[o]) foreach (rp[p]) need($sformatf("red:%s:%s", ro[o], rp[p]));
+        need("red:OP_VREDSUM:wrap");
+        need("red:OP_VDOT:wrap");
+      end
+      begin
+        op_e tops [3];
+        tops = '{OP_TMATMUL, OP_TMATMAC, OP_TMATMULT};
+        foreach (tops[o]) begin
+          for (int c = 0; c < NUM_MC_COV; c++) begin
+            need($sformatf("tns:%s:A=%s", tops[o].name(), mc_name(mc_e'(c))));
+            need($sformatf("tns:%s:B=%s", tops[o].name(), mc_name(mc_e'(c))));
+          end
+          need($sformatf("tns:%s:wrap", tops[o].name()));
+        end
+        need("tns:back_to_back");
+      end
+      foreach (hz[h]) need({"haz:", hz[h]});
+      need("dma:len:1");
+      need("dma:len:mid");
+      need("dma:len:max");
+      for (int m = 3; m < 16; m++)
+        if ($countones(m) >= 2) need($sformatf("mix:%s", unit_mask_str(4'(m))));
+      need("memc:DMA+TNS");
+      need("memc:DMA+VEC");
+      need("memc:DMA+ALU");
+      need("memc:SPM+TNS");
+      need("memc:extbp+DMA");
+      need("memc:extbp+TNS");
+      need("ctl:stall:U_ALU");
+      need("ctl:stall:U_VEC");
+      need("ctl:stall:U_TNS");
+      need("ctl:stall:U_MEM");
+      need("ctl:stall_blocked_issue");
+      need("ctl:flush_blocked_issue");
+      need("ctl:flush_kill:U_TNS");
+      if (precise_flush) begin
+        need("ctl:flush_kill:U_ALU");
+        need("ctl:flush_kill:U_VEC");
+      end
+      need("ctl:flush_mem_survives");
+      need("ctl:flush_idle");
+      need("ctl:stall_exact_latency");
+      need("ctl:cpl_backpressure");
+      need("lat:isolated:U_ALU");
+      need("lat:isolated:U_VEC");
+      need("lat:isolated:U_TNS");
+      need("lat:isolated:U_MEM");
+      need("rst:midrun_with_inflight");
+      need("tag:all_issued");
+    endfunction
+
+    // ---- typed samplers (ledger + native) ----
+    function void s_issue(tile_txn t);
+      hit({"op:", t.op.name()});
+`ifndef SF_TB_NO_NATIVE_COV
+      cv_op = t.op;
+`endif
+      if (t.unit == U_ALU) begin
+        hit($sformatf("ab:%s:%s:%s", t.op.name(), oc_name(classify(t.sa)), oc_name(classify(t.sb))));
+`ifndef SF_TB_NO_NATIVE_COV
+        cv_oca = classify(t.sa);
+        cv_ocb = classify(t.sb);
+        cg_operands.sample();
+`endif
+      end
+      if (t.op == OP_VADD || t.op == OP_VSUB || t.op == OP_VMUL) begin
+        for (int l = 0; l < LANES; l++) begin
+          hit($sformatf("ab:%s:%s:%s", t.op.name(), oc_name(classify(t.va[l])), oc_name(classify(t.vb[l]))));
+`ifndef SF_TB_NO_NATIVE_COV
+          cv_oca = classify(t.va[l]);
+          cv_ocb = classify(t.vb[l]);
+          cg_operands.sample();
+`endif
+        end
+      end
+      if (t.op == OP_VBCAST) hit($sformatf("bcast:%s", oc_name(classify(t.sa))));
+      if (is_dma(t.op)) begin
+        if (t.len == 1)                  hit("dma:len:1");
+        else if (int'(t.len) == DMA_MAX_BEATS) hit("dma:len:max");
+        else                             hit("dma:len:mid");
+`ifndef SF_TB_NO_NATIVE_COV
+        cv_len = int'(t.len);
+        cg_memory.sample();
+`endif
+      end
+    endfunction
+
+    // sampled on normal (checked) completion
+    function void s_done(tile_txn t);
+      hit({"done:", t.op.name()});
+`ifndef SF_TB_NO_NATIVE_COV
+      cv_op = t.op;
+`endif
+      if (is_lanewise(t.op) || t.op == OP_VLD) begin
+        for (int l = 0; l < LANES; l++) begin
+          hit($sformatf("lane:%s:%0d:%s", t.op.name(), l, sign_cls(t.exp_v[l])));
+          if (t.lane_wrap[l]) hit($sformatf("lanewrap:%s:%0d", t.op.name(), l));
+`ifndef SF_TB_NO_NATIVE_COV
+          cv_lane = l;
+          cv_sign = (t.exp_v[l] == '0) ? 0 : ((t.exp_v[l] < 0) ? 2 : 1);
+          cv_wrap = t.lane_wrap[l];
+          cg_lanes.sample();
+`endif
+        end
+      end
+      if (is_reduce(t.op)) begin
+        hit($sformatf("red:%s:%s", t.op.name(), reduce_pattern(t)));
+        if (t.wrapped) hit($sformatf("red:%s:wrap", t.op.name()));
+      end
+      if (t.unit == U_TNS) begin
+        hit($sformatf("tns:%s:A=%s", t.op.name(), mc_name(mat_class(t, 0))));
+        hit($sformatf("tns:%s:B=%s", t.op.name(), mc_name(mat_class(t, 1))));
+        if (t.wrapped) hit($sformatf("tns:%s:wrap", t.op.name()));
+`ifndef SF_TB_NO_NATIVE_COV
+        cv_mca  = mat_class(t, 0);
+        cv_mcb  = mat_class(t, 1);
+        cv_wrap = t.wrapped;
+        cg_tensor.sample();
+`endif
+      end
+    endfunction
+
+    function void s_latency(unit_e u, int lat);
+      hit($sformatf("latency:%s:%0d", u.name(), lat));
+`ifndef SF_TB_NO_NATIVE_COV
+      cv_unit = u;
+      cv_lat  = lat;
+      cg_latency.sample();
+`endif
+    endfunction
+
+    function void s_mix(logic [NUM_UNITS-1:0] m, unit_e u);
+      if ($countones(m) >= 2) begin
+        hit($sformatf("mix:%s", unit_mask_str(m)));
+`ifndef SF_TB_NO_NATIVE_COV
+        cv_mix  = int'(m);
+        cv_unit = u;
+        cg_mixed.sample();
+`endif
+      end
+    endfunction
+
+    function void s_ctl(ctl_ev_e e, unit_e u, string key);
+      hit(key);
+`ifndef SF_TB_NO_NATIVE_COV
+      cv_ctl  = e;
+      cv_unit = u;
+      cg_control.sample();
+`endif
+    endfunction
+
+    function void s_haz(haz_e h);
+      string n;
+      n = h.name();
+      hit({"haz:", n.substr(3, n.len() - 1)});
+`ifndef SF_TB_NO_NATIVE_COV
+      cv_haz = h;
+      cg_memory.sample();
+`endif
+    endfunction
+
+    // ---- classifiers ----
+    static function mc_e mat_class(tile_txn t, int which);
+      bit all_zero;
+      bit diag_only;
+      bit ident;
+      bit any_neg;
+      word_t v;
+      all_zero  = 1'b1;
+      diag_only = 1'b1;
+      ident     = 1'b1;
+      any_neg   = 1'b0;
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) begin
+          v = t.m_at(which, i, j);
+          if (v != '0) all_zero = 1'b0;
+          if (i != j && v != '0) diag_only = 1'b0;
+          if (v != ((i == j) ? word_t'(1) : word_t'(0))) ident = 1'b0;
+          if (v < 0) any_neg = 1'b1;
+        end
+      if (all_zero)  return MC_ZERO;
+      if (ident)     return MC_IDENT;
+      if (diag_only) return MC_DIAG;
+      if (any_neg)   return MC_NEG;
+      return MC_DENSE;
+    endfunction
+
+    static function string reduce_pattern(tile_txn t);
+      bit all_zero;
+      bit all_pos;
+      bit all_neg;
+      bit extreme;
+      word_t p;
+      all_zero = 1'b1;
+      all_pos  = 1'b1;
+      all_neg  = 1'b1;
+      extreme  = 1'b0;
+      for (int i = 0; i < LANES; i++) begin
+        p = (t.op == OP_VDOT) ? tile_ref_model::trunc(acc_t'(t.va[i]) * acc_t'(t.vb[i])) : t.va[i];
+        if (t.va[i] == WORD_MIN || t.va[i] == WORD_MAX) extreme = 1'b1;
+        if (p != '0) all_zero = 1'b0;
+        if (!(p > 0))  all_pos = 1'b0;
+        if (!(p < 0))  all_neg = 1'b0;
+      end
+      if (extreme)  return "extreme";
+      if (all_zero) return "zero";
+      if (all_pos)  return "all_pos";
+      if (all_neg)  return "all_neg";
+      return "mixed";
+    endfunction
+
+    // ---- closure ----
+    function int unsigned holes(ref string hole_list[$]);
+      hole_list.delete();
+      foreach (req_list[i])
+        if ((hit_cnt.exists(req_list[i]) == 0)) hole_list.push_back(req_list[i]);
+      return hole_list.size();
+    endfunction
+
+    function void report();
+      string h [$];
+      int unsigned nh;
+      int unsigned shown;
+      nh = holes(h);
+      $display("  ------------------------------------------------------------------");
+      $display("  FUNCTIONAL COVERAGE (ledger)");
+      $display("    required bins      : %0d", req_list.size());
+      $display("    required bins hit  : %0d (%0.2f%%)", req_list.size() - nh,
+               (req_list.size() == 0) ? 100.0 :
+               100.0 * real'(req_list.size() - nh) / real'(req_list.size()));
+      $display("    observed-only bins : %0d", obs_list.size());
+      if (nh != 0) begin
+        shown = 0;
+        $display("    holes:");
+        foreach (h[i]) begin
+          if (shown < 40) $display("      - %s", h[i]);
+          shown++;
+        end
+        if (nh > 40) $display("      ... %0d more", nh - 40);
+      end
+      $display("    control/arbitration observations:");
+      foreach (obs_list[i])
+        if (obs_list[i].substr(0, 3) == "ctl:" || obs_list[i].substr(0, 3) == "arb:")
+          $display("      %s x%0d", obs_list[i], hit_cnt[obs_list[i]]);
+`ifndef SF_TB_NO_NATIVE_COV
+      $display("  FUNCTIONAL COVERAGE (native covergroups)");
+      $display("    cg_operands : %0.2f%%", cg_operands.get_inst_coverage());
+      $display("    cg_lanes    : %0.2f%%", cg_lanes.get_inst_coverage());
+      $display("    cg_tensor   : %0.2f%%", cg_tensor.get_inst_coverage());
+      $display("    cg_mixed    : %0.2f%%", cg_mixed.get_inst_coverage());
+      $display("    cg_memory   : %0.2f%%", cg_memory.get_inst_coverage());
+      $display("    cg_control  : %0.2f%%", cg_control.get_inst_coverage());
+      $display("    cg_latency  : %0.2f%%", cg_latency.get_inst_coverage());
+`endif
+    endfunction
+  endclass : tile_coverage
+
+  // ===========================================================================
+  //  ext_mem_bfm : external memory slave. Pipelined, in-order responses with
+  //  per-request random latency, request backpressure bursts and an
+  //  outstanding-request limit. Storage is the physical external memory.
+  // ===========================================================================
+  class ext_mem_bfm;
+    word_t           mem [EXT_WORDS];
+    sf_rng           rng;
+    // in-flight responses (parallel queues, in request order)
+    bit              q_we   [$];
+    vbus_t           q_data [$];
+    longint unsigned q_due  [$];
+    longint unsigned q_uid  [$];
+    longint unsigned last_due;
+    // knobs
+    int unsigned     lat_min;
+    int unsigned     lat_max;
+    int unsigned     bp_pct;
+    int unsigned     bp_len_max;
+    int unsigned     bp_cnt;
+    // statistics
+    longint unsigned n_rd;
+    longint unsigned n_wr;
+    longint unsigned n_bp_cycles;
+    int              max_outstanding_seen;
+
+    function new(sf_rng r);
+      this.rng   = r;
+      lat_min    = 2;
+      lat_max    = 6;
+      bp_pct     = 0;
+      bp_len_max = 1;
+      bp_cnt     = 0;
+      last_due   = 0;
+      for (int i = 0; i < EXT_WORDS; i++) mem[i] = '0;
+    endfunction
+
+    function void configure(int unsigned lmin, int unsigned lmax, int unsigned bpp, int unsigned bpl);
+      lat_min    = (lmin < 1) ? 1 : lmin;
+      lat_max    = (lmax < lat_min) ? lat_min : lmax;
+      bp_pct     = bpp;
+      bp_len_max = (bpl < 1) ? 1 : bpl;
+      bp_cnt     = 0;
+    endfunction
+
+    function vbus_t read_beat(int unsigned base);
+      vbus_t b;
+      for (int i = 0; i < LANES; i++) b[i*DATA_W +: DATA_W] = mem[(base + i) % EXT_WORDS];
+      return b;
+    endfunction
+
+    function void write_beat(int unsigned base, vbus_t d);
+      for (int i = 0; i < LANES; i++) mem[(base + i) % EXT_WORDS] = word_t'(d[i*DATA_W +: DATA_W]);
+    endfunction
+
+    function int unsigned outstanding();
+      return q_we.size();
+    endfunction
+
+    function bit idle();
+      return q_we.size() == 0;
+    endfunction
+
+    // request handshake observed at edge 'now'
+    function void accept(bit we, int unsigned addr, vbus_t wdata, longint unsigned uid,
+                         longint unsigned now);
+      longint unsigned due;
+      due = now + 64'(rng.urange(lat_min, lat_max));
+      if (due <= last_due) due = last_due + 1;
+      last_due = due;
+      if (we) begin
+        write_beat(addr, wdata);
+        q_data.push_back('0);
+        n_wr++;
+      end else begin
+        q_data.push_back(read_beat(addr));
+        n_rd++;
+      end
+      q_we.push_back(we);
+      q_due.push_back(due);
+      q_uid.push_back(uid);
+      if (q_we.size() > max_outstanding_seen) max_outstanding_seen = q_we.size();
+    endfunction
+
+    // response handshake observed: retire head, return owning transaction uid
+    function longint unsigned pop();
+      longint unsigned uid;
+      uid = q_uid.pop_front();
+      void'(q_we.pop_front());
+      void'(q_data.pop_front());
+      void'(q_due.pop_front());
+      return uid;
+    endfunction
+
+    function bit rsp_due(longint unsigned now);
+      return (q_due.size() != 0) && (q_due[0] <= now + 1);
+    endfunction
+
+    // request-ready for the next cycle
+    function bit next_req_ready();
+      if (q_we.size() >= EXT_MAX_OUTSTANDING) return 1'b0;
+      if (bp_cnt != 0) begin
+        bp_cnt--;
+        n_bp_cycles++;
+        return 1'b0;
+      end
+      if (bp_pct != 0 && rng.pct(bp_pct)) begin
+        bp_cnt = rng.urange(1, bp_len_max) - 1;
+        n_bp_cycles++;
+        return 1'b0;
+      end
+      return 1'b1;
+    endfunction
+
+    function void reset();
+      q_we.delete();
+      q_data.delete();
+      q_due.delete();
+      q_uid.delete();
+      bp_cnt   = 0;
+      last_due = 0;
+    endfunction
+  endclass : ext_mem_bfm
+
+  // ===========================================================================
+  //  tile_scoreboard : central transaction scoreboard.
+  //   * tag-indexed in-flight table (reorder-safe matching across units)
+  //   * issue-ordered outstanding list (per-unit ordering, timeouts, drain)
+  //   * external-port expectations derived from DMA predictions
+  //   * flush exposure / squash legality, latency envelope, X screening
+  // ===========================================================================
+  class tile_scoreboard;
+    tile_ref_model   rm;
+    tile_coverage    cov;
+    bit              precise_flush;
+
+    tile_txn         inflight   [int unsigned];
+    tile_txn         order_q    [$];
+    tile_txn         dma_by_uid [longint unsigned];
+
+    // expected external writes / reads (parallel queues, issue order)
+    int unsigned     xw_addr  [$];
+    vbus_t           xw_data  [$];
+    bit              xw_known [$];
+    tile_txn         xw_txn   [$];
+    int unsigned     xr_addr  [$];
+    tile_txn         xr_txn   [$];
+
+    // flush tracking
+    tile_txn         drain_set [$];
+    int              drain_budget;
+    longint unsigned last_flush_cyc;
+    longint unsigned last_stall_cyc;
+    int unsigned     epoch;
+
+    // context snapshot (refreshed by the kernel every cycle)
+    logic [NUM_UNITS-1:0] ctx_busy;
+    logic            ctx_idle;
+    bit              ctx_stall;
+    bit              ctx_cpl_ready;
+    bit              ctx_ext_bp;
+
+    // statistics
+    longint unsigned n_issued [NUM_UNITS];
+    longint unsigned n_done   [NUM_UNITS];
+    longint unsigned n_killed [NUM_UNITS];
+    longint unsigned lat_sum  [NUM_UNITS];
+    int              lat_lo   [NUM_UNITS];
+    int              lat_hi   [NUM_UNITS];
+    longint unsigned n_scalars_checked;
+    longint unsigned n_lanes_checked;
+    longint unsigned n_elems_checked;
+    longint unsigned n_ext_wr_checked;
+    longint unsigned n_ext_rd_checked;
+    longint unsigned n_unchecked;
+    longint unsigned n_discarded;
+    longint unsigned n_flushes;
+    longint unsigned mismatches;
+    longint unsigned last_retire_cyc;
+    int unsigned     iso_lat  [string];
+    bit              tag_seen [NUM_TAGS];
+    unit_e           last_cpl_unit;
+    longint unsigned last_cpl_cyc;
+
+    function new(tile_ref_model m, tile_coverage c, bit pf);
+      this.rm            = m;
+      this.cov           = c;
+      this.precise_flush = pf;
+      for (int u = 0; u < NUM_UNITS; u++) begin
+        n_issued[u] = 0; n_done[u] = 0; n_killed[u] = 0; lat_sum[u] = 0;
+        lat_lo[u] = 32'h7FFF_FFFF; lat_hi[u] = 0;
+      end
+      for (int i = 0; i < NUM_TAGS; i++) tag_seen[i] = 1'b0;
+      last_flush_cyc = 0;
+      last_stall_cyc = 0;
+      epoch          = 0;
+      drain_budget   = 0;
+    endfunction
+
+    // ---------------------------------------------------------------- queries
+    function int unsigned unit_inflight(unit_e u);
+      int unsigned n;
+      n = 0;
+      foreach (order_q[i]) if (order_q[i].unit == u) n++;
+      return n;
+    endfunction
+
+    function logic [NUM_UNITS-1:0] inflight_mask();
+      logic [NUM_UNITS-1:0] m;
+      m = '0;
+      foreach (order_q[i]) m[order_q[i].unit] = 1'b1;
+      return m;
+    endfunction
+
+    function bit dma_inflight();
+      foreach (order_q[i]) if (is_dma(order_q[i].op)) return 1'b1;
+      return 1'b0;
+    endfunction
+
+    function bit spm_inflight();
+      foreach (order_q[i]) if (order_q[i].unit == U_MEM && !is_dma(order_q[i].op)) return 1'b1;
+      return 1'b0;
+    endfunction
+
+    function bit quiescent();
+      return (order_q.size() == 0) && (xw_addr.size() == 0) && (xr_addr.size() == 0);
+    endfunction
+
+    // any stall / backpressure / flush voids the isolated-latency guarantee
+    function void disturb();
+      foreach (order_q[i]) order_q[i].isolated = 1'b0;
+    endfunction
+
+    // ------------------------------------------------------------- registration
+    function void register(tile_txn t, longint unsigned prog, logic [NUM_UNITS-1:0] busy);
+      int unsigned key;
+      int unsigned ea;
+      key = int'(t.tag);
+      if (inflight.exists(key) != 0)
+        tb_error("SB_TAG_ALIAS", $sformatf("environment issued tag 0x%0h while %s still in flight",
+                                           t.tag, inflight[key].brief()));
+      if (order_q.size() == 0) last_retire_cyc = g_cycle;
+      t.accepted            = 1'b1;
+      t.issue_cyc           = g_cycle;
+      t.issue_prog          = prog;
+      t.epoch               = epoch;
+      t.busy_at_issue       = busy;
+      t.unit_depth_at_issue = unit_inflight(t.unit);
+      if (order_q.size() != 0) begin
+        t.isolated = 1'b0;
+        disturb();
+      end
+      inflight[key] = t;
+      order_q.push_back(t);
+      n_issued[t.unit]++;
+      tag_seen[key] = 1'b1;
+      if (is_dma(t.op)) begin
+        t.ext_req_pending  = t.len;
+        t.ext_rsp_pending  = 0;
+        dma_by_uid[t.uid]  = t;
+        for (int unsigned k = 0; k < t.len; k++) begin
+          ea = (t.ext_addr + k * LANES) % EXT_WORDS;
+          if (t.op == OP_DMAWR) begin
+            xw_addr.push_back(ea);
+            xw_data.push_back(rm.ext_beat(ea));
+            xw_known.push_back(t.exp_known);
+            xw_txn.push_back(t);
+          end else begin
+            xr_addr.push_back(ea);
+            xr_txn.push_back(t);
+          end
+        end
+      end
+      tb_trace("SB_ISSUE", $sformatf("%s %s", t.brief(), t.inputs_str()));
+    endfunction
+
+    // ------------------------------------------------------------- completion
+    // returns the tag to recycle, or -1 when nothing retired
+    function int complete(cpl_obs_t c);
+      tile_txn     t;
+      int unsigned key;
+      int          lat;
+      bit          ok;
+      if ($isunknown(c.tag)) begin
+        tb_error("SB_CPL_TAG_X", "completion handshake carries an unknown tag");
+        return -1;
+      end
+      key = int'(c.tag);
+      if ((inflight.exists(key) == 0)) begin
+        tb_error("SB_SPURIOUS_CPL",
+                 $sformatf("completion for tag 0x%0h (unit=%0d killed=%b) with no transaction in flight: duplicate, ghost after reset/flush, or corrupted tag",
+                           c.tag, c.unit, c.killed));
+        return -1;
+      end
+      t            = inflight[key];
+      t.cpl_cyc    = g_cycle;
+      t.act_killed = c.killed;
+      t.act_s      = c.scalar;
+      t.act_v      = c.vec;
+      t.act_m      = c.mat;
+      lat          = int'(t.cpl_cyc - t.issue_cyc);
+
+      if (c.unit !== UNIT_W'(t.unit))
+        mismatch(t, "ROUTING", $sformatf("  |   completion returned on unit id %0d; %s executes on %s (id %0d)\n",
+                                         c.unit, t.op.name(), t.unit.name(), t.unit));
+
+      if (last_cpl_cyc + 1 == g_cycle && last_cpl_unit != t.unit)
+        cov.hit($sformatf("arb:b2b:%s->%s", last_cpl_unit.name(), t.unit.name()));
+      last_cpl_unit = t.unit;
+      last_cpl_cyc  = g_cycle;
+
+      if (c.killed === 1'b1) begin
+        if (t.unit == U_MEM)
+          mismatch(t, "ILLEGAL_KILL", "  |   MEM operations are non-speculative and must never be squashed (C6)\n");
+        else if (!t.flush_exposed)
+          mismatch(t, "ILLEGAL_KILL", "  |   op was accepted after the most recent flush edge and must not be squashed (C6)\n");
+        else begin
+          n_killed[t.unit]++;
+          cov.s_ctl(CE_KILL, t.unit, {"ctl:flush_kill:", t.unit.name()});
+        end
+      end else begin
+        if (c.killed !== 1'b0)
+          mismatch(t, "KILLED_X", "  |   cpl_killed is X/Z on a completion handshake\n");
+        if (t.must_kill) begin
+          mismatch(t, "MISSED_KILL",
+                   $sformatf("  |   op was in flight and not presented at the flush edge (cycle %0d); it must be squashed (C6, %s policy)\n",
+                             last_flush_cyc, precise_flush ? "precise" : "relaxed"));
+        end else begin
+          check_order(t);
+          ok = check_result(t);
+          if (ok) cov.s_done(t);
+          if (t.flush_exposed)
+            cov.s_ctl(CE_SURVIVE, t.unit, (t.unit == U_MEM) ? "ctl:flush_mem_survives" : "ctl:flush_survivor");
+          check_latency(t, lat);
+          if (is_dma(t.op) && (t.ext_req_pending != 0 || t.ext_rsp_pending != 0))
+            mismatch(t, "DMA_EARLY_CPL",
+                     $sformatf("  |   DMA completed with %0d beat request(s) unsent and %0d response(s) outstanding (C7)\n",
+                               t.ext_req_pending, t.ext_rsp_pending));
+        end
+        n_done[t.unit]++;
+      end
+      retire(t, key);
+      return int'(key);
+    endfunction
+
+    local function void retire(tile_txn t, int unsigned key);
+      inflight.delete(key);
+      for (int i = 0; i < order_q.size(); i++)
+        if (order_q[i] == t) begin
+          order_q.delete(i);
+          break;
+        end
+      if (dma_by_uid.exists(t.uid) != 0) dma_by_uid.delete(t.uid);
+      t.retired       = 1'b1;
+      last_retire_cyc = g_cycle;
+      tb_trace("SB_RETIRE", $sformatf("%s lat=%0d killed=%b", t.brief(), t.cpl_cyc - t.issue_cyc, t.act_killed));
+    endfunction
+
+    // C3: normal completions of a unit leave in issue order. Flush-exposed ops
+    // are exempt (their squash completions may be returned in any order).
+    local function void check_order(tile_txn t);
+      foreach (order_q[i]) begin
+        if (order_q[i] == t) break;
+        if (order_q[i].unit == t.unit && !order_q[i].flush_exposed) begin
+          mismatch(t, "ORDER",
+                   $sformatf("  |   overtook older %s op %s issued at cycle %0d (C3 per-unit issue order)\n",
+                             t.unit.name(), order_q[i].brief(), order_q[i].issue_cyc));
+          break;
+        end
+      end
+    endfunction
+
+    local function bit check_result(tile_txn t);
+      string d;
+      int    bad;
+      word_t a;
+      if (!t.exp_known) begin
+        n_unchecked++;
+        tb_warn("SB_UNCHECKED", $sformatf("%s reads scratchpad locations with no architectural value; data not checked", t.brief()));
+        return 1'b0;
+      end
+      d   = "";
+      bad = 0;
+      case (res_kind(t.op))
+        RK_SCALAR: begin
+          n_scalars_checked++;
+          if ($isunknown(t.act_s) || (t.act_s !== t.exp_s)) begin
+            mismatch(t, "DATA", $sformatf("  |   scalar result   expected %s   actual %s\n", fmtw(t.exp_s), fmtw(t.act_s)));
+            return 1'b0;
+          end
+        end
+        RK_VEC: begin
+          for (int l = 0; l < LANES; l++) begin
+            a = lane_of(t.act_v, l);
+            n_lanes_checked++;
+            if ($isunknown(a) || (a !== t.exp_v[l])) begin
+              bad++;
+              d = {d, $sformatf("  |   lane %0d   expected %s   actual %s   <-- MISMATCH\n",
+                                l, fmtw(t.exp_v[l]), fmtw(a))};
+            end
+          end
+          if (bad != 0) begin
+            mismatch(t, "DATA", {$sformatf("  |   %0d of %0d lanes differ\n", bad, LANES), d});
+            return 1'b0;
+          end
+        end
+        RK_MAT: begin
+          for (int i = 0; i < TDIM; i++)
+            for (int j = 0; j < TDIM; j++) begin
+              a = elem_of(t.act_m, i, j);
+              n_elems_checked++;
+              if ($isunknown(a) || (a !== t.exp_m[i][j])) begin
+                bad++;
+                d = {d, $sformatf("  |   C[%0d][%0d]   expected %s   actual %s   <-- MISMATCH\n",
+                                  i, j, fmtw(t.exp_m[i][j]), fmtw(a))};
+              end
+            end
+          if (bad != 0) begin
+            mismatch(t, "DATA", {$sformatf("  |   %0d of %0d elements differ ; expected C=%s\n", bad, TELEMS, t.mat_str(3)), d});
+            return 1'b0;
+          end
+        end
+        default: ;
+      endcase
+      return 1'b1;
+    endfunction
+
+    function int unsigned lat_ceiling(tile_txn t);
+      case (t.unit)
+        U_ALU  : return ALU_LAT_MAX;
+        U_VEC  : return VEC_LAT_MAX;
+        U_TNS  : return TNS_LAT_MAX;
+        default: return is_dma(t.op) ? (DMA_SETUP_MAX + t.len * (t.ext_lat_bound + DMA_BEAT_OVH))
+                                     : SPM_LAT_MAX;
+      endcase
+    endfunction
+
+    local function void check_latency(tile_txn t, int lat);
+      int unsigned lo;
+      int unsigned hi;
+      lo = lat_floor(t.op);
+      hi = lat_ceiling(t);
+      lat_sum[t.unit] += longint'(lat);
+      if (lat < lat_lo[t.unit]) lat_lo[t.unit] = lat;
+      if (lat > lat_hi[t.unit]) lat_hi[t.unit] = lat;
+      cov.s_latency(t.unit, lat);
+      if (lat < int'(lo))
+        mismatch(t, "LATENCY_FLOOR", $sformatf("  |   completed after %0d cycles; %s floor is %0d\n", lat, t.op.name(), lo));
+      if (t.isolated) begin
+        if (lat > int'(hi))
+          mismatch(t, "LATENCY_ENVELOPE",
+                   $sformatf("  |   isolated op completed after %0d cycles; envelope [%0d..%0d]\n", lat, lo, hi));
+        else begin
+          iso_lat[t.op.name()] = lat;
+          cov.hit({"lat:isolated:", t.unit.name()});
+        end
+      end
+      if (t.exact_lat >= 0) begin
+        if (lat != t.exact_lat)
+          mismatch(t, "LATENCY_EXACT",
+                   $sformatf("  |   stall-aligned latency %0d, expected exactly %0d (isolated baseline + stalled cycles, C5)\n",
+                             lat, t.exact_lat));
+        else cov.hit("ctl:stall_exact_latency");
+      end
+    endfunction
+
+    // ------------------------------------------------------- external port
+    function longint unsigned ext_req(logic we, logic [EXT_AW-1:0] addr_l, vbus_t wdata);
+      int          idx;
+      int unsigned addr;
+      tile_txn     t;
+      string       d;
+      int          bad;
+      word_t       a;
+      word_t       e;
+      if ($isunknown(addr_l) || $isunknown(we)) begin
+        tb_error("SB_EXT_X", "external request handshake with X/Z address or direction");
+        return 0;
+      end
+      addr = int'(addr_l);
+      idx  = -1;
+      if (we) begin
+        for (int i = 0; i < xw_addr.size(); i++)
+          if (xw_addr[i] == addr) begin idx = i; break; end
+        if (idx < 0) begin
+          tb_error("SB_EXT_SPURIOUS_WR",
+                   $sformatf("external write to 0x%0h not expected by any DMA write in flight (%0d expected beats outstanding)",
+                             addr, xw_addr.size()));
+          return 0;
+        end
+        t = xw_txn[idx];
+        if (xw_known[idx]) begin
+          d   = "";
+          bad = 0;
+          for (int l = 0; l < LANES; l++) begin
+            a = word_t'(wdata[l*DATA_W +: DATA_W]);
+            e = word_t'(xw_data[idx][l*DATA_W +: DATA_W]);
+            if ($isunknown(a) || a !== e) begin
+              bad++;
+              d = {d, $sformatf("  |   ext[0x%0h] lane %0d   expected %s   actual %s   <-- MISMATCH\n",
+                                addr + l, l, fmtw(e), fmtw(a))};
+            end
+          end
+          n_ext_wr_checked++;
+          if (bad != 0) mismatch(t, "EXT_WRITE_DATA", d);
+        end
+        xw_addr.delete(idx);
+        xw_data.delete(idx);
+        xw_known.delete(idx);
+        xw_txn.delete(idx);
+      end else begin
+        for (int i = 0; i < xr_addr.size(); i++)
+          if (xr_addr[i] == addr) begin idx = i; break; end
+        if (idx < 0) begin
+          tb_error("SB_EXT_SPURIOUS_RD",
+                   $sformatf("external read of 0x%0h not expected by any DMA read in flight (%0d expected beats outstanding)",
+                             addr, xr_addr.size()));
+          return 0;
+        end
+        t = xr_txn[idx];
+        n_ext_rd_checked++;
+        xr_addr.delete(idx);
+        xr_txn.delete(idx);
+      end
+      if (t.ext_req_pending == 0)
+        mismatch(t, "DMA_BEATS", $sformatf("  |   DMA emitted more than its %0d beats\n", t.len));
+      else
+        t.ext_req_pending--;
+      t.ext_rsp_pending++;
+      return t.uid;
+    endfunction
+
+    function void ext_rsp(longint unsigned uid);
+      tile_txn t;
+      if (uid == 0) return;
+      if ((dma_by_uid.exists(uid) == 0)) return;   // owner already retired: reported as DMA_EARLY_CPL
+      t = dma_by_uid[uid];
+      if (t.ext_rsp_pending != 0) t.ext_rsp_pending--;
+    endfunction
+
+    // ------------------------------------------------------------- flush
+    function void flush(longint unsigned prog, bit pres_valid, tag_t pres_tag);
+      tile_txn     t;
+      bit          presented;
+      int unsigned n_exposed;
+      n_flushes++;
+      epoch++;
+      last_flush_cyc = g_cycle;
+      n_exposed      = 0;
+      foreach (order_q[i]) begin
+        t = order_q[i];
+        if (t.unit == U_MEM) begin
+          t.flush_exposed = 1'b1;
+          continue;
+        end
+        presented       = pres_valid && (pres_tag === t.tag);
+        t.flush_exposed = 1'b1;
+        if (!presented) begin
+          if (precise_flush) t.must_kill = 1'b1;
+          else if ((prog - t.issue_prog) < 64'(unit_lat_floor(t.unit))) t.must_kill = 1'b1;
+        end
+        drain_set.push_back(t);
+        n_exposed++;
+      end
+      if (order_q.size() == 0) cov.hit("ctl:flush_idle");
+      drain_budget = FLUSH_DRAIN_MAX + drain_set.size();
+      tb_trace("SB_FLUSH", $sformatf("flush #%0d exposes %0d compute op(s)", n_flushes, n_exposed));
+    endfunction
+
+    // ------------------------------------------------------------- reset
+    function void reset_discard();
+      n_discarded += 64'(order_q.size());
+      if (order_q.size() != 0)
+        tb_info("SB_RESET", $sformatf("reset discards %0d in-flight transaction(s)", order_q.size()));
+      inflight.delete();
+      order_q.delete();
+      dma_by_uid.delete();
+      xw_addr.delete(); xw_data.delete(); xw_known.delete(); xw_txn.delete();
+      xr_addr.delete(); xr_txn.delete();
+      drain_set.delete();
+      epoch++;
+    endfunction
+
+    // ------------------------------------------------------------- per cycle
+    function void tick(bit cpl_ready, bit stall);
+      string s;
+      if (stall) last_stall_cyc = g_cycle;
+      if (drain_set.size() != 0) begin
+        for (int i = drain_set.size() - 1; i >= 0; i--)
+          if (drain_set[i].retired) drain_set.delete(i);
+        if (drain_set.size() != 0 && cpl_ready && !stall) begin
+          drain_budget--;
+          if (drain_budget <= 0) begin
+            s = "";
+            foreach (drain_set[i]) s = {s, " ", drain_set[i].brief()};
+            tb_error("SB_FLUSH_DRAIN",
+                     $sformatf("%0d flushed op(s) not retired within the drain budget after the flush at cycle %0d:%s",
+                               drain_set.size(), last_flush_cyc, s));
+            drain_set.delete();
+          end
+        end
+      end
+      if (g_cycle[3:0] == 4'd0) begin
+        foreach (order_q[i])
+          if (!order_q[i].timed_out && (g_cycle - order_q[i].issue_cyc) > 64'(TXN_TIMEOUT)) begin
+            order_q[i].timed_out = 1'b1;
+            order_q[i].cpl_cyc   = g_cycle;
+            mismatch(order_q[i], "TIMEOUT",
+                     $sformatf("  |   no completion %0d cycles after issue (lost transaction or starvation)\n", TXN_TIMEOUT));
+          end
+      end
+      if (order_q.size() != 0 && (g_cycle - last_retire_cyc) > 64'(HANG_LIMIT)) begin
+        dump_outstanding("HANG");
+        tb_error("SB_HANG", $sformatf("no transaction retired for %0d cycles with %0d outstanding", HANG_LIMIT, order_q.size()));
+        $fatal(1, "tb_compute_tile: TEST FAILED (tile hang)");
+      end
+    endfunction
+
+    // ------------------------------------------------------------- reporting
+    function string context_str(tile_txn t);
+      string s;
+      string pos;
+      case (t.unit)
+        U_TNS  : pos = $sformatf("tensor pipeline: completion at stage-equivalent %0d (nominal %0d, %0s%0d)",
+                                 t.cpl_cyc - t.issue_cyc, TNS_LAT_NOM,
+                                 ((t.cpl_cyc - t.issue_cyc) >= 64'(TNS_LAT_NOM)) ? "+" : "-",
+                                 ((t.cpl_cyc - t.issue_cyc) >= 64'(TNS_LAT_NOM)) ? (t.cpl_cyc - t.issue_cyc - 64'(TNS_LAT_NOM))
+                                                                                 : (64'(TNS_LAT_NOM) - (t.cpl_cyc - t.issue_cyc)));
+        U_MEM  : pos = is_dma(t.op) ? $sformatf("DMA engine: %0d beat request(s) unsent, %0d response(s) pending",
+                                                t.ext_req_pending, t.ext_rsp_pending)
+                                    : $sformatf("memory queue position at issue %0d", t.unit_depth_at_issue);
+        default: pos = $sformatf("%s queue position at issue %0d", t.unit.name(), t.unit_depth_at_issue);
+      endcase
+      s = $sformatf("  | context   : dut unit_busy=%s idle=%b stall=%b cpl_ready=%b ext_backpressure=%b\n",
+                    unit_mask_str(ctx_busy), ctx_idle, ctx_stall, ctx_cpl_ready, ctx_ext_bp);
+      s = {s, $sformatf("  |             tb in-flight ALU=%0d VEC=%0d TNS=%0d MEM=%0d ; dut busy at issue=%s\n",
+                        unit_inflight(U_ALU), unit_inflight(U_VEC), unit_inflight(U_TNS), unit_inflight(U_MEM),
+                        unit_mask_str(t.busy_at_issue))};
+      s = {s, $sformatf("  |             last flush @%0d last stall @%0d ; flush_exposed=%b must_kill=%b isolated=%b killed=%b\n",
+                        last_flush_cyc, last_stall_cyc, t.flush_exposed, t.must_kill, t.isolated, t.act_killed)};
+      s = {s, $sformatf("  |             %s\n", pos)};
+      return s;
+    endfunction
+
+    function void mismatch(tile_txn t, string kind, string detail);
+      string s;
+      mismatches++;
+      s = "\n  +=============================== SCOREBOARD MISMATCH ===============================\n";
+      s = {s, $sformatf("  | kind      : %s\n", kind)};
+      s = {s, $sformatf("  | txn       : uid=%0d tag=0x%0h op=%s unit=%s epoch=%0d\n",
+                        t.uid, t.tag, t.op.name(), t.unit.name(), t.epoch)};
+      s = {s, $sformatf("  | origin    : %s   pattern=%s\n", t.origin, t.pattern)};
+      s = {s, $sformatf("  | cycles    : issue=%0d completion=%0d latency=%0d envelope=[%0d..%0d]%s\n",
+                        t.issue_cyc, t.cpl_cyc, t.cpl_cyc - t.issue_cyc, lat_floor(t.op), lat_ceiling(t),
+                        (t.exact_lat >= 0) ? $sformatf(" exact=%0d", t.exact_lat) : "")};
+      s = {s, $sformatf("  | inputs    : %s\n", t.inputs_str())};
+      s = {s, "  | detail    :\n", detail};
+      s = {s, context_str(t)};
+      s = {s, "  +===================================================================================="};
+      tb_error({"SB_", kind}, s);
+    endfunction
+
+    function void dump_outstanding(string why);
+      $display("  ---- outstanding transactions (%s) : %0d ----", why, order_q.size());
+      foreach (order_q[i])
+        $display("    %s unit=%s issued@%0d age=%0d exposed=%b must_kill=%b ext_req_pend=%0d ext_rsp_pend=%0d",
+                 order_q[i].brief(), order_q[i].unit.name(), order_q[i].issue_cyc,
+                 g_cycle - order_q[i].issue_cyc, order_q[i].flush_exposed, order_q[i].must_kill,
+                 order_q[i].ext_req_pending, order_q[i].ext_rsp_pending);
+    endfunction
+
+    function void check_drained(string ctx);
+      if (order_q.size() != 0) begin
+        dump_outstanding(ctx);
+        tb_error("SB_NOT_DRAINED", $sformatf("%s: %0d transaction(s) never completed", ctx, order_q.size()));
+      end
+      if (xw_addr.size() != 0)
+        tb_error("SB_EXT_WR_MISSING", $sformatf("%s: %0d expected external write beat(s) never observed (first addr 0x%0h, %s)",
+                                                ctx, xw_addr.size(), xw_addr[0], xw_txn[0].brief()));
+      if (xr_addr.size() != 0)
+        tb_error("SB_EXT_RD_MISSING", $sformatf("%s: %0d expected external read beat(s) never observed (first addr 0x%0h, %s)",
+                                                ctx, xr_addr.size(), xr_addr[0], xr_txn[0].brief()));
+    endfunction
+
+    function void report();
+      $display("  ------------------------------------------------------------------");
+      $display("  SCOREBOARD");
+      $display("    unit   issued     done   killed   lat_min  lat_avg  lat_max");
+      for (int u = 0; u < NUM_UNITS; u++)
+        $display("    %s  %7d  %7d  %7d   %7d  %7.2f  %7d", unit_name(unit_e'(u)),
+                 n_issued[u], n_done[u], n_killed[u],
+                 (n_done[u] == 0) ? 0 : lat_lo[u],
+                 (n_done[u] == 0) ? 0.0 : real'(lat_sum[u]) / real'(n_done[u]),
+                 lat_hi[u]);
+      $display("    scalars checked         : %0d", n_scalars_checked);
+      $display("    vector lanes checked    : %0d", n_lanes_checked);
+      $display("    matrix elements checked : %0d", n_elems_checked);
+      $display("    ext write beats checked : %0d", n_ext_wr_checked);
+      $display("    ext read beats matched  : %0d", n_ext_rd_checked);
+      $display("    flush events            : %0d", n_flushes);
+      $display("    discarded at reset      : %0d", n_discarded);
+      $display("    unchecked results       : %0d", n_unchecked);
+      $display("    mismatches              : %0d", mismatches);
+    endfunction
+  endclass : tile_scoreboard
+
+  // ===========================================================================
+  //  tile_stim : transaction factories (directed, class-driven and random)
+  // ===========================================================================
+  class tile_stim;
+    sf_rng       rng;
+    int unsigned hot_pct;     // % of SPM accesses steered into a hot window
+    int unsigned hot_base;
+    int unsigned hot_words;
+
+    function new(sf_rng r);
+      this.rng  = r;
+      hot_pct   = 0;
+      hot_base  = 0;
+      hot_words = 8 * LANES;
+    endfunction
+
+    function word_t mixed_word();
+      if (rng.pct(25)) return rng.operand(rng.any_class());
+      return rng.word();
+    endfunction
+
+    // ---------------------------------------------------------------- ALU
+    function tile_txn alu(op_e op, word_t a, word_t b, string origin, string pattern = "directed");
+      tile_txn t;
+      t = new(op, origin, pattern);
+      t.sa = a;
+      t.sb = b;
+      return t;
+    endfunction
+
+    function op_e rand_alu_op();
+      return ALL_OPS[rng.urange(0, 12)];
+    endfunction
+
+    function op_e rand_vec_op();
+      return ALL_OPS[rng.urange(13, 20)];
+    endfunction
+
+    function op_e rand_tns_op();
+      return ALL_OPS[rng.urange(21, 23)];
+    endfunction
+
+    // ---------------------------------------------------------------- VEC
+    function tile_txn vec(op_e op, string origin, string pattern = "directed");
+      tile_txn t;
+      t = new(op, origin, pattern);
+      return t;
+    endfunction
+
+    // lane l carries operand classes ((ca+l) mod 9, (cb+l) mod 9)
+    function tile_txn vec_cls(op_e op, oc_e ca, oc_e cb, string origin);
+      tile_txn t;
+      t = new(op, origin, $sformatf("class:%s/%s", oc_name(ca), oc_name(cb)));
+      for (int l = 0; l < LANES; l++) begin
+        t.va[l] = rng.operand(oc_e'((int'(ca) + l) % NUM_OC));
+        t.vb[l] = rng.operand(oc_e'((int'(cb) + l) % NUM_OC));
+      end
+      t.sa = rng.operand(ca);
+      return t;
+    endfunction
+
+    function tile_txn red_pattern(op_e op, string pat, string origin);
+      tile_txn t;
+      t = new(op, origin, pat);
+      for (int l = 0; l < LANES; l++) begin
+        case (pat)
+          "zero": begin
+            t.va[l] = (op == OP_VDOT) ? rng.srange(-1000, 1000) : word_t'(0);
+            t.vb[l] = '0;
+          end
+          "all_pos": begin
+            t.va[l] = rng.srange(1, 100000);
+            t.vb[l] = rng.srange(1, 100000);
+          end
+          "all_neg": begin
+            t.va[l] = (op == OP_VDOT) ? rng.srange(1, 100000) : rng.srange(-100000, -1);
+            t.vb[l] = rng.srange(-100000, -1);
+          end
+          "mixed": begin
+            t.va[l] = (l % 2 == 0) ? rng.srange(1, 50000) : rng.srange(-50000, -1);
+            t.vb[l] = rng.srange(1, 50000);
+          end
+          "extreme": begin
+            t.va[l] = (l == 2) ? WORD_MAX : ((l == 5) ? WORD_MIN : rng.srange(-1000, 1000));
+            t.vb[l] = rng.srange(-3, 3);
+          end
+          "wrap": begin
+            t.va[l] = (op == OP_VDOT) ? rng.srange(64'sh4000_0000, 64'sh7000_0000) : WORD_MAX;
+            t.vb[l] = rng.srange(64'sh4000_0000, 64'sh7000_0000);
+          end
+          default: begin
+            t.va[l] = mixed_word();
+            t.vb[l] = mixed_word();
+          end
+        endcase
+      end
+      return t;
+    endfunction
+
+    // ---------------------------------------------------------------- TNS
+    function void fill_mat(tile_txn t, int which, mc_e c);
+      word_t d;
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) begin
+          case (c)
+            MC_ZERO : t.m_set(which, i, j, '0);
+            MC_IDENT: t.m_set(which, i, j, (i == j) ? word_t'(1) : word_t'(0));
+            MC_DIAG : begin
+              d = rng.srange(2, 64);
+              if (rng.pct(40)) d = -d;
+              t.m_set(which, i, j, (i == j) ? d : word_t'(0));
+            end
+            MC_NEG  : t.m_set(which, i, j, rng.srange(-30000, -1));
+            MC_DENSE: t.m_set(which, i, j, rng.srange(1, 30000));
+            default : t.m_set(which, i, j, rng.word());
+          endcase
+        end
+    endfunction
+
+    function tile_txn tns(op_e op, mc_e ca, mc_e cb, string origin);
+      tile_txn t;
+      t = new(op, origin, $sformatf("A=%s B=%s", mc_name(ca), mc_name(cb)));
+      fill_mat(t, 0, ca);
+      fill_mat(t, 1, cb);
+      if (op == OP_TMATMAC) fill_mat(t, 2, rng.pct(50) ? MC_NEG : MC_DENSE);
+      return t;
+    endfunction
+
+    function mc_e rand_mc();
+      int unsigned r;
+      r = rng.urange(0, 99);
+      if (r < 5)  return MC_ZERO;
+      if (r < 15) return MC_IDENT;
+      if (r < 25) return MC_DIAG;
+      if (r < 40) return MC_NEG;
+      if (r < 75) return MC_DENSE;
+      return MC_LARGE;
+    endfunction
+
+    // ---------------------------------------------------------------- MEM
+    function int unsigned saddr();
+      if (hot_pct != 0 && rng.pct(hot_pct)) return hot_base + rng.urange(0, hot_words - 1);
+      return rng.urange(0, SPM_WORDS - 1);
+    endfunction
+
+    function int unsigned vaddr();
+      if (hot_pct != 0 && rng.pct(hot_pct)) return hot_base + rng.urange(0, hot_words / LANES - 1) * LANES;
+      return rng.urange(0, SPM_WORDS / LANES - 1) * LANES;
+    endfunction
+
+    function int unsigned dma_len();
+      int unsigned r;
+      r = rng.urange(0, 99);
+      if (r < 20) return 1;
+      if (r < 40) return DMA_MAX_BEATS;
+      return rng.urange(2, DMA_MAX_BEATS - 1);
+    endfunction
+
+    function tile_txn sld(int unsigned a, string origin);
+      tile_txn t;
+      t = new(OP_SLD, origin, "directed");
+      t.addr = a;
+      return t;
+    endfunction
+
+    function tile_txn sst(int unsigned a, word_t v, string origin);
+      tile_txn t;
+      t = new(OP_SST, origin, "directed");
+      t.addr = a;
+      t.sa   = v;
+      return t;
+    endfunction
+
+    function tile_txn vld(int unsigned a, string origin);
+      tile_txn t;
+      t = new(OP_VLD, origin, "directed");
+      t.addr = a;
+      return t;
+    endfunction
+
+    function tile_txn vst(int unsigned a, string origin);
+      tile_txn t;
+      t = new(OP_VST, origin, "random-data");
+      t.addr = a;
+      for (int l = 0; l < LANES; l++) t.va[l] = mixed_word();
+      return t;
+    endfunction
+
+    function tile_txn dma(op_e op, int unsigned spm_a, int unsigned ext_a, int unsigned beats, string origin);
+      tile_txn t;
+      t = new(op, origin, $sformatf("beats=%0d", beats));
+      t.addr     = spm_a;
+      t.ext_addr = ext_a;
+      t.len      = beats;
+      return t;
+    endfunction
+
+    function tile_txn dma_rand(op_e op, string origin);
+      int unsigned n;
+      int unsigned s;
+      int unsigned e;
+      n = dma_len();
+      if (hot_pct != 0 && rng.pct(hot_pct) && n <= hot_words / LANES)
+        s = hot_base + rng.urange(0, hot_words / LANES - n) * LANES;
+      else
+        s = rng.urange(0, SPM_WORDS / LANES - n) * LANES;
+      e = rng.urange(0, EXT_WORDS / LANES - n) * LANES;
+      return dma(op, s, e, n, origin);
+    endfunction
+
+    // ---------------------------------------------------------------- generic
+    function tile_txn random_of(op_e op, string origin);
+      tile_txn t;
+      case (unit_of(op))
+        U_ALU: begin
+          t = new(op, origin, "random");
+          t.sa = mixed_word();
+          t.sb = mixed_word();
+        end
+        U_VEC: begin
+          t = new(op, origin, "random");
+          for (int l = 0; l < LANES; l++) begin
+            t.va[l] = mixed_word();
+            t.vb[l] = mixed_word();
+          end
+          t.sa = mixed_word();
+        end
+        U_TNS: t = tns(op, rand_mc(), rand_mc(), origin);
+        default: begin
+          case (op)
+            OP_SLD  : t = sld(saddr(), origin);
+            OP_SST  : t = sst(saddr(), mixed_word(), origin);
+            OP_VLD  : t = vld(vaddr(), origin);
+            OP_VST  : t = vst(vaddr(), origin);
+            default : t = dma_rand(op, origin);
+          endcase
+          t.pattern = "random";
+        end
+      endcase
+      return t;
+    endfunction
+
+    function tile_txn mem_rand(int unsigned dma_pct, string origin);
+      op_e op;
+      if (rng.pct(dma_pct)) op = rng.pct(50) ? OP_DMARD : OP_DMAWR;
+      else op = ALL_OPS[rng.urange(24, 27)];
+      return random_of(op, origin);
+    endfunction
+
+    function tile_txn any_rand(int unsigned w_alu, int unsigned w_vec, int unsigned w_tns, int unsigned w_mem,
+                               int unsigned dma_pct, string origin);
+      int unsigned r;
+      r = rng.urange(0, w_alu + w_vec + w_tns + w_mem - 1);
+      if (r < w_alu)                 return random_of(rand_alu_op(), origin);
+      if (r < w_alu + w_vec)         return random_of(rand_vec_op(), origin);
+      if (r < w_alu + w_vec + w_tns) return random_of(rand_tns_op(), origin);
+      return mem_rand(dma_pct, origin);
+    endfunction
+  endclass : tile_stim
+
+  // ===========================================================================
+  //  tile_env : single-threaded cycle kernel. All DUT outputs are sampled at
+  //  the rising edge in a fixed order (completion, external port, issue,
+  //  flush) and all DUT inputs for the next cycle are driven with
+  //  non-blocking assignments, giving a race-free, simulator-independent
+  //  ordering. Tests synchronise on cyc_ev, triggered after each kernel step.
+  // ===========================================================================
+  class tile_env;
+    virtual tile_if  vif;
+    sf_rng           rng_stim;
+    sf_rng           rng_ctl;
+    sf_rng           rng_mem;
+    tile_ref_model   rm;
+    tile_coverage    cov;
+    tile_scoreboard  sb;
+    ext_mem_bfm      bfm;
+    tile_stim        stim;
+    event            cyc_ev;
+
+    // issue path
+    tile_txn         pend_q [$];
+    tile_txn         cur;
+    int unsigned     free_tags [$];
+    int unsigned     issue_gap_max;
+    int unsigned     gap_cnt;
+    tile_txn         last_acc;
+    // completion sink
+    int unsigned     cpl_bp_pct;
+    int unsigned     cpl_bp_len_max;
+    int unsigned     cpl_bp_cnt;
+    bit              cpl_hold_low;
+    // global control
+    int unsigned     stall_pct;
+    int unsigned     stall_len_max;
+    int unsigned     stall_cnt;
+    int unsigned     flush_pm;
+    int unsigned     flush_cd;
+    int unsigned     rst_cnt;
+    // kernel state
+    longint unsigned prog;
+    bit              in_reset;
+    int unsigned     reset_edges;
+    int unsigned     quiet_cnt;
+    bit              idle_err_latched;
+    int unsigned     present_age;
+    tile_txn         mem_hist [$];
+    // statistics
+    longint unsigned n_cycles;
+    longint unsigned n_accepted;
+    longint unsigned n_stall_cycles;
+    longint unsigned n_flush_cycles;
+    longint unsigned n_cpl_bp_cycles;
+    longint unsigned n_issue_bp_cycles;
+    longint unsigned n_resets;
+
+    function new(virtual tile_if v, bit [63:0] seed, bit pf);
+      this.vif  = v;
+      rng_stim  = new(seed);
+      rng_ctl   = new(seed ^ 64'hC0FF_EE00_5EED_0001);
+      rng_mem   = new(seed ^ 64'hBADD_CAFE_5EED_0002);
+      rm        = new();
+      cov       = new();
+      bfm       = new(rng_mem);
+      sb        = new(rm, cov, pf);
+      stim      = new(rng_stim);
+      cov.build_plan(pf);
+      init_tags();
+      init_ext_memory();
+      quiet();
+      rst_cnt   = 0;
+      prog      = 0;
+      in_reset  = 1'b0;
+      cur       = null;
+      last_acc  = null;
+    endfunction
+
+    function void init_tags();
+      free_tags.delete();
+      for (int i = 0; i < NUM_TAGS; i++) free_tags.push_back(i);
+    endfunction
+
+    // deterministic external memory image, mirrored into the reference model
+    function void init_ext_memory();
+      word_t w;
+      for (int i = 0; i < EXT_WORDS; i++) begin
+        w = word_t'(32'h9E37_79B9 * (i + 1)) ^ word_t'(i << 7);
+        bfm.mem[i] = w;
+        rm.ext[i]  = w;
+      end
+    endfunction
+
+    // ---------------------------------------------------------------- knobs
+    function void quiet();
+      cpl_bp_pct     = 0;
+      cpl_bp_len_max = 1;
+      cpl_hold_low   = 1'b0;
+      stall_pct      = 0;
+      stall_len_max  = 1;
+      flush_pm       = 0;
+      issue_gap_max  = 0;
+      stim.hot_pct   = 0;
+      bfm.configure(3, 3, 0, 1);
+    endfunction
+
+    function void stress(int unsigned cpl_bp, int unsigned cpl_len, int unsigned stall_p, int unsigned stall_len,
+                         int unsigned flush_per_mille, int unsigned gap,
+                         int unsigned ext_lmin, int unsigned ext_lmax, int unsigned ext_bp, int unsigned ext_bp_len);
+      cpl_bp_pct     = cpl_bp;
+      cpl_bp_len_max = cpl_len;
+      cpl_hold_low   = 1'b0;
+      stall_pct      = stall_p;
+      stall_len_max  = stall_len;
+      flush_pm       = flush_per_mille;
+      issue_gap_max  = gap;
+      bfm.configure(ext_lmin, ext_lmax, ext_bp, ext_bp_len);
+    endfunction
+
+    function bit is_quiet();
+      return (cpl_bp_pct == 0) && !cpl_hold_low && (stall_pct == 0) && (flush_pm == 0) &&
+             (bfm.bp_pct == 0) && (stall_cnt == 0) && (flush_cd == 0) && (cpl_bp_cnt == 0);
+    endfunction
+
+    function void force_stall(int unsigned cycles);
+      stall_cnt = cycles;
+    endfunction
+
+    function void request_flush();
+      flush_cd = 1;
+    endfunction
+
+    // ---------------------------------------------------------------- kernel
+    task automatic run();
+      forever begin
+        @(posedge vif.clk);
+        g_cycle = g_cycle + 1;
+        step();
+        ->cyc_ev;
+      end
+    endtask
+
+    task automatic step();
+      cpl_obs_t        c;
+      bit              s_stall;
+      bit              s_flush;
+      int              rel;
+      longint unsigned uid;
+
+      n_cycles++;
+      if (vif.rst_n !== 1'b1) begin
+        reset_cycle();
+        drive_reset_values();
+        return;
+      end
+      if (in_reset) begin
+        in_reset = 1'b0;
+        tb_info("ENV_RESET", "reset released");
+      end
+
+      s_stall = (vif.stall === 1'b1);
+      s_flush = (vif.flush === 1'b1);
+      if (!s_stall) prog++;
+
+      sb.ctx_busy      = vif.unit_busy;
+      sb.ctx_idle      = vif.idle;
+      sb.ctx_stall     = s_stall;
+      sb.ctx_cpl_ready = (vif.cpl_ready === 1'b1);
+      sb.ctx_ext_bp    = (vif.ext_req_valid === 1'b1) && (vif.ext_req_ready !== 1'b1);
+
+      // (1) completion port
+      if (vif.cpl_valid === 1'b1 && vif.cpl_ready === 1'b1) begin
+        c.tag    = vif.cpl_tag;
+        c.unit   = vif.cpl_unit;
+        c.killed = vif.cpl_killed;
+        c.scalar = vif.cpl_scalar;
+        c.vec    = vif.cpl_vec;
+        c.mat    = vif.cpl_mat;
+        rel = sb.complete(c);
+        if (rel >= 0) free_tags.push_back(rel);
+      end
+
+      // (2) external memory port: response retire, then request accept
+      if (vif.ext_rsp_valid === 1'b1 && vif.ext_rsp_ready === 1'b1) begin
+        uid = bfm.pop();
+        sb.ext_rsp(uid);
+      end
+      if (vif.ext_req_valid === 1'b1 && vif.ext_req_ready === 1'b1) begin
+        uid = sb.ext_req(vif.ext_req_we, vif.ext_req_addr, vif.ext_req_wdata);
+        bfm.accept(vif.ext_req_we === 1'b1, int'(vif.ext_req_addr), vif.ext_req_wdata, uid, g_cycle);
+      end
+
+      // (3) issue port
+      if (cur != null && vif.issue_valid === 1'b1 && vif.issue_ready === 1'b1) begin
+        accept_cur(s_stall, s_flush);
+        present_age = 0;
+      end else if (cur != null && vif.issue_valid === 1'b1) begin
+        issue_blocked(s_stall, s_flush);
+        if (!s_stall && !s_flush) present_age++;
+        if (present_age == ISSUE_STARVE_LIMIT) begin
+          tb_error("ENV_ISSUE_STARVED",
+                   $sformatf("%s presented for %0d unstalled cycles without acceptance (issue_ready stuck low; %0d op(s) outstanding)",
+                             cur.brief(), ISSUE_STARVE_LIMIT, sb.order_q.size()));
+          sb.dump_outstanding("issue starvation");
+        end
+      end else present_age = 0;
+
+      // (4) flush edge
+      if (s_flush) begin
+        n_flush_cycles++;
+        sb.flush(prog, (vif.cpl_valid === 1'b1) && (vif.cpl_ready !== 1'b1), vif.cpl_tag);
+      end
+
+      // (5) observation, scoreboard time base, idle consistency
+      observe(s_stall, s_flush);
+      sb.tick(vif.cpl_ready === 1'b1, s_stall);
+      idle_check();
+
+      // (6) drive next cycle
+      drive_next();
+    endtask
+
+    local function void accept_cur(bit s_stall, bit s_flush);
+      tile_txn t;
+      t = cur;
+      if (s_stall) tb_error("ENV_C1_STALL", $sformatf("%s accepted while stall_i asserted (C1)", t.brief()));
+      if (s_flush) tb_error("ENV_C1_FLUSH", $sformatf("%s accepted while flush_i asserted (C1)", t.brief()));
+      t.isolated      = is_quiet() && (t.stall_after_accept == 0) && (t.flush_after_accept == 0);
+      t.ext_lat_bound = bfm.lat_max;
+      rm.predict(t);
+      sb.register(t, prog, vif.unit_busy);
+      cov.s_issue(t);
+      cov.s_mix(sb.inflight_mask(), t.unit);
+      memc_cov();
+      if (t.unit == U_MEM) hazard_cov(t);
+      if (t.unit == U_TNS && last_acc != null && last_acc.unit == U_TNS && (t.issue_cyc - last_acc.issue_cyc) <= 2)
+        cov.hit("tns:back_to_back");
+      if (t.stall_after_accept != 0) stall_cnt = t.stall_after_accept;
+      if (t.flush_after_accept != 0) flush_cd  = t.flush_after_accept;
+      n_accepted++;
+      last_acc = t;
+      cur      = null;
+      gap_cnt  = (issue_gap_max != 0) ? rng_ctl.urange(0, issue_gap_max) : 0;
+    endfunction
+
+    local function void issue_blocked(bit s_stall, bit s_flush);
+      if (s_stall)      cov.s_ctl(CE_STALL_BLOCK, cur.unit, "ctl:stall_blocked_issue");
+      else if (s_flush) cov.s_ctl(CE_FLUSH_BLOCK, cur.unit, "ctl:flush_blocked_issue");
+      else begin
+        n_issue_bp_cycles++;
+        cov.s_ctl(CE_ISSUE_BP, cur.unit, {"ctl:issue_backpressure:", cur.unit.name()});
+      end
+    endfunction
+
+    local function void memc_cov();
+      logic [NUM_UNITS-1:0] m;
+      bit dma;
+      bit spm;
+      m   = sb.inflight_mask();
+      dma = sb.dma_inflight();
+      spm = sb.spm_inflight();
+      if (dma && m[U_TNS]) cov.hit("memc:DMA+TNS");
+      if (dma && m[U_VEC]) cov.hit("memc:DMA+VEC");
+      if (dma && m[U_ALU]) cov.hit("memc:DMA+ALU");
+      if (spm && m[U_TNS]) cov.hit("memc:SPM+TNS");
+    endfunction
+
+    // ---- memory hazard classification against the recent MEM issue window ----
+    local function bit spm_wr(tile_txn t);
+      return (t.op == OP_SST) || (t.op == OP_VST) || (t.op == OP_DMARD);
+    endfunction
+
+    local function bit spm_rd(tile_txn t);
+      return (t.op == OP_SLD) || (t.op == OP_VLD) || (t.op == OP_DMAWR);
+    endfunction
+
+    local function int unsigned spm_span(tile_txn t);
+      if (t.op == OP_SLD || t.op == OP_SST) return 1;
+      if (t.op == OP_VLD || t.op == OP_VST) return LANES;
+      return t.len * LANES;
+    endfunction
+
+    local function bit ovl(int unsigned a0, int unsigned n0, int unsigned a1, int unsigned n1);
+      return (a0 < a1 + n1) && (a1 < a0 + n0);
+    endfunction
+
+    local function void hazard_cov(tile_txn t);
+      tile_txn p;
+      bit      o;
+      foreach (mem_hist[i]) begin
+        p = mem_hist[i];
+        o = ovl(p.addr, spm_span(p), t.addr, spm_span(t));
+        if (o && spm_wr(p) && spm_rd(t)) begin
+          if      (p.op == OP_SST   && t.op == OP_SLD)   cov.s_haz(HZ_RAW_SS);
+          else if (p.op == OP_VST   && t.op == OP_SLD)   cov.s_haz(HZ_RAW_VS);
+          else if (p.op == OP_SST   && t.op == OP_VLD)   cov.s_haz(HZ_RAW_SV);
+          else if (p.op == OP_VST   && t.op == OP_VLD)   cov.s_haz(HZ_RAW_VV);
+          else if (p.op == OP_DMARD && t.op != OP_DMAWR) cov.s_haz(HZ_RAW_DMA_V);
+          else if (p.op != OP_DMARD && t.op == OP_DMAWR) cov.s_haz(HZ_RAW_V_DMA);
+        end
+        if (o && spm_wr(p) && spm_wr(t)) begin
+          if      (p.op == OP_SST && t.op == OP_VST) cov.s_haz(HZ_WAW_SV);
+          else if (p.op == OP_VST && t.op == OP_SST) cov.s_haz(HZ_WAW_VS);
+        end
+        if (o && spm_rd(p) && spm_wr(t)) begin
+          if      (p.op == OP_VLD && t.op == OP_SST) cov.s_haz(HZ_WAR_VS);
+          else if (p.op == OP_SLD && t.op == OP_VST) cov.s_haz(HZ_WAR_SV);
+        end
+        if (p.op == OP_DMAWR && t.op == OP_DMARD && ovl(p.ext_addr, p.len * LANES, t.ext_addr, t.len * LANES))
+          cov.s_haz(HZ_RAW_EXT);
+      end
+      mem_hist.push_back(t);
+      if (mem_hist.size() > HAZ_WINDOW) void'(mem_hist.pop_front());
+    endfunction
+
+    local function void observe(bit s_stall, bit s_flush);
+      logic [NUM_UNITS-1:0] m;
+      bit                   ext_bp;
+      m      = sb.inflight_mask();
+      ext_bp = (vif.ext_req_valid === 1'b1) && (vif.ext_req_ready !== 1'b1);
+      if (s_stall) begin
+        n_stall_cycles++;
+        for (int u = 0; u < NUM_UNITS; u++)
+          if (m[u]) cov.s_ctl(CE_STALL_BUSY, unit_e'(u), {"ctl:stall:", unit_name(unit_e'(u))});
+      end
+      if (vif.cpl_valid === 1'b1 && vif.cpl_ready !== 1'b1) begin
+        n_cpl_bp_cycles++;
+        cov.s_ctl(CE_CPL_BP, unit_e'(vif.cpl_unit), "ctl:cpl_backpressure");
+      end
+      if (ext_bp && bfm.bp_pct != 0) begin
+        if (sb.dma_inflight()) cov.hit("memc:extbp+DMA");
+        if (m[U_TNS])          cov.hit("memc:extbp+TNS");
+      end
+      if (s_stall || s_flush || (vif.cpl_ready !== 1'b1) || (ext_bp && bfm.bp_pct != 0)) sb.disturb();
+    endfunction
+
+    local function void idle_check();
+      if (sb.order_q.size() == 0 && cur == null && pend_q.size() == 0 && bfm.idle()) quiet_cnt++;
+      else begin
+        quiet_cnt        = 0;
+        idle_err_latched = 1'b0;
+      end
+      if (quiet_cnt == IDLE_SETTLE && !idle_err_latched) begin
+        if (vif.idle !== 1'b1 || vif.unit_busy !== '0 || vif.cpl_valid !== 1'b0 || vif.ext_req_valid !== 1'b0) begin
+          tb_error("ENV_IDLE_MISMATCH",
+                   $sformatf("tile not idle %0d cycles after every transaction retired: idle=%b unit_busy=%b cpl_valid=%b ext_req_valid=%b",
+                             IDLE_SETTLE, vif.idle, vif.unit_busy, vif.cpl_valid, vif.ext_req_valid));
+          idle_err_latched = 1'b1;
+        end
+      end
+    endfunction
+
+    local function void reset_cycle();
+      if (!in_reset) begin
+        in_reset    = 1'b1;
+        reset_edges = 0;
+        n_resets++;
+        if (sb.order_q.size() != 0) cov.s_ctl(CE_RESET, U_MEM, "rst:midrun_with_inflight");
+        sb.reset_discard();
+        bfm.reset();
+        rm.invalidate_spm();
+        // a reset-aborted DMA leaves the physical image authoritative
+        for (int i = 0; i < EXT_WORDS; i++) rm.ext[i] = bfm.mem[i];
+        cur = null;
+        present_age = 0;
+        init_tags();
+        stall_cnt  = 0;
+        flush_cd   = 0;
+        cpl_bp_cnt = 0;
+        gap_cnt    = 0;
+        quiet_cnt  = 0;
+        mem_hist.delete();
+        last_acc   = null;
+      end
+      reset_edges++;
+      if (reset_edges >= 2 && (vif.cpl_valid !== 1'b0 || vif.ext_req_valid !== 1'b0))
+        tb_error("C9_RESET_IDLE",
+                 $sformatf("valid output not deasserted under reset: cpl_valid=%b ext_req_valid=%b",
+                           vif.cpl_valid, vif.ext_req_valid));
+    endfunction
+
+    // ---------------------------------------------------------------- drivers
+    local task automatic drive_rst();
+      if (rst_cnt != 0) begin
+        rst_cnt--;
+        vif.rst_n <= 1'b0;
+      end else
+        vif.rst_n <= 1'b1;
+    endtask
+
+    local task automatic drive_issue_idle();
+      vif.issue_valid    <= 1'b0;
+      vif.issue_op       <= '0;
+      vif.issue_tag      <= '0;
+      vif.issue_sa       <= '0;
+      vif.issue_sb       <= '0;
+      vif.issue_va       <= '0;
+      vif.issue_vb       <= '0;
+      vif.issue_ma       <= '0;
+      vif.issue_mb       <= '0;
+      vif.issue_mc       <= '0;
+      vif.issue_addr     <= '0;
+      vif.issue_ext_addr <= '0;
+      vif.issue_len      <= '0;
+    endtask
+
+    local task automatic drive_reset_values();
+      drive_issue_idle();
+      vif.stall         <= 1'b0;
+      vif.flush         <= 1'b0;
+      vif.cpl_ready     <= 1'b1;
+      vif.ext_req_ready <= 1'b0;
+      vif.ext_rsp_valid <= 1'b0;
+      vif.ext_rsp_we    <= 1'b0;
+      vif.ext_rsp_rdata <= '0;
+      drive_rst();
+    endtask
+
+    local task automatic drive_next();
+      bit nstall;
+      bit nflush;
+      bit nready;
+      // global control (flush has priority; a pending stall resumes afterwards)
+      nstall = 1'b0;
+      nflush = 1'b0;
+      if (flush_cd != 0) begin
+        flush_cd--;
+        if (flush_cd == 0) nflush = 1'b1;
+      end
+      if (!nflush && flush_pm != 0 && stall_cnt == 0 && rng_ctl.urange(0, 999) < flush_pm) nflush = 1'b1;
+      if (!nflush) begin
+        if (stall_cnt != 0) begin
+          nstall = 1'b1;
+          stall_cnt--;
+        end else if (stall_pct != 0 && rng_ctl.pct(stall_pct)) begin
+          nstall    = 1'b1;
+          stall_cnt = rng_ctl.urange(1, stall_len_max) - 1;
+        end
+      end
+      // completion sink
+      if (cpl_hold_low) nready = 1'b0;
+      else if (cpl_bp_cnt != 0) begin
+        nready = 1'b0;
+        cpl_bp_cnt--;
+      end else if (cpl_bp_pct != 0 && rng_ctl.pct(cpl_bp_pct)) begin
+        nready     = 1'b0;
+        cpl_bp_cnt = rng_ctl.urange(1, cpl_bp_len_max) - 1;
+      end else nready = 1'b1;
+      vif.stall     <= nstall;
+      vif.flush     <= nflush;
+      vif.cpl_ready <= nready;
+      // external memory BFM
+      vif.ext_req_ready <= bfm.next_req_ready();
+      if (bfm.rsp_due(g_cycle)) begin
+        vif.ext_rsp_valid <= 1'b1;
+        vif.ext_rsp_we    <= bfm.q_we[0];
+        vif.ext_rsp_rdata <= bfm.q_data[0];
+      end else begin
+        vif.ext_rsp_valid <= 1'b0;
+        vif.ext_rsp_we    <= 1'b0;
+        vif.ext_rsp_rdata <= '0;
+      end
+      // issue port
+      if (gap_cnt != 0) gap_cnt--;
+      else if (cur == null && pend_q.size() != 0 && free_tags.size() != 0) begin
+        cur     = pend_q.pop_front();
+        cur.tag = tag_t'(free_tags.pop_front());
+      end
+      if (cur != null) begin
+        vif.issue_valid    <= 1'b1;
+        vif.issue_op       <= cur.op;
+        vif.issue_tag      <= cur.tag;
+        vif.issue_sa       <= cur.sa;
+        vif.issue_sb       <= cur.sb;
+        vif.issue_va       <= cur.pack_va();
+        vif.issue_vb       <= cur.pack_vb();
+        vif.issue_ma       <= cur.pack_m(0);
+        vif.issue_mb       <= cur.pack_m(1);
+        vif.issue_mc       <= cur.pack_m(2);
+        vif.issue_addr     <= SPM_AW'(cur.addr);
+        vif.issue_ext_addr <= EXT_AW'(cur.ext_addr);
+        vif.issue_len      <= LEN_W'(cur.len);
+      end else
+        drive_issue_idle();
+      drive_rst();
+    endtask
+
+    // ---------------------------------------------------------------- test API
+    task automatic wait_cycles(int unsigned n);
+      repeat (n) @(cyc_ev);
+    endtask
+
+    function void push(tile_txn t);
+      pend_q.push_back(t);
+    endfunction
+
+    task automatic issue(tile_txn t);
+      int unsigned n;
+      push(t);
+      n = 0;
+      while (!t.accepted && n < DRAIN_LIMIT) begin
+        @(cyc_ev);
+        n++;
+      end
+      if (!t.accepted) tb_error("ENV_ISSUE_TIMEOUT", $sformatf("%s never accepted by the tile", t.brief()));
+    endtask
+
+    task automatic issue_and_retire(tile_txn t);
+      int unsigned n;
+      issue(t);
+      n = 0;
+      while (!t.retired && !t.timed_out && n < DRAIN_LIMIT) begin
+        @(cyc_ev);
+        n++;
+      end
+    endtask
+
+    task automatic wait_accepted_all();
+      int unsigned n;
+      n = 0;
+      while ((pend_q.size() != 0 || cur != null) && n < DRAIN_LIMIT) begin
+        @(cyc_ev);
+        n++;
+      end
+    endtask
+
+    task automatic drain(string ctx);
+      int unsigned n;
+      n = 0;
+      while (!(pend_q.size() == 0 && cur == null && sb.order_q.size() == 0 && bfm.idle())) begin
+        @(cyc_ev);
+        n++;
+        if (n > DRAIN_LIMIT) begin
+          tb_error("ENV_DRAIN_TIMEOUT", $sformatf("%s: environment failed to drain within %0d cycles (pending=%0d presented=%0b outstanding=%0d)",
+                                                  ctx, DRAIN_LIMIT, pend_q.size(), cur != null, sb.order_q.size()));
+          sb.dump_outstanding(ctx);
+          break;
+        end
+      end
+      wait_cycles(IDLE_SETTLE + 2);
+      sb.check_drained(ctx);
+    endtask
+
+    task automatic reset_tile(int unsigned cycles);
+      rst_cnt = cycles;
+      while (vif.rst_n !== 1'b0) @(cyc_ev);
+      while (vif.rst_n !== 1'b1) @(cyc_ev);
+      wait_cycles(2);
+    endtask
+
+    function void report();
+      $display("  ------------------------------------------------------------------");
+      $display("  ENVIRONMENT");
+      $display("    cycles                  : %0d", n_cycles);
+      $display("    transactions accepted   : %0d", n_accepted);
+      $display("    stall cycles            : %0d", n_stall_cycles);
+      $display("    flush cycles            : %0d", n_flush_cycles);
+      $display("    completion bp cycles    : %0d", n_cpl_bp_cycles);
+      $display("    issue bp cycles         : %0d", n_issue_bp_cycles);
+      $display("    resets                  : %0d", n_resets);
+      $display("    ext reads / writes      : %0d / %0d", bfm.n_rd, bfm.n_wr);
+      $display("    ext bp cycles           : %0d", bfm.n_bp_cycles);
+      $display("    ext max outstanding     : %0d", bfm.max_outstanding_seen);
+    endfunction
+  endclass : tile_env
+
+  // ===========================================================================
+  //  tile_test_lib : directed, exhaustive, randomized and adversarial tests
+  // ===========================================================================
+  class tile_test_lib;
+    tile_env         env;
+    tile_stim        st;
+    sf_rng           rng;
+    string           only;
+    int unsigned     stress_ops;
+    string           summary [$];
+    int unsigned     err_at_start;
+    longint unsigned cyc_at_start;
+    int unsigned     selftest_bad;
+
+    function new(tile_env e, string sel_test, int unsigned n_stress);
+      this.env        = e;
+      this.st         = e.stim;
+      this.rng        = e.rng_stim;
+      this.only       = sel_test;
+      this.stress_ops = n_stress;
+    endfunction
+
+    function bit sel(string name);
+      return (only == "") || (only == name);
+    endfunction
+
+    function void begin_test(string name);
+      g_phase      = name;
+      err_at_start = g_errors;
+      cyc_at_start = g_cycle;
+      $display("\n==========================================================================");
+      $display("  TEST %s   (cycle %0d)", name, g_cycle);
+      $display("==========================================================================");
+    endfunction
+
+    task automatic end_test(string name);
+      env.drain(name);
+      summary.push_back($sformatf("    %s  %s  errors=%0d  cycles=%0d",
+                                  (g_errors == err_at_start) ? "PASS" : "FAIL", name,
+                                  g_errors - err_at_start, g_cycle - cyc_at_start));
+      env.quiet();
+      st.hot_pct = 0;
+    endtask
+
+    task automatic run_all();
+      t00_reset_and_preload();
+      if (sel("t01_scalar_directed"))           t01_scalar_directed();
+      if (sel("t02_latency_envelope"))          t02_latency_envelope();
+      if (sel("t03_vector_directed"))           t03_vector_directed();
+      if (sel("t04_tensor_directed"))           t04_tensor_directed();
+      if (sel("t05_functional_exhaustion"))     t05_functional_exhaustion();
+      if (sel("t06_memory_coherence"))          t06_memory_coherence();
+      if (sel("t07_stall_propagation"))         t07_stall_propagation();
+      if (sel("t08_completion_backpressure"))   t08_completion_backpressure();
+      if (sel("t09_ext_memory_backpressure"))   t09_ext_memory_backpressure();
+      if (sel("t10_mixed_mode_stress"))         t10_mixed_mode_stress();
+      if (sel("t11_pipeline_saturation"))       t11_pipeline_saturation();
+      if (sel("t12_back_to_back_tensor"))       t12_back_to_back_tensor();
+      if (sel("t13_flush_injection"))           t13_flush_injection();
+      if (sel("t14_memory_compute_contention")) t14_memory_compute_contention();
+      if (sel("t15_midrun_reset"))              t15_midrun_reset();
+      t16_final_readback();
+    endtask
+
+    // -------------------------------------------------------------------------
+    //  golden model self-test against closed-form results
+    // -------------------------------------------------------------------------
+    function void chk(string what, word_t got, word_t exp);
+      if (got !== exp) begin
+        selftest_bad++;
+        tb_error("REF_SELFTEST", $sformatf("%s: model=%s closed-form=%s", what, fmtw(got), fmtw(exp)));
+      end
+    endfunction
+
+    function void ref_selftest();
+      tile_ref_model m;
+      tile_txn       t;
+      m            = new();
+      selftest_bad = 0;
+      chk("SADD MAX+1",       tile_ref_model::alu(OP_SADD,  WORD_MAX, 1),  WORD_MIN);
+      chk("SSUB MIN-1",       tile_ref_model::alu(OP_SSUB,  WORD_MIN, 1),  WORD_MAX);
+      chk("SMUL MIN*-1",      tile_ref_model::alu(OP_SMUL,  WORD_MIN, -1), WORD_MIN);
+      chk("SMUL 2^16*2^16",   tile_ref_model::alu(OP_SMUL,  word_t'(32'h0001_0000), word_t'(32'h0001_0000)), '0);
+      chk("SMUL -3*7",        tile_ref_model::alu(OP_SMUL,  -3, 7), -21);
+      chk("SSRA MIN>>>31",    tile_ref_model::alu(OP_SSRA,  WORD_MIN, 31), -1);
+      chk("SSRL MIN>>31",     tile_ref_model::alu(OP_SSRL,  WORD_MIN, 31), 1);
+      chk("SSLL 1<<32 (mask)",tile_ref_model::alu(OP_SSLL,  1, 32), 1);
+      chk("SSLL 1<<31",       tile_ref_model::alu(OP_SSLL,  1, 31), WORD_MIN);
+      chk("SSLT -1<1",        tile_ref_model::alu(OP_SSLT,  -1, 1), 1);
+      chk("SSLTU -1<1",       tile_ref_model::alu(OP_SSLTU, -1, 1), 0);
+      chk("SMIN",             tile_ref_model::alu(OP_SMIN,  WORD_MIN, WORD_MAX), WORD_MIN);
+      chk("SMAX",             tile_ref_model::alu(OP_SMAX,  WORD_MIN, WORD_MAX), WORD_MAX);
+      chk("SXOR",             tile_ref_model::alu(OP_SXOR,  word_t'(32'hFF00_FF00), word_t'(32'h0FF0_0FF0)),
+                              word_t'(32'hF0F0_F0F0));
+      // reductions
+      t = new(OP_VREDSUM, "selftest");
+      for (int l = 0; l < LANES; l++) t.va[l] = WORD_MAX;
+      m.predict(t);
+      chk("VREDSUM LANES*MAX", t.exp_s, word_t'(-LANES));
+      t = new(OP_VDOT, "selftest");
+      for (int l = 0; l < LANES; l++) begin t.va[l] = l + 1; t.vb[l] = 1; end
+      m.predict(t);
+      chk("VDOT ramp.ones", t.exp_s, word_t'(LANES * (LANES + 1) / 2));
+      t = new(OP_VREDMAX, "selftest");
+      for (int l = 0; l < LANES; l++) t.va[l] = -100 - l;
+      t.va[LANES-1] = -3;
+      m.predict(t);
+      chk("VREDMAX negatives", t.exp_s, -3);
+      t = new(OP_VREDMIN, "selftest");
+      for (int l = 0; l < LANES; l++) t.va[l] = 100 + l;
+      t.va[3] = WORD_MIN;
+      m.predict(t);
+      chk("VREDMIN with MIN", t.exp_s, WORD_MIN);
+      // tensor: identity, diagonal scaling, known block, transpose, accumulate
+      t = st.tns(OP_TMATMUL, MC_IDENT, MC_DENSE, "selftest");
+      m.predict(t);
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) chk($sformatf("I*B[%0d][%0d]", i, j), t.exp_m[i][j], t.mb[i][j]);
+      t = st.tns(OP_TMATMUL, MC_DENSE, MC_DIAG, "selftest");
+      m.predict(t);
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++)
+          chk($sformatf("A*D[%0d][%0d]", i, j), t.exp_m[i][j],
+              tile_ref_model::alu(OP_SMUL, t.ma[i][j], t.mb[j][j]));
+      t = new(OP_TMATMUL, "selftest");
+      t.ma[0][0] = 1; t.ma[0][1] = 2; t.ma[1][0] = 3; t.ma[1][1] = 4;
+      t.mb[0][0] = 5; t.mb[0][1] = 6; t.mb[1][0] = 7; t.mb[1][1] = 8;
+      m.predict(t);
+      chk("known C00", t.exp_m[0][0], 19);
+      chk("known C01", t.exp_m[0][1], 22);
+      chk("known C10", t.exp_m[1][0], 43);
+      chk("known C11", t.exp_m[1][1], 50);
+      chk("known C22", t.exp_m[2][2], 0);
+      t = st.tns(OP_TMATMULT, MC_IDENT, MC_DENSE, "selftest");
+      m.predict(t);
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) chk($sformatf("I*B^T[%0d][%0d]", i, j), t.exp_m[i][j], t.mb[j][i]);
+      t = st.tns(OP_TMATMAC, MC_ZERO, MC_DENSE, "selftest");
+      m.predict(t);
+      for (int i = 0; i < TDIM; i++)
+        for (int j = 0; j < TDIM; j++) chk($sformatf("0*B+C[%0d][%0d]", i, j), t.exp_m[i][j], t.mc[i][j]);
+      if (selftest_bad == 0) tb_info("REF_SELFTEST", "golden model agrees with all closed-form results");
+    endfunction
+
+    task automatic preload_spm(string origin);
+      for (int v = 0; v < SPM_WORDS / LANES; v++) env.push(st.vst(v * LANES, {origin, "/preload"}));
+      env.drain({origin, "/preload"});
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t00_reset_and_preload();
+      begin_test("t00_reset_and_preload");
+      ref_selftest();
+      env.quiet();
+      while (env.vif.rst_n !== 1'b1) @(env.cyc_ev);
+      env.wait_cycles(RESET_IDLE_MAX);
+      preload_spm("t00");
+      for (int i = 0; i < 16; i++) env.push(st.vld(st.vaddr(), "t00/readback"));
+      for (int i = 0; i < 16; i++) env.push(st.sld(st.saddr(), "t00/readback"));
+      end_test("t00_reset_and_preload");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t01_scalar_directed();
+      word_t pa [$];
+      word_t pb [$];
+      begin_test("t01_scalar_directed");
+      pa = '{ 0,  1, WORD_MAX, WORD_MIN, WORD_MIN, -1, word_t'(32'h5555_5555), 12345, -7,
+              WORD_MAX, WORD_MIN, WORD_MAX, word_t'(32'h8000_0001), word_t'(32'h8000_0001),
+              word_t'(32'h8000_0001), word_t'(32'h8000_0001), word_t'(32'h8000_0001),
+              word_t'(32'h1234_5678), -1, 46341, word_t'(32'h0001_0000), 2 };
+      pb = '{ 0, -1, 1, -1, 1, -1, word_t'(32'hAAAA_AAAA), -678, 3,
+              WORD_MAX, WORD_MIN, WORD_MIN, 0, 1, 31, 32, 33, 4, 1, 46341, word_t'(32'h0001_0000), -1 };
+      for (int o = 0; o < NUM_OPS; o++) begin
+        if (unit_of(ALL_OPS[o]) != U_ALU) continue;
+        for (int p = 0; p < pa.size(); p++)
+          env.push(st.alu(ALL_OPS[o], pa[p], pb[p], "t01/corner", $sformatf("pair%0d", p)));
+      end
+      end_test("t01_scalar_directed");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t02_latency_envelope();
+      tile_txn t;
+      begin_test("t02_latency_envelope");
+      env.quiet();
+      foreach (ALL_OPS[i]) begin
+        t = st.random_of(ALL_OPS[i], "t02/isolated");
+        env.issue_and_retire(t);
+        env.wait_cycles(2);
+        tb_info("LATENCY", $sformatf("%s isolated latency %0d cycles (envelope %0d..%0d)%s",
+                                     ALL_OPS[i].name(), t.cpl_cyc - t.issue_cyc, lat_floor(t.op),
+                                     env.sb.lat_ceiling(t), is_dma(t.op) ? $sformatf(" beats=%0d", t.len) : ""));
+      end
+      end_test("t02_latency_envelope");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t03_vector_directed();
+      tile_txn t;
+      op_e     lw [3];
+      op_e     ro [4];
+      string   rp [6];
+      word_t   bc [7];
+      begin_test("t03_vector_directed");
+      lw = '{OP_VADD, OP_VSUB, OP_VMUL};
+      ro = '{OP_VREDSUM, OP_VREDMAX, OP_VREDMIN, OP_VDOT};
+      rp = '{"zero", "all_pos", "all_neg", "mixed", "extreme", "wrap"};
+      bc = '{0, 1, -1, WORD_MIN, WORD_MAX, word_t'(32'h1234_5678), -99};
+      foreach (lw[o]) begin
+        env.push(st.vec(lw[o], "t03/lanewise", "zero"));
+        t = st.vec(lw[o], "t03/lanewise", "ramp");
+        for (int l = 0; l < LANES; l++) begin t.va[l] = l; t.vb[l] = 3 * l - 7; end
+        env.push(t);
+        t = st.vec(lw[o], "t03/lanewise", "lane_wrap");
+        for (int l = 0; l < LANES; l++) begin
+          t.va[l] = (lw[o] == OP_VSUB) ? WORD_MIN : WORD_MAX;
+          t.vb[l] = (lw[o] == OP_VMUL) ? word_t'(l + 2) : word_t'(l + 1);
+        end
+        env.push(t);
+        t = st.vec(lw[o], "t03/lanewise", "negative");
+        for (int l = 0; l < LANES; l++) begin t.va[l] = -(l + 1) * 1000; t.vb[l] = (l - 4) * 77; end
+        env.push(t);
+        t = st.vec(lw[o], "t03/lanewise", "alternating_extremes");
+        for (int l = 0; l < LANES; l++) begin
+          t.va[l] = (l % 2 != 0) ? WORD_MIN : WORD_MAX;
+          t.vb[l] = (l % 2 != 0) ? word_t'(-1) : word_t'(1);
+        end
+        env.push(t);
+        t = st.vec(lw[o], "t03/lanewise", "neutral_element");
+        for (int l = 0; l < LANES; l++) begin
+          t.va[l] = st.mixed_word();
+          t.vb[l] = (lw[o] == OP_VMUL) ? word_t'(1) : word_t'(0);
+        end
+        env.push(t);
+        t = st.vec(lw[o], "t03/lanewise", "self_operand");
+        for (int l = 0; l < LANES; l++) begin t.va[l] = st.mixed_word(); t.vb[l] = t.va[l]; end
+        env.push(t);
+      end
+      foreach (bc[i]) begin
+        t = st.vec(OP_VBCAST, "t03/broadcast", $sformatf("scalar%0d", i));
+        t.sa = bc[i];
+        for (int l = 0; l < LANES; l++) begin t.va[l] = rng.word(); t.vb[l] = rng.word(); end
+        env.push(t);
+      end
+      foreach (ro[o]) foreach (rp[p]) env.push(st.red_pattern(ro[o], rp[p], "t03/reduce"));
+      for (int pos = 0; pos < LANES; pos++) begin
+        t = st.vec(OP_VREDMAX, "t03/reduce", $sformatf("max_at_lane%0d", pos));
+        for (int l = 0; l < LANES; l++) t.va[l] = -1000 + l;
+        t.va[pos] = 5000;
+        env.push(t);
+        t = st.vec(OP_VREDMIN, "t03/reduce", $sformatf("min_at_lane%0d", pos));
+        for (int l = 0; l < LANES; l++) t.va[l] = 1000 - l;
+        t.va[pos] = -5000;
+        env.push(t);
+        t = st.vec(OP_VREDSUM, "t03/reduce", $sformatf("single_at_lane%0d", pos));
+        t.va[pos] = 777;
+        env.push(t);
+      end
+      t = st.vec(OP_VDOT, "t03/dot", "orthogonal");
+      for (int l = 0; l < LANES; l++) begin t.va[l] = (l % 2 == 0) ? word_t'(1) : word_t'(0); t.vb[l] = (l % 2 == 1) ? word_t'(1) : word_t'(0); end
+      env.push(t);
+      t = st.vec(OP_VDOT, "t03/dot", "ones");
+      for (int l = 0; l < LANES; l++) begin t.va[l] = 1; t.vb[l] = 1; end
+      env.push(t);
+      t = st.vec(OP_VDOT, "t03/dot", "signed");
+      for (int l = 0; l < LANES; l++) begin t.va[l] = -1; t.vb[l] = l + 1; end
+      env.push(t);
+      t = st.vec(OP_VDOT, "t03/dot", "min_squared");
+      for (int l = 0; l < LANES; l++) begin t.va[l] = WORD_MIN; t.vb[l] = WORD_MIN; end
+      env.push(t);
+      end_test("t03_vector_directed");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t04_tensor_directed();
+      tile_txn t;
+      begin_test("t04_tensor_directed");
+      env.push(st.tns(OP_TMATMUL,  MC_IDENT, MC_DENSE, "t04/identity_left"));
+      env.push(st.tns(OP_TMATMUL,  MC_DENSE, MC_IDENT, "t04/identity_right"));
+      env.push(st.tns(OP_TMATMUL,  MC_IDENT, MC_IDENT, "t04/identity_square"));
+      env.push(st.tns(OP_TMATMUL,  MC_ZERO,  MC_DENSE, "t04/zero_left"));
+      env.push(st.tns(OP_TMATMUL,  MC_DENSE, MC_ZERO,  "t04/zero_right"));
+      env.push(st.tns(OP_TMATMUL,  MC_DIAG,  MC_DENSE, "t04/diag_row_scale"));
+      env.push(st.tns(OP_TMATMUL,  MC_DENSE, MC_DIAG,  "t04/diag_col_scale"));
+      env.push(st.tns(OP_TMATMUL,  MC_DIAG,  MC_DIAG,  "t04/diag_diag"));
+      env.push(st.tns(OP_TMATMUL,  MC_NEG,   MC_NEG,   "t04/neg_neg"));
+      env.push(st.tns(OP_TMATMUL,  MC_NEG,   MC_DENSE, "t04/neg_pos"));
+      env.push(st.tns(OP_TMATMUL,  MC_LARGE, MC_LARGE, "t04/wrap"));
+      env.push(st.tns(OP_TMATMUL,  MC_LARGE, MC_LARGE, "t04/wrap"));
+      env.push(st.tns(OP_TMATMAC,  MC_IDENT, MC_DENSE, "t04/mac_identity"));
+      env.push(st.tns(OP_TMATMAC,  MC_ZERO,  MC_ZERO,  "t04/mac_passthrough"));
+      env.push(st.tns(OP_TMATMAC,  MC_DENSE, MC_DENSE, "t04/mac_dense"));
+      env.push(st.tns(OP_TMATMAC,  MC_DIAG,  MC_NEG,   "t04/mac_diag"));
+      env.push(st.tns(OP_TMATMAC,  MC_LARGE, MC_LARGE, "t04/mac_wrap"));
+      env.push(st.tns(OP_TMATMULT, MC_DENSE, MC_IDENT, "t04/mult_identity"));
+      env.push(st.tns(OP_TMATMULT, MC_IDENT, MC_DENSE, "t04/mult_transpose"));
+      env.push(st.tns(OP_TMATMULT, MC_DIAG,  MC_DENSE, "t04/mult_diag"));
+      env.push(st.tns(OP_TMATMULT, MC_NEG,   MC_DENSE, "t04/mult_neg"));
+      env.push(st.tns(OP_TMATMULT, MC_LARGE, MC_LARGE, "t04/mult_wrap"));
+      t = new(OP_TMATMUL, "t04/known_block", "known");
+      t.ma[0][0] = 1; t.ma[0][1] = 2; t.ma[1][0] = 3; t.ma[1][1] = 4;
+      t.mb[0][0] = 5; t.mb[0][1] = 6; t.mb[1][0] = 7; t.mb[1][1] = 8;
+      env.push(t);
+      t = new(OP_TMATMUL, "t04/extreme_corner", "known");
+      t.ma[0][0] = WORD_MIN; t.mb[0][0] = -1;
+      t.ma[3][3] = WORD_MAX; t.mb[3][3] = WORD_MAX;
+      env.push(t);
+      end_test("t04_tensor_directed");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t05_functional_exhaustion();
+      op_e   lw [3];
+      op_e   ro [4];
+      op_e   to [3];
+      string rp [6];
+      begin_test("t05_functional_exhaustion");
+      lw = '{OP_VADD, OP_VSUB, OP_VMUL};
+      ro = '{OP_VREDSUM, OP_VREDMAX, OP_VREDMIN, OP_VDOT};
+      to = '{OP_TMATMUL, OP_TMATMAC, OP_TMATMULT};
+      rp = '{"zero", "all_pos", "all_neg", "mixed", "extreme", "wrap"};
+      env.issue_gap_max = 1;
+      for (int o = 0; o < NUM_OPS; o++) begin
+        if (unit_of(ALL_OPS[o]) != U_ALU) continue;
+        for (int a = 0; a < NUM_OC; a++)
+          for (int b = 0; b < NUM_OC; b++)
+            env.push(st.alu(ALL_OPS[o], rng.operand(oc_e'(a)), rng.operand(oc_e'(b)), "t05/alu_classes",
+                            $sformatf("%s/%s", oc_name(oc_e'(a)), oc_name(oc_e'(b)))));
+      end
+      foreach (lw[o])
+        for (int a = 0; a < NUM_OC; a++)
+          for (int b = 0; b < NUM_OC; b++)
+            env.push(st.vec_cls(lw[o], oc_e'(a), oc_e'(b), "t05/vec_classes"));
+      for (int c = 0; c < NUM_OC; c++) begin
+        env.push(st.vec_cls(OP_VBCAST, oc_e'(c), oc_e'(c), "t05/bcast_classes"));
+        env.push(st.vec_cls(OP_VBCAST, oc_e'(c), oc_e'(c), "t05/bcast_classes"));
+      end
+      foreach (ro[o]) begin
+        foreach (rp[p]) repeat (3) env.push(st.red_pattern(ro[o], rp[p], "t05/reduce_patterns"));
+        repeat (16) env.push(st.random_of(ro[o], "t05/reduce_random"));
+      end
+      foreach (to[o]) begin
+        for (int a = 0; a < NUM_MC_COV; a++)
+          for (int b = 0; b < NUM_MC_COV; b++)
+            env.push(st.tns(to[o], mc_e'(a), mc_e'(b), "t05/tensor_classes"));
+        repeat (2) env.push(st.tns(to[o], MC_LARGE, MC_LARGE, "t05/tensor_wrap"));
+      end
+      for (int o = 0; o < NUM_OPS; o++)
+        if (unit_of(ALL_OPS[o]) == U_MEM) repeat (8) env.push(st.random_of(ALL_OPS[o], "t05/memory"));
+      end_test("t05_functional_exhaustion");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t06_memory_coherence();
+      tile_txn     t;
+      int unsigned a;
+      int unsigned b;
+      int unsigned s0;
+      int unsigned s1;
+      int unsigned e;
+      int unsigned lens [3];
+      begin_test("t06_memory_coherence");
+      lens = '{1, 7, DMA_MAX_BEATS};
+      // scalar RAW and WAW
+      for (int i = 0; i < 16; i++) begin
+        a = st.saddr();
+        env.push(st.sst(a, rng.word(), "t06/raw_ss"));
+        env.push(st.sld(a, "t06/raw_ss"));
+      end
+      for (int i = 0; i < 8; i++) begin
+        a = st.saddr();
+        env.push(st.sst(a, rng.word(), "t06/waw_ss"));
+        env.push(st.sst(a, rng.word(), "t06/waw_ss"));
+        env.push(st.sld(a, "t06/waw_ss"));
+      end
+      // vector -> scalar and scalar -> vector coherence
+      for (int i = 0; i < 4; i++) begin
+        b = st.vaddr();
+        env.push(st.vst(b, "t06/raw_vs"));
+        for (int l = 0; l < LANES; l++) env.push(st.sld(b + l, "t06/raw_vs"));
+      end
+      for (int i = 0; i < 4; i++) begin
+        b = st.vaddr();
+        for (int l = 0; l < LANES; l++) env.push(st.sst(b + l, rng.word(), "t06/raw_sv"));
+        env.push(st.vld(b, "t06/raw_sv"));
+      end
+      for (int i = 0; i < 8; i++) begin
+        b = st.vaddr();
+        env.push(st.vst(b, "t06/raw_vv"));
+        env.push(st.vld(b, "t06/raw_vv"));
+      end
+      // mixed-width WAW / WAR
+      for (int i = 0; i < 4; i++) begin
+        b = st.vaddr();
+        env.push(st.sst(b + 3, rng.word(), "t06/waw_sv"));
+        env.push(st.vst(b, "t06/waw_sv"));
+        env.push(st.vld(b, "t06/waw_sv"));
+        b = st.vaddr();
+        env.push(st.vst(b, "t06/waw_vs"));
+        env.push(st.sst(b + 5, rng.word(), "t06/waw_vs"));
+        env.push(st.vld(b, "t06/waw_vs"));
+        b = st.vaddr();
+        env.push(st.vld(b, "t06/war_vs"));
+        env.push(st.sst(b + 2, rng.word(), "t06/war_vs"));
+        env.push(st.vld(b, "t06/war_vs"));
+        b = st.vaddr();
+        env.push(st.sld(b + 6, "t06/war_sv"));
+        env.push(st.vst(b, "t06/war_sv"));
+        env.push(st.sld(b + 6, "t06/war_sv"));
+      end
+      // per-lane sign sweep through the scratchpad
+      for (int r = 0; r < 3; r++) begin
+        b = st.vaddr();
+        t = st.vst(b, "t06/lane_sign_sweep");
+        for (int l = 0; l < LANES; l++)
+          case ((l + r) % 3)
+            0      : t.va[l] = '0;
+            1      : t.va[l] = rng.srange(1, 1000000);
+            default: t.va[l] = rng.srange(-1000000, -1);
+          endcase
+        env.push(t);
+        env.push(st.vld(b, "t06/lane_sign_sweep"));
+      end
+      // DMA read then immediate consumption (RAW across the DMA engine)
+      foreach (lens[k]) begin
+        s0 = rng.urange(0, SPM_WORDS / LANES - lens[k]) * LANES;
+        e  = rng.urange(0, EXT_WORDS / LANES - lens[k]) * LANES;
+        env.push(st.dma(OP_DMARD, s0, e, lens[k], "t06/dma_rd_raw"));
+        for (int j = 0; j < int'(lens[k]); j++) env.push(st.vld(s0 + j * LANES, "t06/dma_rd_raw"));
+      end
+      // SPM -> EXT -> SPM round trip (RAW into DMA write, RAW through external memory)
+      foreach (lens[k]) begin
+        s0 = 0;
+        s1 = SPM_WORDS / 2;
+        e  = rng.urange(0, EXT_WORDS / LANES - lens[k]) * LANES;
+        for (int j = 0; j < int'(lens[k]); j++) env.push(st.vst(s0 + j * LANES, "t06/ext_round_trip"));
+        env.push(st.dma(OP_DMAWR, s0, e, lens[k], "t06/ext_round_trip"));
+        env.push(st.dma(OP_DMARD, s1, e, lens[k], "t06/ext_round_trip"));
+        for (int j = 0; j < int'(lens[k]); j++) env.push(st.vld(s1 + j * LANES, "t06/ext_round_trip"));
+      end
+      // external WAW: two DMA writes to one region, then read back
+      e = 64 * LANES;
+      env.push(st.vst(0, "t06/ext_waw"));
+      env.push(st.dma(OP_DMAWR, 0, e, 2, "t06/ext_waw"));
+      env.push(st.vst(LANES, "t06/ext_waw"));
+      env.push(st.dma(OP_DMAWR, LANES, e, 2, "t06/ext_waw"));
+      env.push(st.dma(OP_DMARD, 8 * LANES, e, 2, "t06/ext_waw"));
+      env.push(st.vld(8 * LANES, "t06/ext_waw"));
+      env.push(st.vld(9 * LANES, "t06/ext_waw"));
+      // address-space boundaries
+      env.push(st.vst(SPM_WORDS - LANES, "t06/boundary"));
+      env.push(st.vld(SPM_WORDS - LANES, "t06/boundary"));
+      env.push(st.sst(SPM_WORDS - 1, rng.word(), "t06/boundary"));
+      env.push(st.sld(SPM_WORDS - 1, "t06/boundary"));
+      env.push(st.sst(0, rng.word(), "t06/boundary"));
+      env.push(st.sld(0, "t06/boundary"));
+      env.push(st.dma(OP_DMARD, 0, EXT_WORDS - DMA_MAX_BEATS * LANES, DMA_MAX_BEATS, "t06/boundary"));
+      env.push(st.vld(0, "t06/boundary"));
+      env.push(st.dma(OP_DMAWR, SPM_WORDS - DMA_MAX_BEATS * LANES, EXT_WORDS - DMA_MAX_BEATS * LANES,
+                      DMA_MAX_BEATS, "t06/boundary"));
+      env.push(st.dma(OP_DMARD, LANES * 16, EXT_WORDS - DMA_MAX_BEATS * LANES, DMA_MAX_BEATS, "t06/boundary"));
+      env.push(st.vld(LANES * 31, "t06/boundary"));
+      end_test("t06_memory_coherence");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t07_stall_propagation();
+      tile_txn     t;
+      op_e         rep [10];
+      int unsigned sv  [4];
+      int          base;
+      begin_test("t07_stall_propagation");
+      rep = '{OP_SADD, OP_SMUL, OP_VADD, OP_VMUL, OP_VREDSUM, OP_VDOT, OP_TMATMUL, OP_SLD, OP_VLD, OP_SST};
+      sv  = '{1, 3, 7, 13};
+      env.quiet();
+      // (a) cycle-exact stall propagation: latency(stalled) == latency(isolated) + stall cycles
+      foreach (rep[r]) begin
+        t = st.random_of(rep[r], "t07/baseline");
+        env.issue_and_retire(t);
+        env.wait_cycles(2);
+        base = int'(t.cpl_cyc - t.issue_cyc);
+        foreach (sv[s]) begin
+          t = st.random_of(rep[r], $sformatf("t07/exact_stall%0d", sv[s]));
+          t.stall_after_accept = sv[s];
+          // a completion launched at the issue edge itself (latency 1) precedes the
+          // first stalled edge and is unaffected; any later launch slips by exactly S
+          t.exact_lat          = (base <= 1) ? base : base + int'(sv[s]);
+          env.issue_and_retire(t);
+          env.wait_cycles(2);
+        end
+      end
+      // (b) issue attempts while stalled must not be accepted
+      env.force_stall(12);
+      env.push(st.random_of(OP_SADD,    "t07/blocked_issue"));
+      env.push(st.random_of(OP_TMATMUL, "t07/blocked_issue"));
+      env.push(st.random_of(OP_VLD,     "t07/blocked_issue"));
+      env.drain("t07/blocked_issue");
+      // (c) long ops frozen mid-flight by random stalls
+      env.stress(0, 1, 20, 8, 0, 0, 3, 12, 0, 1);
+      for (int i = 0; i < 240; i++) env.push(st.any_rand(25, 25, 25, 25, 40, "t07/stall_storm"));
+      env.drain("t07/stall_storm");
+      // (d) stall combined with completion and external backpressure
+      env.stress(30, 6, 12, 6, 0, 1, 2, 20, 30, 6);
+      for (int i = 0; i < 240; i++) env.push(st.any_rand(25, 25, 25, 25, 40, "t07/stall_bp_combo"));
+      end_test("t07_stall_propagation");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t08_completion_backpressure();
+      begin_test("t08_completion_backpressure");
+      env.quiet();
+      env.cpl_hold_low = 1'b1;
+      for (int i = 0; i < 24; i++) env.push(st.any_rand(25, 25, 25, 25, 30, "t08/hold_low"));
+      env.wait_cycles(120);
+      env.cpl_hold_low = 1'b0;
+      env.drain("t08/hold_low");
+      env.stress(35, 10, 0, 1, 0, 0, 3, 3, 0, 1);
+      for (int i = 0; i < 400; i++) env.push(st.any_rand(25, 25, 25, 25, 30, "t08/bursty_bp"));
+      env.drain("t08/bursty_bp");
+      env.stress(50, 1, 0, 1, 0, 0, 3, 3, 0, 1);
+      for (int i = 0; i < 200; i++) env.push(st.any_rand(25, 25, 25, 25, 30, "t08/toggle_bp"));
+      end_test("t08_completion_backpressure");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t09_ext_memory_backpressure();
+      begin_test("t09_ext_memory_backpressure");
+      st.hot_pct = 50;
+      env.stress(0, 1, 0, 1, 0, 0, 2, 40, 60, 12);
+      for (int i = 0; i < 300; i++) env.push(st.any_rand(10, 10, 10, 70, 60, "t09/dma_heavy"));
+      env.drain("t09/dma_heavy");
+      env.stress(0, 1, 0, 1, 0, 0, 1, 1, 0, 1);
+      for (int i = 0; i < 40; i++) env.push(st.dma_rand(rng.pct(50) ? OP_DMARD : OP_DMAWR, "t09/dma_min_latency"));
+      env.drain("t09/dma_min_latency");
+      env.stress(10, 4, 0, 1, 0, 0, 30, 64, 30, 20);
+      for (int i = 0; i < 200; i++) env.push(st.any_rand(20, 20, 20, 40, 50, "t09/long_latency"));
+      end_test("t09_ext_memory_backpressure");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t10_mixed_mode_stress();
+      int unsigned n1;
+      int unsigned n2;
+      begin_test("t10_mixed_mode_stress");
+      n1 = stress_ops / 3;
+      n2 = stress_ops - 2 * n1;
+      st.hot_pct = 30;
+      env.stress(10, 4, 2, 4, 0, 2, 2, 16, 20, 6);
+      for (int unsigned i = 0; i < n1; i++) env.push(st.any_rand(30, 30, 15, 25, 30, "t10/light"));
+      env.drain("t10/light");
+      env.stress(30, 6, 6, 5, 0, 0, 2, 32, 45, 10);
+      for (int unsigned i = 0; i < n1; i++) env.push(st.any_rand(30, 30, 15, 25, 30, "t10/heavy"));
+      env.drain("t10/heavy");
+      env.stress(20, 5, 4, 4, 8, 1, 2, 24, 30, 8);
+      for (int unsigned i = 0; i < n2; i++) env.push(st.any_rand(30, 30, 15, 25, 30, "t10/chaos"));
+      end_test("t10_mixed_mode_stress");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t11_pipeline_saturation();
+      tile_txn first;
+      tile_txn last;
+      tile_txn t;
+      begin_test("t11_pipeline_saturation");
+      env.quiet();
+      for (int u = 0; u < NUM_UNITS; u++) begin
+        for (int i = 0; i < 128; i++) begin
+          case (u)
+            0      : t = st.random_of(st.rand_alu_op(), "t11/saturate_alu");
+            1      : t = st.random_of(st.rand_vec_op(), "t11/saturate_vec");
+            2      : t = st.random_of(st.rand_tns_op(), "t11/saturate_tns");
+            default: t = st.mem_rand(10, "t11/saturate_mem");
+          endcase
+          if (i == 0) first = t;
+          last = t;
+          env.push(t);
+        end
+        env.wait_accepted_all();
+        env.drain($sformatf("t11/saturate_%s", unit_name(unit_e'(u))));
+        tb_info("THROUGHPUT", $sformatf("%s sustained issue rate %0.3f ops/cycle (128 ops in %0d cycles), completion span %0d cycles",
+                                        unit_name(unit_e'(u)),
+                                        128.0 / real'(last.issue_cyc - first.issue_cyc + 1),
+                                        last.issue_cyc - first.issue_cyc + 1, last.cpl_cyc - first.issue_cyc));
+      end
+      for (int i = 0; i < 64; i++) begin
+        env.push(st.random_of(st.rand_alu_op(), "t11/round_robin"));
+        env.push(st.random_of(st.rand_vec_op(), "t11/round_robin"));
+        env.push(st.random_of(st.rand_tns_op(), "t11/round_robin"));
+        env.push(st.mem_rand(20, "t11/round_robin"));
+      end
+      end_test("t11_pipeline_saturation");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t12_back_to_back_tensor();
+      begin_test("t12_back_to_back_tensor");
+      env.quiet();
+      for (int i = 0; i < 32; i++) env.push(st.tns(st.rand_tns_op(), st.rand_mc(), st.rand_mc(), "t12/b2b"));
+      env.drain("t12/b2b");
+      env.stress(30, 4, 0, 1, 0, 0, 3, 3, 0, 1);
+      for (int i = 0; i < 32; i++) env.push(st.tns(st.rand_tns_op(), st.rand_mc(), st.rand_mc(), "t12/b2b_bp"));
+      env.drain("t12/b2b_bp");
+      env.quiet();
+      for (int i = 0; i < 16; i++) begin
+        env.push(st.tns(st.rand_tns_op(), st.rand_mc(), st.rand_mc(), "t12/interleaved"));
+        env.push(st.random_of(OP_VDOT, "t12/interleaved"));
+        env.push(st.dma_rand(rng.pct(50) ? OP_DMARD : OP_DMAWR, "t12/interleaved"));
+        env.push(st.random_of(OP_VREDSUM, "t12/interleaved"));
+      end
+      end_test("t12_back_to_back_tensor");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t13_flush_injection();
+      tile_txn t;
+      tile_txn a;
+      begin_test("t13_flush_injection");
+      env.quiet();
+      // (a) flush offset sweep across the tensor pipeline depth
+      for (int d = 1; d <= TNS_LAT_MAX + 4; d++) begin
+        t = st.random_of(OP_TMATMUL, $sformatf("t13/sweep_d%0d", d));
+        t.flush_after_accept = d;
+        env.push(t);
+        env.push(st.random_of(OP_VMUL,    $sformatf("t13/sweep_d%0d", d)));
+        env.push(st.random_of(OP_SMUL,    $sformatf("t13/sweep_d%0d", d)));
+        env.push(st.random_of(OP_SLD,     $sformatf("t13/sweep_d%0d", d)));
+        env.push(st.random_of(OP_TMATMAC, $sformatf("t13/sweep_d%0d", d)));
+        env.push(st.random_of(OP_VREDSUM, $sformatf("t13/sweep_d%0d", d)));
+        env.push(st.random_of(OP_SADD,    $sformatf("t13/sweep_d%0d", d)));
+        env.drain($sformatf("t13/sweep_d%0d", d));
+      end
+      // (b) a completion already presented on the port survives the flush
+      env.cpl_hold_low = 1'b1;
+      a = st.random_of(OP_SADD, "t13/presented_survivor");
+      env.issue(a);
+      env.wait_cycles(6);
+      t = st.random_of(OP_TMATMUL, "t13/presented_victim");
+      t.flush_after_accept = 3;
+      env.issue(t);
+      env.wait_cycles(10);
+      env.cpl_hold_low = 1'b0;
+      env.drain("t13/presented_survivor");
+      // (c) memory operations are non-speculative across a flush
+      env.bfm.configure(10, 20, 30, 4);
+      env.push(st.dma(OP_DMARD, 32 * LANES, 48 * LANES, DMA_MAX_BEATS, "t13/mem_survives"));
+      t = st.random_of(OP_TMATMUL, "t13/mem_survives");
+      t.flush_after_accept = 4;
+      env.push(t);
+      for (int k = 0; k < DMA_MAX_BEATS; k++) env.push(st.vld((32 + k) * LANES, "t13/mem_survives"));
+      env.drain("t13/mem_survives");
+      env.quiet();
+      // (d) back-to-back flushes, with an issue presented in the flush cycle
+      for (int i = 0; i < 4; i++) env.push(st.random_of(st.rand_tns_op(), "t13/double_flush"));
+      env.wait_accepted_all();
+      env.request_flush();
+      env.push(st.random_of(OP_VADD, "t13/flush_blocked_issue"));
+      env.wait_cycles(2);
+      env.push(st.random_of(OP_TMATMULT, "t13/double_flush"));
+      env.push(st.random_of(OP_VMUL, "t13/double_flush"));
+      env.wait_accepted_all();
+      env.request_flush();
+      env.drain("t13/double_flush");
+      // (e) flush with an empty tile must be a no-op
+      env.request_flush();
+      env.wait_cycles(30);
+      // (f) random flush storm under mixed traffic and backpressure
+      env.stress(15, 4, 2, 3, 20, 1, 2, 12, 20, 4);
+      for (int i = 0; i < 400; i++) env.push(st.any_rand(25, 25, 30, 20, 30, "t13/flush_storm"));
+      end_test("t13_flush_injection");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t14_memory_compute_contention();
+      begin_test("t14_memory_compute_contention");
+      st.hot_pct = 40;
+      env.stress(25, 6, 0, 1, 0, 0, 4, 32, 50, 10);
+      for (int i = 0; i < 600; i++) env.push(st.any_rand(15, 20, 20, 45, 50, "t14/contention"));
+      end_test("t14_memory_compute_contention");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t15_midrun_reset();
+      begin_test("t15_midrun_reset");
+      env.stress(10, 3, 0, 1, 0, 0, 4, 24, 20, 4);
+      for (int i = 0; i < 300; i++) env.push(st.any_rand(25, 25, 25, 25, 40, "t15/pre_reset"));
+      env.wait_cycles(150);
+      env.pend_q.delete();
+      env.reset_tile(6);
+      env.quiet();
+      env.wait_cycles(RESET_IDLE_MAX + IDLE_SETTLE);
+      preload_spm("t15");
+      for (int i = 0; i < 200; i++) env.push(st.any_rand(25, 25, 25, 25, 40, "t15/post_reset"));
+      end_test("t15_midrun_reset");
+    endtask
+
+    // -------------------------------------------------------------------------
+    task automatic t16_final_readback();
+      int unsigned bad;
+      begin_test("t16_final_readback");
+      env.quiet();
+      for (int v = 0; v < SPM_WORDS / LANES; v++) env.push(st.vld(v * LANES, "t16/spm_image"));
+      env.drain("t16/spm_image");
+      bad = 0;
+      for (int i = 0; i < EXT_WORDS; i++)
+        if (env.bfm.mem[i] !== env.rm.ext[i]) begin
+          bad++;
+          if (bad <= 16)
+            tb_error("EXT_IMAGE", $sformatf("external memory[0x%0h] physical=%s reference=%s",
+                                            i, fmtw(env.bfm.mem[i]), fmtw(env.rm.ext[i])));
+        end
+      if (bad == 0) tb_info("EXT_IMAGE", $sformatf("external memory image matches reference (%0d words)", EXT_WORDS));
+      else tb_error("EXT_IMAGE", $sformatf("%0d external memory word(s) differ from reference", bad));
+      end_test("t16_final_readback");
+    endtask
+  endclass : tile_test_lib
+
+endpackage : tb_compute_tile_pkg
+
+// =============================================================================
+//  tb_compute_tile : top level
+// =============================================================================
+module tb_compute_tile;
+  import tb_tile_base_pkg::*;
+  import tb_compute_tile_pkg::*;
+
+  logic clk;
+  initial clk = 1'b0;
+  always #5 clk = ~clk;
+
+  tile_if tif (.clk(clk));
+
+  // ---------------------------------------------------------------------------
+  //  Device under test
+  // ---------------------------------------------------------------------------
+  compute_tile #(
+    .DATA_W (DATA_W),
+    .LANES  (LANES),
+    .TDIM   (TDIM),
+    .TAG_W  (TAG_W),
+    .SPM_AW (SPM_AW),
+    .EXT_AW (EXT_AW),
+    .LEN_W  (LEN_W)
+  ) u_dut (
+    .clk              (clk),
+    .rst_n            (tif.rst_n),
+    .stall_i          (tif.stall),
+    .flush_i          (tif.flush),
+    .issue_valid_i    (tif.issue_valid),
+    .issue_ready_o    (tif.issue_ready),
+    .issue_op_i       (tif.issue_op),
+    .issue_tag_i      (tif.issue_tag),
+    .issue_sa_i       (tif.issue_sa),
+    .issue_sb_i       (tif.issue_sb),
+    .issue_va_i       (tif.issue_va),
+    .issue_vb_i       (tif.issue_vb),
+    .issue_ma_i       (tif.issue_ma),
+    .issue_mb_i       (tif.issue_mb),
+    .issue_mc_i       (tif.issue_mc),
+    .issue_addr_i     (tif.issue_addr),
+    .issue_ext_addr_i (tif.issue_ext_addr),
+    .issue_len_i      (tif.issue_len),
+    .cpl_valid_o      (tif.cpl_valid),
+    .cpl_ready_i      (tif.cpl_ready),
+    .cpl_tag_o        (tif.cpl_tag),
+    .cpl_unit_o       (tif.cpl_unit),
+    .cpl_killed_o     (tif.cpl_killed),
+    .cpl_scalar_o     (tif.cpl_scalar),
+    .cpl_vec_o        (tif.cpl_vec),
+    .cpl_mat_o        (tif.cpl_mat),
+    .ext_req_valid_o  (tif.ext_req_valid),
+    .ext_req_ready_i  (tif.ext_req_ready),
+    .ext_req_we_o     (tif.ext_req_we),
+    .ext_req_addr_o   (tif.ext_req_addr),
+    .ext_req_wdata_o  (tif.ext_req_wdata),
+    .ext_rsp_valid_i  (tif.ext_rsp_valid),
+    .ext_rsp_ready_o  (tif.ext_rsp_ready),
+    .ext_rsp_we_i     (tif.ext_rsp_we),
+    .ext_rsp_rdata_i  (tif.ext_rsp_rdata),
+    .unit_busy_o      (tif.unit_busy),
+    .idle_o           (tif.idle)
+  );
+
+  // ---------------------------------------------------------------------------
+  //  Environment
+  // ---------------------------------------------------------------------------
+  tile_env         env;
+  tile_test_lib    tests;
+  bit [63:0]       seed;
+  string           only;
+  int unsigned     stress_ops;
+  int unsigned     max_errors;
+  longint unsigned sim_limit;
+  bit              relaxed;
+  bit              no_cov_gate;
+
+  always @(posedge clk) begin
+    if (sim_limit != 0 && g_cycle > sim_limit) begin
+      $display("\n*** tb_compute_tile: cycle limit %0d exceeded in phase '%s' ***", sim_limit, g_phase);
+      $fatal(1, "tb_compute_tile: TEST FAILED (cycle limit)");
+    end
+  end
+
+  initial begin : main
+    string       holes [$];
+    bit          all_tags;
+    seed        = 64'h5F1C_A017;
+    only        = "";
+    stress_ops  = 3000;
+    max_errors  = 25;
+    sim_limit   = 2_000_000;
+    void'($value$plusargs("SEED=%d", seed));
+    void'($value$plusargs("TEST=%s", only));
+    void'($value$plusargs("STRESS_OPS=%d", stress_ops));
+    void'($value$plusargs("SIM_LIMIT=%d", sim_limit));
+    if ($value$plusargs("MAX_ERRORS=%d", max_errors)) g_max_errors = max_errors;
+    g_verbose   = $test$plusargs("VERBOSE");
+    relaxed     = $test$plusargs("FLUSH_RELAXED");
+    no_cov_gate = $test$plusargs("NO_COV_GATE");
+
+    // deterministic, X-free inputs from time zero; reset asserted
+    tif.rst_n          = 1'b0;
+    tif.stall          = 1'b0;
+    tif.flush          = 1'b0;
+    tif.issue_valid    = 1'b0;
+    tif.issue_op       = '0;
+    tif.issue_tag      = '0;
+    tif.issue_sa       = '0;
+    tif.issue_sb       = '0;
+    tif.issue_va       = '0;
+    tif.issue_vb       = '0;
+    tif.issue_ma       = '0;
+    tif.issue_mb       = '0;
+    tif.issue_mc       = '0;
+    tif.issue_addr     = '0;
+    tif.issue_ext_addr = '0;
+    tif.issue_len      = '0;
+    tif.cpl_ready      = 1'b1;
+    tif.ext_req_ready  = 1'b0;
+    tif.ext_rsp_valid  = 1'b0;
+    tif.ext_rsp_we     = 1'b0;
+    tif.ext_rsp_rdata  = '0;
+
+    $display("==========================================================================");
+    $display("  tb_compute_tile : SilicaFlux compute_tile full-system verification");
+    $display("  seed=%0d  test=%s  stress_ops=%0d  flush_policy=%s  max_errors=%0d",
+             seed, (only == "") ? "<full regression>" : only, stress_ops,
+             relaxed ? "relaxed" : "precise", g_max_errors);
+    $display("  geometry: DATA_W=%0d LANES=%0d TDIM=%0d TAG_W=%0d SPM=%0d words EXT=%0d words",
+             DATA_W, LANES, TDIM, TAG_W, SPM_WORDS, EXT_WORDS);
+    $display("==========================================================================");
+
+    env         = new(tif, seed, !relaxed);
+    env.rst_cnt = 8;
+    tests       = new(env, only, stress_ops);
+    fork
+      env.run();
+    join_none
+
+    tests.run_all();
+
+    // ---- end-of-test checks ----
+    g_phase = "final";
+    env.sb.check_drained("final");
+    all_tags = 1'b1;
+    for (int i = 0; i < NUM_TAGS; i++) all_tags = all_tags & env.sb.tag_seen[i];
+    if (all_tags) env.cov.hit("tag:all_issued");
+    if (env.sb.n_unchecked != 0)
+      tb_error("UNCHECKED_RESULTS", $sformatf("%0d result(s) could not be checked against the reference", env.sb.n_unchecked));
+    if (only == "" && !no_cov_gate && env.cov.holes(holes) != 0)
+      tb_error("COVERAGE_HOLES", $sformatf("%0d required coverage bin(s) not hit (first: %s)", holes.size(), holes[0]));
+
+    $display("\n==========================================================================");
+    $display("  tb_compute_tile : FINAL REPORT   (seed=%0d, %0d cycles)", seed, g_cycle);
+    $display("==========================================================================");
+    $display("  TESTS");
+    foreach (tests.summary[i]) $display("%s", tests.summary[i]);
+    env.report();
+    env.sb.report();
+    env.cov.report();
+    $display("  ------------------------------------------------------------------");
+    $display("  errors=%0d  warnings=%0d", g_errors, g_warnings);
+    if (g_errors == 0) begin
+      $display("\n*** TB_COMPUTE_TILE : TEST PASSED ***\n");
+      $finish;
+    end else begin
+      $display("\n*** TB_COMPUTE_TILE : TEST FAILED ***\n");
+      $fatal(1, "tb_compute_tile: TEST FAILED (%0d errors)", g_errors);
+    end
+  end
+
+endmodule : tb_compute_tile
