@@ -1,0 +1,71 @@
+start:
+    MOV r2, 0x200
+    MOV r3, 0x300
+    MOV r4, 0
+    LOAD_S r8, [r2+0x00]
+    LOAD_S r24, [r3+0x00]
+    LOAD_S r9, [r2+0x04]
+    LOAD_S r25, [r3+0x04]
+    LOAD_S r10, [r2+0x08]
+    LOAD_S r26, [r3+0x08]
+    LOAD_S r11, [r2+0x0C]
+    LOAD_S r27, [r3+0x0C]
+    LOAD_S r12, [r2+0x10]
+    LOAD_S r28, [r3+0x10]
+    LOAD_S r13, [r2+0x14]
+    LOAD_S r29, [r3+0x14]
+    LOAD_S r14, [r2+0x18]
+    LOAD_S r30, [r3+0x18]
+    LOAD_S r15, [r2+0x1C]
+    LOAD_S r31, [r3+0x1C]
+    LOAD_S r16, [r2+0x20]
+    LOAD_S r17, [r2+0x24]
+    LOAD_S r18, [r2+0x28]
+    LOAD_S r19, [r2+0x2C]
+    LOAD_S r20, [r2+0x30]
+    LOAD_S r21, [r2+0x34]
+    LOAD_S r22, [r2+0x38]
+    LOAD_S r23, [r2+0x3C]
+    MUL r8, r8, r24
+    LOAD_S r24, [r3+0x20]
+    MUL r9, r9, r25
+    LOAD_S r25, [r3+0x24]
+    MUL r10, r10, r26
+    LOAD_S r26, [r3+0x28]
+    MUL r11, r11, r27
+    LOAD_S r27, [r3+0x2C]
+    MUL r12, r12, r28
+    LOAD_S r28, [r3+0x30]
+    MUL r13, r13, r29
+    LOAD_S r29, [r3+0x34]
+    MUL r14, r14, r30
+    LOAD_S r30, [r3+0x38]
+    MUL r15, r15, r31
+    LOAD_S r31, [r3+0x3C]
+    MUL r16, r16, r24
+    ADD r24, r8, r9
+    MUL r17, r17, r25
+    ADD r25, r10, r11
+    MUL r18, r18, r26
+    ADD r26, r12, r13
+    MUL r19, r19, r27
+    ADD r27, r14, r15
+    MUL r20, r20, r28
+    ADD r24, r24, r25
+    MUL r21, r21, r29
+    ADD r26, r26, r27
+    MUL r22, r22, r30
+    ADD r28, r16, r17
+    MUL r23, r23, r31
+    ADD r29, r18, r19
+    ADD r30, r20, r21
+    ADD r31, r22, r23
+    ADD r24, r24, r26
+    ADD r28, r28, r29
+    ADD r30, r30, r31
+    ADD r28, r28, r30
+    ADD r24, r24, r28
+    ADD r4, r4, r24
+    STORE_S r4, [0x400]
+halt:
+    JMP halt

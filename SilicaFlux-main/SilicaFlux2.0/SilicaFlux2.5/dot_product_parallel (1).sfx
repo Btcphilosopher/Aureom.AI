@@ -1,0 +1,72 @@
+_start:
+    MOV r2, 0x200
+    MOV r3, 0x300
+    LOAD_S r8, [r2+0]
+    LOAD_S r10, [r3+0]
+    MOV r4, 0
+    LOAD_S r9, [r2+4]
+    LOAD_S r11, [r3+4]
+    LOAD_S r12, [r2+8]
+    MUL r8, r8, r10
+    LOAD_S r14, [r3+8]
+    LOAD_S r13, [r2+12]
+    MUL r9, r9, r11
+    LOAD_S r15, [r3+12]
+    LOAD_S r16, [r2+16]
+    MUL r12, r12, r14
+    LOAD_S r18, [r3+16]
+    LOAD_S r17, [r2+20]
+    MUL r13, r13, r15
+    LOAD_S r19, [r3+20]
+    ADD r24, r8, r9
+    LOAD_S r20, [r2+24]
+    MUL r16, r16, r18
+    LOAD_S r22, [r3+24]
+    LOAD_S r21, [r2+28]
+    MUL r17, r17, r19
+    LOAD_S r23, [r3+28]
+    ADD r25, r12, r13
+    LOAD_S r8, [r2+32]
+    MUL r20, r20, r22
+    LOAD_S r10, [r3+32]
+    ADD r24, r24, r25
+    MUL r21, r21, r23
+    LOAD_S r9, [r2+36]
+    LOAD_S r11, [r3+36]
+    ADD r26, r16, r17
+    LOAD_S r12, [r2+40]
+    MUL r8, r8, r10
+    LOAD_S r14, [r3+40]
+    MOV r25, 0x400
+    LOAD_S r13, [r2+44]
+    ADD r27, r20, r21
+    LOAD_S r15, [r3+44]
+    MUL r9, r9, r11
+    LOAD_S r16, [r2+48]
+    MUL r12, r12, r14
+    LOAD_S r18, [r3+48]
+    ADD r26, r26, r27
+    LOAD_S r17, [r2+52]
+    MUL r13, r13, r15
+    LOAD_S r19, [r3+52]
+    ADD r24, r24, r26
+    LOAD_S r20, [r2+56]
+    MUL r16, r16, r18
+    LOAD_S r22, [r3+56]
+    ADD r28, r8, r9
+    LOAD_S r21, [r2+60]
+    MUL r17, r17, r19
+    LOAD_S r23, [r3+60]
+    ADD r29, r12, r13
+    MUL r20, r20, r22
+    MUL r21, r21, r23
+    ADD r28, r28, r29
+    ADD r30, r16, r17
+    ADD r4, r4, r24
+    ADD r31, r20, r21
+    ADD r30, r30, r31
+    ADD r28, r28, r30
+    ADD r4, r4, r28
+    STORE_S r4, [r25+0]
+halt:
+    JMP halt
