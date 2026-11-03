@@ -1,0 +1,50 @@
+        .equ    FIB_N,       16
+        .equ    FIB_BASE,    0x100
+        .equ    WORD_BYTES,  4
+
+        .global _start, fib_table
+
+        .text
+_start:
+fib_init:
+        LI      r8, 0
+        LI      r7, 1
+        LI      r1, FIB_N
+        LI      r2, FIB_BASE
+        MOV     r3, r8
+        MOV     r4, r7
+        MOV     r6, r8
+
+fib_seed0:
+        BGE     r6, r1, fib_done
+        STORE_S r3, [r2]
+        ADDI    r2, r2, WORD_BYTES
+        ADD     r6, r6, r7
+
+fib_seed1:
+        BGE     r6, r1, fib_done
+        STORE_S r4, [r2]
+        ADDI    r2, r2, WORD_BYTES
+        ADD     r6, r6, r7
+        BGE     r6, r1, fib_done
+
+fib_loop:
+        ADD     r5, r4, r3
+        STORE_S r5, [r2]
+        MOV     r3, r4
+        MOV     r4, r5
+        ADDI    r2, r2, WORD_BYTES
+        ADD     r6, r6, r7
+        BLT     r6, r1, fib_loop
+
+fib_done:
+        DFSYNC  0, LSU, TILE
+        HALT    0
+
+fib_hang:
+        JMP     fib_hang
+
+        .data
+        .org    FIB_BASE
+fib_table:
+        .space  FIB_N * WORD_BYTES
