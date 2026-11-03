@@ -1,0 +1,193 @@
+matmul_4x4:
+    LI      r4, 0x100
+    LI      r5, 0x200
+    LI      r6, 0x300
+    LOAD_S  r8, [r4 + 0]
+    LOAD_S  r9, [r5 + 0]
+    LOAD_S  r18, [r4 + 4]
+    LI      r1, 0
+    LI      r2, 0
+
+tile_r01:
+    LOAD_S  r20, [r5 + 1]
+    MUL     r7, r8, r9
+    MUL     r14, r18, r9
+    LOAD_S  r9, [r5 + 2]
+    MUL     r11, r8, r20
+    MUL     r15, r18, r20
+    LOAD_S  r20, [r5 + 3]
+    MUL     r12, r8, r9
+    MUL     r16, r18, r9
+    LOAD_S  r9, [r5 + 4]
+    MUL     r13, r8, r20
+    LOAD_S  r8, [r4 + 1]
+    MUL     r17, r18, r20
+    LOAD_S  r18, [r4 + 5]
+    MUL     r10, r8, r9
+    LOAD_S  r20, [r5 + 5]
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 6]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    LOAD_S  r20, [r5 + 7]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    LOAD_S  r9, [r5 + 8]
+    MUL     r10, r8, r20
+    LOAD_S  r8, [r4 + 2]
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    LOAD_S  r18, [r4 + 6]
+    ADD     r13, r13, r10
+    LOAD_S  r20, [r5 + 9]
+    MUL     r10, r8, r9
+    ADD     r17, r17, r19
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 10]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    LOAD_S  r20, [r5 + 11]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    LOAD_S  r9, [r5 + 12]
+    MUL     r10, r8, r20
+    LOAD_S  r8, [r4 + 3]
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    LOAD_S  r18, [r4 + 7]
+    ADD     r13, r13, r10
+    LOAD_S  r20, [r5 + 13]
+    MUL     r10, r8, r9
+    ADD     r17, r17, r19
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 14]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    STORE_S r7, [r6 + 0]
+    STORE_S r14, [r6 + 4]
+    LOAD_S  r20, [r5 + 15]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    STORE_S r11, [r6 + 1]
+    STORE_S r15, [r6 + 5]
+    LOAD_S  r9, [r5 + 0]
+    MUL     r10, r8, r20
+    LOAD_S  r8, [r4 + 8]
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    LOAD_S  r18, [r4 + 12]
+    ADD     r13, r13, r10
+    STORE_S r12, [r6 + 2]
+    STORE_S r16, [r6 + 6]
+
+tile_r23:
+    LI      r1, 2
+    LOAD_S  r20, [r5 + 1]
+    MUL     r7, r8, r9
+    MUL     r14, r18, r9
+    ADD     r17, r17, r19
+    STORE_S r13, [r6 + 3]
+    STORE_S r17, [r6 + 7]
+    LOAD_S  r9, [r5 + 2]
+    MUL     r11, r8, r20
+    MUL     r15, r18, r20
+    LOAD_S  r20, [r5 + 3]
+    MUL     r12, r8, r9
+    MUL     r16, r18, r9
+    LOAD_S  r9, [r5 + 4]
+    MUL     r13, r8, r20
+    LOAD_S  r8, [r4 + 9]
+    MUL     r17, r18, r20
+    LOAD_S  r18, [r4 + 13]
+    MUL     r10, r8, r9
+    LOAD_S  r20, [r5 + 5]
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 6]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    LOAD_S  r20, [r5 + 7]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    LOAD_S  r9, [r5 + 8]
+    MUL     r10, r8, r20
+    LOAD_S  r8, [r4 + 10]
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    LOAD_S  r18, [r4 + 14]
+    ADD     r13, r13, r10
+    LOAD_S  r20, [r5 + 9]
+    MUL     r10, r8, r9
+    ADD     r17, r17, r19
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 10]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    LOAD_S  r20, [r5 + 11]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    LOAD_S  r9, [r5 + 12]
+    MUL     r10, r8, r20
+    LOAD_S  r8, [r4 + 11]
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    LOAD_S  r18, [r4 + 15]
+    ADD     r13, r13, r10
+    LOAD_S  r20, [r5 + 13]
+    MUL     r10, r8, r9
+    ADD     r17, r17, r19
+    MUL     r19, r18, r9
+    ADD     r7, r7, r10
+    LOAD_S  r9, [r5 + 14]
+    MUL     r10, r8, r20
+    ADD     r14, r14, r19
+    MUL     r19, r18, r20
+    ADD     r11, r11, r10
+    STORE_S r7, [r6 + 8]
+    STORE_S r14, [r6 + 12]
+    LOAD_S  r20, [r5 + 15]
+    MUL     r10, r8, r9
+    ADD     r15, r15, r19
+    MUL     r19, r18, r9
+    ADD     r12, r12, r10
+    STORE_S r11, [r6 + 9]
+    STORE_S r15, [r6 + 13]
+    MUL     r10, r8, r20
+    ADD     r16, r16, r19
+    MUL     r19, r18, r20
+    ADD     r13, r13, r10
+    STORE_S r12, [r6 + 10]
+    STORE_S r16, [r6 + 14]
+
+epilogue:
+    ADD     r17, r17, r19
+    STORE_S r13, [r6 + 11]
+    STORE_S r17, [r6 + 15]
+
+halt:
+    HALT
+    JMP     halt
