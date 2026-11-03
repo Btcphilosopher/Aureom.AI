@@ -1,0 +1,3650 @@
+//==============================================================================
+//  tb_silicaflux_top.sf
+//------------------------------------------------------------------------------
+//  SilicaFlux heterogeneous compute SoC - full-system, end-to-end, self-checking
+//  verification environment.                             Language: Silica Flux-2017
+//
+//  DUT ......... silicaflux_top   (silicaflux_top.sf)
+//  Top ......... tb_silicaflux_top
+//
+//  Environment
+//  -----------
+//   sft_prog_gen/sft_asm -> sft_program --imem load--> DUT <--data bus--> sft_mem_bfm
+//   sft_obs (monitor) -> sft_scoreboard
+//        |-> instruction lifecycle tracker (dispatch/issue/writeback/flush/retire)
+//        |-> sft_isa_model (golden ISA, lock-stepped on retirement)
+//        |-> store-order checker (retired stores vs bus writes), DFSYNC checker
+//        '-> sft_coverage, sft_tracker (mailbox: retired-instruction statistics)
+//   End of program: debug-port register sweep + data-memory image vs golden model.
+//
+//  SF-ISA (32-bit words, byte PC, x0 = 0, 32 x 32b scalar, 8 x 128b vector)
+//  -------------------------------------------------------------------------
+//   [31:26] opcode. R: rd[25:21] rs1[20:16] rs2[15:11]. I: rd rs1 imm[15:0] (sext).
+//   B: rs1[25:21] rs2[20:16] off[15:0] (words). JAL: rd off[20:0] (words).
+//   Vector: vd[23:21] vs1[18:16] vs2[13:11]; VLD/VST/VLDP/VSTP: vd[23:21] rs1 imm.
+//   ALU   ADD SUB AND OR XOR SLL SRL SRA SLT SLTU MUL | ADDI ANDI ORI XORI SLLI SRLI
+//         SRAI SLTI LUI (rd = imm << 16)             | reserved opcodes: no-op on ALU
+//   BR    BEQ BNE BLT BGE BLTU BGEU (pc + off*4), JAL (rd = pc+4), JALR (rd = pc+4,
+//         pc = (rs1 + imm) & ~3)
+//   MEM   LW/SW (addr & ~3), VLD/VST (addr & ~15), VLDP/VSTP vd,vd+1 (addr & ~31)
+//   VEC   VADD VSUB VMUL (lanewise), VBCAST vd <- x[rs1], VREDSUM x[rd] <- sum(vs1)
+//   TNS   TMAC vd <- vd + vs1 * vs2 (lanewise)
+//   DFSYNC (barrier), HALT
+//
+//  DUT interface contract (rising edge of clk_i)
+//  ---------------------------------------------
+//   C1  Instruction SRAM is written through imem_we_i at any time and survives
+//       reset. After reset the core fetches from PC 0 while run_i is high.
+//   C2  Dispatch (tr_dsp_*): program order, one per cycle, ids 0,1,2.. after reset
+//       (squashed ids are never reused). The word is the SRAM word at tr_dsp_pc_o.
+//       No dispatch while run_i is low, stall_i is high, or halted_o is high.
+//   C3  Each dispatched instruction other than DFSYNC/HALT issues exactly once on
+//       its unit port (0 ALU, 1 BR, 2 VEC, 3 TNS, 4 MEM) and later writes back
+//       exactly once on the same port, unless squashed. Issue only after every
+//       producer of a source register has written back (same-cycle bypass allowed).
+//       Latency (wb - issue): ALU 1 (MUL 2), BR 1, VEC 1/2/3 (VBCAST/VADD,VSUB,
+//       VREDSUM/VMUL), TNS 20; stores >= 1, loads >= 2 (after their last beat).
+//   C4  tr_flush_* names a written-back control instruction; every younger id
+//       (including one dispatched in the same cycle) is squashed and produces no
+//       further events; the next dispatch is at tr_flush_pc_o. A control transfer
+//       that leaves pc+4 is always redirected through a flush.
+//   C5  Retirement (rv_*): in order, one per cycle, after write-back, never while
+//       stall_i is high. rv_* carries the architectural effect (x0 writes are not
+//       reported). DFSYNC/HALT retire once every older store is performed.
+//   C6  Data bus: 128-bit, 16-byte aligned requests held stable until accepted.
+//       Stores are performed in program order, at or after retirement, as single
+//       beats (VSTP: two). Reads may be speculative; dm_req_len_o = beats-1 (VLDP 1).
+//       Responses are always accepted; beats of a burst arrive in order; distinct
+//       outstanding tags may complete in any order.
+//   C7  DFSYNC: no younger instruction issues until every older instruction has
+//       written back and every older store has been performed.
+//   C8  HALT retires last; halted_o rises the next cycle and holds until reset.
+//   C9  tr_rob_count_o = live (dispatched, not retired, not squashed) instructions;
+//       tr_sb_count_o = retired store beats not yet performed; both registered.
+//   C10 rst_ni active low: register files zero, pipeline and buffers empty,
+//       outputs quiescent from the second reset cycle. dbg_* read the
+//       architectural register files combinationally.
+//
+//  Plusargs : +SEED=<n> +SFT_RELAXED_TIMING +SFT_VERBOSE=<0..3> +SFT_RANDOM_ITERS=<n>
+//             +SFT_TEST=<name> +SFT_MAX_ERRORS=<n> +SFT_NO_COV_CLOSURE
+//  Defines  : SF_TB_NO_COVERGROUPS  (omit covergroup constructs)
+//==============================================================================
+
+`timescale 1ns/1ps
+`default_nettype none
+
+//==============================================================================
+// System parameters and SF-ISA definition
+//==============================================================================
+package sft_params_pkg;
+
+  localparam int unsigned SFT_NXREG      = 32;
+  localparam int unsigned SFT_NVREG      = 8;
+  localparam int unsigned SFT_VLANES     = 4;
+  localparam int unsigned SFT_IMEM_AW    = 10;
+  localparam int unsigned SFT_IMEM_WORDS = 1 << SFT_IMEM_AW;
+  localparam int unsigned SFT_ROB_DEPTH  = 16;
+  localparam int unsigned SFT_SB_DEPTH   = 8;
+  localparam int unsigned SFT_TAG_W      = 4;
+  localparam int unsigned SFT_ID_W       = 32;
+  localparam int unsigned SFT_ROBC_W     = $clog2(SFT_ROB_DEPTH + 1);
+  localparam int unsigned SFT_SBC_W      = $clog2(SFT_SB_DEPTH + 1);
+  localparam int unsigned SFT_NUNITS     = 5;
+
+  localparam int unsigned U_ALU  = 0;
+  localparam int unsigned U_BR   = 1;
+  localparam int unsigned U_VEC  = 2;
+  localparam int unsigned U_TNS  = 3;
+  localparam int unsigned U_MEM  = 4;
+  localparam int unsigned U_NONE = 7;
+
+  localparam int unsigned OP_ADD     = 'h00;
+  localparam int unsigned OP_SUB     = 'h01;
+  localparam int unsigned OP_AND     = 'h02;
+  localparam int unsigned OP_OR      = 'h03;
+  localparam int unsigned OP_XOR     = 'h04;
+  localparam int unsigned OP_SLL     = 'h05;
+  localparam int unsigned OP_SRL     = 'h06;
+  localparam int unsigned OP_SRA     = 'h07;
+  localparam int unsigned OP_SLT     = 'h08;
+  localparam int unsigned OP_SLTU    = 'h09;
+  localparam int unsigned OP_MUL     = 'h0A;
+  localparam int unsigned OP_ADDI    = 'h10;
+  localparam int unsigned OP_ANDI    = 'h11;
+  localparam int unsigned OP_ORI     = 'h12;
+  localparam int unsigned OP_XORI    = 'h13;
+  localparam int unsigned OP_SLLI    = 'h14;
+  localparam int unsigned OP_SRLI    = 'h15;
+  localparam int unsigned OP_SRAI    = 'h16;
+  localparam int unsigned OP_SLTI    = 'h17;
+  localparam int unsigned OP_LUI     = 'h18;
+  localparam int unsigned OP_BEQ     = 'h20;
+  localparam int unsigned OP_BNE     = 'h21;
+  localparam int unsigned OP_BLT     = 'h22;
+  localparam int unsigned OP_BGE     = 'h23;
+  localparam int unsigned OP_BLTU    = 'h24;
+  localparam int unsigned OP_BGEU    = 'h25;
+  localparam int unsigned OP_JAL     = 'h26;
+  localparam int unsigned OP_JALR    = 'h27;
+  localparam int unsigned OP_LW      = 'h28;
+  localparam int unsigned OP_SW      = 'h29;
+  localparam int unsigned OP_VLD     = 'h2A;
+  localparam int unsigned OP_VST     = 'h2B;
+  localparam int unsigned OP_VLDP    = 'h2C;
+  localparam int unsigned OP_VSTP    = 'h2D;
+  localparam int unsigned OP_VADD    = 'h30;
+  localparam int unsigned OP_VSUB    = 'h31;
+  localparam int unsigned OP_VMUL    = 'h32;
+  localparam int unsigned OP_VBCAST  = 'h33;
+  localparam int unsigned OP_VREDSUM = 'h34;
+  localparam int unsigned OP_TMAC    = 'h38;
+  localparam int unsigned OP_DFSYNC  = 'h3E;
+  localparam int unsigned OP_HALT    = 'h3F;
+
+  //----------------------------------------------------------------------------
+  // Field extraction
+  //----------------------------------------------------------------------------
+  function automatic int unsigned sft_opc(bit [31:0] w);   return w[31:26]; endfunction
+  function automatic int unsigned sft_rd(bit [31:0] w);    return w[25:21]; endfunction
+  function automatic int unsigned sft_rs1(bit [31:0] w);   return w[20:16]; endfunction
+  function automatic int unsigned sft_rs2(bit [31:0] w);   return w[15:11]; endfunction
+  function automatic int unsigned sft_vd(bit [31:0] w);    return w[23:21]; endfunction
+  function automatic int unsigned sft_vs1(bit [31:0] w);   return w[18:16]; endfunction
+  function automatic int unsigned sft_vs2(bit [31:0] w);   return w[13:11]; endfunction
+  function automatic bit [31:0]   sft_imm(bit [31:0] w);   return {{16{w[15]}}, w[15:0]}; endfunction
+  function automatic bit [31:0]   sft_off21(bit [31:0] w); return {{11{w[20]}}, w[20:0]}; endfunction
+
+  function automatic bit sft_is_r_alu(int unsigned op);  return op <= OP_MUL; endfunction
+  function automatic bit sft_is_i_alu(int unsigned op);  return op >= OP_ADDI && op <= OP_LUI; endfunction
+  function automatic bit sft_is_branch(int unsigned op); return op >= OP_BEQ && op <= OP_BGEU; endfunction
+  function automatic bit sft_is_ctrl(int unsigned op);   return op >= OP_BEQ && op <= OP_JALR; endfunction
+  function automatic bit sft_is_load(int unsigned op);   return op == OP_LW || op == OP_VLD || op == OP_VLDP; endfunction
+  function automatic bit sft_is_store(int unsigned op);  return op == OP_SW || op == OP_VST || op == OP_VSTP; endfunction
+
+  function automatic int unsigned sft_unit(int unsigned op);
+    if (op == OP_DFSYNC || op == OP_HALT)        return U_NONE;
+    if (sft_is_ctrl(op))                         return U_BR;
+    if (op >= OP_LW && op <= OP_VSTP)            return U_MEM;
+    if (op >= OP_VADD && op <= OP_VREDSUM)       return U_VEC;
+    if (op == OP_TMAC)                           return U_TNS;
+    return U_ALU;
+  endfunction
+
+  // Exact write-back latency (0: variable, memory unit).
+  function automatic int unsigned sft_lat(int unsigned op);
+    case (sft_unit(op))
+      U_ALU: return (op == OP_MUL) ? 2 : 1;
+      U_BR:  return 1;
+      U_VEC: begin
+        if (op == OP_VBCAST) return 1;
+        if (op == OP_VMUL)   return 3;
+        return 2;
+      end
+      U_TNS: return 20;
+      default: return 0;
+    endcase
+  endfunction
+
+  // Latency window per unit class (relaxed timing).
+  function automatic void sft_lat_window(int unsigned op, output int unsigned lo, output int unsigned hi);
+    case (sft_unit(op))
+      U_ALU:   begin lo = 1;  hi = 2;  end
+      U_BR:    begin lo = 1;  hi = 2;  end
+      U_VEC:   begin lo = 1;  hi = 3;  end
+      U_TNS:   begin lo = 16; hi = 24; end
+      default: begin lo = sft_is_load(op) ? 2 : 1; hi = 0; end
+    endcase
+  endfunction
+
+  function automatic string sft_unit_name(int unsigned u);
+    case (u)
+      U_ALU:   return "ALU";
+      U_BR:    return "BR";
+      U_VEC:   return "VEC";
+      U_TNS:   return "TNS";
+      U_MEM:   return "MEM";
+      default: return "NONE";
+    endcase
+  endfunction
+
+  function automatic string sft_op_name(int unsigned op);
+    case (op)
+      OP_ADD: return "ADD";       OP_SUB: return "SUB";       OP_AND: return "AND";     OP_OR: return "OR";
+      OP_XOR: return "XOR";       OP_SLL: return "SLL";       OP_SRL: return "SRL";     OP_SRA: return "SRA";
+      OP_SLT: return "SLT";       OP_SLTU: return "SLTU";     OP_MUL: return "MUL";
+      OP_ADDI: return "ADDI";     OP_ANDI: return "ANDI";     OP_ORI: return "ORI";     OP_XORI: return "XORI";
+      OP_SLLI: return "SLLI";     OP_SRLI: return "SRLI";     OP_SRAI: return "SRAI";   OP_SLTI: return "SLTI";
+      OP_LUI: return "LUI";
+      OP_BEQ: return "BEQ";       OP_BNE: return "BNE";       OP_BLT: return "BLT";     OP_BGE: return "BGE";
+      OP_BLTU: return "BLTU";     OP_BGEU: return "BGEU";     OP_JAL: return "JAL";     OP_JALR: return "JALR";
+      OP_LW: return "LW";         OP_SW: return "SW";         OP_VLD: return "VLD";     OP_VST: return "VST";
+      OP_VLDP: return "VLDP";     OP_VSTP: return "VSTP";
+      OP_VADD: return "VADD";     OP_VSUB: return "VSUB";     OP_VMUL: return "VMUL";   OP_VBCAST: return "VBCAST";
+      OP_VREDSUM: return "VREDSUM";
+      OP_TMAC: return "TMAC";     OP_DFSYNC: return "DFSYNC"; OP_HALT: return "HALT";
+      default: return $sformatf("RSV%02h", op);
+    endcase
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Semantics shared by the golden model
+  //----------------------------------------------------------------------------
+  function automatic bit [31:0] sft_alu(int unsigned op, bit [31:0] a, bit [31:0] b);
+    bit [63:0] p;
+    case (op)
+      OP_ADD, OP_ADDI:   return a + b;
+      OP_SUB:            return a - b;
+      OP_AND, OP_ANDI:   return a & b;
+      OP_OR, OP_ORI:     return a | b;
+      OP_XOR, OP_XORI:   return a ^ b;
+      OP_SLL, OP_SLLI:   return a << b[4:0];
+      OP_SRL, OP_SRLI:   return a >> b[4:0];
+      OP_SRA, OP_SRAI:   return $unsigned($signed(a) >>> b[4:0]);
+      OP_SLT, OP_SLTI:   return {31'd0, $signed(a) < $signed(b)};
+      OP_SLTU:           return {31'd0, a < b};
+      OP_MUL: begin
+        p = 64'(a) * 64'(b);
+        return p[31:0];
+      end
+      OP_LUI:            return {b[15:0], 16'd0};
+      default:           return 32'd0;
+    endcase
+  endfunction
+
+  function automatic bit sft_br_taken(int unsigned op, bit [31:0] a, bit [31:0] b);
+    case (op)
+      OP_BEQ:  return a == b;
+      OP_BNE:  return a != b;
+      OP_BLT:  return $signed(a) < $signed(b);
+      OP_BGE:  return $signed(a) >= $signed(b);
+      OP_BLTU: return a < b;
+      OP_BGEU: return a >= b;
+      default: return 1'b0;
+    endcase
+  endfunction
+
+  function automatic bit [127:0] sft_vec(int unsigned op, bit [127:0] a, bit [127:0] b, bit [127:0] c);
+    bit [127:0] r;
+    for (int unsigned l = 0; l < SFT_VLANES; l++) begin
+      bit [31:0] x = a[l*32 +: 32];
+      bit [31:0] y = b[l*32 +: 32];
+      bit [31:0] z = c[l*32 +: 32];
+      case (op)
+        OP_VADD: r[l*32 +: 32] = x + y;
+        OP_VSUB: r[l*32 +: 32] = x - y;
+        OP_VMUL: r[l*32 +: 32] = x * y;
+        OP_TMAC: r[l*32 +: 32] = z + x * y;
+        default: r[l*32 +: 32] = x;
+      endcase
+    end
+    return r;
+  endfunction
+
+  function automatic bit [31:0] sft_vredsum(bit [127:0] a);
+    return a[31:0] + a[63:32] + a[95:64] + a[127:96];
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Encoders
+  //----------------------------------------------------------------------------
+  function automatic bit [31:0] sft_enc_r(int unsigned op, int unsigned rd, int unsigned rs1, int unsigned rs2);
+    return {6'(op), 5'(rd), 5'(rs1), 5'(rs2), 11'd0};
+  endfunction
+
+  function automatic bit [31:0] sft_enc_i(int unsigned op, int unsigned rd, int unsigned rs1, int imm);
+    return {6'(op), 5'(rd), 5'(rs1), 16'(imm)};
+  endfunction
+
+  function automatic bit [31:0] sft_enc_b(int unsigned op, int unsigned rs1, int unsigned rs2, int off);
+    return {6'(op), 5'(rs1), 5'(rs2), 16'(off)};
+  endfunction
+
+  function automatic bit [31:0] sft_enc_j(int unsigned rd, int off);
+    return {6'(OP_JAL), 5'(rd), 21'(off)};
+  endfunction
+
+  function automatic bit [31:0] sft_enc_v(int unsigned op, int unsigned vd, int unsigned vs1, int unsigned vs2);
+    return {6'(op), 2'd0, 3'(vd), 2'd0, 3'(vs1), 2'd0, 3'(vs2), 11'd0};
+  endfunction
+
+  // VLD/VST/VLDP/VSTP vd, imm(rs1)  -  VBCAST vd, rs1
+  function automatic bit [31:0] sft_enc_vm(int unsigned op, int unsigned vd, int unsigned rs1, int imm);
+    return {6'(op), 2'd0, 3'(vd), 5'(rs1), 16'(imm)};
+  endfunction
+
+  // VREDSUM rd, vs1
+  function automatic bit [31:0] sft_enc_vr(int unsigned rd, int unsigned vs1);
+    return {6'(OP_VREDSUM), 5'(rd), 2'd0, 3'(vs1), 16'd0};
+  endfunction
+
+  function automatic string sft_disasm(bit [31:0] w);
+    int unsigned op = sft_opc(w);
+    int          im = $signed(sft_imm(w));
+    if (sft_is_r_alu(op))
+      return $sformatf("%s x%0d, x%0d, x%0d", sft_op_name(op), sft_rd(w), sft_rs1(w), sft_rs2(w));
+    if (op == OP_LUI)
+      return $sformatf("LUI x%0d, 0x%04h", sft_rd(w), w[15:0]);
+    if (sft_is_i_alu(op))
+      return $sformatf("%s x%0d, x%0d, %0d", sft_op_name(op), sft_rd(w), sft_rs1(w), im);
+    if (sft_is_branch(op))
+      return $sformatf("%s x%0d, x%0d, %0d", sft_op_name(op), sft_rd(w), sft_rs1(w), im);
+    if (op == OP_JAL)
+      return $sformatf("JAL x%0d, %0d", sft_rd(w), $signed(sft_off21(w)));
+    if (op == OP_JALR)
+      return $sformatf("JALR x%0d, x%0d, %0d", sft_rd(w), sft_rs1(w), im);
+    if (op == OP_LW)
+      return $sformatf("LW x%0d, %0d(x%0d)", sft_rd(w), im, sft_rs1(w));
+    if (op == OP_SW)
+      return $sformatf("SW x%0d, %0d(x%0d)", sft_rd(w), im, sft_rs1(w));
+    if (op >= OP_VLD && op <= OP_VSTP)
+      return $sformatf("%s v%0d, %0d(x%0d)", sft_op_name(op), sft_vd(w), im, sft_rs1(w));
+    if (op == OP_VBCAST)
+      return $sformatf("VBCAST v%0d, x%0d", sft_vd(w), sft_rs1(w));
+    if (op == OP_VREDSUM)
+      return $sformatf("VREDSUM x%0d, v%0d", sft_rd(w), sft_vs1(w));
+    if (op == OP_VADD || op == OP_VSUB || op == OP_VMUL || op == OP_TMAC)
+      return $sformatf("%s v%0d, v%0d, v%0d", sft_op_name(op), sft_vd(w), sft_vs1(w), sft_vs2(w));
+    return sft_op_name(op);
+  endfunction
+
+endpackage : sft_params_pkg
+
+//==============================================================================
+// Signal bundle between the environment and the DUT
+//==============================================================================
+interface sft_if (input logic clk);
+  import sft_params_pkg::*;
+
+  logic                                      rst_n;
+  logic                                      run;
+  logic                                      stall;
+  logic                                      halted;
+
+  logic                                      imem_we;
+  logic [SFT_IMEM_AW-1:0]                    imem_waddr;
+  logic [31:0]                               imem_wdata;
+
+  logic                                      dm_req_valid;
+  logic                                      dm_req_ready;
+  logic                                      dm_req_we;
+  logic [31:0]                               dm_req_addr;
+  logic [1:0]                                dm_req_len;
+  logic [127:0]                              dm_req_wdata;
+  logic [15:0]                               dm_req_be;
+  logic [SFT_TAG_W-1:0]                      dm_req_tag;
+  logic                                      dm_rsp_valid;
+  logic [SFT_TAG_W-1:0]                      dm_rsp_tag;
+  logic [127:0]                              dm_rsp_rdata;
+  logic                                      dm_rsp_last;
+
+  logic                                      tr_dsp_valid;
+  logic [SFT_ID_W-1:0]                       tr_dsp_id;
+  logic [31:0]                               tr_dsp_pc;
+  logic [31:0]                               tr_dsp_insn;
+  logic [SFT_NUNITS-1:0]                     tr_iss_valid;
+  logic [SFT_NUNITS-1:0][SFT_ID_W-1:0]       tr_iss_id;
+  logic [SFT_NUNITS-1:0]                     tr_wb_valid;
+  logic [SFT_NUNITS-1:0][SFT_ID_W-1:0]       tr_wb_id;
+  logic                                      tr_flush_valid;
+  logic [SFT_ID_W-1:0]                       tr_flush_id;
+  logic [31:0]                               tr_flush_pc;
+  logic [SFT_ROBC_W-1:0]                     tr_rob_count;
+  logic [SFT_SBC_W-1:0]                      tr_sb_count;
+
+  logic                                      rv_valid;
+  logic [63:0]                               rv_order;
+  logic [SFT_ID_W-1:0]                       rv_id;
+  logic [31:0]                               rv_pc;
+  logic [31:0]                               rv_insn;
+  logic [31:0]                               rv_next_pc;
+  logic                                      rv_rd_we;
+  logic [4:0]                                rv_rd_addr;
+  logic [31:0]                               rv_rd_wdata;
+  logic [1:0]                                rv_vd_we;
+  logic [2:0]                                rv_vd_addr;
+  logic [1:0][127:0]                         rv_vd_wdata;
+  logic                                      rv_mem_rd;
+  logic                                      rv_mem_wr;
+  logic [31:0]                               rv_mem_addr;
+  logic [15:0]                               rv_mem_be;
+  logic [1:0]                                rv_mem_len;
+  logic [1:0][127:0]                         rv_mem_rdata;
+  logic [1:0][127:0]                         rv_mem_wdata;
+  logic                                      rv_halt;
+
+  logic [4:0]                                dbg_xaddr;
+  logic [31:0]                               dbg_xdata;
+  logic [2:0]                                dbg_vaddr;
+  logic [127:0]                              dbg_vdata;
+
+  //----------------------------------------------------------------------------
+  // Monitor view: the whole boundary captured at the rising edge (values of the
+  // cycle that is ending), then mon_ev. The environment samples only this view
+  // and drives the live signals with nonblocking assignments.
+  //----------------------------------------------------------------------------
+  event                                      mon_ev;
+  logic                                      mon_rst_n;
+  logic                                      mon_run;
+  logic                                      mon_stall;
+  logic                                      mon_halted;
+  logic                                      mon_dm_req_valid;
+  logic                                      mon_dm_req_ready;
+  logic                                      mon_dm_req_we;
+  logic [31:0]                               mon_dm_req_addr;
+  logic [1:0]                                mon_dm_req_len;
+  logic [127:0]                              mon_dm_req_wdata;
+  logic [15:0]                               mon_dm_req_be;
+  logic [SFT_TAG_W-1:0]                      mon_dm_req_tag;
+  logic                                      mon_dm_rsp_valid;
+  logic [SFT_TAG_W-1:0]                      mon_dm_rsp_tag;
+  logic                                      mon_dm_rsp_last;
+  logic                                      mon_tr_dsp_valid;
+  logic [SFT_ID_W-1:0]                       mon_tr_dsp_id;
+  logic [31:0]                               mon_tr_dsp_pc;
+  logic [31:0]                               mon_tr_dsp_insn;
+  logic [SFT_NUNITS-1:0]                     mon_tr_iss_valid;
+  logic [SFT_NUNITS-1:0][SFT_ID_W-1:0]       mon_tr_iss_id;
+  logic [SFT_NUNITS-1:0]                     mon_tr_wb_valid;
+  logic [SFT_NUNITS-1:0][SFT_ID_W-1:0]       mon_tr_wb_id;
+  logic                                      mon_tr_flush_valid;
+  logic [SFT_ID_W-1:0]                       mon_tr_flush_id;
+  logic [31:0]                               mon_tr_flush_pc;
+  logic [SFT_ROBC_W-1:0]                     mon_tr_rob_count;
+  logic [SFT_SBC_W-1:0]                      mon_tr_sb_count;
+  logic                                      mon_rv_valid;
+  logic [63:0]                               mon_rv_order;
+  logic [SFT_ID_W-1:0]                       mon_rv_id;
+  logic [31:0]                               mon_rv_pc;
+  logic [31:0]                               mon_rv_insn;
+  logic [31:0]                               mon_rv_next_pc;
+  logic                                      mon_rv_rd_we;
+  logic [4:0]                                mon_rv_rd_addr;
+  logic [31:0]                               mon_rv_rd_wdata;
+  logic [1:0]                                mon_rv_vd_we;
+  logic [2:0]                                mon_rv_vd_addr;
+  logic [1:0][127:0]                         mon_rv_vd_wdata;
+  logic                                      mon_rv_mem_rd;
+  logic                                      mon_rv_mem_wr;
+  logic [31:0]                               mon_rv_mem_addr;
+  logic [15:0]                               mon_rv_mem_be;
+  logic [1:0]                                mon_rv_mem_len;
+  logic [1:0][127:0]                         mon_rv_mem_rdata;
+  logic [1:0][127:0]                         mon_rv_mem_wdata;
+  logic                                      mon_rv_halt;
+  logic [31:0]                               mon_dbg_xdata;
+  logic [127:0]                              mon_dbg_vdata;
+
+  always @(posedge clk) begin : p_monitor
+    mon_rst_n          = rst_n;
+    mon_run            = run;
+    mon_stall          = stall;
+    mon_halted         = halted;
+    mon_dm_req_valid   = dm_req_valid;
+    mon_dm_req_ready   = dm_req_ready;
+    mon_dm_req_we      = dm_req_we;
+    mon_dm_req_addr    = dm_req_addr;
+    mon_dm_req_len     = dm_req_len;
+    mon_dm_req_wdata   = dm_req_wdata;
+    mon_dm_req_be      = dm_req_be;
+    mon_dm_req_tag     = dm_req_tag;
+    mon_dm_rsp_valid   = dm_rsp_valid;
+    mon_dm_rsp_tag     = dm_rsp_tag;
+    mon_dm_rsp_last    = dm_rsp_last;
+    mon_tr_dsp_valid   = tr_dsp_valid;
+    mon_tr_dsp_id      = tr_dsp_id;
+    mon_tr_dsp_pc      = tr_dsp_pc;
+    mon_tr_dsp_insn    = tr_dsp_insn;
+    mon_tr_iss_valid   = tr_iss_valid;
+    mon_tr_iss_id      = tr_iss_id;
+    mon_tr_wb_valid    = tr_wb_valid;
+    mon_tr_wb_id       = tr_wb_id;
+    mon_tr_flush_valid = tr_flush_valid;
+    mon_tr_flush_id    = tr_flush_id;
+    mon_tr_flush_pc    = tr_flush_pc;
+    mon_tr_rob_count   = tr_rob_count;
+    mon_tr_sb_count    = tr_sb_count;
+    mon_rv_valid       = rv_valid;
+    mon_rv_order       = rv_order;
+    mon_rv_id          = rv_id;
+    mon_rv_pc          = rv_pc;
+    mon_rv_insn        = rv_insn;
+    mon_rv_next_pc     = rv_next_pc;
+    mon_rv_rd_we       = rv_rd_we;
+    mon_rv_rd_addr     = rv_rd_addr;
+    mon_rv_rd_wdata    = rv_rd_wdata;
+    mon_rv_vd_we       = rv_vd_we;
+    mon_rv_vd_addr     = rv_vd_addr;
+    mon_rv_vd_wdata    = rv_vd_wdata;
+    mon_rv_mem_rd      = rv_mem_rd;
+    mon_rv_mem_wr      = rv_mem_wr;
+    mon_rv_mem_addr    = rv_mem_addr;
+    mon_rv_mem_be      = rv_mem_be;
+    mon_rv_mem_len     = rv_mem_len;
+    mon_rv_mem_rdata   = rv_mem_rdata;
+    mon_rv_mem_wdata   = rv_mem_wdata;
+    mon_rv_halt        = rv_halt;
+    mon_dbg_xdata      = dbg_xdata;
+    mon_dbg_vdata      = dbg_vdata;
+    -> mon_ev;
+  end
+
+endinterface : sft_if
+
+//==============================================================================
+// Verification package
+//==============================================================================
+package sft_tb_pkg;
+  import sft_params_pkg::*;
+
+  //----------------------------------------------------------------------------
+  // Error taxonomy
+  //----------------------------------------------------------------------------
+  typedef enum int unsigned {
+    E_PROTOCOL,          // interface rule broken (bus stability, response tags, ...)
+    E_XPROP,             // unknown value on a control output
+    E_FETCH_PC,          // dispatched PC breaks sequential / redirect order
+    E_FETCH_CORRUPT,     // dispatched word differs from instruction SRAM
+    E_DISPATCH_ID,       // dispatch id sequence broken
+    E_STALL,             // activity while stalled / not running / halted
+    E_UNIT_ROUTE,        // instruction issued to the wrong execution unit
+    E_DUP_EVENT,         // second issue / write-back / retirement of one instruction
+    E_PHANTOM,           // event for an id that was never dispatched
+    E_SQUASHED_ACTIVITY, // event for a squashed instruction (stale write-back)
+    E_RAW,               // issued before a producer wrote back
+    E_DFSYNC,            // issued past an unreleased DFSYNC barrier
+    E_LATENCY,           // write-back latency outside the unit contract
+    E_FLUSH,             // flush from a non-control / not written-back instruction
+    E_REDIRECT,          // taken control transfer not redirected to its target
+    E_RETIRE_ORDER,      // retirement out of order / before write-back
+    E_ARCH_MISMATCH,     // retired effect differs from the golden ISA model
+    E_MEM_WRITE,         // bus write differs from the retired store stream
+    E_MEM_READ,          // malformed read request
+    E_MEM_IMAGE,         // final data memory differs from the golden model
+    E_RF_STATE,          // final register file differs from the golden model
+    E_COUNT,             // occupancy counters differ from tracked state
+    E_HALT,              // halt behaviour
+    E_RESET,             // reset behaviour
+    E_DEADLOCK,          // no retirement progress
+    E_LOST,              // instruction never retired / work left at halt
+    E_DETERMINISM,       // identical replay produced a different trace
+    E_COVERAGE,          // mandatory coverage bin not reached
+    E_SVA,               // concurrent assertion failure
+    E_TB_INTERNAL,       // environment self-consistency failure
+    E_NUM_CATEGORIES
+  } sft_err_e;
+
+  int unsigned sft_sva_failures = 0;
+
+  function automatic void sft_sva_fail(string msg);
+    sft_sva_failures++;
+    $display("[SFT-SVA] %s", msg);
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Utilities
+  //----------------------------------------------------------------------------
+  function automatic bit [63:0] sft_hash_str(string s, bit [63:0] salt);
+    bit [63:0] h = 64'hCBF2_9CE4_8422_2325 ^ salt;
+    for (int i = 0; i < s.len(); i++) begin
+      h = h ^ {56'd0, s[i]};
+      h = h * 64'h0000_0100_0000_01B3;
+    end
+    return h;
+  endfunction
+
+  function automatic string sft_pick(bit c, string a, string b);
+    return c ? a : b;
+  endfunction
+
+  function automatic string sft_pad(string s, int unsigned w);
+    string r = s;
+    while (r.len() < int'(w)) r = {r, " "};
+    return r;
+  endfunction
+
+  function automatic bit [127:0] sft_merge(bit [127:0] old, bit [127:0] d, bit [15:0] be);
+    bit [127:0] r = old;
+    for (int unsigned b = 0; b < 16; b++) if (be[b]) r[b*8 +: 8] = d[b*8 +: 8];
+    return r;
+  endfunction
+
+  function automatic bit sft_masked_eq(bit [127:0] a, bit [127:0] b, bit [15:0] be);
+    for (int unsigned k = 0; k < 16; k++) if (be[k] && a[k*8 +: 8] != b[k*8 +: 8]) return 1'b0;
+    return 1'b1;
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Run configuration
+  //----------------------------------------------------------------------------
+  class sft_cfg;
+    bit [63:0]   seed;
+    bit          strict_timing;
+    int unsigned verbosity;
+    int unsigned max_errors;
+    int unsigned random_iters;
+    int unsigned deadlock_cycles;
+    longint      program_timeout;
+    string       only_test;
+    bit          cov_closure;
+
+    function new();
+      seed            = 64'd17060915;
+      strict_timing   = 1'b1;
+      verbosity       = 1;
+      max_errors      = 25;
+      random_iters    = 12;
+      deadlock_cycles = 3000;
+      program_timeout = 200000;
+      only_test       = "";
+      cov_closure     = 1'b1;
+    endfunction
+
+    function void load_plusargs();
+      longint unsigned s;
+      int unsigned     v;
+      string           t;
+      if ($value$plusargs("SEED=%d", s))             seed          = s;
+      if ($test$plusargs("SFT_RELAXED_TIMING"))       strict_timing = 1'b0;
+      if ($value$plusargs("SFT_VERBOSE=%d", v))       verbosity     = v;
+      if ($value$plusargs("SFT_RANDOM_ITERS=%d", v))  random_iters  = v;
+      if ($value$plusargs("SFT_MAX_ERRORS=%d", v))    max_errors    = (v == 0) ? 1 : v;
+      if ($value$plusargs("SFT_TEST=%s", t))          only_test     = t;
+      if ($test$plusargs("SFT_NO_COV_CLOSURE"))       cov_closure   = 1'b0;
+    endfunction
+  endclass : sft_cfg
+
+  //----------------------------------------------------------------------------
+  // Deterministic PRNG (xoshiro128**, splitmix64 seeding); simulator-agnostic.
+  //----------------------------------------------------------------------------
+  class sft_prng;
+    local bit [31:0] st[4];
+
+    function new(bit [63:0] seed = 64'h5F3A_9C21_D00D_F00D);
+      reseed(seed);
+    endfunction
+
+    local function bit [63:0] mix64(bit [63:0] z);
+      z = (z ^ (z >> 30)) * 64'hBF58_476D_1CE4_E5B9;
+      z = (z ^ (z >> 27)) * 64'h94D0_49BB_1331_11EB;
+      return z ^ (z >> 31);
+    endfunction
+
+    local function bit [31:0] rotl(bit [31:0] x, int unsigned k);
+      return (x << k) | (x >> (32 - k));
+    endfunction
+
+    function void reseed(bit [63:0] seed);
+      bit [63:0] z = seed;
+      bit [63:0] m;
+      for (int i = 0; i < 4; i++) begin
+        z     = z + 64'h9E37_79B9_7F4A_7C15;
+        m     = mix64(z);
+        st[i] = m[31:0] ^ m[63:32];
+      end
+      if ((st[0] | st[1] | st[2] | st[3]) == 32'd0) st[0] = 32'h1;
+    endfunction
+
+    function bit [31:0] next32();
+      bit [31:0] result = rotl(st[1] * 32'd5, 7) * 32'd9;
+      bit [31:0] t      = st[1] << 9;
+      st[2] = st[2] ^ st[0];
+      st[3] = st[3] ^ st[1];
+      st[1] = st[1] ^ st[2];
+      st[0] = st[0] ^ st[3];
+      st[2] = st[2] ^ t;
+      st[3] = rotl(st[3], 11);
+      return result;
+    endfunction
+
+    function bit [127:0] next128();
+      bit [31:0] a = next32();
+      bit [31:0] b = next32();
+      bit [31:0] c = next32();
+      bit [31:0] d = next32();
+      return {a, b, c, d};
+    endfunction
+
+    function int unsigned range(int unsigned lo, int unsigned hi);
+      bit [63:0] span;
+      bit [63:0] prod;
+      if (hi <= lo) return lo;
+      span = 64'(hi) - 64'(lo) + 64'd1;
+      prod = 64'(next32()) * span;
+      return lo + prod[63:32];
+    endfunction
+
+    function bit permille(int unsigned p);
+      return range(0, 999) < p;
+    endfunction
+
+    // Operand values biased toward arithmetic corner cases.
+    function bit [31:0] corner32();
+      case (range(0, 9))
+        0:       return 32'h0000_0000;
+        1:       return 32'h0000_0001;
+        2:       return 32'hFFFF_FFFF;
+        3:       return 32'h7FFF_FFFF;
+        4:       return 32'h8000_0000;
+        5:       return 32'h0000_001F;
+        6:       return 32'h8000_0001;
+        default: return next32();
+      endcase
+    endfunction
+  endclass : sft_prng
+
+  //----------------------------------------------------------------------------
+  // Program image: instruction words + initial data memory
+  //----------------------------------------------------------------------------
+  class sft_program;
+    string      name;
+    string      kind;
+    bit [31:0]  words[$];
+    bit [127:0] data_init[bit [31:0]];
+
+    function new(string pname, string pkind);
+      name = pname;
+      kind = pkind;
+    endfunction
+
+    function int unsigned size();
+      return words.size();
+    endfunction
+  endclass : sft_program
+
+  //----------------------------------------------------------------------------
+  // Two-pass assembler with label fix-ups
+  //----------------------------------------------------------------------------
+  class sft_asm;
+    sft_program  prog;
+    int unsigned label_pos[string];
+    string       fix_label[$];
+    int unsigned fix_pos[$];
+    bit          fix_jal[$];
+
+    function new(string pname, string pkind);
+      prog = new(pname, pkind);
+    endfunction
+
+    function int unsigned here();
+      return prog.words.size();
+    endfunction
+
+    function void emit(bit [31:0] w);
+      prog.words.push_back(w);
+    endfunction
+
+    function void label(string l);
+      if (label_pos.exists(l)) $fatal(1, "[SFT-ASM] %s: duplicate label '%s'", prog.name, l);
+      label_pos[l] = here();
+    endfunction
+
+    function void r(int unsigned op, int unsigned rd, int unsigned rs1, int unsigned rs2);
+      emit(sft_enc_r(op, rd, rs1, rs2));
+    endfunction
+
+    function void i(int unsigned op, int unsigned rd, int unsigned rs1, int imm);
+      emit(sft_enc_i(op, rd, rs1, imm));
+    endfunction
+
+    function void br(int unsigned op, int unsigned rs1, int unsigned rs2, string l);
+      fix_label.push_back(l);
+      fix_pos.push_back(here());
+      fix_jal.push_back(1'b0);
+      emit(sft_enc_b(op, rs1, rs2, 0));
+    endfunction
+
+    function void jal(int unsigned rd, string l);
+      fix_label.push_back(l);
+      fix_pos.push_back(here());
+      fix_jal.push_back(1'b1);
+      emit(sft_enc_j(rd, 0));
+    endfunction
+
+    function void jalr(int unsigned rd, int unsigned rs1, int imm);
+      emit(sft_enc_i(OP_JALR, rd, rs1, imm));
+    endfunction
+
+    function void lw(int unsigned rd, int imm, int unsigned base);
+      emit(sft_enc_i(OP_LW, rd, base, imm));
+    endfunction
+
+    function void sw(int unsigned src, int imm, int unsigned base);
+      emit(sft_enc_i(OP_SW, src, base, imm));
+    endfunction
+
+    function void v(int unsigned op, int unsigned vd, int unsigned vs1, int unsigned vs2);
+      emit(sft_enc_v(op, vd, vs1, vs2));
+    endfunction
+
+    function void vm(int unsigned op, int unsigned vd, int imm, int unsigned base);
+      emit(sft_enc_vm(op, vd, base, imm));
+    endfunction
+
+    function void vbcast(int unsigned vd, int unsigned rs);
+      emit(sft_enc_vm(OP_VBCAST, vd, rs, 0));
+    endfunction
+
+    function void vredsum(int unsigned rd, int unsigned vs);
+      emit(sft_enc_vr(rd, vs));
+    endfunction
+
+    // Load any 32-bit constant (LUI + sign-compensated ADDI).
+    function void li(int unsigned rd, bit [31:0] val);
+      bit [15:0] hi = val[31:16] + {15'd0, val[15]};
+      i(OP_LUI, rd, 0, int'(hi));
+      i(OP_ADDI, rd, rd, int'($signed(val[15:0])));
+    endfunction
+
+    function void nop();    i(OP_ADDI, 0, 0, 0);      endfunction
+    function void dfsync(); emit({6'(OP_DFSYNC), 26'd0}); endfunction
+    function void halt();   emit({6'(OP_HALT), 26'd0});   endfunction
+
+    function sft_program finish();
+      foreach (fix_label[k]) begin
+        int off;
+        if (!label_pos.exists(fix_label[k])) $fatal(1, "[SFT-ASM] %s: undefined label '%s'", prog.name, fix_label[k]);
+        off = int'(label_pos[fix_label[k]]) - int'(fix_pos[k]);
+        if (fix_jal[k]) prog.words[fix_pos[k]][20:0] = 21'(off);
+        else            prog.words[fix_pos[k]][15:0] = 16'(off);
+      end
+      if (prog.words.size() > SFT_IMEM_WORDS) $fatal(1, "[SFT-ASM] %s: %0d words exceed the instruction SRAM", prog.name, prog.words.size());
+      return prog;
+    endfunction
+  endclass : sft_asm
+
+  //----------------------------------------------------------------------------
+  // Architectural effect of one instruction
+  //----------------------------------------------------------------------------
+  class sft_effect;
+    bit [31:0]   pc;
+    bit [31:0]   insn;
+    bit [31:0]   next_pc;
+    bit          rd_we;
+    int unsigned rd;
+    bit [31:0]   rd_val;
+    bit [1:0]    vd_we;
+    int unsigned vd;
+    bit [127:0]  vd_val[2];
+    bit          mem_rd;
+    bit          mem_wr;
+    bit [31:0]   mem_addr;
+    bit [15:0]   be;
+    int unsigned len;
+    bit [127:0]  mem_rdata[2];
+    bit [127:0]  mem_wdata[2];
+    bit          halt;
+    bit          taken;
+
+    function new();
+      pc = '0; insn = '0; next_pc = '0; rd_we = 1'b0; rd = 0; rd_val = '0; vd_we = '0; vd = 0;
+      vd_val[0] = '0; vd_val[1] = '0; mem_rd = 1'b0; mem_wr = 1'b0; mem_addr = '0; be = '0; len = 0;
+      mem_rdata[0] = '0; mem_rdata[1] = '0; mem_wdata[0] = '0; mem_wdata[1] = '0; halt = 1'b0; taken = 1'b0;
+    endfunction
+  endclass : sft_effect
+
+  //----------------------------------------------------------------------------
+  // Golden ISA model: sequential, cycle-independent architectural semantics
+  //----------------------------------------------------------------------------
+  class sft_isa_model;
+    bit [31:0]       x[SFT_NXREG];
+    bit [127:0]      v[SFT_NVREG];
+    bit [31:0]       pc;
+    bit [127:0]      mem[bit [31:0]];
+    bit [31:0]       imem[SFT_IMEM_WORDS];
+    bit              halted;
+    longint unsigned n_exec;
+
+    function new();
+      foreach (imem[i]) imem[i] = '0;
+      reset_arch();
+    endfunction
+
+    function void reset_arch();
+      foreach (x[i]) x[i] = '0;
+      foreach (v[i]) v[i] = '0;
+      pc     = '0;
+      halted = 1'b0;
+      n_exec = 0;
+    endfunction
+
+    function bit [31:0] fetch(bit [31:0] a);
+      return imem[a[SFT_IMEM_AW+1:2]];
+    endfunction
+
+    function bit [127:0] line(bit [31:0] a);
+      bit [31:0] k = {a[31:4], 4'd0};
+      if (mem.exists(k)) return mem[k];
+      return '0;
+    endfunction
+
+    function sft_effect execute();
+      sft_effect   e  = new();
+      bit [31:0]   w  = fetch(pc);
+      int unsigned op = sft_opc(w);
+      bit [31:0]   a  = x[sft_rs1(w)];
+      bit [31:0]   b  = x[sft_rs2(w)];
+      bit [31:0]   ea = a + sft_imm(w);
+      e.pc      = pc;
+      e.insn    = w;
+      e.next_pc = pc + 32'd4;
+      if (sft_is_r_alu(op)) begin
+        e.rd = sft_rd(w); e.rd_val = sft_alu(op, a, b);
+      end else if (sft_is_i_alu(op)) begin
+        e.rd = sft_rd(w); e.rd_val = sft_alu(op, a, sft_imm(w));
+      end else if (sft_is_branch(op)) begin
+        e.taken = sft_br_taken(op, x[sft_rd(w)], x[sft_rs1(w)]);
+        if (e.taken) e.next_pc = pc + (sft_imm(w) << 2);
+      end else if (op == OP_JAL) begin
+        e.rd = sft_rd(w); e.rd_val = pc + 32'd4; e.taken = 1'b1;
+        e.next_pc = pc + (sft_off21(w) << 2);
+      end else if (op == OP_JALR) begin
+        e.rd = sft_rd(w); e.rd_val = pc + 32'd4; e.taken = 1'b1;
+        e.next_pc = ea & ~32'd3;
+      end else if (op == OP_LW) begin
+        bit [31:0] ad = ea & ~32'd3;
+        e.mem_rd = 1'b1; e.mem_addr = {ad[31:4], 4'd0}; e.be = 16'hF << (ad[3:2] * 4); e.len = 0;
+        e.mem_rdata[0] = line(ad);
+        e.rd = sft_rd(w); e.rd_val = e.mem_rdata[0][ad[3:2] * 32 +: 32];
+      end else if (op == OP_SW) begin
+        bit [31:0] ad = ea & ~32'd3;
+        e.mem_wr = 1'b1; e.mem_addr = {ad[31:4], 4'd0}; e.be = 16'hF << (ad[3:2] * 4); e.len = 0;
+        e.mem_wdata[0] = 128'(x[sft_rd(w)]) << (ad[3:2] * 32);
+      end else if (op == OP_VLD || op == OP_VLDP) begin
+        bit [31:0] ad = (op == OP_VLD) ? (ea & ~32'd15) : (ea & ~32'd31);
+        e.mem_rd = 1'b1; e.mem_addr = ad; e.be = 16'hFFFF; e.len = (op == OP_VLDP) ? 1 : 0;
+        e.vd = sft_vd(w); e.vd_we = (op == OP_VLDP) ? 2'b11 : 2'b01;
+        for (int unsigned k = 0; k <= e.len; k++) begin
+          e.mem_rdata[k] = line(ad + 16 * k);
+          e.vd_val[k]    = e.mem_rdata[k];
+        end
+      end else if (op == OP_VST || op == OP_VSTP) begin
+        bit [31:0] ad = (op == OP_VST) ? (ea & ~32'd15) : (ea & ~32'd31);
+        e.mem_wr = 1'b1; e.mem_addr = ad; e.be = 16'hFFFF; e.len = (op == OP_VSTP) ? 1 : 0;
+        for (int unsigned k = 0; k <= e.len; k++) e.mem_wdata[k] = v[(sft_vd(w) + k) % SFT_NVREG];
+      end else if (op == OP_VADD || op == OP_VSUB || op == OP_VMUL) begin
+        e.vd = sft_vd(w); e.vd_we = 2'b01; e.vd_val[0] = sft_vec(op, v[sft_vs1(w)], v[sft_vs2(w)], '0);
+      end else if (op == OP_TMAC) begin
+        e.vd = sft_vd(w); e.vd_we = 2'b01; e.vd_val[0] = sft_vec(op, v[sft_vs1(w)], v[sft_vs2(w)], v[sft_vd(w)]);
+      end else if (op == OP_VBCAST) begin
+        e.vd = sft_vd(w); e.vd_we = 2'b01; e.vd_val[0] = {4{a}};
+      end else if (op == OP_VREDSUM) begin
+        e.rd = sft_rd(w); e.rd_val = sft_vredsum(v[sft_vs1(w)]);
+      end else if (op == OP_HALT) begin
+        e.halt = 1'b1;
+      end
+      e.rd_we = (sft_unit(op) != U_NONE) && (e.rd != 0) &&
+                (sft_is_r_alu(op) || sft_is_i_alu(op) || op == OP_JAL || op == OP_JALR || op == OP_LW || op == OP_VREDSUM);
+      if (!e.rd_we) e.rd_val = '0;
+      return e;
+    endfunction
+
+    function void commit(sft_effect e);
+      if (e.rd_we) x[e.rd] = e.rd_val;
+      for (int unsigned k = 0; k < 2; k++) if (e.vd_we[k]) v[(e.vd + k) % SFT_NVREG] = e.vd_val[k];
+      if (e.mem_wr) begin
+        for (int unsigned k = 0; k <= e.len; k++) begin
+          bit [31:0] la = e.mem_addr + 16 * k;
+          mem[la] = sft_merge(line(la), e.mem_wdata[k], e.be);
+        end
+      end
+      pc = e.next_pc;
+      if (e.halt) halted = 1'b1;
+      n_exec++;
+    endfunction
+
+    function string reg_snapshot();
+      string s = "";
+      for (int unsigned r = 0; r < SFT_NXREG; r++) begin
+        if (r % 8 == 0) s = {s, "\n        "};
+        s = {s, $sformatf("x%0d=%08h ", r, x[r])};
+      end
+      for (int unsigned r = 0; r < SFT_NVREG; r++) begin
+        if (r % 2 == 0) s = {s, "\n        "};
+        s = {s, $sformatf("v%0d=%032h ", r, v[r])};
+      end
+      return s;
+    endfunction
+  endclass : sft_isa_model
+
+  //----------------------------------------------------------------------------
+  // Run knobs: data-bus behaviour and system stall pattern
+  //----------------------------------------------------------------------------
+  class sft_knobs;
+    int unsigned bus_stall_pm;
+    int unsigned bus_stall_max;
+    int unsigned lat_min;
+    int unsigned lat_max;
+    bit          ooo;
+    int unsigned gap_pm;
+    int unsigned sys_stall_pm;
+    int unsigned sys_stall_max;
+    longint      bus_freeze_from[$];
+    longint      bus_freeze_to[$];
+    longint      stall_from[$];
+    longint      stall_to[$];
+
+    function new();
+      bus_stall_pm  = 0;
+      bus_stall_max = 1;
+      lat_min       = 2;
+      lat_max       = 6;
+      ooo           = 1'b0;
+      gap_pm        = 0;
+      sys_stall_pm  = 0;
+      sys_stall_max = 1;
+    endfunction
+
+    function void add_bus_freeze(longint from, longint to);
+      bus_freeze_from.push_back(from);
+      bus_freeze_to.push_back(to);
+    endfunction
+
+    function void add_stall(longint from, longint to);
+      stall_from.push_back(from);
+      stall_to.push_back(to);
+    endfunction
+  endclass : sft_knobs
+
+  //----------------------------------------------------------------------------
+  // Data-memory bus responder: backing store, request back-pressure, variable
+  // latency, out-of-order completion across tags, in-order burst beats.
+  //----------------------------------------------------------------------------
+  class sft_mem_bfm;
+    sft_prng     rng;
+    bit [127:0]  mem[bit [31:0]];
+    int unsigned p_tag[$];
+    int unsigned p_beats[$];
+    int unsigned p_next[$];
+    longint      p_ready[$];
+    bit [127:0]  p_d0[$];
+    bit [127:0]  p_d1[$];
+    bit          tag_busy[int unsigned];
+    sft_knobs    k;
+    longint      base_cycle;
+    int unsigned stall_left;
+    bit          ready_now;
+    bit          rsp_valid;
+    int unsigned rsp_tag;
+    bit [127:0]  rsp_data;
+    bit          rsp_last;
+    bit          rsp_ooo;
+    bit          rsp_gap;
+    int unsigned n_reads;
+    int unsigned n_writes;
+    int unsigned n_beats;
+    int unsigned n_bp_cycles;
+
+    function new(sft_prng rng_h);
+      rng = rng_h;
+      k   = new();
+      n_reads = 0; n_writes = 0; n_beats = 0; n_bp_cycles = 0;
+      reset();
+    endfunction
+
+    function void reset();
+      p_tag.delete(); p_beats.delete(); p_next.delete(); p_ready.delete(); p_d0.delete(); p_d1.delete();
+      tag_busy.delete();
+      stall_left = 0;
+      ready_now  = 1'b1;
+      rsp_valid  = 1'b0;
+      rsp_tag    = 0;
+      rsp_data   = '0;
+      rsp_last   = 1'b0;
+      rsp_ooo    = 1'b0;
+      rsp_gap    = 1'b0;
+    endfunction
+
+    function void configure(sft_knobs kn, longint base);
+      k          = kn;
+      base_cycle = base;
+    endfunction
+
+    function void load_image(sft_program p);
+      mem.delete();
+      foreach (p.data_init[a]) mem[a] = p.data_init[a];
+    endfunction
+
+    function bit [127:0] line(bit [31:0] a);
+      bit [31:0] la = {a[31:4], 4'd0};
+      if (mem.exists(la)) return mem[la];
+      return '0;
+    endfunction
+
+    function int unsigned outstanding();
+      return p_tag.size();
+    endfunction
+
+    function void write(bit [31:0] a, bit [127:0] d, bit [15:0] be);
+      bit [31:0] la = {a[31:4], 4'd0};
+      mem[la] = sft_merge(line(la), d, be);
+      n_writes++;
+    endfunction
+
+    // Accept a read request; returns a protocol complaint or "".
+    function string accept_read(bit [31:0] a, int unsigned len, int unsigned tag, longint cyc);
+      if (a[3:0] != 4'd0)             return $sformatf("read address 0x%08h not 16-byte aligned", a);
+      if (len > 1)                    return $sformatf("read length %0d beats exceeds the 2-beat burst limit", len + 1);
+      if (len == 1 && a[4] != 1'b0)   return $sformatf("2-beat burst at 0x%08h not 32-byte aligned", a);
+      if (tag_busy.exists(tag))       return $sformatf("read tag %0d reused while outstanding", tag);
+      tag_busy[tag] = 1'b1;
+      p_tag.push_back(tag);
+      p_beats.push_back(len + 1);
+      p_next.push_back(0);
+      p_ready.push_back(cyc + longint'(rng.range(k.lat_min, k.lat_max)));
+      p_d0.push_back(line(a));
+      p_d1.push_back(line(a + 32'd16));
+      n_reads++;
+      return "";
+    endfunction
+
+    local function bit in_freeze(longint cyc);
+      foreach (k.bus_freeze_from[i])
+        if (cyc >= base_cycle + k.bus_freeze_from[i] && cyc <= base_cycle + k.bus_freeze_to[i]) return 1'b1;
+      return 1'b0;
+    endfunction
+
+    // Decide request-ready and the response beat for cycle 'cyc'.
+    function void advance(longint cyc);
+      int sel = -1;
+      int cand[$];
+      if (in_freeze(cyc)) begin
+        ready_now = 1'b0;
+      end else if (stall_left > 0) begin
+        ready_now = 1'b0;
+        stall_left--;
+      end else if (k.bus_stall_pm > 0 && rng.permille(k.bus_stall_pm)) begin
+        ready_now  = 1'b0;
+        stall_left = rng.range(1, (k.bus_stall_max == 0) ? 1 : k.bus_stall_max) - 1;
+      end else begin
+        ready_now = 1'b1;
+      end
+      if (!ready_now) n_bp_cycles++;
+      rsp_valid = 1'b0;
+      rsp_ooo   = 1'b0;
+      rsp_gap   = 1'b0;
+      foreach (p_tag[i]) if (p_ready[i] <= cyc) cand.push_back(i);
+      if (cand.size() == 0) return;
+      if (k.ooo) begin
+        sel = cand[rng.range(0, cand.size() - 1)];
+      end else begin
+        if (p_ready[0] <= cyc) sel = 0;
+      end
+      if (sel < 0) return;
+      if (sel > 0) rsp_ooo = 1'b1;
+      rsp_valid = 1'b1;
+      rsp_tag   = p_tag[sel];
+      rsp_data  = (p_next[sel] == 0) ? p_d0[sel] : p_d1[sel];
+      p_next[sel]++;
+      n_beats++;
+      rsp_last = (p_next[sel] == p_beats[sel]);
+      if (rsp_last) begin
+        tag_busy.delete(p_tag[sel]);
+        p_tag.delete(sel); p_beats.delete(sel); p_next.delete(sel); p_ready.delete(sel); p_d0.delete(sel); p_d1.delete(sel);
+      end else begin
+        int unsigned gap = (k.gap_pm > 0 && rng.permille(k.gap_pm)) ? rng.range(1, 3) : 0;
+        p_ready[sel] = cyc + 1 + longint'(gap);
+        rsp_gap      = gap > 0;
+      end
+    endfunction
+  endclass : sft_mem_bfm
+
+  //----------------------------------------------------------------------------
+  // Dynamic instruction transaction: decode, dependencies, full lifecycle
+  //----------------------------------------------------------------------------
+  class sft_instr;
+    longint unsigned id;
+    bit [31:0]       pc;
+    bit [31:0]       insn;
+    int unsigned     op;
+    int unsigned     unit;
+    int unsigned     src_x[$];
+    int unsigned     src_v[$];
+    int              dst_x;
+    int unsigned     dst_v[$];
+    sft_instr        prod[$];
+    int unsigned     dep_dist;
+    bit              is_load;
+    bit              is_store;
+    bit              is_ctrl;
+    bit              is_barrier;
+    bit              is_halt;
+    longint          dsp_cycle;
+    longint          iss_cycle;
+    longint          wb_cycle;
+    longint          ret_cycle;
+    longint          squash_cycle;
+    int              iss_unit;
+    bit              squashed;
+    bit              retired;
+    bit              flushed;
+    bit [31:0]       flush_pc;
+    longint          flush_cycle;
+
+    function new(longint unsigned iid, bit [31:0] ipc, bit [31:0] w, longint cyc);
+      id           = iid;
+      pc           = ipc;
+      insn         = w;
+      op           = sft_opc(w);
+      unit         = sft_unit(op);
+      dst_x        = -1;
+      dep_dist     = 0;
+      is_load      = sft_is_load(op);
+      is_store     = sft_is_store(op);
+      is_ctrl      = sft_is_ctrl(op);
+      is_barrier   = (op == OP_DFSYNC);
+      is_halt      = (op == OP_HALT);
+      dsp_cycle    = cyc;
+      iss_cycle    = -1;
+      wb_cycle     = -1;
+      ret_cycle    = -1;
+      squash_cycle = -1;
+      iss_unit     = -1;
+      squashed     = 1'b0;
+      retired      = 1'b0;
+      flushed      = 1'b0;
+      flush_pc     = '0;
+      flush_cycle  = -1;
+      decode();
+    endfunction
+
+    local function void add_x(int unsigned r);
+      if (r != 0) src_x.push_back(r);
+    endfunction
+
+    local function void decode();
+      bit [31:0] w = insn;
+      if (sft_is_r_alu(op)) begin
+        add_x(sft_rs1(w)); add_x(sft_rs2(w)); dst_x = int'(sft_rd(w));
+      end else if (op == OP_LUI) begin
+        dst_x = int'(sft_rd(w));
+      end else if (sft_is_i_alu(op)) begin
+        add_x(sft_rs1(w)); dst_x = int'(sft_rd(w));
+      end else if (sft_is_branch(op)) begin
+        add_x(sft_rd(w)); add_x(sft_rs1(w));
+      end else if (op == OP_JAL) begin
+        dst_x = int'(sft_rd(w));
+      end else if (op == OP_JALR || op == OP_LW) begin
+        add_x(sft_rs1(w)); dst_x = int'(sft_rd(w));
+      end else if (op == OP_SW) begin
+        add_x(sft_rs1(w)); add_x(sft_rd(w));
+      end else if (op == OP_VLD) begin
+        add_x(sft_rs1(w)); dst_v.push_back(sft_vd(w));
+      end else if (op == OP_VLDP) begin
+        add_x(sft_rs1(w)); dst_v.push_back(sft_vd(w)); dst_v.push_back((sft_vd(w) + 1) % SFT_NVREG);
+      end else if (op == OP_VST) begin
+        add_x(sft_rs1(w)); src_v.push_back(sft_vd(w));
+      end else if (op == OP_VSTP) begin
+        add_x(sft_rs1(w)); src_v.push_back(sft_vd(w)); src_v.push_back((sft_vd(w) + 1) % SFT_NVREG);
+      end else if (op == OP_VADD || op == OP_VSUB || op == OP_VMUL) begin
+        src_v.push_back(sft_vs1(w)); src_v.push_back(sft_vs2(w)); dst_v.push_back(sft_vd(w));
+      end else if (op == OP_TMAC) begin
+        src_v.push_back(sft_vs1(w)); src_v.push_back(sft_vs2(w)); src_v.push_back(sft_vd(w)); dst_v.push_back(sft_vd(w));
+      end else if (op == OP_VBCAST) begin
+        add_x(sft_rs1(w)); dst_v.push_back(sft_vd(w));
+      end else if (op == OP_VREDSUM) begin
+        src_v.push_back(sft_vs1(w)); dst_x = int'(sft_rd(w));
+      end
+      if (dst_x == 0) dst_x = -1;
+    endfunction
+
+    function bit writes_x(int unsigned r);
+      return dst_x == int'(r);
+    endfunction
+
+    function bit writes_v(int unsigned r);
+      foreach (dst_v[k]) if (dst_v[k] == r) return 1'b1;
+      return 1'b0;
+    endfunction
+
+    function string brief();
+      return $sformatf("id=%0d pc=0x%08h [%s] %s", id, pc, sft_unit_name(unit), sft_disasm(insn));
+    endfunction
+
+    function string lifecycle();
+      return $sformatf("dispatch@%0d issue@%0d(%s) writeback@%0d retire@%0d%s%s", dsp_cycle, iss_cycle,
+                       (iss_unit < 0) ? "-" : sft_unit_name(iss_unit), wb_cycle, ret_cycle,
+                       sft_pick(squashed, $sformatf(" squashed@%0d", squash_cycle), ""),
+                       sft_pick(flushed, $sformatf(" flush@%0d->0x%08h", flush_cycle, flush_pc), ""));
+    endfunction
+  endclass : sft_instr
+
+  //----------------------------------------------------------------------------
+  // Expected bus write (one beat of a retired store)
+  //----------------------------------------------------------------------------
+  class sft_wr;
+    longint unsigned id;
+    bit [31:0]       pc;
+    bit [31:0]       insn;
+    bit [31:0]       addr;
+    bit [127:0]      data;
+    bit [15:0]       be;
+    longint          ret_cycle;
+
+    function new(longint unsigned iid, bit [31:0] ipc, bit [31:0] w, bit [31:0] a, bit [127:0] d, bit [15:0] b, longint cyc);
+      id = iid; pc = ipc; insn = w; addr = a; data = d; be = b; ret_cycle = cyc;
+    endfunction
+  endclass : sft_wr
+
+  //----------------------------------------------------------------------------
+  // Per-cycle monitor sample of the DUT boundary
+  //----------------------------------------------------------------------------
+  class sft_obs;
+    longint                cyc;
+    bit                    rst_n;
+    bit                    run;
+    bit                    stall;
+    bit                    halted;
+    bit                    req_valid;
+    bit                    req_ready;
+    bit                    req_we;
+    bit [31:0]             req_addr;
+    int unsigned           req_len;
+    bit [127:0]            req_wdata;
+    bit [15:0]             req_be;
+    int unsigned           req_tag;
+    bit                    rsp_valid;
+    bit                    rsp_last;
+    bit                    dsp_valid;
+    longint unsigned       dsp_id;
+    bit [31:0]             dsp_pc;
+    bit [31:0]             dsp_insn;
+    bit [SFT_NUNITS-1:0]   iss_valid;
+    longint unsigned       iss_id [SFT_NUNITS];
+    bit [SFT_NUNITS-1:0]   wb_valid;
+    longint unsigned       wb_id  [SFT_NUNITS];
+    bit                    flush_valid;
+    longint unsigned       flush_id;
+    bit [31:0]             flush_pc;
+    int unsigned           rob_count;
+    int unsigned           sb_count;
+    bit                    rv_valid;
+    longint unsigned       rv_order;
+    longint unsigned       rv_id;
+    bit [31:0]             rv_pc;
+    bit [31:0]             rv_insn;
+    bit [31:0]             rv_next_pc;
+    bit                    rv_rd_we;
+    int unsigned           rv_rd_addr;
+    bit [31:0]             rv_rd_wdata;
+    bit [1:0]              rv_vd_we;
+    int unsigned           rv_vd_addr;
+    bit [127:0]            rv_vd_wdata [2];
+    bit                    rv_mem_rd;
+    bit                    rv_mem_wr;
+    bit [31:0]             rv_mem_addr;
+    bit [15:0]             rv_mem_be;
+    int unsigned           rv_mem_len;
+    bit [127:0]            rv_mem_rdata [2];
+    bit [127:0]            rv_mem_wdata [2];
+    bit                    rv_halt;
+    bit [31:0]             dbg_x;
+    bit [127:0]            dbg_v;
+    string                 xmsg;
+
+    function void sample(virtual sft_if vif, longint cyc_now);
+      cyc   = cyc_now;
+      rst_n = (vif.mon_rst_n === 1'b1);
+      xmsg  = "";
+      if ($isunknown(vif.mon_halted))         xmsg = {xmsg, " halted"};
+      if ($isunknown(vif.mon_dm_req_valid))   xmsg = {xmsg, " dm_req_valid"};
+      if ($isunknown(vif.mon_tr_dsp_valid))   xmsg = {xmsg, " tr_dsp_valid"};
+      if ($isunknown(vif.mon_tr_iss_valid))   xmsg = {xmsg, " tr_iss_valid"};
+      if ($isunknown(vif.mon_tr_wb_valid))    xmsg = {xmsg, " tr_wb_valid"};
+      if ($isunknown(vif.mon_tr_flush_valid)) xmsg = {xmsg, " tr_flush_valid"};
+      if ($isunknown(vif.mon_rv_valid))       xmsg = {xmsg, " rv_valid"};
+      if ($isunknown(vif.mon_tr_rob_count))   xmsg = {xmsg, " tr_rob_count"};
+      if ($isunknown(vif.mon_tr_sb_count))    xmsg = {xmsg, " tr_sb_count"};
+      if (vif.mon_rv_valid === 1'b1 &&
+          $isunknown({vif.mon_rv_pc, vif.mon_rv_insn, vif.mon_rv_next_pc, vif.mon_rv_rd_we, vif.mon_rv_vd_we,
+                      vif.mon_rv_mem_rd, vif.mon_rv_mem_wr})) xmsg = {xmsg, " rv_payload"};
+      if (vif.mon_dm_req_valid === 1'b1 &&
+          $isunknown({vif.mon_dm_req_we, vif.mon_dm_req_addr, vif.mon_dm_req_len, vif.mon_dm_req_tag})) xmsg = {xmsg, " dm_req_payload"};
+      run         = (vif.mon_run === 1'b1);
+      stall       = (vif.mon_stall === 1'b1);
+      halted      = (vif.mon_halted === 1'b1);
+      req_valid   = (vif.mon_dm_req_valid === 1'b1);
+      req_ready   = (vif.mon_dm_req_ready === 1'b1);
+      req_we      = vif.mon_dm_req_we;
+      req_addr    = vif.mon_dm_req_addr;
+      req_len     = vif.mon_dm_req_len;
+      req_wdata   = vif.mon_dm_req_wdata;
+      req_be      = vif.mon_dm_req_be;
+      req_tag     = vif.mon_dm_req_tag;
+      rsp_valid   = (vif.mon_dm_rsp_valid === 1'b1);
+      rsp_last    = vif.mon_dm_rsp_last;
+      dsp_valid   = (vif.mon_tr_dsp_valid === 1'b1);
+      dsp_id      = vif.mon_tr_dsp_id;
+      dsp_pc      = vif.mon_tr_dsp_pc;
+      dsp_insn    = vif.mon_tr_dsp_insn;
+      iss_valid   = vif.mon_tr_iss_valid;
+      wb_valid    = vif.mon_tr_wb_valid;
+      for (int unsigned u = 0; u < SFT_NUNITS; u++) begin
+        iss_id[u] = vif.mon_tr_iss_id[u];
+        wb_id[u]  = vif.mon_tr_wb_id[u];
+      end
+      flush_valid = (vif.mon_tr_flush_valid === 1'b1);
+      flush_id    = vif.mon_tr_flush_id;
+      flush_pc    = vif.mon_tr_flush_pc;
+      rob_count   = vif.mon_tr_rob_count;
+      sb_count    = vif.mon_tr_sb_count;
+      rv_valid    = (vif.mon_rv_valid === 1'b1);
+      rv_order    = vif.mon_rv_order;
+      rv_id       = vif.mon_rv_id;
+      rv_pc       = vif.mon_rv_pc;
+      rv_insn     = vif.mon_rv_insn;
+      rv_next_pc  = vif.mon_rv_next_pc;
+      rv_rd_we    = vif.mon_rv_rd_we;
+      rv_rd_addr  = vif.mon_rv_rd_addr;
+      rv_rd_wdata = vif.mon_rv_rd_wdata;
+      rv_vd_we    = vif.mon_rv_vd_we;
+      rv_vd_addr  = vif.mon_rv_vd_addr;
+      rv_mem_rd   = vif.mon_rv_mem_rd;
+      rv_mem_wr   = vif.mon_rv_mem_wr;
+      rv_mem_addr = vif.mon_rv_mem_addr;
+      rv_mem_be   = vif.mon_rv_mem_be;
+      rv_mem_len  = vif.mon_rv_mem_len;
+      rv_halt     = vif.mon_rv_halt;
+      for (int unsigned k = 0; k < 2; k++) begin
+        rv_vd_wdata[k]  = vif.mon_rv_vd_wdata[k];
+        rv_mem_rdata[k] = vif.mon_rv_mem_rdata[k];
+        rv_mem_wdata[k] = vif.mon_rv_mem_wdata[k];
+      end
+      dbg_x = vif.mon_dbg_xdata;
+      dbg_v = vif.mon_dbg_vdata;
+    endfunction
+  endclass : sft_obs
+
+  //----------------------------------------------------------------------------
+  // Per-cycle event summary for coverage / statistics
+  //----------------------------------------------------------------------------
+  class sft_cycle_info;
+    sft_instr    dsp;
+    sft_instr    ret;
+    sft_effect   ret_eff;
+    sft_instr    flusher;
+    int unsigned n_squashed;
+    int unsigned n_squashed_inflight;
+    int unsigned n_squashed_stores;
+    int unsigned n_issue;
+    bit          bus_write;
+    bit          bus_read;
+    int unsigned bus_read_len;
+    bit          load_hazard;
+    bit          barrier_wait;
+    int unsigned issued_units[$];
+
+    function new();
+      dsp = null; ret = null; ret_eff = null; flusher = null;
+      n_squashed = 0; n_squashed_inflight = 0; n_squashed_stores = 0; n_issue = 0;
+      bus_write = 1'b0; bus_read = 1'b0; bus_read_len = 0; load_hazard = 1'b0; barrier_wait = 1'b0;
+    endfunction
+  endclass : sft_cycle_info
+
+  //----------------------------------------------------------------------------
+  // Scoreboard: instruction lifecycle, retirement lock-step with the golden ISA
+  // model, store ordering, DFSYNC, flush/redirect, occupancy and stall rules.
+  //----------------------------------------------------------------------------
+  class sft_scoreboard;
+    sft_cfg          cfg;
+    sft_isa_model    model;
+    sft_mem_bfm      bfm;
+    int unsigned     err_cnt[int'(E_NUM_CATEGORIES)];
+    int unsigned     total_errors;
+    bit              abort_req;
+
+    sft_instr        live[$];
+    sft_instr        by_id[longint unsigned];
+    bit              squashed_ids[longint unsigned];
+    bit              retired_ids[longint unsigned];
+    sft_wr           pend_wr[$];
+    longint unsigned next_id;
+    longint unsigned next_order;
+    bit [31:0]       exp_pc;
+    bit              halt_retired;
+    longint          halt_cycle;
+    bit              prev_req_stuck;
+    bit              prev_req_we;
+    bit [31:0]       prev_req_addr;
+    int unsigned     prev_req_len;
+    bit [127:0]      prev_req_wdata;
+    bit [15:0]       prev_req_be;
+    int unsigned     prev_req_tag;
+    longint          last_retire_cycle;
+
+    int unsigned     n_dispatch;
+    int unsigned     n_issue;
+    int unsigned     n_wb;
+    int unsigned     n_retire;
+    int unsigned     n_flush;
+    int unsigned     n_squash;
+    int unsigned     n_bus_wr;
+    int unsigned     n_bus_rd;
+
+    function new(sft_cfg cfg_h, sft_isa_model model_h, sft_mem_bfm bfm_h);
+      cfg   = cfg_h;
+      model = model_h;
+      bfm   = bfm_h;
+      foreach (err_cnt[i]) err_cnt[i] = 0;
+      total_errors = 0;
+      abort_req    = 1'b0;
+      n_dispatch = 0; n_issue = 0; n_wb = 0; n_retire = 0; n_flush = 0; n_squash = 0; n_bus_wr = 0; n_bus_rd = 0;
+      reset_state();
+    endfunction
+
+    function void error(sft_err_e cat, longint cyc, string msg);
+      err_cnt[cat]++;
+      total_errors++;
+      $display("[SFT-ERR] cyc=%0d %s: %s", cyc, cat.name(), msg);
+      if (total_errors >= cfg.max_errors) abort_req = 1'b1;
+    endfunction
+
+    // System reset: everything in flight disappears; the next program restarts.
+    function void reset_state();
+      foreach (live[i]) begin
+        sft_instr x = live[i];
+        x.squashed = 1'b1;
+      end
+      live.delete();
+      by_id.delete();
+      squashed_ids.delete();
+      retired_ids.delete();
+      pend_wr.delete();
+      next_id           = 0;
+      next_order        = 0;
+      exp_pc            = '0;
+      halt_retired      = 1'b0;
+      halt_cycle        = -1;
+      prev_req_stuck    = 1'b0;
+      last_retire_cycle = 0;
+    endfunction
+
+    function void check_reset_cycle(sft_obs o, int unsigned idx);
+      if (idx < 2) return;
+      if (o.dsp_valid)       error(E_RESET, o.cyc, "dispatch while reset is held");
+      if (o.iss_valid != '0) error(E_RESET, o.cyc, $sformatf("issue (units %b) while reset is held", o.iss_valid));
+      if (o.wb_valid != '0)  error(E_RESET, o.cyc, $sformatf("write-back (units %b) while reset is held", o.wb_valid));
+      if (o.rv_valid)        error(E_RESET, o.cyc, "retirement while reset is held");
+      if (o.flush_valid)     error(E_RESET, o.cyc, "flush while reset is held");
+      if (o.req_valid)       error(E_RESET, o.cyc, "data-bus request while reset is held");
+      if (o.halted)          error(E_RESET, o.cyc, "halted_o asserted while reset is held");
+    endfunction
+
+    local function sft_instr lookup(longint unsigned id, string what, longint cyc);
+      if (by_id.exists(id)) return by_id[id];
+      if (squashed_ids.exists(id))     error(E_SQUASHED_ACTIVITY, cyc, $sformatf("%s for squashed id=%0d", what, id));
+      else if (retired_ids.exists(id)) error(E_DUP_EVENT, cyc, $sformatf("%s for already retired id=%0d", what, id));
+      else                             error(E_PHANTOM, cyc, $sformatf("%s for id=%0d that was never dispatched", what, id));
+      return null;
+    endfunction
+
+    local function void remove_live(sft_instr x);
+      for (int i = 0; i < live.size(); i++) begin
+        if (live[i] == x) begin
+          live.delete(i);
+          break;
+        end
+      end
+      by_id.delete(x.id);
+    endfunction
+
+    function string pipeline_snapshot();
+      string s = $sformatf("pipeline: %0d live, %0d store beats pending", live.size(), pend_wr.size());
+      foreach (live[i]) begin
+        sft_instr x = live[i];
+        if (i >= 12) begin
+          s = {s, $sformatf("\n        ... %0d more", live.size() - 12)};
+          break;
+        end
+        s = {s, $sformatf("\n        %s | %s", x.brief(), x.lifecycle())};
+      end
+      return s;
+    endfunction
+
+    local function string prod_desc(sft_instr p);
+      if (p == null) return "-";
+      return $sformatf("%s writeback@%0d%s", p.brief(), p.wb_cycle, sft_pick(p.retired, " (retired)", ""));
+    endfunction
+
+    // DFSYNC b releases once every older instruction wrote back before 'cyc'
+    // and every older store has been performed.
+    function bit barrier_released(sft_instr b, longint cyc, output string why);
+      why = "";
+      foreach (live[i]) begin
+        sft_instr x = live[i];
+        if (x == b) break;
+        if (x.is_barrier || x.is_halt) begin
+          why = $sformatf("older %s not retired", x.brief());
+          return 1'b0;
+        end
+        if (x.wb_cycle < 0 || x.wb_cycle >= cyc) begin
+          why = $sformatf("older %s not written back", x.brief());
+          return 1'b0;
+        end
+        if (x.is_store) begin
+          why = $sformatf("older store %s not performed", x.brief());
+          return 1'b0;
+        end
+      end
+      foreach (pend_wr[i]) begin
+        sft_wr w = pend_wr[i];
+        if (w.id < b.id) begin
+          why = $sformatf("older store id=%0d (pc 0x%08h) not performed on the bus", w.id, w.pc);
+          return 1'b0;
+        end
+      end
+      return 1'b1;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Main per-cycle check
+    //--------------------------------------------------------------------------
+    function sft_cycle_info check_cycle(sft_obs o);
+      sft_cycle_info ci = new();
+      if (o.xmsg != "") error(E_XPROP, o.cyc, {"unknown value sampled on:", o.xmsg});
+
+      // ---- stall / run / halt rules and occupancy counters (start-of-cycle state)
+      if (o.dsp_valid && (!o.run || o.stall || o.halted))
+        error(E_STALL, o.cyc, $sformatf("dispatch of pc 0x%08h with run=%0b stall=%0b halted=%0b", o.dsp_pc, o.run, o.stall, o.halted));
+      if (o.rv_valid && o.stall)
+        error(E_STALL, o.cyc, $sformatf("retirement of id=%0d while stall_i is asserted", o.rv_id));
+      if (o.rob_count != live.size())
+        error(E_COUNT, o.cyc, $sformatf("tr_rob_count=%0d, %0d live instructions tracked\n      %s", o.rob_count, live.size(),
+                                        pipeline_snapshot()));
+      if (o.sb_count != pend_wr.size())
+        error(E_COUNT, o.cyc, $sformatf("tr_sb_count=%0d, %0d retired store beats pending", o.sb_count, pend_wr.size()));
+      if (o.halted && !halt_retired)
+        error(E_HALT, o.cyc, "halted_o asserted before HALT retired");
+      if (halt_retired && o.cyc > halt_cycle && !o.halted)
+        error(E_HALT, o.cyc, $sformatf("HALT retired @%0d but halted_o is low", halt_cycle));
+
+      // ---- dispatch
+      if (o.dsp_valid) begin
+        sft_instr x;
+        if (o.dsp_id != next_id)
+          error(E_DISPATCH_ID, o.cyc, $sformatf("dispatch id %0d, expected %0d", o.dsp_id, next_id));
+        if (o.dsp_pc != exp_pc)
+          error(E_FETCH_PC, o.cyc, $sformatf("dispatched pc 0x%08h (%s), expected 0x%08h", o.dsp_pc, sft_disasm(o.dsp_insn), exp_pc));
+        if (o.dsp_insn != model.fetch(o.dsp_pc))
+          error(E_FETCH_CORRUPT, o.cyc, $sformatf("pc 0x%08h dispatched 0x%08h (%s), SRAM holds 0x%08h (%s)", o.dsp_pc, o.dsp_insn,
+                                                  sft_disasm(o.dsp_insn), model.fetch(o.dsp_pc), sft_disasm(model.fetch(o.dsp_pc))));
+        x = new(o.dsp_id, o.dsp_pc, o.dsp_insn, o.cyc);
+        find_producers(x);
+        live.push_back(x);
+        by_id[x.id] = x;
+        next_id = o.dsp_id + 1;
+        exp_pc  = o.dsp_pc + 32'd4;
+        ci.dsp  = x;
+        n_dispatch++;
+      end
+
+      // ---- issue
+      for (int unsigned u = 0; u < SFT_NUNITS; u++) begin
+        sft_instr x;
+        if (!o.iss_valid[u]) continue;
+        x = lookup(o.iss_id[u], $sformatf("issue on %s", sft_unit_name(u)), o.cyc);
+        if (x == null) continue;
+        n_issue++;
+        ci.n_issue++;
+        ci.issued_units.push_back(u);
+        if (x.iss_cycle >= 0) begin
+          error(E_DUP_EVENT, o.cyc, $sformatf("%s issued again on %s (first issue @%0d on %s)", x.brief(), sft_unit_name(u),
+                                              x.iss_cycle, sft_unit_name(x.iss_unit)));
+          continue;
+        end
+        if (x.unit != u)
+          error(E_UNIT_ROUTE, o.cyc, $sformatf("%s issued on %s, requires %s", x.brief(), sft_unit_name(u), sft_unit_name(x.unit)));
+        foreach (x.prod[k]) begin
+          sft_instr p = x.prod[k];
+          if (p.retired) continue;
+          if (p.wb_cycle < 0 || p.wb_cycle > o.cyc)
+            error(E_RAW, o.cyc, $sformatf("%s issued @%0d before producer wrote back\n      producer: %s | %s\n      %s",
+                                          x.brief(), o.cyc, prod_desc(p), p.lifecycle(), pipeline_snapshot()));
+        end
+        foreach (live[i]) begin
+          sft_instr b = live[i];
+          string    why;
+          if (b == x) break;
+          if (!b.is_barrier) continue;
+          if (!barrier_released(b, o.cyc, why))
+            error(E_DFSYNC, o.cyc, $sformatf("%s issued past unreleased DFSYNC id=%0d (pc 0x%08h): %s", x.brief(), b.id, b.pc, why));
+        end
+        if (x.is_load) begin
+          foreach (pend_wr[i]) begin
+            sft_wr w = pend_wr[i];
+            if (w.id < x.id) ci.load_hazard = 1'b1;
+          end
+          foreach (live[i]) begin
+            sft_instr s = live[i];
+            if (s == x) break;
+            if (s.is_store) ci.load_hazard = 1'b1;
+          end
+        end
+        x.iss_cycle = o.cyc;
+        x.iss_unit  = int'(u);
+      end
+
+      // ---- write-back
+      for (int unsigned u = 0; u < SFT_NUNITS; u++) begin
+        sft_instr    x;
+        int unsigned lo;
+        int unsigned hi;
+        longint      lat;
+        if (!o.wb_valid[u]) continue;
+        x = lookup(o.wb_id[u], $sformatf("write-back on %s", sft_unit_name(u)), o.cyc);
+        if (x == null) continue;
+        n_wb++;
+        if (x.wb_cycle >= 0) begin
+          error(E_DUP_EVENT, o.cyc, $sformatf("%s wrote back again (first @%0d)", x.brief(), x.wb_cycle));
+          continue;
+        end
+        if (x.iss_cycle < 0) begin
+          error(E_PROTOCOL, o.cyc, $sformatf("%s wrote back on %s without being issued", x.brief(), sft_unit_name(u)));
+          x.wb_cycle = o.cyc;
+          continue;
+        end
+        if (x.iss_unit != int'(u))
+          error(E_UNIT_ROUTE, o.cyc, $sformatf("%s wrote back on %s, issued on %s", x.brief(), sft_unit_name(u), sft_unit_name(x.iss_unit)));
+        lat = o.cyc - x.iss_cycle;
+        sft_lat_window(x.op, lo, hi);
+        if (cfg.strict_timing && sft_lat(x.op) != 0) begin
+          if (lat != longint'(sft_lat(x.op)))
+            error(E_LATENCY, o.cyc, $sformatf("%s wrote back %0d cycle(s) after issue @%0d; contract latency %0d (expected write-back @%0d)",
+                                              x.brief(), lat, x.iss_cycle, sft_lat(x.op), x.iss_cycle + longint'(sft_lat(x.op))));
+        end else if (lat < longint'(lo) || (hi != 0 && lat > longint'(hi))) begin
+          error(E_LATENCY, o.cyc, $sformatf("%s wrote back %0d cycle(s) after issue, %s window is [%0d:%0d]", x.brief(), lat,
+                                            sft_unit_name(x.unit), lo, hi));
+        end
+        x.wb_cycle = o.cyc;
+      end
+
+      // ---- retirement (lock-step with the golden ISA model)
+      if (o.rv_valid) begin
+        sft_instr  x    = null;
+        sft_instr  head = null;
+        sft_effect e;
+        string     mism = "";
+        string     snap;
+        n_retire++;
+        if (o.rv_order != next_order)
+          error(E_RETIRE_ORDER, o.cyc, $sformatf("rv_order %0d, expected %0d", o.rv_order, next_order));
+        next_order = o.rv_order + 1;
+        if (live.size() > 0) head = live[0];
+        x = lookup(o.rv_id, "retirement", o.cyc);
+        if (head == null) begin
+          error(E_RETIRE_ORDER, o.cyc, $sformatf("retirement of id=%0d with no live instruction", o.rv_id));
+        end else if (head.id != o.rv_id) begin
+          error(E_RETIRE_ORDER, o.cyc, $sformatf("retired id=%0d but the oldest live instruction is %s", o.rv_id, head.brief()));
+        end
+        if (x != null) begin
+          if (!x.is_barrier && !x.is_halt) begin
+            if (x.wb_cycle < 0 || x.wb_cycle > o.cyc)
+              error(E_RETIRE_ORDER, o.cyc, $sformatf("%s retired before write-back | %s", x.brief(), x.lifecycle()));
+          end
+          if (x.is_barrier || x.is_halt) begin
+            foreach (pend_wr[i]) begin
+              sft_wr w = pend_wr[i];
+              if (w.id < x.id) begin
+                error(E_DFSYNC, o.cyc, $sformatf("%s retired with older store id=%0d not yet performed", x.brief(), w.id));
+                break;
+              end
+            end
+          end
+        end
+        snap = model.reg_snapshot();
+        e    = model.execute();
+        if (o.rv_pc != e.pc)              mism = {mism, $sformatf("\n      pc         : expected 0x%08h actual 0x%08h", e.pc, o.rv_pc)};
+        if (o.rv_insn != e.insn)          mism = {mism, $sformatf("\n      insn       : expected 0x%08h (%s) actual 0x%08h (%s)", e.insn,
+                                                                  sft_disasm(e.insn), o.rv_insn, sft_disasm(o.rv_insn))};
+        if (o.rv_next_pc != e.next_pc)    mism = {mism, $sformatf("\n      next_pc    : expected 0x%08h actual 0x%08h", e.next_pc, o.rv_next_pc)};
+        if (o.rv_rd_we != e.rd_we)        mism = {mism, $sformatf("\n      rd write   : expected %0b actual %0b", e.rd_we, o.rv_rd_we)};
+        else if (e.rd_we && (o.rv_rd_addr != e.rd || o.rv_rd_wdata != e.rd_val))
+          mism = {mism, $sformatf("\n      rd         : expected x%0d=0x%08h actual x%0d=0x%08h", e.rd, e.rd_val, o.rv_rd_addr, o.rv_rd_wdata)};
+        if (o.rv_vd_we != e.vd_we)        mism = {mism, $sformatf("\n      vd write   : expected %b actual %b", e.vd_we, o.rv_vd_we)};
+        else if (e.vd_we != 2'b00) begin
+          if (o.rv_vd_addr != e.vd)       mism = {mism, $sformatf("\n      vd         : expected v%0d actual v%0d", e.vd, o.rv_vd_addr)};
+          for (int unsigned k = 0; k < 2; k++)
+            if (e.vd_we[k] && o.rv_vd_wdata[k] != e.vd_val[k])
+              mism = {mism, $sformatf("\n      vd[%0d] data : expected %032h actual %032h", k, e.vd_val[k], o.rv_vd_wdata[k])};
+        end
+        if (o.rv_mem_rd != e.mem_rd || o.rv_mem_wr != e.mem_wr)
+          mism = {mism, $sformatf("\n      mem access : expected rd=%0b wr=%0b actual rd=%0b wr=%0b", e.mem_rd, e.mem_wr, o.rv_mem_rd, o.rv_mem_wr)};
+        else if (e.mem_rd || e.mem_wr) begin
+          if (o.rv_mem_addr != e.mem_addr || o.rv_mem_be != e.be || o.rv_mem_len != e.len)
+            mism = {mism, $sformatf("\n      mem addr   : expected 0x%08h be=%04h len=%0d actual 0x%08h be=%04h len=%0d",
+                                    e.mem_addr, e.be, e.len, o.rv_mem_addr, o.rv_mem_be, o.rv_mem_len)};
+          for (int unsigned k = 0; k <= e.len; k++) begin
+            if (e.mem_rd && !sft_masked_eq(o.rv_mem_rdata[k], e.mem_rdata[k], e.be))
+              mism = {mism, $sformatf("\n      load[%0d]    : expected %032h actual %032h", k, e.mem_rdata[k], o.rv_mem_rdata[k])};
+            if (e.mem_wr && !sft_masked_eq(o.rv_mem_wdata[k], e.mem_wdata[k], e.be))
+              mism = {mism, $sformatf("\n      store[%0d]   : expected %032h actual %032h", k, e.mem_wdata[k], o.rv_mem_wdata[k])};
+          end
+        end
+        if (o.rv_halt != e.halt)          mism = {mism, $sformatf("\n      halt       : expected %0b actual %0b", e.halt, o.rv_halt)};
+        if (x != null) begin
+          if (x.pc != e.pc)               mism = {mism, $sformatf("\n      dispatch   : id=%0d was dispatched at pc 0x%08h", x.id, x.pc)};
+        end
+        if (mism != "")
+          error(E_ARCH_MISMATCH, o.cyc, $sformatf("retired id=%0d %s at pc 0x%08h differs from golden model:%s\n      context: %s\n      golden registers before commit:%s",
+                                                  o.rv_id, sft_op_name(sft_opc(e.insn)), e.pc, mism,
+                                                  ctx_desc(x), snap));
+        model.commit(e);
+        if (e.mem_wr) begin
+          for (int unsigned k = 0; k <= e.len; k++) begin
+            sft_wr w = new(o.rv_id, e.pc, e.insn, e.mem_addr + 16 * k, e.mem_wdata[k], e.be, o.cyc);
+            pend_wr.push_back(w);
+          end
+        end
+        if (x != null) begin
+          if (x.is_ctrl) begin
+            if (e.next_pc != e.pc + 32'd4) begin
+              if (!x.flushed)
+                error(E_REDIRECT, o.cyc, $sformatf("%s transferred control to 0x%08h without a flush/redirect", x.brief(), e.next_pc));
+              else if (x.flush_pc != e.next_pc)
+                error(E_REDIRECT, o.cyc, $sformatf("%s redirected fetch to 0x%08h @%0d, architectural target 0x%08h",
+                                                   x.brief(), x.flush_pc, x.flush_cycle, e.next_pc));
+            end else if (x.flushed && x.flush_pc != e.next_pc) begin
+              error(E_REDIRECT, o.cyc, $sformatf("not-taken %s redirected fetch to 0x%08h @%0d instead of 0x%08h",
+                                                 x.brief(), x.flush_pc, x.flush_cycle, e.next_pc));
+            end
+          end
+          x.retired   = 1'b1;
+          x.ret_cycle = o.cyc;
+          remove_live(x);
+          retired_ids[x.id] = 1'b1;
+          ci.ret = x;
+        end
+        ci.ret_eff        = e;
+        last_retire_cycle = o.cyc;
+        if (e.halt) begin
+          halt_retired = 1'b1;
+          halt_cycle   = o.cyc;
+        end
+      end
+
+      // ---- data bus
+      if (prev_req_stuck) begin
+        if (!o.req_valid)
+          error(E_PROTOCOL, o.cyc, "data-bus request withdrawn before it was accepted");
+        else if (o.req_we != prev_req_we || o.req_addr != prev_req_addr || o.req_len != prev_req_len ||
+                 o.req_tag != prev_req_tag || (o.req_we && (o.req_wdata != prev_req_wdata || o.req_be != prev_req_be)))
+          error(E_PROTOCOL, o.cyc, "data-bus request changed while waiting for ready");
+      end
+      prev_req_stuck = o.req_valid && !o.req_ready;
+      prev_req_we    = o.req_we;
+      prev_req_addr  = o.req_addr;
+      prev_req_len   = o.req_len;
+      prev_req_wdata = o.req_wdata;
+      prev_req_be    = o.req_be;
+      prev_req_tag   = o.req_tag;
+      if (o.req_valid && o.req_ready) begin
+        if (o.req_we) begin
+          ci.bus_write = 1'b1;
+          n_bus_wr++;
+          if (o.req_addr[3:0] != 4'd0 || o.req_len != 0)
+            error(E_MEM_WRITE, o.cyc, $sformatf("write request addr 0x%08h len %0d (single 16-byte aligned beat required)", o.req_addr, o.req_len));
+          if (pend_wr.size() == 0) begin
+            error(E_MEM_WRITE, o.cyc, $sformatf("bus write 0x%08h be=%04h data=%032h with no retired store pending (wrong-path or duplicate store)",
+                                                o.req_addr, o.req_be, o.req_wdata));
+          end else begin
+            sft_wr w = pend_wr.pop_front();
+            if (o.req_addr != w.addr || o.req_be != w.be || !sft_masked_eq(o.req_wdata, w.data, w.be))
+              error(E_MEM_WRITE, o.cyc, $sformatf("bus write differs from the oldest retired store (id=%0d pc 0x%08h %s, retired @%0d)\n      expected addr 0x%08h be=%04h data=%032h\n      actual   addr 0x%08h be=%04h data=%032h",
+                                                  w.id, w.pc, sft_disasm(w.insn), w.ret_cycle, w.addr, w.be, w.data,
+                                                  o.req_addr, o.req_be, o.req_wdata));
+          end
+          bfm.write(o.req_addr, o.req_wdata, o.req_be);
+        end else begin
+          string msg = bfm.accept_read(o.req_addr, o.req_len, o.req_tag, o.cyc);
+          ci.bus_read     = 1'b1;
+          ci.bus_read_len = o.req_len;
+          n_bus_rd++;
+          if (msg != "") error(E_MEM_READ, o.cyc, msg);
+        end
+      end
+
+      // ---- flush / redirect
+      if (o.flush_valid) begin
+        sft_instr b = lookup(o.flush_id, "flush", o.cyc);
+        n_flush++;
+        if (b != null) begin
+          if (!b.is_ctrl)
+            error(E_FLUSH, o.cyc, $sformatf("flush requested by non-control %s", b.brief()));
+          if (b.wb_cycle < 0 || b.wb_cycle > o.cyc)
+            error(E_FLUSH, o.cyc, $sformatf("flush by %s before it wrote back | %s", b.brief(), b.lifecycle()));
+          b.flushed     = 1'b1;
+          b.flush_pc    = o.flush_pc;
+          b.flush_cycle = o.cyc;
+          ci.flusher    = b;
+        end
+        if (o.flush_pc[1:0] != 2'd0) error(E_FLUSH, o.cyc, $sformatf("redirect pc 0x%08h not word aligned", o.flush_pc));
+        for (int i = live.size() - 1; i >= 0; i--) begin
+          sft_instr s = live[i];
+          if (s.id <= o.flush_id) break;
+          s.squashed     = 1'b1;
+          s.squash_cycle = o.cyc;
+          squashed_ids[s.id] = 1'b1;
+          by_id.delete(s.id);
+          live.delete(i);
+          ci.n_squashed++;
+          n_squash++;
+          if (s.iss_cycle >= 0 && s.wb_cycle < 0) ci.n_squashed_inflight++;
+          if (s.is_store) ci.n_squashed_stores++;
+        end
+        exp_pc = o.flush_pc;
+      end
+
+      foreach (live[i]) begin
+        sft_instr b = live[i];
+        string    why;
+        if (!b.is_barrier) continue;
+        if (i + 1 < live.size() && !barrier_released(b, o.cyc + 1, why)) ci.barrier_wait = 1'b1;
+      end
+      return ci;
+    endfunction
+
+    // Youngest live writer of every source register; distance in dispatch order.
+    local function void find_producers(sft_instr x);
+      x.prod.delete();
+      x.dep_dist = 0;
+      foreach (x.src_x[k]) begin
+        for (int i = live.size() - 1; i >= 0; i--) begin
+          sft_instr p = live[i];
+          if (p.writes_x(x.src_x[k])) begin
+            add_producer(x, p, live.size() - i);
+            break;
+          end
+        end
+      end
+      foreach (x.src_v[k]) begin
+        for (int i = live.size() - 1; i >= 0; i--) begin
+          sft_instr p = live[i];
+          if (p.writes_v(x.src_v[k])) begin
+            add_producer(x, p, live.size() - i);
+            break;
+          end
+        end
+      end
+    endfunction
+
+    local function void add_producer(sft_instr x, sft_instr p, int unsigned ddist);
+      foreach (x.prod[m]) if (x.prod[m] == p) return;
+      x.prod.push_back(p);
+      if (x.dep_dist == 0 || ddist < x.dep_dist) x.dep_dist = ddist;
+    endfunction
+
+    local function string ctx_desc(sft_instr x);
+      if (x == null) return "-";
+      return x.lifecycle();
+    endfunction
+  endclass : sft_scoreboard
+
+  //----------------------------------------------------------------------------
+  // Program generator: directed ISA programs and seeded random streams
+  //   x28 link, x29 data base, x30/x31 loop counters, x1..x27 general purpose
+  //----------------------------------------------------------------------------
+  localparam int unsigned SFT_R_LINK  = 28;
+  localparam int unsigned SFT_R_BASE  = 29;
+  localparam int unsigned SFT_R_LOOP1 = 30;
+  localparam int unsigned SFT_R_LOOP2 = 31;
+  localparam bit [31:0]   SFT_DATA_BASE = 32'h0001_0000;
+  localparam int unsigned SFT_DATA_SIZE = 4096;
+
+  // End-to-end program classes that must each pass at least once.
+  localparam int unsigned SFT_N_KINDS = 11;
+
+  function automatic string sft_kind_name(int unsigned k);
+    case (k)
+      0:       return "arith";
+      1:       return "branch";
+      2:       return "dep_chain";
+      3:       return "vector_mem";
+      4:       return "mem_order";
+      5:       return "dfsync";
+      6:       return "mixed";
+      7:       return "random";
+      8:       return "stress";
+      9:       return "reset";
+      default: return "halt";
+    endcase
+  endfunction
+
+  class sft_prog_gen;
+    sft_prng     rng;
+    int unsigned lbl;
+
+    function new(sft_prng rng_h);
+      rng = rng_h;
+      lbl = 0;
+    endfunction
+
+    function string fresh(string stem);
+      lbl++;
+      return $sformatf("%s_%0d", stem, lbl);
+    endfunction
+
+    function void init_data(sft_program p);
+      for (int unsigned a = 0; a < SFT_DATA_SIZE; a += 16) p.data_init[SFT_DATA_BASE + a] = rng.next128();
+    endfunction
+
+    function int unsigned greg();
+      return rng.range(1, 27);
+    endfunction
+
+    function int unsigned vreg();
+      return rng.range(0, SFT_NVREG - 1);
+    endfunction
+
+    function int moff(int unsigned align);
+      int unsigned o = rng.range(0, SFT_DATA_SIZE - 32);
+      return int'(o & ~(align - 1));
+    endfunction
+
+    // Base pointer, corner-value scalar registers, vector registers from memory.
+    function void prologue(sft_asm a);
+      a.li(SFT_R_BASE, SFT_DATA_BASE);
+      for (int unsigned r = 1; r <= 27; r++) a.li(r, rng.corner32());
+      for (int unsigned v = 0; v < SFT_NVREG; v++) a.vm(OP_VLD, v, int'(v * 16), SFT_R_BASE);
+    endfunction
+
+    function void rand_alu(sft_asm a, bit allow_x0);
+      int unsigned rd = (allow_x0 && rng.permille(40)) ? 0 : greg();
+      case (rng.range(0, 2))
+        0: a.r(rng.range(OP_ADD, OP_MUL), rd, greg(), greg());
+        1: a.i(rng.range(OP_ADDI, OP_SLTI), rd, greg(), int'($signed(16'(rng.next32()))));
+        default: a.i(OP_LUI, rd, 0, int'(rng.range(0, 65535)));
+      endcase
+    endfunction
+
+    function void rand_mem(sft_asm a);
+      case (rng.range(0, 5))
+        0: a.lw(greg(), moff(4), SFT_R_BASE);
+        1: a.sw(greg(), moff(4), SFT_R_BASE);
+        2: a.vm(OP_VLD, vreg(), moff(16), SFT_R_BASE);
+        3: a.vm(OP_VST, vreg(), moff(16), SFT_R_BASE);
+        4: a.vm(OP_VLDP, vreg(), moff(32), SFT_R_BASE);
+        default: a.vm(OP_VSTP, vreg(), moff(32), SFT_R_BASE);
+      endcase
+    endfunction
+
+    function void rand_vec(sft_asm a);
+      case (rng.range(0, 5))
+        0: a.v(OP_VADD, vreg(), vreg(), vreg());
+        1: a.v(OP_VSUB, vreg(), vreg(), vreg());
+        2: a.v(OP_VMUL, vreg(), vreg(), vreg());
+        3: a.v(OP_TMAC, vreg(), vreg(), vreg());
+        4: a.vbcast(vreg(), greg());
+        default: a.vredsum(greg(), vreg());
+      endcase
+    endfunction
+
+    function void rand_op(sft_asm a, int unsigned w_alu, int unsigned w_mem, int unsigned w_vec, int unsigned w_sync);
+      int unsigned t = w_alu + w_mem + w_vec + w_sync;
+      int unsigned r = rng.range(0, (t == 0) ? 0 : t - 1);
+      if (r < w_alu)                      rand_alu(a, 1'b1);
+      else if (r < w_alu + w_mem)         rand_mem(a);
+      else if (r < w_alu + w_mem + w_vec) rand_vec(a);
+      else                                a.dfsync();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 1. Scalar arithmetic sweep: every ALU op over corner operands, results
+    //    stored to memory; x0 writes and x0 sources.
+    //--------------------------------------------------------------------------
+    function sft_program gen_scalar_arith(string name);
+      sft_asm      a   = new(name, "arith");
+      int unsigned off = 0;
+      bit [31:0]   cv[8];
+      cv[0] = 32'h0; cv[1] = 32'h1; cv[2] = 32'hFFFF_FFFF; cv[3] = 32'h7FFF_FFFF;
+      cv[4] = 32'h8000_0000; cv[5] = 32'h0000_001F; cv[6] = 32'hDEAD_BEEF; cv[7] = rng.next32();
+      a.li(SFT_R_BASE, SFT_DATA_BASE);
+      for (int unsigned op = OP_ADD; op <= OP_MUL; op++) begin
+        for (int unsigned k = 0; k < 6; k++) begin
+          a.li(1, cv[rng.range(0, 7)]);
+          a.li(2, cv[rng.range(0, 7)]);
+          a.r(op, 3, 1, 2);
+          a.sw(3, int'(off), SFT_R_BASE);
+          off += 4;
+        end
+      end
+      for (int unsigned op = OP_ADDI; op <= OP_LUI; op++) begin
+        for (int unsigned k = 0; k < 6; k++) begin
+          int imm = int'($signed(16'(rng.next32())));
+          if (k == 0) imm = 0;
+          if (k == 1) imm = -1;
+          if (k == 2) imm = 31;
+          if (k == 3) imm = -32768;
+          a.li(1, cv[rng.range(0, 7)]);
+          a.i(op, 4, 1, imm);
+          a.sw(4, int'(off), SFT_R_BASE);
+          off += 4;
+        end
+      end
+      a.r(OP_ADD, 0, 1, 2);
+      a.sw(0, int'(off), SFT_R_BASE);
+      a.r(OP_ADD, 5, 0, 1);
+      a.sw(5, int'(off + 4), SFT_R_BASE);
+      a.r(OP_ADD, 6, 5, 5);
+      a.r(OP_SUB, 7, 6, 5);
+      a.r(OP_XOR, 8, 7, 6);
+      a.r(OP_MUL, 9, 8, 7);
+      a.r(OP_ADD, 10, 9, 9);
+      a.sw(10, int'(off + 8), SFT_R_BASE);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 2. Control flow: loops, nesting, every branch condition taken and not
+    //    taken, signed/unsigned edges, call/return, computed jumps, wrong-path
+    //    stores directly behind taken branches.
+    //--------------------------------------------------------------------------
+    function sft_program gen_branch(string name);
+      sft_asm      a = new(name, "branch");
+      int unsigned off = 0;
+      string       l, m;
+      prologue(a);
+      // counted loop (backward taken) with a wrong-path store behind the back edge
+      a.li(SFT_R_LOOP1, 10);
+      a.li(5, 0);
+      l = fresh("loop");
+      a.label(l);
+      a.i(OP_ADDI, 5, 5, 3);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+      a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+      a.sw(5, int'(off), SFT_R_BASE); off += 4;
+      // nested loops
+      a.li(SFT_R_LOOP1, 4);
+      a.li(6, 0);
+      l = fresh("outer");
+      a.label(l);
+      a.li(SFT_R_LOOP2, 5);
+      m = fresh("inner");
+      a.label(m);
+      a.r(OP_ADD, 6, 6, SFT_R_LOOP1);
+      a.i(OP_ADDI, SFT_R_LOOP2, SFT_R_LOOP2, -1);
+      a.br(OP_BNE, SFT_R_LOOP2, 0, m);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+      a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+      a.sw(6, int'(off), SFT_R_BASE); off += 4;
+      // every condition, taken and not taken, with signed/unsigned corner operands
+      for (int unsigned op = OP_BEQ; op <= OP_BGEU; op++) begin
+        for (int unsigned t = 0; t < 2; t++) begin
+          bit [31:0] x, y;
+          case (op)
+            OP_BEQ:  begin x = 32'h1234; y = (t != 0) ? 32'h1234 : 32'h1235; end
+            OP_BNE:  begin x = 32'h1234; y = (t != 0) ? 32'h1235 : 32'h1234; end
+            OP_BLT:  begin x = 32'hFFFF_FFFF; y = (t != 0) ? 32'h1 : 32'h8000_0000; end
+            OP_BGE:  begin x = 32'h1; y = (t != 0) ? 32'hFFFF_FFFF : 32'h7FFF_FFFF; end
+            OP_BLTU: begin x = 32'h1; y = (t != 0) ? 32'hFFFF_FFFF : 32'h0; end
+            default: begin x = (t != 0) ? 32'hFFFF_FFFF : 32'h0; y = (t != 0) ? 32'h1 : 32'hFFFF_FFFF; end
+          endcase
+          a.li(11, x);
+          a.li(12, y);
+          a.li(7, 32'h600D_0000 + op * 16 + t);
+          l = fresh("fwd");
+          a.br(op, 11, 12, l);
+          a.li(7, 32'hBAD0_0000 + op);
+          a.sw(7, int'(off), SFT_R_BASE);
+          a.label(l);
+          a.sw(7, int'(off + 4), SFT_R_BASE);
+          off += 8;
+        end
+      end
+      // back-to-back branches and a taken branch to the next instruction
+      l = fresh("bb");
+      m = fresh("bb_skip");
+      a.br(OP_BEQ, 0, 0, l);
+      a.li(8, 32'hBAD1);
+      a.label(l);
+      a.br(OP_BNE, 0, 0, m);
+      a.br(OP_BEQ, 0, 0, fresh("bb_next"));
+      a.label($sformatf("bb_next_%0d", lbl));
+      a.li(8, 32'h600D);
+      a.label(m);
+      a.sw(8, int'(off), SFT_R_BASE); off += 4;
+      // call / return through the link register
+      a.li(9, 0);
+      for (int unsigned k = 0; k < 3; k++) begin
+        a.jal(SFT_R_LINK, "sub_accumulate");
+        a.i(OP_ADDI, 9, 9, 1);
+      end
+      a.sw(9, int'(off), SFT_R_BASE); off += 4;
+      // computed jump: JAL captures pc+4, JALR skips two instructions
+      l = fresh("here");
+      a.jal(13, l);
+      a.label(l);
+      a.i(OP_ADDI, 13, 13, 24);
+      a.jalr(0, 13, 0);
+      a.li(14, 32'hBAD2);
+      a.li(14, 32'hBAD3);
+      a.li(14, 32'h600D2);
+      a.sw(14, int'(off), SFT_R_BASE); off += 4;
+      // data-dependent loop exit with forward and backward branches
+      a.li(SFT_R_LOOP1, 0);
+      a.li(15, 0);
+      l = fresh("scan");
+      m = fresh("scan_odd");
+      a.label(l);
+      a.lw(16, int'(off), SFT_R_BASE);
+      a.i(OP_ANDI, 17, SFT_R_LOOP1, 1);
+      a.br(OP_BNE, 17, 0, m);
+      a.r(OP_ADD, 15, 15, 16);
+      a.label(m);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, 1);
+      a.i(OP_SLTI, 18, SFT_R_LOOP1, 9);
+      a.br(OP_BNE, 18, 0, l);
+      a.sw(15, int'(off + 4), SFT_R_BASE);
+      a.halt();
+      a.label("sub_accumulate");
+      a.i(OP_ADDI, 9, 9, 10);
+      a.jalr(0, SFT_R_LINK, 0);
+      a.li(9, 32'hBAD4);
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 3. Dependency chains across every unit, through memory and back
+    //--------------------------------------------------------------------------
+    function sft_program gen_dep_chain(string name);
+      sft_asm a = new(name, "dep_chain");
+      prologue(a);
+      for (int unsigned k = 0; k < 40; k++) begin
+        int unsigned d = 2 + (k % 20);
+        int unsigned s = 2 + ((k + 19) % 20);
+        case (k % 6)
+          0: a.r(OP_ADD, d, s, 1);
+          1: a.r(OP_MUL, d, s, s);
+          2: a.i(OP_XORI, d, s, int'(k * 37));
+          3: a.r(OP_SLL, d, s, 1);
+          4: a.r(OP_SUB, d, s, 1);
+          default: a.i(OP_SRAI, d, s, int'(k % 31));
+        endcase
+      end
+      a.vbcast(0, 21);
+      a.v(OP_VADD, 1, 0, 0);
+      a.v(OP_VMUL, 2, 1, 0);
+      a.v(OP_TMAC, 2, 1, 2);
+      a.v(OP_TMAC, 2, 2, 1);
+      a.vredsum(22, 2);
+      a.r(OP_ADD, 23, 22, 21);
+      a.sw(23, 64, SFT_R_BASE);
+      a.lw(24, 64, SFT_R_BASE);
+      a.r(OP_ADD, 25, 24, 23);
+      a.sw(25, 68, SFT_R_BASE);
+      a.vm(OP_VST, 2, 128, SFT_R_BASE);
+      a.vm(OP_VLD, 3, 128, SFT_R_BASE);
+      a.v(OP_VSUB, 4, 3, 2);
+      a.vredsum(26, 4);
+      a.lw(27, 132, SFT_R_BASE);
+      a.r(OP_ADD, 26, 26, 27);
+      a.sw(26, 72, SFT_R_BASE);
+      for (int unsigned k = 0; k < 12; k++) a.r(OP_ADD, 20, 20, 20);
+      a.sw(20, 76, SFT_R_BASE);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 4. Vector datapath and vector memory: single, burst-pair, overlap
+    //--------------------------------------------------------------------------
+    function sft_program gen_vector_mem(string name);
+      sft_asm a = new(name, "vector_mem");
+      prologue(a);
+      for (int unsigned k = 0; k < 6; k++) begin
+        a.vm(OP_VLDP, (2 * k) % SFT_NVREG, int'(256 + 32 * k), SFT_R_BASE);
+        a.v(OP_VADD, 4, 0, 1);
+        a.v(OP_VMUL, 5, 2, 3);
+        a.v(OP_TMAC, 6, 4, 5);
+        a.v(OP_VSUB, 7, 6, 0);
+        a.vm(OP_VSTP, 6, int'(1024 + 32 * k), SFT_R_BASE);
+        a.vm(OP_VST, 4, int'(1536 + 16 * k), SFT_R_BASE);
+      end
+      a.vm(OP_VLDP, 0, 1024, SFT_R_BASE);
+      a.vredsum(1, 0);
+      a.vredsum(2, 1);
+      a.vbcast(3, 1);
+      a.v(OP_VADD, 3, 3, 0);
+      a.vm(OP_VST, 3, 2048, SFT_R_BASE);
+      a.sw(2, 2052, SFT_R_BASE);
+      a.vm(OP_VLD, 5, 2048, SFT_R_BASE);
+      a.lw(6, 2056, SFT_R_BASE);
+      a.vredsum(7, 5);
+      a.r(OP_ADD, 7, 7, 6);
+      a.sw(7, 2064, SFT_R_BASE);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 5. Memory ordering: store->load forwarding, write-after-write, partial
+    //    overlap scalar/vector, pointer chasing
+    //--------------------------------------------------------------------------
+    function sft_program gen_mem_order(string name);
+      sft_asm a = new(name, "mem_order");
+      prologue(a);
+      for (int unsigned k = 0; k < 8; k++) begin
+        int o = int'(k * 16);
+        a.sw(1 + k, o, SFT_R_BASE);
+        a.lw(10 + k, o, SFT_R_BASE);
+        a.sw(10 + k, o + 4, SFT_R_BASE);
+        a.sw(2 + k, o + 4, SFT_R_BASE);
+        a.lw(18 + (k % 8), o + 4, SFT_R_BASE);
+      end
+      a.sw(5, 512 + 8, SFT_R_BASE);
+      a.vm(OP_VLD, 0, 512, SFT_R_BASE);
+      a.vm(OP_VST, 1, 528, SFT_R_BASE);
+      a.lw(6, 532, SFT_R_BASE);
+      a.vm(OP_VSTP, 2, 544, SFT_R_BASE);
+      a.vm(OP_VLDP, 4, 544, SFT_R_BASE);
+      a.vm(OP_VLD, 6, 560, SFT_R_BASE);
+      a.li(7, SFT_DATA_BASE + 800);
+      a.sw(7, 768, SFT_R_BASE);
+      a.li(8, 32'hC0FFEE);
+      a.sw(8, 800, SFT_R_BASE);
+      a.lw(9, 768, SFT_R_BASE);
+      a.lw(10, 0, 9);
+      a.r(OP_ADD, 11, 10, 6);
+      a.sw(11, 804, SFT_R_BASE);
+      a.vm(OP_VST, 5, 816, SFT_R_BASE);
+      a.vm(OP_VST, 6, 816, SFT_R_BASE);
+      a.vm(OP_VLD, 7, 816, SFT_R_BASE);
+      a.vredsum(12, 7);
+      a.sw(12, 808, SFT_R_BASE);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 6. DFSYNC barriers: around long tensor work, store->load, back-to-back,
+    //    first/last instruction, inside a loop
+    //--------------------------------------------------------------------------
+    function sft_program gen_dfsync(string name);
+      sft_asm a = new(name, "dfsync");
+      string  l;
+      a.dfsync();
+      prologue(a);
+      a.v(OP_TMAC, 0, 1, 2);
+      a.v(OP_TMAC, 3, 4, 5);
+      a.sw(1, 0, SFT_R_BASE);
+      a.dfsync();
+      a.r(OP_ADD, 2, 3, 4);
+      a.vredsum(5, 0);
+      a.lw(6, 0, SFT_R_BASE);
+      a.dfsync();
+      a.dfsync();
+      a.dfsync();
+      a.vm(OP_VST, 0, 64, SFT_R_BASE);
+      a.dfsync();
+      a.vm(OP_VLD, 7, 64, SFT_R_BASE);
+      a.li(SFT_R_LOOP1, 6);
+      l = fresh("bar_loop");
+      a.label(l);
+      a.v(OP_TMAC, 7, 7, 1);
+      a.sw(SFT_R_LOOP1, 128, SFT_R_BASE);
+      a.dfsync();
+      a.lw(8, 128, SFT_R_BASE);
+      a.r(OP_ADD, 9, 9, 8);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+      a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+      a.vredsum(10, 7);
+      a.sw(10, 132, SFT_R_BASE);
+      a.sw(9, 136, SFT_R_BASE);
+      a.dfsync();
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 7. Mixed pipeline: loop interleaving loads, arithmetic, branches, vector,
+    //    stores and conditional barriers
+    //--------------------------------------------------------------------------
+    function sft_program gen_mixed(string name);
+      sft_asm a = new(name, "mixed");
+      string  l, s1, s2;
+      prologue(a);
+      a.li(SFT_R_LOOP1, 12);
+      a.li(20, 0);
+      a.li(21, SFT_DATA_BASE);
+      l = fresh("mix");
+      a.label(l);
+      a.lw(1, 0, 21);
+      a.lw(2, 4, 21);
+      a.r(OP_ADD, 3, 1, 2);
+      a.r(OP_MUL, 4, 3, 1);
+      s1 = fresh("mix_skip");
+      a.br(OP_BLT, 3, 2, s1);
+      a.vbcast(0, 4);
+      a.v(OP_VADD, 1, 0, 1);
+      a.v(OP_TMAC, 2, 1, 0);
+      a.label(s1);
+      a.sw(4, 8, 21);
+      a.r(OP_XOR, 20, 20, 4);
+      a.i(OP_ANDI, 5, SFT_R_LOOP1, 3);
+      s2 = fresh("mix_nosync");
+      a.br(OP_BNE, 5, 0, s2);
+      a.dfsync();
+      a.vm(OP_VST, 2, 2048, SFT_R_BASE);
+      a.label(s2);
+      a.i(OP_ADDI, 21, 21, 16);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+      a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+      a.sw(20, 3072, SFT_R_BASE);
+      a.vredsum(22, 2);
+      a.sw(22, 3076, SFT_R_BASE);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // 8. Random instruction streams with structured, terminating control flow
+    //--------------------------------------------------------------------------
+    function sft_program gen_random(string name, int unsigned n_blocks, int unsigned w_alu, int unsigned w_mem,
+                                    int unsigned w_vec, int unsigned w_sync);
+      sft_asm      a = new(name, "random");
+      int unsigned n_sub = 0;
+      prologue(a);
+      for (int unsigned b = 0; b < n_blocks; b++) begin
+        case (rng.range(0, 9))
+          0, 1: begin
+            string l = fresh("rskip");
+            a.br(rng.range(OP_BEQ, OP_BGEU), greg(), greg(), l);
+            repeat (rng.range(1, 5)) rand_op(a, w_alu, w_mem, w_vec, w_sync);
+            a.label(l);
+          end
+          2: begin
+            string l = fresh("rloop");
+            a.li(SFT_R_LOOP1, rng.range(2, 5));
+            a.label(l);
+            repeat (rng.range(2, 8)) rand_op(a, w_alu, w_mem, w_vec, w_sync);
+            if (rng.permille(400)) begin
+              string m = fresh("rinner");
+              a.li(SFT_R_LOOP2, rng.range(2, 3));
+              a.label(m);
+              repeat (rng.range(1, 4)) rand_op(a, w_alu, w_mem, w_vec, w_sync);
+              a.i(OP_ADDI, SFT_R_LOOP2, SFT_R_LOOP2, -1);
+              a.br(OP_BNE, SFT_R_LOOP2, 0, m);
+            end
+            a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+            a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+          end
+          3: begin
+            if (n_sub < 3) begin
+              a.jal(SFT_R_LINK, $sformatf("%s_sub%0d", name, n_sub));
+              n_sub++;
+            end else begin
+              rand_op(a, w_alu, w_mem, w_vec, w_sync);
+            end
+          end
+          default: repeat (rng.range(2, 6)) rand_op(a, w_alu, w_mem, w_vec, w_sync);
+        endcase
+      end
+      a.halt();
+      for (int unsigned s = 0; s < n_sub; s++) begin
+        a.label($sformatf("%s_sub%0d", name, s));
+        repeat (rng.range(2, 6)) rand_op(a, w_alu, w_mem, w_vec, 0);
+        a.jalr(0, SFT_R_LINK, 0);
+      end
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Reset victim: every architectural register holds a distinctive non-zero
+    // value, then a long mixed loop keeps work in flight for a mid-run reset.
+    //--------------------------------------------------------------------------
+    function sft_program gen_reset_victim(string name);
+      sft_asm a = new(name, "reset");
+      string  l;
+      a.li(SFT_R_BASE, SFT_DATA_BASE);
+      for (int unsigned r = 1; r < SFT_NXREG; r++)
+        if (r != SFT_R_BASE) a.li(r, 32'h5A00_00A5 | (r << 8));
+      for (int unsigned v = 0; v < SFT_NVREG; v++) a.vbcast(v, v + 1);
+      a.li(SFT_R_LOOP1, 48);
+      l = fresh("victim");
+      a.label(l);
+      a.lw(1, 0, SFT_R_BASE);
+      a.r(OP_ADD, 2, 1, 3);
+      a.r(OP_MUL, 4, 2, 2);
+      a.v(OP_TMAC, 1, 2, 3);
+      a.sw(4, 4, SFT_R_BASE);
+      a.vm(OP_VST, 1, 32, SFT_R_BASE);
+      a.i(OP_ADDI, SFT_R_LOOP1, SFT_R_LOOP1, -1);
+      a.br(OP_BNE, SFT_R_LOOP1, 0, l);
+      a.halt();
+      init_data(a.prog);
+      return a.finish();
+    endfunction
+
+    function sft_program gen_halt_only(string name);
+      sft_asm a = new(name, "halt");
+      a.halt();
+      return a.finish();
+    endfunction
+  endclass : sft_prog_gen
+
+  //----------------------------------------------------------------------------
+  // Functional coverage: named bins with closure check + covergroups
+  //----------------------------------------------------------------------------
+  class sft_coverage;
+    int unsigned hits[string];
+    bit          mandatory[string];
+    string       order[$];
+    bit [31:0]   st_hist[$];
+
+`ifndef SF_TB_NO_COVERGROUPS
+    covergroup cg_retire with function sample(int unsigned op, int unsigned unit, int unsigned ddist, bit pending);
+      option.per_instance = 1;
+      cp_op   : coverpoint op   { bins alu[] = {[OP_ADD:OP_MUL]}; bins ialu[] = {[OP_ADDI:OP_LUI]}; bins ctl[] = {[OP_BEQ:OP_JALR]};
+                                  bins mem[] = {[OP_LW:OP_VSTP]}; bins vec[] = {[OP_VADD:OP_VREDSUM]}; bins tns = {OP_TMAC};
+                                  bins sync = {OP_DFSYNC}; bins halt = {OP_HALT}; }
+      cp_unit : coverpoint unit { bins u[] = {[U_ALU:U_MEM]}; bins none = {U_NONE}; }
+      cp_dist : coverpoint ddist { bins indep = {0}; bins d1 = {1}; bins d2 = {2}; bins d3_4 = {[3:4]}; bins d5_8 = {[5:8]};
+                                  bins far = {[9:$]}; }
+      cp_pend : coverpoint pending;
+      x_unit_dist : cross cp_unit, cp_dist;
+    endgroup
+
+    covergroup cg_branch with function sample(int unsigned op, bit taken, bit backward);
+      option.per_instance = 1;
+      cp_op    : coverpoint op { bins b[] = {[OP_BEQ:OP_BGEU]}; }
+      cp_taken : coverpoint taken;
+      cp_dir   : coverpoint backward;
+      x_op_taken : cross cp_op, cp_taken;
+    endgroup
+
+    covergroup cg_pipe with function sample(int unsigned rob, int unsigned sb, int unsigned n_issue, bit stall, bit bus_bp);
+      option.per_instance = 1;
+      cp_rob   : coverpoint rob     { bins empty = {0}; bins low = {[1:4]}; bins mid = {[5:8]}; bins high = {[9:SFT_ROB_DEPTH-1]};
+                                      bins full = {SFT_ROB_DEPTH}; }
+      cp_sb    : coverpoint sb      { bins empty = {0}; bins one = {1}; bins few = {[2:3]}; bins many = {[4:$]}; }
+      cp_issue : coverpoint n_issue { bins none = {0}; bins one = {1}; bins two = {2}; bins wide = {[3:SFT_NUNITS]}; }
+      cp_stall : coverpoint stall;
+      cp_bp    : coverpoint bus_bp;
+      x_rob_issue : cross cp_rob, cp_issue;
+    endgroup
+
+    covergroup cg_flush with function sample(int unsigned squashed, int unsigned inflight);
+      option.per_instance = 1;
+      cp_sq  : coverpoint squashed { bins none = {0}; bins few = {[1:3]}; bins some = {[4:7]}; bins deep = {[8:$]}; }
+      cp_inf : coverpoint inflight { bins none = {0}; bins some = {[1:$]}; }
+    endgroup
+`endif
+
+    function new();
+      define_bins();
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_retire = new();
+      cg_branch = new();
+      cg_pipe   = new();
+      cg_flush  = new();
+`endif
+    endfunction
+
+    function void declare(string name, bit mand = 1'b1);
+      if (hits.exists(name)) return;
+      hits[name]      = 0;
+      mandatory[name] = mand;
+      order.push_back(name);
+    endfunction
+
+    function void hit(string name);
+      if (!hits.exists(name)) declare(name, 1'b0);
+      hits[name]++;
+    endfunction
+
+    function void define_bins();
+      for (int unsigned op = 0; op < 64; op++) begin
+        if (op > OP_MUL && op < OP_ADDI)     continue;
+        if (op > OP_LUI && op < OP_BEQ)      continue;
+        if (op > OP_VSTP && op < OP_VADD)    continue;
+        if (op > OP_VREDSUM && op < OP_TMAC) continue;
+        if (op > OP_TMAC && op < OP_DFSYNC)  continue;
+        declare({"retire.", sft_op_name(op)});
+      end
+      for (int unsigned op = OP_BEQ; op <= OP_BGEU; op++) begin
+        declare({"branch.", sft_op_name(op), ".taken"});
+        declare({"branch.", sft_op_name(op), ".not_taken"});
+      end
+      declare("branch.backward.taken");
+      declare("branch.forward.taken");
+      declare("branch.taken_to_next");
+      declare("flush.squash.1_3");
+      declare("flush.squash.4_7");
+      declare("flush.squash.8p");
+      declare("flush.squash_inflight");
+      declare("flush.squash_store");
+      declare("dep.dist.1");
+      declare("dep.dist.2");
+      declare("dep.dist.3_4");
+      declare("dep.dist.5_8");
+      declare("dep.dist.9p");
+      declare("dep.producer_pending");
+      declare("dep.cross_unit");
+      for (int unsigned u = U_ALU; u <= U_MEM; u++) declare({"issue.unit.", sft_unit_name(u)});
+      declare("issue.width.2");
+      declare("issue.width.3p");
+      declare("rob.occ.0");
+      declare("rob.occ.1_4");
+      declare("rob.occ.5_8");
+      declare("rob.occ.9_15");
+      declare("rob.occ.full");
+      declare("sb.occ.1");
+      declare("sb.occ.2_3");
+      declare("sb.occ.4p");
+      declare("stall.system");
+      declare("stall.bus_backpressure");
+      declare("stall.rob_full");
+      declare("mem.load_scalar");
+      declare("mem.store_scalar");
+      declare("mem.load_vector");
+      declare("mem.store_vector");
+      declare("mem.load_burst");
+      declare("mem.store_pair");
+      declare("mem.store_load_same_line");
+      declare("mem.load_behind_store", 1'b0);
+      declare("bus.rsp_out_of_order");
+      declare("bus.rsp_burst_gap");
+      declare("dfsync.retired");
+      declare("dfsync.younger_waiting");
+      declare("halt.retired");
+      declare("reset.mid_program");
+      for (int unsigned k = 0; k < SFT_N_KINDS; k++) declare({"program.", sft_kind_name(k), ".passed"});
+    endfunction
+
+    function void sample_cycle(sft_obs o, sft_cycle_info ci, sft_mem_bfm bfm);
+      if (ci.dsp != null) sample_dispatch(ci.dsp);
+      if (ci.ret != null) sample_retire(ci.ret, ci.ret_eff);
+      if (ci.flusher != null) begin
+        if (ci.n_squashed >= 8)      hit("flush.squash.8p");
+        else if (ci.n_squashed >= 4) hit("flush.squash.4_7");
+        else if (ci.n_squashed >= 1) hit("flush.squash.1_3");
+        if (ci.n_squashed_inflight > 0) hit("flush.squash_inflight");
+        if (ci.n_squashed_stores > 0)   hit("flush.squash_store");
+`ifndef SF_TB_NO_COVERGROUPS
+        cg_flush.sample(ci.n_squashed, ci.n_squashed_inflight);
+`endif
+      end
+      foreach (ci.issued_units[k]) hit({"issue.unit.", sft_unit_name(ci.issued_units[k])});
+      if (ci.n_issue == 2) hit("issue.width.2");
+      if (ci.n_issue >= 3) hit("issue.width.3p");
+      if      (o.rob_count == 0)                 hit("rob.occ.0");
+      else if (o.rob_count <= 4)                 hit("rob.occ.1_4");
+      else if (o.rob_count <= 8)                 hit("rob.occ.5_8");
+      else if (o.rob_count < SFT_ROB_DEPTH)      hit("rob.occ.9_15");
+      else                                       hit("rob.occ.full");
+      if      (o.sb_count == 1)                  hit("sb.occ.1");
+      else if (o.sb_count >= 2 && o.sb_count <= 3) hit("sb.occ.2_3");
+      else if (o.sb_count >= 4)                  hit("sb.occ.4p");
+      if (o.stall && o.rob_count > 0)            hit("stall.system");
+      if (o.req_valid && !o.req_ready)           hit("stall.bus_backpressure");
+      if (o.rob_count >= SFT_ROB_DEPTH && o.run && !o.halted) hit("stall.rob_full");
+      if (ci.load_hazard)                        hit("mem.load_behind_store");
+      if (bfm.rsp_valid && bfm.rsp_ooo)          hit("bus.rsp_out_of_order");
+      if (bfm.rsp_valid && bfm.rsp_gap)          hit("bus.rsp_burst_gap");
+      if (ci.barrier_wait)                       hit("dfsync.younger_waiting");
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_pipe.sample(o.rob_count, o.sb_count, ci.n_issue, o.stall, o.req_valid && !o.req_ready);
+`endif
+    endfunction
+
+    function void sample_dispatch(sft_instr x);
+      bit pending = 1'b0;
+      bit xunit   = 1'b0;
+      foreach (x.prod[k]) begin
+        sft_instr p = x.prod[k];
+        if (p.wb_cycle < 0) pending = 1'b1;
+        if (p.unit != x.unit) xunit = 1'b1;
+      end
+      if      (x.dep_dist == 1) hit("dep.dist.1");
+      else if (x.dep_dist == 2) hit("dep.dist.2");
+      else if (x.dep_dist >= 3 && x.dep_dist <= 4) hit("dep.dist.3_4");
+      else if (x.dep_dist >= 5 && x.dep_dist <= 8) hit("dep.dist.5_8");
+      else if (x.dep_dist >= 9) hit("dep.dist.9p");
+      if (pending) hit("dep.producer_pending");
+      if (xunit)   hit("dep.cross_unit");
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_retire.sample(x.op, x.unit, x.dep_dist, pending);
+`endif
+    endfunction
+
+    function void sample_retire(sft_instr x, sft_effect e);
+      hit({"retire.", sft_op_name(x.op)});
+      if (sft_is_branch(x.op)) begin
+        bit back = $signed(sft_imm(x.insn)) < 0;
+        hit({"branch.", sft_op_name(x.op), sft_pick(e.taken, ".taken", ".not_taken")});
+        if (e.taken && back)  hit("branch.backward.taken");
+        if (e.taken && !back) hit("branch.forward.taken");
+`ifndef SF_TB_NO_COVERGROUPS
+        cg_branch.sample(x.op, e.taken, back);
+`endif
+      end
+      if (e.taken && e.next_pc == e.pc + 32'd4) hit("branch.taken_to_next");
+      case (x.op)
+        OP_LW:     hit("mem.load_scalar");
+        OP_SW:     hit("mem.store_scalar");
+        OP_VLD:    hit("mem.load_vector");
+        OP_VST:    hit("mem.store_vector");
+        OP_VLDP:   hit("mem.load_burst");
+        OP_VSTP:   hit("mem.store_pair");
+        OP_DFSYNC: hit("dfsync.retired");
+        OP_HALT:   hit("halt.retired");
+        default: ;
+      endcase
+      if (e.mem_rd) begin
+        foreach (st_hist[k]) if (st_hist[k] == e.mem_addr) begin
+          hit("mem.store_load_same_line");
+          break;
+        end
+      end
+      if (e.mem_wr) st_hist.push_back(e.mem_addr);
+      if (e.mem_wr || e.mem_rd) begin
+        if (st_hist.size() > 8) void'(st_hist.pop_front());
+      end
+    endfunction
+
+    function void unhit_mandatory(ref string missing[$]);
+      missing.delete();
+      foreach (order[i]) if (mandatory[order[i]] && hits[order[i]] == 0) missing.push_back(order[i]);
+    endfunction
+
+    function void report();
+      int unsigned n_mand = 0;
+      int unsigned n_hit  = 0;
+      $display("[SFT-COV] ------------------------------------------------------------");
+      foreach (order[i]) begin
+        string nm = order[i];
+        if (mandatory[nm]) begin
+          n_mand++;
+          if (hits[nm] > 0) n_hit++;
+        end
+        $display("[SFT-COV]   %s %10d %s", sft_pad(nm, 30), hits[nm], sft_pick(mandatory[nm] && hits[nm] == 0, "<< UNHIT", ""));
+      end
+      $display("[SFT-COV] mandatory bins covered: %0d / %0d", n_hit, n_mand);
+`ifndef SF_TB_NO_COVERGROUPS
+      $display("[SFT-COV] covergroups: retire %0.1f%%  branch %0.1f%%  pipeline %0.1f%%  flush %0.1f%%",
+               cg_retire.get_inst_coverage(), cg_branch.get_inst_coverage(), cg_pipe.get_inst_coverage(),
+               cg_flush.get_inst_coverage());
+`endif
+    endfunction
+  endclass : sft_coverage
+
+  //----------------------------------------------------------------------------
+  // Retirement tracker: retired instructions arrive through a mailbox;
+  // per-unit execution latency and dispatch-to-retire statistics.
+  //----------------------------------------------------------------------------
+  class sft_tracker;
+    mailbox #(sft_instr) mb;
+    int unsigned         n_unit   [8];
+    longint              sum_exec [8];
+    longint              max_exec [8];
+    longint              sum_life;
+    longint              max_life;
+    int unsigned         n_total;
+
+    function new();
+      mb = new();
+      foreach (n_unit[u]) begin
+        n_unit[u] = 0; sum_exec[u] = 0; max_exec[u] = 0;
+      end
+      sum_life = 0; max_life = 0; n_total = 0;
+    endfunction
+
+    function void post(sft_instr x);
+      void'(mb.try_put(x));
+    endfunction
+
+    function void drain();
+      sft_instr x;
+      while (mb.try_get(x) > 0) begin
+        longint life = x.ret_cycle - x.dsp_cycle;
+        n_total++;
+        sum_life += life;
+        if (life > max_life) max_life = life;
+        if (x.iss_cycle >= 0 && x.wb_cycle >= 0) begin
+          longint ex = x.wb_cycle - x.iss_cycle;
+          n_unit[x.unit]++;
+          sum_exec[x.unit] += ex;
+          if (ex > max_exec[x.unit]) max_exec[x.unit] = ex;
+        end
+      end
+    endfunction
+
+    function void report();
+      for (int unsigned u = U_ALU; u <= U_MEM; u++) begin
+        if (n_unit[u] == 0) continue;
+        $display("[SFT-STAT]   %s executed %7d  avg issue->writeback %6.2f (max %0d)", sft_pad(sft_unit_name(u), 4),
+                 n_unit[u], real'(sum_exec[u]) / real'(n_unit[u]), max_exec[u]);
+      end
+      if (n_total > 0)
+        $display("[SFT-STAT]   retired %0d  avg dispatch->retire %6.2f (max %0d)", n_total,
+                 real'(sum_life) / real'(n_total), max_life);
+    endfunction
+  endclass : sft_tracker
+
+  //----------------------------------------------------------------------------
+  // Environment: cycle orchestration, program loading, reset sequencing,
+  // end-of-program architectural state checks, watchdogs and final verdict.
+  //----------------------------------------------------------------------------
+  class sft_env;
+    sft_cfg          cfg;
+    virtual sft_if   vif;
+    sft_prng         rng_gen;
+    sft_prng         rng_bfm;
+    sft_prng         rng_sys;
+    sft_prog_gen     gen;
+    sft_isa_model    model;
+    sft_mem_bfm      bfm;
+    sft_scoreboard   sb;
+    sft_coverage     cov;
+    sft_tracker      trk;
+    sft_knobs        knobs;
+    sft_obs          last_obs;
+
+    longint          cyc;
+    longint          prog_start;
+    int unsigned     reset_idx;
+    bit              run_q;
+    int unsigned     dbg_x_q;
+    int unsigned     dbg_v_q;
+    int unsigned     imem_wa[$];
+    bit [31:0]       imem_wd[$];
+    int unsigned     stall_left;
+    bit              prog_aborted;
+    longint          ret_trace[$];
+    bit [31:0]       ret_pc_trace[$];
+
+    int unsigned     total_programs;
+    longint unsigned total_retired;
+    bit              closure_done;
+    bit              sva_accounted;
+    string           prog_names [$];
+    bit              prog_pass  [$];
+    longint          prog_cyc   [$];
+    longint unsigned prog_ret   [$];
+    string           test_names [$];
+    bit              test_pass  [$];
+    longint          test_cyc   [$];
+    int unsigned     test_errs  [$];
+    string           cur_test;
+    int unsigned     test_err_base;
+    longint          test_cyc_base;
+
+    function new(sft_cfg cfg_h, virtual sft_if vif_h);
+      cfg     = cfg_h;
+      vif     = vif_h;
+      rng_gen = new(cfg.seed ^ 64'h0123_4567_89AB_CDEF);
+      rng_bfm = new(cfg.seed ^ 64'hFEDC_BA98_7654_3210);
+      rng_sys = new(cfg.seed ^ 64'h5A5A_A5A5_3C3C_C3C3);
+      gen     = new(rng_gen);
+      model   = new();
+      bfm     = new(rng_bfm);
+      sb      = new(cfg, model, bfm);
+      cov     = new();
+      trk     = new();
+      knobs   = new();
+      last_obs = new();
+      cyc            = 0;
+      prog_start     = 0;
+      reset_idx      = 0;
+      run_q          = 1'b0;
+      dbg_x_q        = 0;
+      dbg_v_q        = 0;
+      stall_left     = 0;
+      prog_aborted   = 1'b0;
+      total_programs = 0;
+      total_retired  = 0;
+      closure_done   = 1'b0;
+      sva_accounted  = 1'b0;
+      cur_test       = "";
+    endfunction
+
+    function void info(int unsigned lvl, string msg);
+      if (cfg.verbosity >= lvl) $display("[SFT-TB] cyc=%0d %s", cyc, msg);
+    endfunction
+
+    function void reseed(string tag);
+      rng_gen.reseed(sft_hash_str(tag, cfg.seed));
+      rng_bfm.reseed(sft_hash_str(tag, cfg.seed ^ 64'h00FF_00FF_00FF_00FF));
+      rng_sys.reseed(sft_hash_str(tag, cfg.seed ^ 64'h0F0F_0F0F_0F0F_0F0F));
+    endfunction
+
+    function void init_signals();
+      vif.rst_n          = 1'b0;
+      vif.run            = 1'b0;
+      vif.stall          = 1'b0;
+      vif.imem_we        = 1'b0;
+      vif.imem_waddr     = '0;
+      vif.imem_wdata     = '0;
+      vif.dm_req_ready   = 1'b1;
+      vif.dm_rsp_valid   = 1'b0;
+      vif.dm_rsp_tag     = '0;
+      vif.dm_rsp_rdata   = '0;
+      vif.dm_rsp_last    = 1'b0;
+      vif.dbg_xaddr      = '0;
+      vif.dbg_vaddr      = '0;
+    endfunction
+
+    local function bit sys_stall(longint c);
+      foreach (knobs.stall_from[i])
+        if (c >= prog_start + knobs.stall_from[i] && c <= prog_start + knobs.stall_to[i]) return 1'b1;
+      if (stall_left > 0) begin
+        stall_left--;
+        return 1'b1;
+      end
+      if (knobs.sys_stall_pm > 0 && rng_sys.permille(knobs.sys_stall_pm)) begin
+        stall_left = rng_sys.range(1, (knobs.sys_stall_max == 0) ? 1 : knobs.sys_stall_max) - 1;
+        return 1'b1;
+      end
+      return 1'b0;
+    endfunction
+
+    // Inputs for the next cycle: SRAM loader, run/stall, data bus, debug port.
+    function void drive_inputs();
+      bit in_reset = (reset_idx > 0);
+      bit st;
+      if (imem_wa.size() > 0) begin
+        int unsigned a = imem_wa.pop_front();
+        bit [31:0]   d = imem_wd.pop_front();
+        vif.imem_we    <= 1'b1;
+        vif.imem_waddr <= SFT_IMEM_AW'(a);
+        vif.imem_wdata <= d;
+        model.imem[a]   = d;
+      end else begin
+        vif.imem_we    <= 1'b0;
+        vif.imem_waddr <= SFT_IMEM_AW'(rng_sys.next32());
+        vif.imem_wdata <= rng_sys.next32();
+      end
+      vif.run       <= run_q && !in_reset;
+      st = 1'b0;
+      if (!in_reset && run_q) st = sys_stall(cyc + 1);
+      vif.stall     <= st;
+      vif.dbg_xaddr <= 5'(dbg_x_q);
+      vif.dbg_vaddr <= 3'(dbg_v_q);
+      if (in_reset) begin
+        vif.dm_req_ready <= 1'b1;
+        vif.dm_rsp_valid <= 1'b0;
+        vif.dm_rsp_last  <= 1'b0;
+        vif.dm_rsp_tag   <= SFT_TAG_W'(rng_sys.next32());
+        vif.dm_rsp_rdata <= rng_sys.next128();
+      end else begin
+        bfm.advance(cyc + 1);
+        vif.dm_req_ready <= bfm.ready_now;
+        vif.dm_rsp_valid <= bfm.rsp_valid;
+        vif.dm_rsp_last  <= bfm.rsp_valid ? bfm.rsp_last : 1'b0;
+        vif.dm_rsp_tag   <= bfm.rsp_valid ? SFT_TAG_W'(bfm.rsp_tag) : SFT_TAG_W'(rng_sys.next32());
+        vif.dm_rsp_rdata <= bfm.rsp_valid ? bfm.rsp_data : rng_sys.next128();
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // One clock
+    //--------------------------------------------------------------------------
+    task run_cycle();
+      sft_obs        o = new();
+      sft_cycle_info ci;
+      @(vif.mon_ev);
+      cyc++;
+      o.sample(vif, cyc);
+      last_obs = o;
+      if (!o.rst_n) begin
+        reset_idx++;
+        if (reset_idx == 1) begin
+          sb.reset_state();
+          bfm.reset();
+          stall_left = 0;
+        end
+        sb.check_reset_cycle(o, reset_idx);
+        drive_inputs();
+        return;
+      end
+      reset_idx = 0;
+      ci = sb.check_cycle(o);
+      cov.sample_cycle(o, ci, bfm);
+      if (ci.ret != null) begin
+        sft_instr r = ci.ret;
+        trk.post(r);
+        total_retired++;
+        ret_trace.push_back(cyc - prog_start);
+        ret_pc_trace.push_back(r.pc);
+        if (cfg.verbosity >= 3) info(3, $sformatf("RETIRE %s | %s", r.brief(), r.lifecycle()));
+      end
+      drive_inputs();
+      if (sb.abort_req) begin
+        $display("[SFT-TB] error limit (%0d) reached - aborting", cfg.max_errors);
+        finish();
+      end
+    endtask
+
+    task run_cycles(int unsigned n);
+      repeat (n) run_cycle();
+    endtask
+
+    task reset_dut(int unsigned n);
+      vif.rst_n <= 1'b0;
+      run_q = 1'b0;
+      repeat ((n < 2) ? 2 : n) run_cycle();
+      vif.rst_n <= 1'b1;
+    endtask
+
+    // Load the instruction SRAM (under reset), the data images, and restart.
+    task load_program(sft_program p);
+      for (int unsigned i = 0; i < p.size(); i++) begin
+        imem_wa.push_back(i);
+        imem_wd.push_back(p.words[i]);
+      end
+      for (int unsigned i = p.size(); i < p.size() + 16 && i < SFT_IMEM_WORDS; i++) begin
+        imem_wa.push_back(i);
+        imem_wd.push_back('0);
+      end
+      reset_dut(imem_wa.size() + 4);
+      bfm.load_image(p);
+      model.mem.delete();
+      foreach (p.data_init[a]) model.mem[a] = p.data_init[a];
+      model.reset_arch();
+    endtask
+
+    // Read back both architectural register files through the debug port.
+    task sweep_registers(string tag, bit expect_reset_state);
+      int unsigned bad = 0;
+      for (int unsigned r = 0; r < SFT_NXREG; r++) begin
+        bit [31:0]  ex = expect_reset_state ? 32'd0 : model.x[r];
+        bit [127:0] ev = (r < SFT_NVREG) ? (expect_reset_state ? 128'd0 : model.v[r]) : 128'd0;
+        dbg_x_q = r;
+        dbg_v_q = r % SFT_NVREG;
+        run_cycle();
+        run_cycle();
+        if (last_obs.dbg_x != ex) begin
+          sb.error(E_RF_STATE, cyc, $sformatf("[%s] x%0d = 0x%08h, golden 0x%08h", tag, r, last_obs.dbg_x, ex));
+          bad++;
+        end
+        if (r < SFT_NVREG && last_obs.dbg_v != ev) begin
+          sb.error(E_RF_STATE, cyc, $sformatf("[%s] v%0d = %032h, golden %032h", tag, r, last_obs.dbg_v, ev));
+          bad++;
+        end
+        if (sb.abort_req) break;
+      end
+      dbg_x_q = 0;
+      dbg_v_q = 0;
+      if (bad != 0) info(1, $sformatf("[%s] register sweep found %0d mismatching register(s)", tag, bad));
+    endtask
+
+    function void compare_memory(string tag);
+      bit          keys[bit [31:0]];
+      int unsigned bad = 0;
+      foreach (bfm.mem[a])   keys[a] = 1'b1;
+      foreach (model.mem[a]) keys[a] = 1'b1;
+      foreach (keys[a]) begin
+        if (bfm.line(a) != model.line(a)) begin
+          if (bad < 8)
+            sb.error(E_MEM_IMAGE, cyc, $sformatf("[%s] line 0x%08h = %032h, golden %032h", tag, a, bfm.line(a), model.line(a)));
+          bad++;
+        end
+      end
+      if (bad > 8) sb.error(E_MEM_IMAGE, cyc, $sformatf("[%s] %0d further memory lines differ", tag, bad - 8));
+    endfunction
+
+    task recover(sft_program p, string why);
+      sb.error(E_DEADLOCK, cyc, $sformatf("program '%s': %s\n      golden pc 0x%08h after %0d instructions\n      %s", p.name, why,
+                                          model.pc, model.n_exec, sb.pipeline_snapshot()));
+      prog_aborted = 1'b1;
+      reset_dut(4);
+    endtask
+
+    //--------------------------------------------------------------------------
+    // Execute one program end to end
+    //--------------------------------------------------------------------------
+    task start_program(sft_program p, sft_knobs k);
+      load_program(p);
+      knobs        = k;
+      prog_start   = cyc;
+      prog_aborted = 1'b0;
+      stall_left   = 0;
+      ret_trace.delete();
+      ret_pc_trace.delete();
+      bfm.configure(k, cyc + 1);
+      run_q = 1'b1;
+      total_programs++;
+      info(1, $sformatf("program '%s' (%s): %0d words", p.name, p.kind, p.size()));
+    endtask
+
+    task run_program(sft_program p, sft_knobs k);
+      int unsigned err0 = sb.total_errors;
+      longint      t_halt;
+      bit          passed;
+      start_program(p, k);
+      while (!last_obs.halted) begin
+        run_cycle();
+        if (cyc - sb.last_retire_cycle > longint'(cfg.deadlock_cycles) && cyc - prog_start > longint'(cfg.deadlock_cycles)) begin
+          recover(p, $sformatf("no retirement for %0d cycles", cfg.deadlock_cycles));
+          break;
+        end
+        if (cyc - prog_start > cfg.program_timeout) begin
+          recover(p, $sformatf("program exceeded %0d cycles", cfg.program_timeout));
+          break;
+        end
+      end
+      if (!prog_aborted) begin
+        t_halt = cyc;
+        while ((bfm.outstanding() > 0 || sb.pend_wr.size() > 0) && cyc - t_halt < 400) run_cycle();
+        run_cycles(4);
+        if (sb.live.size() != 0)
+          sb.error(E_LOST, cyc, $sformatf("[%s] %0d instruction(s) still live after halt\n      %s", p.name, sb.live.size(),
+                                          sb.pipeline_snapshot()));
+        if (sb.pend_wr.size() != 0)
+          sb.error(E_LOST, cyc, $sformatf("[%s] %0d retired store beat(s) never performed", p.name, sb.pend_wr.size()));
+        if (bfm.outstanding() != 0)
+          sb.error(E_LOST, cyc, $sformatf("[%s] %0d read(s) still outstanding after halt", p.name, bfm.outstanding()));
+        if (!model.halted)
+          sb.error(E_HALT, cyc, $sformatf("[%s] halted_o asserted but the golden model has not executed HALT (pc 0x%08h)", p.name, model.pc));
+        sweep_registers(p.name, 1'b0);
+        compare_memory(p.name);
+      end
+      trk.drain();
+      passed = (sb.total_errors == err0);
+      if (passed) cov.hit({"program.", p.kind, ".passed"});
+      prog_names.push_back(p.name);
+      prog_pass.push_back(passed);
+      prog_cyc.push_back(cyc - prog_start);
+      prog_ret.push_back(model.n_exec);
+      info(1, $sformatf("program '%s' %s: %0d instructions retired in %0d cycles (IPC %0.3f)", p.name,
+                        sft_pick(passed, "PASSED", "FAILED"), model.n_exec, cyc - prog_start,
+                        real'(model.n_exec) / real'((cyc - prog_start) == 0 ? 1 : (cyc - prog_start))));
+      run_q = 1'b0;
+    endtask
+
+    //--------------------------------------------------------------------------
+    // Test bookkeeping and final verdict
+    //--------------------------------------------------------------------------
+    task begin_test(string name);
+      cur_test      = name;
+      test_err_base = sb.total_errors;
+      test_cyc_base = cyc;
+      reseed(name);
+      $display("[SFT-TB] ==== TEST %s ====", sft_pad(name, 24));
+    endtask
+
+    function void end_test();
+      int unsigned errs = sb.total_errors - test_err_base;
+      test_names.push_back(cur_test);
+      test_pass.push_back(errs == 0);
+      test_cyc.push_back(cyc - test_cyc_base);
+      test_errs.push_back(errs);
+      $display("[SFT-TB] ==== TEST %s %s (%0d cycles, %0d errors)", sft_pad(cur_test, 24),
+               sft_pick(errs == 0, "PASS", "FAIL"), cyc - test_cyc_base, errs);
+    endfunction
+
+    function void final_report();
+      string missing[$];
+      trk.drain();
+      if (!sva_accounted) begin
+        sva_accounted = 1'b1;
+        if (sft_sva_failures > 0) begin
+          sb.err_cnt[E_SVA] += sft_sva_failures;
+          sb.total_errors   += sft_sva_failures;
+        end
+      end
+      if (cfg.cov_closure && cfg.only_test == "" && !sb.abort_req && !closure_done) begin
+        closure_done = 1'b1;
+        cov.unhit_mandatory(missing);
+        foreach (missing[i]) sb.error(E_COVERAGE, cyc, $sformatf("mandatory bin '%s' never hit", missing[i]));
+      end
+      $display("");
+      $display("[SFT-TB] ==================================================================");
+      $display("[SFT-TB]  SilicaFlux full-system verification summary");
+      $display("[SFT-TB] ==================================================================");
+      $display("[SFT-TB]  seed %0d | timing %s | %0d cycles | %0d programs | %0d instructions retired",
+               cfg.seed, sft_pick(cfg.strict_timing, "STRICT", "RELAXED"), cyc, total_programs, total_retired);
+      $display("[SFT-TB]  events: %0d dispatched, %0d issued, %0d written back, %0d retired, %0d flushes squashing %0d",
+               sb.n_dispatch, sb.n_issue, sb.n_wb, sb.n_retire, sb.n_flush, sb.n_squash);
+      $display("[SFT-TB]  data bus: %0d reads, %0d writes, %0d response beats, %0d back-pressure cycles",
+               sb.n_bus_rd, sb.n_bus_wr, bfm.n_beats, bfm.n_bp_cycles);
+      foreach (test_names[i])
+        $display("[SFT-TB]   %s %s  %8d cycles %4d errors", sft_pad(test_names[i], 24),
+                 sft_pick(test_pass[i], "PASS", "FAIL"), test_cyc[i], test_errs[i]);
+      foreach (prog_names[i])
+        if (!prog_pass[i] || cfg.verbosity >= 2)
+          $display("[SFT-TB]     program %s %s  %7d cycles %7d retired", sft_pad(prog_names[i], 26),
+                   sft_pick(prog_pass[i], "PASS", "FAIL"), prog_cyc[i], prog_ret[i]);
+      for (int c = 0; c < int'(E_NUM_CATEGORIES); c++) begin
+        sft_err_e e = sft_err_e'(c);
+        if (sb.err_cnt[c] > 0) $display("[SFT-TB]   errors %s %0d", sft_pad(e.name(), 22), sb.err_cnt[c]);
+      end
+      trk.report();
+      cov.report();
+      $display("[SFT-TB] ==================================================================");
+    endfunction
+
+    function void finish();
+      final_report();
+      if (sb.total_errors == 0) begin
+        $display("[SFT-TB] TB_RESULT: PASS");
+        $finish;
+      end else begin
+        $display("[SFT-TB] TB_RESULT: FAIL (%0d errors)", sb.total_errors);
+        $fatal(1, "[SFT-TB] full-system verification FAILED");
+      end
+    endfunction
+  endclass : sft_env
+
+  //----------------------------------------------------------------------------
+  // Test library
+  //----------------------------------------------------------------------------
+  class sft_test_lib;
+    sft_env      env;
+    sft_cfg      cfg;
+    int unsigned n_selected;
+
+    function new(sft_env env_h);
+      env        = env_h;
+      cfg        = env_h.cfg;
+      n_selected = 0;
+    endfunction
+
+    function bit selected(string name);
+      bit sel = (cfg.only_test == "") || (cfg.only_test == name);
+      if (sel) n_selected++;
+      return sel;
+    endfunction
+
+    function sft_knobs stress_knobs(sft_prng r);
+      sft_knobs k = new();
+      k.bus_stall_pm  = r.range(150, 450);
+      k.bus_stall_max = r.range(2, 8);
+      k.lat_min       = 1;
+      k.lat_max       = r.range(12, 40);
+      k.ooo           = 1'b1;
+      k.gap_pm        = 500;
+      k.sys_stall_pm  = r.range(20, 80);
+      k.sys_stall_max = r.range(2, 10);
+      k.add_stall(longint'(r.range(100, 300)), longint'(r.range(320, 500)));
+      k.add_bus_freeze(longint'(r.range(500, 700)), longint'(r.range(720, 900)));
+      return k;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    task t_reset_init();
+      sft_knobs   k = new();
+      sft_program p;
+      env.begin_test("reset_init");
+      env.reset_dut(4);
+      env.run_cycles(6);
+      env.sweep_registers("post_reset", 1'b1);
+      p = env.gen.gen_halt_only("halt_only");
+      env.run_program(p, k);
+      env.end_test();
+    endtask
+
+    task t_scalar_arith();
+      sft_knobs   k  = new();
+      sft_knobs   kb = new();
+      sft_program p;
+      env.begin_test("scalar_arith");
+      p = env.gen.gen_scalar_arith("arith.sweep");
+      env.run_program(p, k);
+      kb.bus_stall_pm  = 300;
+      kb.bus_stall_max = 4;
+      p = env.gen.gen_scalar_arith("arith.sweep_bp");
+      env.run_program(p, kb);
+      env.end_test();
+    endtask
+
+    task t_branch_control();
+      sft_knobs   k  = new();
+      sft_knobs   ks = new();
+      sft_program p;
+      env.begin_test("branch_control");
+      p = env.gen.gen_branch("branch.directed");
+      env.run_program(p, k);
+      ks.sys_stall_pm  = 100;
+      ks.sys_stall_max = 4;
+      ks.lat_min       = 1;
+      ks.lat_max       = 12;
+      p = env.gen.gen_branch("branch.directed_stall");
+      env.run_program(p, ks);
+      env.end_test();
+    endtask
+
+    task t_dep_chain();
+      sft_knobs   k  = new();
+      sft_knobs   kl = new();
+      sft_program p;
+      env.begin_test("dep_chain");
+      p = env.gen.gen_dep_chain("dep.chain");
+      env.run_program(p, k);
+      kl.lat_min = 8;
+      kl.lat_max = 24;
+      p = env.gen.gen_dep_chain("dep.chain_slow_mem");
+      env.run_program(p, kl);
+      env.end_test();
+    endtask
+
+    task t_vector_memory();
+      sft_knobs   k  = new();
+      sft_knobs   ko = new();
+      sft_program p;
+      env.begin_test("vector_memory");
+      p = env.gen.gen_vector_mem("vec.mem");
+      env.run_program(p, k);
+      ko.ooo     = 1'b1;
+      ko.gap_pm  = 600;
+      ko.lat_min = 1;
+      ko.lat_max = 20;
+      p = env.gen.gen_vector_mem("vec.mem_ooo_gaps");
+      env.run_program(p, ko);
+      env.end_test();
+    endtask
+
+    task t_memory_ordering();
+      sft_knobs   k  = new();
+      sft_knobs   kh = new();
+      sft_program p;
+      env.begin_test("memory_ordering");
+      p = env.gen.gen_mem_order("mem.order");
+      env.run_program(p, k);
+      kh.lat_min       = 10;
+      kh.lat_max       = 40;
+      kh.ooo           = 1'b1;
+      kh.bus_stall_pm  = 300;
+      kh.bus_stall_max = 5;
+      p = env.gen.gen_mem_order("mem.order_hostile");
+      env.run_program(p, kh);
+      env.end_test();
+    endtask
+
+    task t_dfsync_barrier();
+      sft_knobs   k  = new();
+      sft_knobs   kf = new();
+      sft_program p;
+      env.begin_test("dfsync_barrier");
+      p = env.gen.gen_dfsync("dfsync.directed");
+      env.run_program(p, k);
+      kf.add_bus_freeze(40, 160);
+      kf.lat_max = 15;
+      p = env.gen.gen_dfsync("dfsync.bus_freeze");
+      env.run_program(p, kf);
+      env.end_test();
+    endtask
+
+    task t_mixed_pipeline();
+      sft_knobs   k = new();
+      sft_program p;
+      env.begin_test("mixed_pipeline");
+      p = env.gen.gen_mixed("mixed.loop");
+      env.run_program(p, k);
+      p = env.gen.gen_mixed("mixed.loop_stress");
+      env.run_program(p, stress_knobs(env.gen.rng));
+      env.end_test();
+    endtask
+
+    task t_random_streams();
+      env.begin_test("random_streams");
+      for (int unsigned it = 0; it < cfg.random_iters; it++) begin
+        sft_prng    r = env.gen.rng;
+        sft_knobs   k = new();
+        sft_program p;
+        k.lat_min       = r.range(1, 4);
+        k.lat_max       = r.range(4, 24);
+        k.ooo           = r.permille(500);
+        k.gap_pm        = r.range(0, 500);
+        k.bus_stall_pm  = r.permille(500) ? 0 : r.range(50, 350);
+        k.bus_stall_max = r.range(1, 6);
+        k.sys_stall_pm  = r.permille(600) ? 0 : r.range(10, 60);
+        k.sys_stall_max = r.range(1, 6);
+        p = env.gen.gen_random($sformatf("random.%0d", it), r.range(25, 45), r.range(30, 60), r.range(10, 30),
+                               r.range(5, 25), r.range(0, 4));
+        env.run_program(p, k);
+      end
+      env.end_test();
+    endtask
+
+    task t_system_stress();
+      sft_program p;
+      env.begin_test("system_stress");
+      for (int unsigned it = 0; it < 4; it++) begin
+        if (it % 2 == 0) p = env.gen.gen_mixed($sformatf("stress.mixed.%0d", it));
+        else             p = env.gen.gen_random($sformatf("stress.random.%0d", it), 40, 40, 30, 20, 3);
+        p.kind = "stress";
+        env.run_program(p, stress_knobs(env.gen.rng));
+      end
+      env.end_test();
+    endtask
+
+    task t_midprogram_reset();
+      sft_knobs   k = new();
+      sft_program p;
+      env.begin_test("midprogram_reset");
+      k.lat_min = 6;
+      k.lat_max = 20;
+      p = env.gen.gen_reset_victim("reset.victim");
+      env.start_program(p, k);
+      for (int unsigned c = 0; c < 2000 && env.model.n_exec < 80; c++) env.run_cycle();
+      env.run_cycles(24);
+      if (env.model.n_exec < 80)
+        env.sb.error(E_TB_INTERNAL, env.cyc, "midprogram_reset: register initialisation did not retire before the reset point");
+      if (env.sb.live.size() == 0)
+        env.sb.error(E_TB_INTERNAL, env.cyc, "midprogram_reset: no instruction in flight at the reset point");
+      env.cov.hit("reset.mid_program");
+      env.reset_dut(6);
+      env.run_cycles(6);
+      env.sweep_registers("after_midprogram_reset", 1'b1);
+      env.run_program(p, k);
+      env.end_test();
+    endtask
+
+    task t_determinism();
+      sft_knobs   k = new();
+      sft_program p;
+      longint     tr_a[$];
+      bit [31:0]  pc_a[$];
+      env.begin_test("determinism");
+      k.bus_stall_pm  = 200;
+      k.bus_stall_max = 3;
+      k.ooo           = 1'b1;
+      k.lat_max       = 16;
+      k.sys_stall_pm  = 30;
+      k.sys_stall_max = 4;
+      p = env.gen.gen_random("determinism.prog", 35, 40, 25, 20, 2);
+      env.reseed("determinism.replay");
+      env.run_program(p, k);
+      tr_a = env.ret_trace;
+      pc_a = env.ret_pc_trace;
+      env.reseed("determinism.replay");
+      env.run_program(p, k);
+      if (tr_a.size() != env.ret_trace.size()) begin
+        env.sb.error(E_DETERMINISM, env.cyc, $sformatf("replay retired %0d instructions, first run %0d", env.ret_trace.size(), tr_a.size()));
+      end else begin
+        foreach (tr_a[i]) begin
+          if (tr_a[i] != env.ret_trace[i] || pc_a[i] != env.ret_pc_trace[i]) begin
+            env.sb.error(E_DETERMINISM, env.cyc, $sformatf("replay diverged at retirement %0d: run A pc 0x%08h @+%0d, run B pc 0x%08h @+%0d",
+                                                           i, pc_a[i], tr_a[i], env.ret_pc_trace[i], env.ret_trace[i]));
+            break;
+          end
+        end
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    task run();
+      $display("[SFT-TB] SilicaFlux full-system verification: seed=%0d timing=%s rob=%0d sb=%0d imem=%0d words",
+               cfg.seed, sft_pick(cfg.strict_timing, "STRICT", "RELAXED"), SFT_ROB_DEPTH, SFT_SB_DEPTH, SFT_IMEM_WORDS);
+      if (selected("reset_init"))       t_reset_init();
+      if (selected("scalar_arith"))     t_scalar_arith();
+      if (selected("branch_control"))   t_branch_control();
+      if (selected("dep_chain"))        t_dep_chain();
+      if (selected("vector_memory"))    t_vector_memory();
+      if (selected("memory_ordering"))  t_memory_ordering();
+      if (selected("dfsync_barrier"))   t_dfsync_barrier();
+      if (selected("mixed_pipeline"))   t_mixed_pipeline();
+      if (selected("random_streams"))   t_random_streams();
+      if (selected("system_stress"))    t_system_stress();
+      if (selected("midprogram_reset")) t_midprogram_reset();
+      if (selected("determinism"))      t_determinism();
+      if (n_selected == 0) env.sb.error(E_TB_INTERNAL, env.cyc, $sformatf("unknown test '%s'", cfg.only_test));
+      env.finish();
+    endtask
+  endclass : sft_test_lib
+
+endpackage : sft_tb_pkg
+
+//==============================================================================
+// Top
+//==============================================================================
+module tb_silicaflux_top;
+  import sft_params_pkg::*;
+  import sft_tb_pkg::*;
+
+  localparam time CLK_HALF = 1ns;
+
+  logic clk = 1'b0;
+  always #(CLK_HALF) clk = ~clk;
+
+  sft_if sif (.clk(clk));
+
+  //----------------------------------------------------------------------------
+  // DUT
+  //----------------------------------------------------------------------------
+  silicaflux_top #(
+    .IMEM_AW   (SFT_IMEM_AW),
+    .ROB_DEPTH (SFT_ROB_DEPTH),
+    .SB_DEPTH  (SFT_SB_DEPTH),
+    .TAG_W     (SFT_TAG_W),
+    .ID_W      (SFT_ID_W)
+  ) u_dut (
+    .clk_i            (clk),
+    .rst_ni           (sif.rst_n),
+    .run_i            (sif.run),
+    .stall_i          (sif.stall),
+    .halted_o         (sif.halted),
+    .imem_we_i        (sif.imem_we),
+    .imem_waddr_i     (sif.imem_waddr),
+    .imem_wdata_i     (sif.imem_wdata),
+    .dm_req_valid_o   (sif.dm_req_valid),
+    .dm_req_ready_i   (sif.dm_req_ready),
+    .dm_req_we_o      (sif.dm_req_we),
+    .dm_req_addr_o    (sif.dm_req_addr),
+    .dm_req_len_o     (sif.dm_req_len),
+    .dm_req_wdata_o   (sif.dm_req_wdata),
+    .dm_req_be_o      (sif.dm_req_be),
+    .dm_req_tag_o     (sif.dm_req_tag),
+    .dm_rsp_valid_i   (sif.dm_rsp_valid),
+    .dm_rsp_tag_i     (sif.dm_rsp_tag),
+    .dm_rsp_rdata_i   (sif.dm_rsp_rdata),
+    .dm_rsp_last_i    (sif.dm_rsp_last),
+    .tr_dsp_valid_o   (sif.tr_dsp_valid),
+    .tr_dsp_id_o      (sif.tr_dsp_id),
+    .tr_dsp_pc_o      (sif.tr_dsp_pc),
+    .tr_dsp_insn_o    (sif.tr_dsp_insn),
+    .tr_iss_valid_o   (sif.tr_iss_valid),
+    .tr_iss_id_o      (sif.tr_iss_id),
+    .tr_wb_valid_o    (sif.tr_wb_valid),
+    .tr_wb_id_o       (sif.tr_wb_id),
+    .tr_flush_valid_o (sif.tr_flush_valid),
+    .tr_flush_id_o    (sif.tr_flush_id),
+    .tr_flush_pc_o    (sif.tr_flush_pc),
+    .tr_rob_count_o   (sif.tr_rob_count),
+    .tr_sb_count_o    (sif.tr_sb_count),
+    .rv_valid_o       (sif.rv_valid),
+    .rv_order_o       (sif.rv_order),
+    .rv_id_o          (sif.rv_id),
+    .rv_pc_o          (sif.rv_pc),
+    .rv_insn_o        (sif.rv_insn),
+    .rv_next_pc_o     (sif.rv_next_pc),
+    .rv_rd_we_o       (sif.rv_rd_we),
+    .rv_rd_addr_o     (sif.rv_rd_addr),
+    .rv_rd_wdata_o    (sif.rv_rd_wdata),
+    .rv_vd_we_o       (sif.rv_vd_we),
+    .rv_vd_addr_o     (sif.rv_vd_addr),
+    .rv_vd_wdata_o    (sif.rv_vd_wdata),
+    .rv_mem_rd_o      (sif.rv_mem_rd),
+    .rv_mem_wr_o      (sif.rv_mem_wr),
+    .rv_mem_addr_o    (sif.rv_mem_addr),
+    .rv_mem_be_o      (sif.rv_mem_be),
+    .rv_mem_len_o     (sif.rv_mem_len),
+    .rv_mem_rdata_o   (sif.rv_mem_rdata),
+    .rv_mem_wdata_o   (sif.rv_mem_wdata),
+    .rv_halt_o        (sif.rv_halt),
+    .dbg_xaddr_i      (sif.dbg_xaddr),
+    .dbg_xdata_o      (sif.dbg_xdata),
+    .dbg_vaddr_i      (sif.dbg_vaddr),
+    .dbg_vdata_o      (sif.dbg_vdata)
+  );
+
+  //----------------------------------------------------------------------------
+  // Concurrent assertions
+  //----------------------------------------------------------------------------
+  a_outputs_known : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      !$isunknown({sif.halted, sif.dm_req_valid, sif.tr_dsp_valid, sif.tr_iss_valid, sif.tr_wb_valid,
+                   sif.tr_flush_valid, sif.rv_valid, sif.tr_rob_count, sif.tr_sb_count}))
+    else sft_sva_fail($sformatf("%0t a_outputs_known: X/Z on control outputs", $time));
+
+  a_dispatch_gated : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.tr_dsp_valid |-> (sif.run && !sif.stall && !sif.halted))
+    else sft_sva_fail($sformatf("%0t a_dispatch_gated: dispatch while not running, stalled or halted", $time));
+
+  a_retire_not_stalled : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.rv_valid |-> !sif.stall)
+    else sft_sva_fail($sformatf("%0t a_retire_not_stalled: retirement during stall_i", $time));
+
+  a_halt_sticky : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.halted |=> sif.halted)
+    else sft_sva_fail($sformatf("%0t a_halt_sticky: halted_o dropped without reset", $time));
+
+  a_req_stable : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      (sif.dm_req_valid && !sif.dm_req_ready) |=>
+        (sif.dm_req_valid && $stable(sif.dm_req_we) && $stable(sif.dm_req_addr) && $stable(sif.dm_req_len) &&
+         $stable(sif.dm_req_tag)))
+    else sft_sva_fail($sformatf("%0t a_req_stable: data-bus request changed before acceptance", $time));
+
+  a_req_aligned : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.dm_req_valid |-> (sif.dm_req_addr[3:0] == 4'd0))
+    else sft_sva_fail($sformatf("%0t a_req_aligned: request address 0x%08h", $time, $sampled(sif.dm_req_addr)));
+
+  a_write_single_beat : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      (sif.dm_req_valid && sif.dm_req_we) |-> (sif.dm_req_len == 2'd0))
+    else sft_sva_fail($sformatf("%0t a_write_single_beat: multi-beat write request", $time));
+
+  a_flush_aligned : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.tr_flush_valid |-> (sif.tr_flush_pc[1:0] == 2'd0))
+    else sft_sva_fail($sformatf("%0t a_flush_aligned: redirect pc 0x%08h", $time, $sampled(sif.tr_flush_pc)));
+
+  a_rob_bound : assert property (@(posedge clk) disable iff (!sif.rst_n)
+      sif.tr_rob_count <= SFT_ROBC_W'(SFT_ROB_DEPTH))
+    else sft_sva_fail($sformatf("%0t a_rob_bound: rob count %0d", $time, $sampled(sif.tr_rob_count)));
+
+  a_quiet_in_reset : assert property (@(posedge clk)
+      (!sif.rst_n && $past(!sif.rst_n)) |->
+        (!sif.tr_dsp_valid && sif.tr_iss_valid == '0 && sif.tr_wb_valid == '0 && !sif.rv_valid && !sif.dm_req_valid))
+    else sft_sva_fail($sformatf("%0t a_quiet_in_reset: activity while reset held", $time));
+
+  c_flush            : cover property (@(posedge clk) disable iff (!sif.rst_n) sif.tr_flush_valid);
+  c_wide_issue       : cover property (@(posedge clk) disable iff (!sif.rst_n) $countones(sif.tr_iss_valid) >= 3);
+  c_burst_response   : cover property (@(posedge clk) disable iff (!sif.rst_n) sif.dm_rsp_valid && !sif.dm_rsp_last);
+  c_retire_and_flush : cover property (@(posedge clk) disable iff (!sif.rst_n) sif.rv_valid && sif.tr_flush_valid);
+
+  //----------------------------------------------------------------------------
+  // Environment
+  //----------------------------------------------------------------------------
+  sft_cfg      cfg;
+  sft_env      env;
+  sft_test_lib tests;
+
+  initial begin
+    cfg = new();
+    cfg.load_plusargs();
+    env = new(cfg, sif);
+    env.init_signals();
+    tests = new(env);
+    tests.run();
+  end
+
+endmodule : tb_silicaflux_top
+
+`default_nettype wire
