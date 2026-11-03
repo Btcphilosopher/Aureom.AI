@@ -1,0 +1,2952 @@
+//==============================================================================
+//  tb_noc_interconnect.sf
+//------------------------------------------------------------------------------
+//  SilicaFlux 2x2 XY-routed mesh NoC - cycle-accurate, self-checking
+//  verification environment.                             Language: Silica Flux-2017
+//
+//  DUT ......... noc_interconnect   (noc_interconnect.sf)
+//  Top ......... tb_noc_interconnect
+//
+//  Topology                         Ports              Node index n = y*MESH_X + x
+//     n2 (0,1) ---- n3 (1,1)         L = 0  local
+//        |             |             N = 1  +y
+//        |             |             E = 2  +x
+//     n0 (0,0) ---- n1 (1,0)         S = 3  -y
+//                                    W = 4  -x
+//
+//  Environment
+//  -----------
+//   noc_traffic_gen -> noc_traffic -> noc_inj_driver[n] --inject--> DUT --eject--> noc_ej_sink[n]
+//   noc_obs (monitor) -> noc_scoreboard <-> noc_ref_model (golden XY mesh, per-port FIFOs, RR arbiters)
+//                            |-> noc_cdg (channel-dependency graph: golden + observed)
+//                            |-> noc_coverage (named bins + covergroups)
+//                            '-> noc_tracker (mailbox) -> latency / path statistics
+//
+//  DUT interface contract (rising edge of clk_i)
+//  ---------------------------------------------
+//   Flit   : single-flit packets, noc_flit_t {chk, payload, id, src_y, src_x, dst_y, dst_x}
+//            packed with dst_x at bit 0. The network carries every bit unmodified.
+//   Router : one FIFO of FIFO_DEPTH flits per input port. The head flit is routed XY:
+//            x != dst_x -> E/W, else y != dst_y -> N/S, else L.
+//   T1 inj_ready_o[n] == (local input FIFO of router n holds < FIFO_DEPTH flits),
+//      registered state. An injection fires when inj_valid_i && inj_ready_o and the
+//      flit is visible at that FIFO from cycle t+1.
+//   T2 Each output port has a round-robin arbiter over input ports in L,N,E,S,W
+//      order, starting one past the last granted input. It grants the first input
+//      whose head routes to it, if the output is ready: a link output is ready when
+//      the downstream input FIFO holds < FIFO_DEPTH flits (start-of-cycle occupancy);
+//      the local output is ready when ej_ready_i is set. The pointer moves on grants
+//      only and resets to L.
+//   T3 A granted flit leaves its FIFO at the end of cycle t and heads the downstream
+//      FIFO from t+1 (one cycle per hop). ej_valid_o/ej_flit_o present the local
+//      output grant: ej_valid_o implies ej_ready_i.
+//   T4 trc_valid_o[r][p] / trc_flit_o[r][p] report every transfer on output port p of
+//      router r in the cycle it happens (trc_valid_o[r][L] == ej_valid_o[r]).
+//      buf_count_o[r][p] is the registered occupancy of input FIFO p of router r.
+//      Ports beyond the mesh edge never transfer and read zero.
+//   T5 rst_ni is active low: FIFOs empty, arbiters at L, outputs quiescent from the
+//      second reset cycle.
+//   Zero-load latency: eject_cycle = inject_cycle + hops + 1.
+//
+//  Checking: strict mode (default) compares every router grant, inj_ready and buffer
+//  occupancy with the golden model each cycle. +NOC_RELAXED keeps routing, integrity,
+//  ordering, overflow, loss/duplication, deadlock and liveness checks and drops
+//  cycle-exact arbitration equivalence.
+//
+//  Plusargs : +SEED=<n> +NOC_RELAXED +NOC_VERBOSE=<0..3> +NOC_RANDOM_ITERS=<n>
+//             +NOC_TEST=<name> +NOC_MAX_ERRORS=<n> +NOC_NO_COV_CLOSURE
+//  Defines  : SF_TB_NO_COVERGROUPS  (omit covergroup constructs)
+//==============================================================================
+
+`timescale 1ns/1ps
+`default_nettype none
+
+//==============================================================================
+// Mesh parameters, flit format, topology and XY routing functions
+//==============================================================================
+package noc_params_pkg;
+
+  localparam int unsigned NOC_MESH_X     = 2;
+  localparam int unsigned NOC_MESH_Y     = 2;
+  localparam int unsigned NOC_NODES      = NOC_MESH_X * NOC_MESH_Y;
+  localparam int unsigned NOC_PORTS      = 5;
+  localparam int unsigned NOC_RP         = NOC_NODES * NOC_PORTS;
+  localparam int unsigned NOC_COORD_W    = 1;
+  localparam int unsigned NOC_ID_W       = 16;
+  localparam int unsigned NOC_PAYLOAD_W  = 64;
+  localparam int unsigned NOC_CHK_W      = 16;
+  localparam int unsigned NOC_FIFO_DEPTH = 4;
+  localparam int unsigned NOC_CNT_W      = $clog2(NOC_FIFO_DEPTH + 1);
+
+  // Router port indices (input and output ports share the numbering).
+  localparam int unsigned P_L = 0;
+  localparam int unsigned P_N = 1;
+  localparam int unsigned P_E = 2;
+  localparam int unsigned P_S = 3;
+  localparam int unsigned P_W = 4;
+
+  typedef struct packed {
+    logic [NOC_CHK_W-1:0]     chk;
+    logic [NOC_PAYLOAD_W-1:0] payload;
+    logic [NOC_ID_W-1:0]      id;
+    logic [NOC_COORD_W-1:0]   src_y;
+    logic [NOC_COORD_W-1:0]   src_x;
+    logic [NOC_COORD_W-1:0]   dst_y;
+    logic [NOC_COORD_W-1:0]   dst_x;
+  } noc_flit_t;
+
+  localparam int unsigned NOC_FLIT_W = $bits(noc_flit_t);
+  localparam int unsigned NOC_BODY_W = NOC_FLIT_W - NOC_CHK_W;
+
+  function automatic int unsigned noc_x(int unsigned n);
+    return n % NOC_MESH_X;
+  endfunction
+
+  function automatic int unsigned noc_y(int unsigned n);
+    return n / NOC_MESH_X;
+  endfunction
+
+  function automatic int unsigned noc_node(int unsigned x, int unsigned y);
+    return y * NOC_MESH_X + x;
+  endfunction
+
+  function automatic bit noc_port_exists(int unsigned n, int unsigned p);
+    case (p)
+      P_L:     return 1'b1;
+      P_N:     return noc_y(n) + 1 < NOC_MESH_Y;
+      P_E:     return noc_x(n) + 1 < NOC_MESH_X;
+      P_S:     return noc_y(n) > 0;
+      P_W:     return noc_x(n) > 0;
+      default: return 1'b0;
+    endcase
+  endfunction
+
+  function automatic int unsigned noc_neighbor(int unsigned n, int unsigned p);
+    case (p)
+      P_N:     return n + NOC_MESH_X;
+      P_E:     return n + 1;
+      P_S:     return n - NOC_MESH_X;
+      P_W:     return n - 1;
+      default: return n;
+    endcase
+  endfunction
+
+  function automatic int unsigned noc_opposite(int unsigned p);
+    case (p)
+      P_N:     return P_S;
+      P_E:     return P_W;
+      P_S:     return P_N;
+      P_W:     return P_E;
+      default: return P_L;
+    endcase
+  endfunction
+
+  // Golden dimension-order routing: X first, then Y, then eject.
+  function automatic int unsigned noc_xy_route(int unsigned n, int unsigned dx, int unsigned dy);
+    if (dx > noc_x(n)) return P_E;
+    if (dx < noc_x(n)) return P_W;
+    if (dy > noc_y(n)) return P_N;
+    if (dy < noc_y(n)) return P_S;
+    return P_L;
+  endfunction
+
+  function automatic int unsigned noc_hops(int unsigned s, int unsigned d);
+    int unsigned hx = (noc_x(s) > noc_x(d)) ? noc_x(s) - noc_x(d) : noc_x(d) - noc_x(s);
+    int unsigned hy = (noc_y(s) > noc_y(d)) ? noc_y(s) - noc_y(d) : noc_y(d) - noc_y(s);
+    return hx + hy;
+  endfunction
+
+  function automatic int unsigned noc_num_links();
+    int unsigned n = 0;
+    for (int unsigned r = 0; r < NOC_NODES; r++)
+      for (int unsigned p = 1; p < NOC_PORTS; p++)
+        if (noc_port_exists(r, p)) n++;
+    return n;
+  endfunction
+
+  // End-to-end integrity code over every non-checksum flit bit.
+  function automatic logic [NOC_CHK_W-1:0] noc_flit_chk(noc_flit_t f);
+    logic [NOC_BODY_W-1:0] body = f[NOC_BODY_W-1:0];
+    logic [NOC_CHK_W-1:0]  c    = 16'hA55A;
+    for (int unsigned i = 0; i < NOC_BODY_W; i += NOC_CHK_W) begin
+      logic [NOC_BODY_W-1:0] sh = body >> i;
+      c = {c[10:0], c[15:11]} ^ sh[NOC_CHK_W-1:0];
+      c = c + 16'h9E37;
+    end
+    return c;
+  endfunction
+
+endpackage : noc_params_pkg
+
+//==============================================================================
+// Signal bundle between the environment and the DUT
+//==============================================================================
+interface noc_if (input logic clk);
+  import noc_params_pkg::*;
+
+  logic                                                rst_n;
+
+  logic [NOC_NODES-1:0]                                inj_valid;
+  logic [NOC_NODES-1:0]                                inj_ready;
+  logic [NOC_NODES-1:0][NOC_FLIT_W-1:0]                inj_flit;
+  logic [NOC_NODES-1:0]                                ej_valid;
+  logic [NOC_NODES-1:0]                                ej_ready;
+  logic [NOC_NODES-1:0][NOC_FLIT_W-1:0]                ej_flit;
+
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0]                 trc_valid;
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0][NOC_FLIT_W-1:0] trc_flit;
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0][NOC_CNT_W-1:0]  buf_count;
+
+  //----------------------------------------------------------------------------
+  // Monitor view: the whole boundary captured at the rising edge (values of the
+  // cycle that is ending), then mon_ev. The environment samples only this view
+  // and drives the live signals with nonblocking assignments.
+  //----------------------------------------------------------------------------
+  event                                                mon_ev;
+  logic                                                mon_rst_n;
+  logic [NOC_NODES-1:0]                                mon_inj_valid;
+  logic [NOC_NODES-1:0]                                mon_inj_ready;
+  logic [NOC_NODES-1:0]                                mon_ej_valid;
+  logic [NOC_NODES-1:0]                                mon_ej_ready;
+  logic [NOC_NODES-1:0][NOC_FLIT_W-1:0]                mon_ej_flit;
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0]                 mon_trc_valid;
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0][NOC_FLIT_W-1:0] mon_trc_flit;
+  logic [NOC_NODES-1:0][NOC_PORTS-1:0][NOC_CNT_W-1:0]  mon_buf_count;
+
+  always @(posedge clk) begin : p_monitor
+    mon_rst_n     = rst_n;
+    mon_inj_valid = inj_valid;
+    mon_inj_ready = inj_ready;
+    mon_ej_valid  = ej_valid;
+    mon_ej_ready  = ej_ready;
+    mon_ej_flit   = ej_flit;
+    mon_trc_valid = trc_valid;
+    mon_trc_flit  = trc_flit;
+    mon_buf_count = buf_count;
+    -> mon_ev;
+  end
+
+endinterface : noc_if
+
+//==============================================================================
+// Verification package
+//==============================================================================
+package noc_tb_pkg;
+  import noc_params_pkg::*;
+
+  //----------------------------------------------------------------------------
+  // Enumerations
+  //----------------------------------------------------------------------------
+  typedef enum int unsigned {
+    PK_NEW, PK_PRESENTED, PK_IN_NET, PK_DELIVERED, PK_LOST, PK_FLUSHED
+  } noc_pkt_state_e;
+
+  typedef enum int unsigned {
+    E_PROTOCOL,          // handshake / trace consistency rule broken
+    E_XPROP,             // unknown value on a control output
+    E_PHANTOM,           // packet observed that was never injected
+    E_CORRUPT,           // flit bits differ from the injected flit
+    E_DUPLICATE,         // packet delivered or forwarded more than once
+    E_STALE,             // pre-reset packet observed after reset
+    E_ROUTE,             // hop violates XY routing / leaves the mesh
+    E_PATH,              // observed path differs from the golden XY path
+    E_FIFO_ORDER,        // strict: transfer is not the head of its input FIFO
+    E_FLOW_ORDER,        // packets of one source->destination flow reordered
+    E_OVERFLOW,          // push into a full buffer / occupancy above depth
+    E_GRANT_MISMATCH,    // strict: router grant differs from golden model
+    E_WORK_CONSERVATION, // strict: output idle while golden model grants
+    E_INJ_READY,         // strict: inj_ready differs from golden model
+    E_BUF_COUNT,         // strict: buffer occupancy differs from golden model
+    E_LATENCY,           // delivery faster than the zero-load bound / directed latency
+    E_STARVATION,        // packet in flight longer than the latency bound
+    E_DEADLOCK,          // no forward progress with packets in flight
+    E_LOST,              // packet never delivered
+    E_CDG,               // cyclic channel dependency
+    E_RESET,             // reset behaviour
+    E_DETERMINISM,       // identical replay produced a different schedule
+    E_COVERAGE,          // mandatory coverage bin not reached
+    E_SVA,               // concurrent assertion failure
+    E_TB_INTERNAL,       // environment self-consistency failure
+    E_NUM_CATEGORIES
+  } noc_err_e;
+
+  // Concurrent-assertion failure counter, updated from the top-level SVA.
+  int unsigned noc_sva_failures = 0;
+
+  function automatic void noc_sva_fail(string msg);
+    noc_sva_failures++;
+    $display("[NOC-SVA] %s", msg);
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Utilities
+  //----------------------------------------------------------------------------
+  function automatic bit [63:0] noc_hash_str(string s, bit [63:0] salt);
+    bit [63:0] h = 64'hCBF2_9CE4_8422_2325 ^ salt;
+    for (int i = 0; i < s.len(); i++) begin
+      h = h ^ {56'd0, s[i]};
+      h = h * 64'h0000_0100_0000_01B3;
+    end
+    return h;
+  endfunction
+
+  function automatic string noc_pick(bit c, string a, string b);
+    return c ? a : b;
+  endfunction
+
+  function automatic string noc_pad(string s, int unsigned w);
+    string r = s;
+    while (r.len() < int'(w)) r = {r, " "};
+    return r;
+  endfunction
+
+  function automatic string noc_port_name(int unsigned p);
+    case (p)
+      P_L:     return "L";
+      P_N:     return "N";
+      P_E:     return "E";
+      P_S:     return "S";
+      P_W:     return "W";
+      default: return "?";
+    endcase
+  endfunction
+
+  function automatic string noc_node_name(int unsigned n);
+    return $sformatf("n%0d(%0d,%0d)", n, noc_x(n), noc_y(n));
+  endfunction
+
+  function automatic string noc_rp_name(int unsigned r, int unsigned p);
+    return $sformatf("n%0d.%s", r, noc_port_name(p));
+  endfunction
+
+  //----------------------------------------------------------------------------
+  // Run configuration
+  //----------------------------------------------------------------------------
+  class noc_cfg;
+    bit [63:0]   seed;
+    bit          strict;
+    int unsigned verbosity;
+    int unsigned max_errors;
+    int unsigned random_iters;
+    int unsigned deadlock_cycles;
+    int unsigned max_latency;
+    longint      traffic_timeout;
+    string       only_test;
+    bit          cov_closure;
+
+    function new();
+      seed            = 64'd20170202;
+      strict          = 1'b1;
+      verbosity       = 1;
+      max_errors      = 25;
+      random_iters    = 10;
+      deadlock_cycles = 2500;
+      max_latency     = 6000;
+      traffic_timeout = 200000;
+      only_test       = "";
+      cov_closure     = 1'b1;
+    endfunction
+
+    function void load_plusargs();
+      longint unsigned s;
+      int unsigned     v;
+      string           t;
+      if ($value$plusargs("SEED=%d", s))             seed         = s;
+      if ($test$plusargs("NOC_RELAXED"))              strict       = 1'b0;
+      if ($value$plusargs("NOC_VERBOSE=%d", v))       verbosity    = v;
+      if ($value$plusargs("NOC_RANDOM_ITERS=%d", v))  random_iters = v;
+      if ($value$plusargs("NOC_MAX_ERRORS=%d", v))    max_errors   = (v == 0) ? 1 : v;
+      if ($value$plusargs("NOC_TEST=%s", t))          only_test    = t;
+      if ($test$plusargs("NOC_NO_COV_CLOSURE"))       cov_closure  = 1'b0;
+    endfunction
+  endclass : noc_cfg
+
+  //----------------------------------------------------------------------------
+  // Deterministic PRNG (xoshiro128**, splitmix64 seeding); simulator-agnostic.
+  //----------------------------------------------------------------------------
+  class noc_prng;
+    local bit [31:0] st[4];
+
+    function new(bit [63:0] seed = 64'h5F3A_9C21_D00D_F00D);
+      reseed(seed);
+    endfunction
+
+    local function bit [63:0] mix64(bit [63:0] z);
+      z = (z ^ (z >> 30)) * 64'hBF58_476D_1CE4_E5B9;
+      z = (z ^ (z >> 27)) * 64'h94D0_49BB_1331_11EB;
+      return z ^ (z >> 31);
+    endfunction
+
+    local function bit [31:0] rotl(bit [31:0] x, int unsigned k);
+      return (x << k) | (x >> (32 - k));
+    endfunction
+
+    function void reseed(bit [63:0] seed);
+      bit [63:0] z = seed;
+      bit [63:0] m;
+      for (int i = 0; i < 4; i++) begin
+        z     = z + 64'h9E37_79B9_7F4A_7C15;
+        m     = mix64(z);
+        st[i] = m[31:0] ^ m[63:32];
+      end
+      if ((st[0] | st[1] | st[2] | st[3]) == 32'd0) st[0] = 32'h1;
+    endfunction
+
+    function bit [31:0] next32();
+      bit [31:0] result = rotl(st[1] * 32'd5, 7) * 32'd9;
+      bit [31:0] t      = st[1] << 9;
+      st[2] = st[2] ^ st[0];
+      st[3] = st[3] ^ st[1];
+      st[1] = st[1] ^ st[2];
+      st[0] = st[0] ^ st[3];
+      st[2] = st[2] ^ t;
+      st[3] = rotl(st[3], 11);
+      return result;
+    endfunction
+
+    function bit [63:0] next64();
+      bit [31:0] hi = next32();
+      bit [31:0] lo = next32();
+      return {hi, lo};
+    endfunction
+
+    // Uniform integer in [lo:hi] (inclusive).
+    function int unsigned range(int unsigned lo, int unsigned hi);
+      bit [63:0] span;
+      bit [63:0] prod;
+      if (hi <= lo) return lo;
+      span = 64'(hi) - 64'(lo) + 64'd1;
+      prod = 64'(next32()) * span;
+      return lo + prod[63:32];
+    endfunction
+
+    function bit permille(int unsigned p);
+      return range(0, 999) < p;
+    endfunction
+
+    function noc_flit_t junk_flit();
+      bit [127:0] r = {next64(), next64()};
+      return noc_flit_t'(r[NOC_FLIT_W-1:0]);
+    endfunction
+  endclass : noc_prng
+
+  //----------------------------------------------------------------------------
+  // Packet transaction: content, golden XY path, observed hop trace, lifecycle
+  //----------------------------------------------------------------------------
+  class noc_packet;
+    int unsigned            uid;
+    bit [NOC_ID_W-1:0]      id;
+    int unsigned            src;
+    int unsigned            dst;
+    bit [NOC_PAYLOAD_W-1:0] payload;
+    noc_flit_t              flit;
+    int unsigned            hops;
+    int unsigned            pre_gap;
+    int unsigned            exp_router[$];
+    int unsigned            exp_port[$];
+
+    noc_pkt_state_e         state;
+    int unsigned            cur_router;
+    int unsigned            cur_port;
+    longint unsigned        inj_seq;
+    longint                 present_cycle;
+    longint                 inject_cycle;
+    longint                 min_arrival;
+    longint                 exp_hop_cycle;
+    longint                 eject_cycle;
+    int unsigned            eject_count;
+    int unsigned            xfer_count;
+    bit                     age_reported;
+    bit                     flagged;
+    int unsigned            obs_router[$];
+    int unsigned            obs_port[$];
+    longint                 obs_cycle[$];
+    longint                 obs_exp_cycle[$];
+
+    function new();
+      uid = 0; id = '0; src = 0; dst = 0; payload = '0; flit = '0; hops = 0; pre_gap = 0;
+      reset_lifecycle();
+    endfunction
+
+    function void reset_lifecycle();
+      state         = PK_NEW;
+      cur_router    = 0;
+      cur_port      = P_L;
+      inj_seq       = 0;
+      present_cycle = -1;
+      inject_cycle  = -1;
+      min_arrival   = -1;
+      exp_hop_cycle = -1;
+      eject_cycle   = -1;
+      eject_count   = 0;
+      xfer_count    = 0;
+      age_reported  = 1'b0;
+      flagged       = 1'b0;
+      obs_router.delete();
+      obs_port.delete();
+      obs_cycle.delete();
+      obs_exp_cycle.delete();
+    endfunction
+
+    // Fill content and derive the golden XY path (router, output port) per hop.
+    function void build(int unsigned uid_v, int unsigned s, int unsigned d, bit [NOC_PAYLOAD_W-1:0] pl);
+      int unsigned r = s;
+      uid     = uid_v;
+      id      = NOC_ID_W'(uid_v);
+      src     = s;
+      dst     = d;
+      payload = pl;
+      flit.dst_x   = NOC_COORD_W'(noc_x(d));
+      flit.dst_y   = NOC_COORD_W'(noc_y(d));
+      flit.src_x   = NOC_COORD_W'(noc_x(s));
+      flit.src_y   = NOC_COORD_W'(noc_y(s));
+      flit.id      = id;
+      flit.payload = pl;
+      flit.chk     = noc_flit_chk(flit);
+      exp_router.delete();
+      exp_port.delete();
+      for (int unsigned k = 0; k <= 2 * NOC_NODES; k++) begin
+        int unsigned p = noc_xy_route(r, noc_x(d), noc_y(d));
+        exp_router.push_back(r);
+        exp_port.push_back(p);
+        if (p == P_L) break;
+        r = noc_neighbor(r, p);
+      end
+      hops = exp_router.size() - 1;
+    endfunction
+
+    function int unsigned flow();
+      return src * NOC_NODES + dst;
+    endfunction
+
+    function bit path_matches();
+      if (obs_router.size() != exp_router.size()) return 1'b0;
+      foreach (exp_router[k]) begin
+        if (obs_router[k] != exp_router[k]) return 1'b0;
+        if (obs_port[k] != exp_port[k])     return 1'b0;
+      end
+      return 1'b1;
+    endfunction
+
+    function string brief();
+      return $sformatf("pkt id=0x%04h uid=%0d %s->%s", id, uid, noc_node_name(src), noc_node_name(dst));
+    endfunction
+
+    function string exp_path_str();
+      string s = "";
+      foreach (exp_router[k]) s = {s, $sformatf("n%0d -%s-> ", exp_router[k], noc_port_name(exp_port[k]))};
+      return {s, "eject"};
+    endfunction
+
+    function string obs_path_str();
+      string s = $sformatf("inj@%0d ", inject_cycle);
+      foreach (obs_router[k]) s = {s, $sformatf("n%0d -%s@%0d-> ", obs_router[k], noc_port_name(obs_port[k]), obs_cycle[k])};
+      return {s, noc_pick(state == PK_DELIVERED, "eject", "(in flight)")};
+    endfunction
+
+    // Node-by-node trace: expected router/port and cycle vs observed.
+    function string trace();
+      string s = "";
+      int unsigned n = (exp_router.size() > obs_router.size()) ? exp_router.size() : obs_router.size();
+      for (int unsigned k = 0; k < n; k++) begin
+        string e = "-";
+        string o = "-";
+        if (k < exp_router.size()) e = $sformatf("n%0d.%s", exp_router[k], noc_port_name(exp_port[k]));
+        if (k < obs_router.size()) o = $sformatf("n%0d.%s @%0d (model @%0d)", obs_router[k], noc_port_name(obs_port[k]),
+                                                 obs_cycle[k], obs_exp_cycle[k]);
+        s = {s, $sformatf("\n        hop %0d: expected %s | observed %s", k, noc_pad(e, 6), o)};
+      end
+      return s;
+    endfunction
+
+    function string convert2string();
+      return $sformatf("%s hops=%0d state=%s inj@%0d min_arrival@%0d eject@%0d payload=0x%016h",
+                       brief(), hops, state.name(), inject_cycle, min_arrival, eject_cycle, payload);
+    endfunction
+  endclass : noc_packet
+
+  //----------------------------------------------------------------------------
+  // Input buffer (golden model)
+  //----------------------------------------------------------------------------
+  class noc_fifo;
+    noc_packet q[$];
+
+    function int unsigned size();
+      return q.size();
+    endfunction
+
+    function noc_packet head();
+      if (q.size() == 0) return null;
+      return q[0];
+    endfunction
+
+    function bit remove(noc_packet p);
+      for (int i = 0; i < q.size(); i++) begin
+        if (q[i] == p) begin
+          q.delete(i);
+          return 1'b1;
+        end
+      end
+      return 1'b0;
+    endfunction
+  endclass : noc_fifo
+
+  //----------------------------------------------------------------------------
+  // Traffic program: packets in per-source injection order
+  //----------------------------------------------------------------------------
+  class noc_traffic;
+    string       name;
+    noc_packet   pkts[$];
+    int unsigned per_node[NOC_NODES];
+
+    function new(string tname);
+      name = tname;
+      foreach (per_node[n]) per_node[n] = 0;
+    endfunction
+
+    function void add(noc_packet p);
+      pkts.push_back(p);
+      per_node[p.src]++;
+    endfunction
+
+    function int unsigned size();
+      return pkts.size();
+    endfunction
+  endclass : noc_traffic
+
+  //----------------------------------------------------------------------------
+  // Knobs: injection rate, sink back-pressure and freeze windows for one run
+  //----------------------------------------------------------------------------
+  class noc_knobs;
+    int unsigned inj_rate_pm  [NOC_NODES];
+    int unsigned ej_stall_pm  [NOC_NODES];
+    int unsigned ej_stall_min [NOC_NODES];
+    int unsigned ej_stall_max [NOC_NODES];
+    int          win_node[$];
+    longint      win_from[$];
+    longint      win_to[$];
+
+    function new();
+      for (int n = 0; n < NOC_NODES; n++) begin
+        inj_rate_pm[n]  = 1000;
+        ej_stall_pm[n]  = 0;
+        ej_stall_min[n] = 1;
+        ej_stall_max[n] = 1;
+      end
+    endfunction
+
+    function void set_rate_all(int unsigned pm);
+      for (int n = 0; n < NOC_NODES; n++) inj_rate_pm[n] = pm;
+    endfunction
+
+    function void set_stall_all(int unsigned pm, int unsigned smin, int unsigned smax);
+      for (int n = 0; n < NOC_NODES; n++) begin
+        ej_stall_pm[n] = pm; ej_stall_min[n] = smin; ej_stall_max[n] = smax;
+      end
+    endfunction
+
+    // node < 0 : every sink
+    function void add_freeze(int node, longint from, longint to);
+      win_node.push_back(node);
+      win_from.push_back(from);
+      win_to.push_back(to);
+    endfunction
+  endclass : noc_knobs
+
+  //----------------------------------------------------------------------------
+  // Traffic generator: directed patterns and seeded random traffic
+  //----------------------------------------------------------------------------
+  class noc_traffic_gen;
+    noc_prng     rng;
+    int unsigned next_uid;
+
+    function new(noc_prng rng_h);
+      rng      = rng_h;
+      next_uid = 1;
+    endfunction
+
+    function noc_packet make(int unsigned s, int unsigned d);
+      noc_packet p = new();
+      p.build(next_uid, s, d, rng.next64());
+      next_uid++;
+      return p;
+    endfunction
+
+    function void add_flow(noc_traffic t, int unsigned s, int unsigned d, int unsigned n);
+      for (int unsigned i = 0; i < n; i++) t.add(make(s, d));
+    endfunction
+
+    // Destination at a chosen hop distance from s.
+    function int unsigned pick_dst(int unsigned s, int unsigned hops);
+      int unsigned c[$];
+      for (int unsigned d = 0; d < NOC_NODES; d++) if (noc_hops(s, d) == hops) c.push_back(d);
+      if (c.size() == 0) return s;
+      return c[rng.range(0, c.size() - 1)];
+    endfunction
+
+    function noc_traffic gen_loopback(string name, int unsigned n_each);
+      noc_traffic t = new(name);
+      for (int unsigned s = 0; s < NOC_NODES; s++) add_flow(t, s, s, n_each);
+      return t;
+    endfunction
+
+    function noc_traffic gen_pair(string name, int unsigned s, int unsigned d, int unsigned n_each);
+      noc_traffic t = new(name);
+      add_flow(t, s, d, n_each);
+      return t;
+    endfunction
+
+    function noc_traffic gen_bidir(string name, int unsigned a, int unsigned b, int unsigned n_each);
+      noc_traffic t = new(name);
+      add_flow(t, a, b, n_each);
+      add_flow(t, b, a, n_each);
+      return t;
+    endfunction
+
+    // Every ordered pair at exactly 'hops' distance, interleaved per source.
+    function noc_traffic gen_hop_class(string name, int unsigned hops, int unsigned n_each);
+      noc_traffic t = new(name);
+      for (int unsigned i = 0; i < n_each; i++)
+        for (int unsigned s = 0; s < NOC_NODES; s++)
+          for (int unsigned d = 0; d < NOC_NODES; d++)
+            if (noc_hops(s, d) == hops) t.add(make(s, d));
+      return t;
+    endfunction
+
+    function noc_traffic gen_all_pairs(string name, int unsigned n_each, bit shuffle);
+      noc_traffic t = new(name);
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        int unsigned order[$];
+        for (int unsigned i = 0; i < n_each; i++)
+          for (int unsigned d = 0; d < NOC_NODES; d++) order.push_back(d);
+        if (shuffle) begin
+          for (int i = order.size() - 1; i > 0; i--) begin
+            int unsigned j   = rng.range(0, i);
+            int unsigned tmp = order[i];
+            order[i] = order[j];
+            order[j] = tmp;
+          end
+        end
+        foreach (order[k]) t.add(make(s, order[k]));
+      end
+      return t;
+    endfunction
+
+    // Uniform random traffic weighted by hop distance (0, 1, 2 hops).
+    function noc_traffic gen_uniform(string name, int unsigned n_per_node, int unsigned w0, int unsigned w1, int unsigned w2);
+      noc_traffic  t     = new(name);
+      int unsigned total = w0 + w1 + w2;
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        for (int unsigned i = 0; i < n_per_node; i++) begin
+          int unsigned r = rng.range(0, (total == 0) ? 0 : total - 1);
+          int unsigned h = (r < w0) ? 0 : ((r < w0 + w1) ? 1 : 2);
+          t.add(make(s, pick_dst(s, h)));
+        end
+      end
+      return t;
+    endfunction
+
+    function noc_traffic gen_hotspot(string name, int unsigned hot, int unsigned n_per_node, int unsigned hot_pm);
+      noc_traffic t = new(name);
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        for (int unsigned i = 0; i < n_per_node; i++) begin
+          int unsigned d = rng.permille(hot_pm) ? hot : rng.range(0, NOC_NODES - 1);
+          t.add(make(s, d));
+        end
+      end
+      return t;
+    endfunction
+
+    // Transpose permutation (x,y) -> (y,x).
+    function noc_traffic gen_transpose(string name, int unsigned n_each);
+      noc_traffic t = new(name);
+      for (int unsigned i = 0; i < n_each; i++)
+        for (int unsigned s = 0; s < NOC_NODES; s++)
+          t.add(make(s, noc_node(noc_y(s), noc_x(s))));
+      return t;
+    endfunction
+
+    function noc_traffic clone(noc_traffic src_t, string name);
+      noc_traffic t = new(name);
+      foreach (src_t.pkts[i]) begin
+        noc_packet o = src_t.pkts[i];
+        noc_packet p = new();
+        p.build(next_uid, o.src, o.dst, o.payload);
+        p.pre_gap = o.pre_gap;
+        next_uid++;
+        t.add(p);
+      end
+      return t;
+    endfunction
+  endclass : noc_traffic_gen
+
+  //----------------------------------------------------------------------------
+  // Network-interface injection driver (one per node): in-order presentation,
+  // flit held stable until accepted, rate-controlled offering.
+  //----------------------------------------------------------------------------
+  class noc_inj_driver;
+    int unsigned node;
+    noc_prng     rng;
+    noc_packet   q[$];
+    noc_packet   cur;
+    int unsigned rate_pm;
+    int unsigned gap_cnt;
+    bit          active;
+    bit          stall_now;
+    int unsigned n_offered;
+    int unsigned n_injected;
+    int unsigned n_stall_cycles;
+
+    function new(int unsigned node_idx, noc_prng rng_h);
+      node       = node_idx;
+      rng        = rng_h;
+      cur        = null;
+      rate_pm    = 1000;
+      gap_cnt    = 0;
+      active     = 1'b0;
+      stall_now  = 1'b0;
+      n_offered  = 0;
+      n_injected = 0;
+      n_stall_cycles = 0;
+    endfunction
+
+    function void load(noc_traffic t, int unsigned rate);
+      q.delete();
+      foreach (t.pkts[i]) begin
+        noc_packet p = t.pkts[i];
+        if (p.src == node) q.push_back(p);
+      end
+      cur     = null;
+      active  = 1'b1;
+      rate_pm = (rate == 0) ? 1 : rate;
+      gap_cnt = 0;
+      if (q.size() > 0) begin
+        noc_packet h = q[0];
+        gap_cnt = h.pre_gap;
+      end
+    endfunction
+
+    function void abort();
+      if (cur != null) cur.state = PK_FLUSHED;
+      foreach (q[i]) begin
+        noc_packet p = q[i];
+        p.state = PK_FLUSHED;
+      end
+      q.delete();
+      cur    = null;
+      active = 1'b0;
+    endfunction
+
+    function bit done();
+      if (cur != null) return 1'b0;
+      return q.size() == 0;
+    endfunction
+
+    // Handshake observation for the current cycle; returns the accepted packet.
+    function noc_packet observe(bit valid, bit ready);
+      noc_packet u = null;
+      stall_now = 1'b0;
+      if (cur == null) return u;
+      if (!valid) return u;
+      if (ready) begin
+        u   = cur;
+        cur = null;
+        n_injected++;
+      end else begin
+        stall_now = 1'b1;
+        n_stall_cycles++;
+      end
+      return u;
+    endfunction
+
+    // Select what is presented in cycle 'next_cyc'.
+    function void advance(longint next_cyc);
+      noc_packet h;
+      if (!active) return;
+      if (cur != null) return;
+      if (q.size() == 0) return;
+      if (gap_cnt > 0) begin
+        gap_cnt--;
+        return;
+      end
+      if (rate_pm < 1000) begin
+        if (!rng.permille(rate_pm)) return;
+      end
+      h               = q.pop_front();
+      h.state         = PK_PRESENTED;
+      h.present_cycle = next_cyc;
+      cur             = h;
+      n_offered++;
+      if (q.size() > 0) begin
+        noc_packet nx = q[0];
+        gap_cnt = nx.pre_gap;
+      end
+    endfunction
+  endclass : noc_inj_driver
+
+  //----------------------------------------------------------------------------
+  // Network-interface ejection sink (one per node): random stall bursts and
+  // forced freeze windows that push back-pressure into the mesh.
+  //----------------------------------------------------------------------------
+  class noc_ej_sink;
+    int unsigned node;
+    noc_prng     rng;
+    int unsigned stall_pm;
+    int unsigned stall_min;
+    int unsigned stall_max;
+    longint      win_from[$];
+    longint      win_to[$];
+    int unsigned stall_left;
+    bit          ready_now;
+    bit          frozen_now;
+    int unsigned n_notready;
+    int unsigned n_frozen;
+
+    function new(int unsigned node_idx, noc_prng rng_h);
+      node       = node_idx;
+      rng        = rng_h;
+      stall_pm   = 0;
+      stall_min  = 1;
+      stall_max  = 1;
+      n_notready = 0;
+      n_frozen   = 0;
+      reset_state();
+    endfunction
+
+    function void reset_state();
+      stall_left = 0;
+      ready_now  = 1'b1;
+      frozen_now = 1'b0;
+    endfunction
+
+    function void configure(noc_knobs k, longint base_cycle);
+      stall_pm  = k.ej_stall_pm[node];
+      stall_min = (k.ej_stall_min[node] == 0) ? 1 : k.ej_stall_min[node];
+      stall_max = (k.ej_stall_max[node] < stall_min) ? stall_min : k.ej_stall_max[node];
+      win_from.delete();
+      win_to.delete();
+      foreach (k.win_node[i]) begin
+        if (k.win_node[i] < 0 || k.win_node[i] == int'(node)) begin
+          win_from.push_back(base_cycle + k.win_from[i]);
+          win_to.push_back(base_cycle + k.win_to[i]);
+        end
+      end
+    endfunction
+
+    // Compute ej_ready for cycle 'cyc'.
+    function void advance(longint cyc);
+      bit forced = 1'b0;
+      bit rnd;
+      foreach (win_from[i]) if (cyc >= win_from[i] && cyc <= win_to[i]) forced = 1'b1;
+      if (stall_left > 0) begin
+        rnd = 1'b1;
+        stall_left--;
+      end else if (stall_pm > 0 && rng.permille(stall_pm)) begin
+        rnd        = 1'b1;
+        stall_left = rng.range(stall_min, stall_max) - 1;
+      end else begin
+        rnd = 1'b0;
+      end
+      ready_now  = !forced && !rnd;
+      frozen_now = forced;
+      if (!ready_now) n_notready++;
+      if (forced)     n_frozen++;
+    endfunction
+  endclass : noc_ej_sink
+
+  //----------------------------------------------------------------------------
+  // Per-cycle monitor sample of the DUT boundary (flattened router*port index)
+  //----------------------------------------------------------------------------
+  class noc_obs;
+    longint               cyc;
+    bit                   rst_n;
+    bit [NOC_NODES-1:0]   inj_valid;
+    bit [NOC_NODES-1:0]   inj_ready;
+    bit [NOC_NODES-1:0]   ej_valid;
+    bit [NOC_NODES-1:0]   ej_ready;
+    noc_flit_t            ej_flit   [NOC_NODES];
+    bit [NOC_RP-1:0]      trc_valid;
+    noc_flit_t            trc_flit  [NOC_RP];
+    int unsigned          buf_count [NOC_RP];
+    string                xmsg;
+
+    function void sample(virtual noc_if vif, longint cyc_now);
+      cyc   = cyc_now;
+      rst_n = (vif.mon_rst_n === 1'b1);
+      xmsg  = "";
+      if ($isunknown(vif.mon_inj_ready)) xmsg = {xmsg, " inj_ready"};
+      if ($isunknown(vif.mon_ej_valid))  xmsg = {xmsg, " ej_valid"};
+      if ($isunknown(vif.mon_trc_valid)) xmsg = {xmsg, " trc_valid"};
+      if ($isunknown(vif.mon_buf_count)) xmsg = {xmsg, " buf_count"};
+      inj_valid = vif.mon_inj_valid;
+      inj_ready = vif.mon_inj_ready;
+      ej_valid  = vif.mon_ej_valid;
+      ej_ready  = vif.mon_ej_ready;
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        if (vif.mon_ej_valid[n] === 1'b1 && $isunknown(vif.mon_ej_flit[n])) xmsg = {xmsg, $sformatf(" ej_flit[%0d]", n)};
+        ej_flit[n] = noc_flit_t'(vif.mon_ej_flit[n]);
+      end
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned p = 0; p < NOC_PORTS; p++) begin
+          int unsigned idx = r * NOC_PORTS + p;
+          if (vif.mon_trc_valid[r][p] === 1'b1 && $isunknown(vif.mon_trc_flit[r][p]))
+            xmsg = {xmsg, $sformatf(" trc_flit[%0d][%0d]", r, p)};
+          trc_valid[idx] = vif.mon_trc_valid[r][p];
+          trc_flit[idx]  = noc_flit_t'(vif.mon_trc_flit[r][p]);
+          buf_count[idx] = int'(vif.mon_buf_count[r][p]);
+        end
+      end
+    endfunction
+  endclass : noc_obs
+
+  //----------------------------------------------------------------------------
+  // Accepted events of one cycle (the golden model follows the DUT through them)
+  //----------------------------------------------------------------------------
+  class noc_events;
+    noc_packet   xfer[$];
+    int          xfer_in [NOC_RP];
+    noc_packet   inj[$];
+    noc_packet   ej[$];
+    int unsigned n_xfer;
+    int unsigned n_link_xfer;
+    int unsigned n_inj;
+    int unsigned n_ej;
+
+    function new();
+      for (int unsigned i = 0; i < NOC_RP; i++) begin
+        xfer.push_back(null);
+        xfer_in[i] = -1;
+      end
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        inj.push_back(null);
+        ej.push_back(null);
+      end
+      n_xfer = 0; n_link_xfer = 0; n_inj = 0; n_ej = 0;
+    endfunction
+
+    function bit progress();
+      return (n_xfer + n_inj) > 0;
+    endfunction
+  endclass : noc_events
+
+  //----------------------------------------------------------------------------
+  // Golden-model prediction for one cycle
+  //----------------------------------------------------------------------------
+  class noc_pred;
+    noc_packet   grant[$];
+    int          grant_in  [NOC_RP];
+    int unsigned n_cand    [NOC_RP];
+    bit          blocked   [NOC_RP];
+    bit          out_ready [NOC_RP];
+    int unsigned buf_count [NOC_RP];
+    bit          inj_ready [NOC_NODES];
+    int unsigned total_buffered;
+    int unsigned n_full;
+
+    function new();
+      for (int unsigned i = 0; i < NOC_RP; i++) begin
+        grant.push_back(null);
+        grant_in[i]  = -1;
+        n_cand[i]    = 0;
+        blocked[i]   = 1'b0;
+        out_ready[i] = 1'b0;
+        buf_count[i] = 0;
+      end
+      foreach (inj_ready[n]) inj_ready[n] = 1'b0;
+      total_buffered = 0;
+      n_full         = 0;
+    endfunction
+  endclass : noc_pred
+
+  //----------------------------------------------------------------------------
+  // Golden mesh model: per-router input FIFOs, XY route compute, round-robin
+  // output arbitration, start-of-cycle downstream readiness.
+  //----------------------------------------------------------------------------
+  class noc_ref_model;
+    noc_fifo         fifos[$];
+    int unsigned     rr [NOC_RP];
+    noc_packet       live      [bit [NOC_ID_W-1:0]];
+    noc_packet       delivered [bit [NOC_ID_W-1:0]];
+    bit              stale     [bit [NOC_ID_W-1:0]];
+    longint unsigned inj_seq_ctr;
+    int unsigned     epoch;
+    int unsigned     n_inject;
+    int unsigned     n_eject;
+    int unsigned     n_hops;
+    int unsigned     n_lost;
+
+    function new();
+      for (int unsigned i = 0; i < NOC_RP; i++) begin
+        noc_fifo f = new();
+        fifos.push_back(f);
+      end
+      inj_seq_ctr = 0;
+      epoch       = 0;
+      n_inject = 0; n_eject = 0; n_hops = 0; n_lost = 0;
+      reset();
+    endfunction
+
+    // Reset: every buffered packet becomes stale; buffers and arbiters clear.
+    function void reset();
+      foreach (live[k]) begin
+        noc_packet p = live[k];
+        stale[k] = 1'b1;
+        p.state  = PK_FLUSHED;
+      end
+      live.delete();
+      delivered.delete();
+      foreach (fifos[i]) begin
+        noc_fifo f = fifos[i];
+        f.q.delete();
+      end
+      foreach (rr[i]) rr[i] = P_L;
+      epoch++;
+    endfunction
+
+    function int unsigned count(int unsigned r, int unsigned i);
+      noc_fifo f = fifos[r * NOC_PORTS + i];
+      return f.size();
+    endfunction
+
+    function int unsigned buffered();
+      int unsigned n = 0;
+      foreach (fifos[i]) begin
+        noc_fifo f = fifos[i];
+        n += f.size();
+      end
+      return n;
+    endfunction
+
+    function bit empty();
+      return live.num() == 0;
+    endfunction
+
+    function int unsigned route_of(noc_packet p, int unsigned r);
+      return noc_xy_route(r, noc_x(p.dst), noc_y(p.dst));
+    endfunction
+
+    function bit out_ready(int unsigned r, int unsigned o, bit [NOC_NODES-1:0] ej_ready);
+      if (!noc_port_exists(r, o)) return 1'b0;
+      if (o == P_L) return ej_ready[r];
+      return count(noc_neighbor(r, o), noc_opposite(o)) < NOC_FIFO_DEPTH;
+    endfunction
+
+    function bit at_head(noc_packet p);
+      noc_fifo   f = fifos[p.cur_router * NOC_PORTS + p.cur_port];
+      noc_packet h = f.head();
+      return h == p;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Prediction for the cycle given the ejection-ready vector driven in it
+    //--------------------------------------------------------------------------
+    function noc_pred predict(bit [NOC_NODES-1:0] ej_ready);
+      noc_pred pr = new();
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned i = 0; i < NOC_PORTS; i++) begin
+          int unsigned c = count(r, i);
+          pr.buf_count[r * NOC_PORTS + i] = c;
+          pr.total_buffered += c;
+          if (c >= NOC_FIFO_DEPTH) pr.n_full++;
+        end
+        pr.inj_ready[r] = count(r, P_L) < NOC_FIFO_DEPTH;
+      end
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned o = 0; o < NOC_PORTS; o++) begin
+          int unsigned idx   = r * NOC_PORTS + o;
+          int          first = -1;
+          bit          rdy;
+          if (!noc_port_exists(r, o)) continue;
+          rdy               = out_ready(r, o, ej_ready);
+          pr.out_ready[idx] = rdy;
+          for (int unsigned k = 0; k < NOC_PORTS; k++) begin
+            int unsigned i = (rr[idx] + k) % NOC_PORTS;
+            noc_fifo     f = fifos[r * NOC_PORTS + i];
+            noc_packet   h = f.head();
+            if (h == null) continue;
+            if (route_of(h, r) != o) continue;
+            pr.n_cand[idx]++;
+            if (first < 0) first = int'(i);
+          end
+          if (first < 0) continue;
+          if (rdy) begin
+            noc_fifo f = fifos[r * NOC_PORTS + first];
+            pr.grant[idx]    = f.head();
+            pr.grant_in[idx] = first;
+          end else begin
+            pr.blocked[idx] = 1'b1;
+          end
+        end
+      end
+      return pr;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Advance by the accepted events of cycle 'cyc': pops, pushes, injections
+    //--------------------------------------------------------------------------
+    function void commit(noc_events ev, longint cyc);
+      noc_packet   moved[$];
+      int unsigned moved_idx[$];
+      for (int unsigned idx = 0; idx < NOC_RP; idx++) begin
+        noc_packet p = ev.xfer[idx];
+        noc_fifo   f;
+        if (p == null) continue;
+        f = fifos[p.cur_router * NOC_PORTS + p.cur_port];
+        void'(f.remove(p));
+        rr[idx] = (p.cur_port + 1) % NOC_PORTS;
+        p.obs_router.push_back(idx / NOC_PORTS);
+        p.obs_port.push_back(idx % NOC_PORTS);
+        p.obs_cycle.push_back(cyc);
+        p.obs_exp_cycle.push_back(p.exp_hop_cycle);
+        p.exp_hop_cycle = -1;
+        p.xfer_count++;
+        n_hops++;
+        moved.push_back(p);
+        moved_idx.push_back(idx);
+      end
+      foreach (moved[k]) begin
+        noc_packet   p = moved[k];
+        int unsigned r = moved_idx[k] / NOC_PORTS;
+        int unsigned o = moved_idx[k] % NOC_PORTS;
+        if (o == P_L) begin
+          p.state       = PK_DELIVERED;
+          p.eject_cycle = cyc;
+          p.eject_count++;
+          live.delete(p.id);
+          delivered[p.id] = p;
+          n_eject++;
+        end else if (!noc_port_exists(r, o)) begin
+          p.state = PK_LOST;
+          live.delete(p.id);
+          n_lost++;
+        end else begin
+          int unsigned nr = noc_neighbor(r, o);
+          int unsigned ip = noc_opposite(o);
+          noc_fifo     f  = fifos[nr * NOC_PORTS + ip];
+          f.q.push_back(p);
+          p.cur_router = nr;
+          p.cur_port   = ip;
+        end
+      end
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_packet p = ev.inj[n];
+        noc_fifo   f;
+        if (p == null) continue;
+        f = fifos[n * NOC_PORTS + P_L];
+        f.q.push_back(p);
+        p.state        = PK_IN_NET;
+        p.cur_router   = n;
+        p.cur_port     = P_L;
+        p.inject_cycle = cyc;
+        p.min_arrival  = cyc + longint'(p.hops) + 1;
+        p.inj_seq      = inj_seq_ctr;
+        inj_seq_ctr++;
+        live[p.id] = p;
+        n_inject++;
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Diagnostics
+    //--------------------------------------------------------------------------
+    function string head_desc(int unsigned r, int unsigned i, bit [NOC_NODES-1:0] ej_ready);
+      noc_fifo     f = fifos[r * NOC_PORTS + i];
+      noc_packet   h = f.head();
+      int unsigned o;
+      if (h == null) return "";
+      o = route_of(h, r);
+      return $sformatf(" head id=0x%04h ->%s%s", h.id, noc_port_name(o), noc_pick(out_ready(r, o, ej_ready), "", " BLOCKED"));
+    endfunction
+
+    function string router_snapshot(int unsigned r, bit [NOC_NODES-1:0] ej_ready);
+      string s = $sformatf("      %s rr[", noc_node_name(r));
+      for (int unsigned o = 0; o < NOC_PORTS; o++)
+        if (noc_port_exists(r, o)) s = {s, $sformatf(" %s>%s", noc_port_name(o), noc_port_name(rr[r * NOC_PORTS + o]))};
+      s = {s, " ]"};
+      for (int unsigned i = 0; i < NOC_PORTS; i++) begin
+        if (!noc_port_exists(r, i)) continue;
+        s = {s, $sformatf(" in.%s[%0d/%0d%s]", noc_port_name(i), count(r, i), NOC_FIFO_DEPTH, head_desc(r, i, ej_ready))};
+      end
+      s = {s, $sformatf(" sink_ready=%0b", ej_ready[r])};
+      return s;
+    endfunction
+
+    function string congestion_snapshot(bit [NOC_NODES-1:0] ej_ready);
+      string s = $sformatf("congestion: %0d packets buffered, %0d live", buffered(), live.num());
+      for (int unsigned r = 0; r < NOC_NODES; r++) s = {s, "\n", router_snapshot(r, ej_ready)};
+      return s;
+    endfunction
+
+    // Wait-for graph over input buffers whose head is blocked on a full buffer.
+    function string wait_for_analysis(bit [NOC_NODES-1:0] ej_ready);
+      int    nxt[NOC_RP];
+      string s = "";
+      for (int unsigned b = 0; b < NOC_RP; b++) begin
+        noc_fifo     f = fifos[b];
+        noc_packet   h = f.head();
+        int unsigned r = b / NOC_PORTS;
+        int unsigned o;
+        nxt[b] = -1;
+        if (h == null) continue;
+        o = route_of(h, r);
+        if (o == P_L) begin
+          if (!ej_ready[r]) s = {s, $sformatf(" %s waits on sink n%0d;", noc_rp_name(r, b % NOC_PORTS), r)};
+          continue;
+        end
+        if (count(noc_neighbor(r, o), noc_opposite(o)) >= NOC_FIFO_DEPTH)
+          nxt[b] = int'(noc_neighbor(r, o) * NOC_PORTS + noc_opposite(o));
+      end
+      for (int unsigned b = 0; b < NOC_RP; b++) begin
+        int          c     = int'(b);
+        int unsigned steps = 0;
+        while (c >= 0 && steps <= NOC_RP) begin
+          c = nxt[c];
+          steps++;
+        end
+        if (steps > NOC_RP) return {"CYCLIC wait-for dependency through ", noc_rp_name(b / NOC_PORTS, b % NOC_PORTS), ";", s};
+      end
+      return {"wait-for graph acyclic;", s};
+    endfunction
+  endclass : noc_ref_model
+
+  //----------------------------------------------------------------------------
+  // Channel-dependency graph (links + injection/ejection channels) with cycle
+  // detection. Used on the golden XY routing function and on observed paths.
+  //----------------------------------------------------------------------------
+  localparam int unsigned NOC_CH = NOC_RP + 2 * NOC_NODES;
+
+  class noc_cdg;
+    string       name;
+    bit          edge_set[int unsigned];
+    int unsigned n_edges;
+
+    function new(string gname);
+      name    = gname;
+      n_edges = 0;
+    endfunction
+
+    function void clear();
+      edge_set.delete();
+      n_edges = 0;
+    endfunction
+
+    function int unsigned ch_link(int unsigned r, int unsigned o);
+      return r * NOC_PORTS + o;
+    endfunction
+
+    function int unsigned ch_inj(int unsigned n);
+      return NOC_RP + n;
+    endfunction
+
+    function int unsigned ch_ej(int unsigned n);
+      return NOC_RP + NOC_NODES + n;
+    endfunction
+
+    function string ch_name(int unsigned c);
+      if (c >= NOC_RP + NOC_NODES) return $sformatf("EJ(n%0d)", c - NOC_RP - NOC_NODES);
+      if (c >= NOC_RP)             return $sformatf("INJ(n%0d)", c - NOC_RP);
+      return $sformatf("n%0d-%s->n%0d", c / NOC_PORTS, noc_port_name(c % NOC_PORTS),
+                       noc_neighbor(c / NOC_PORTS, c % NOC_PORTS));
+    endfunction
+
+    function void add_edge(int unsigned a, int unsigned b);
+      int unsigned key = a * NOC_CH + b;
+      if (edge_set.exists(key)) return;
+      edge_set[key] = 1'b1;
+      n_edges++;
+    endfunction
+
+    function void add_path(int unsigned src, int unsigned routers[$], int unsigned ports[$]);
+      int unsigned prev = ch_inj(src);
+      foreach (routers[k]) begin
+        int unsigned c = (ports[k] == P_L) ? ch_ej(routers[k]) : ch_link(routers[k], ports[k]);
+        add_edge(prev, c);
+        prev = c;
+      end
+    endfunction
+
+    // Kahn elimination; any surviving channel lies on or feeds a cycle.
+    function bit find_cycle(output string desc);
+      int unsigned indeg[NOC_CH];
+      bit          gone[NOC_CH];
+      int unsigned work[$];
+      int unsigned left = 0;
+      int unsigned walk[$];
+      int          c    = -1;
+      desc = "";
+      foreach (indeg[i]) begin
+        indeg[i] = 0;
+        gone[i]  = 1'b0;
+      end
+      foreach (edge_set[key]) indeg[key % NOC_CH]++;
+      foreach (indeg[i]) if (indeg[i] == 0) work.push_back(i);
+      while (work.size() > 0) begin
+        int unsigned a = work.pop_front();
+        gone[a] = 1'b1;
+        foreach (edge_set[key]) begin
+          if (key / NOC_CH != a) continue;
+          indeg[key % NOC_CH]--;
+          if (indeg[key % NOC_CH] == 0) work.push_back(key % NOC_CH);
+        end
+      end
+      foreach (gone[i]) if (!gone[i]) left++;
+      if (left == 0) return 1'b0;
+      foreach (gone[i]) if (!gone[i] && c < 0) c = i;
+      for (int unsigned step = 0; step < 2 * NOC_CH; step++) begin
+        int nx = -1;
+        walk.push_back(c);
+        foreach (edge_set[key]) if (key / NOC_CH == c && !gone[key % NOC_CH] && nx < 0) nx = key % NOC_CH;
+        c = nx;
+        if (c < 0) break;
+      end
+      foreach (walk[i]) desc = {desc, ch_name(walk[i]), noc_pick(i + 1 < walk.size(), " => ", "")};
+      return 1'b1;
+    endfunction
+  endclass : noc_cdg
+
+  //----------------------------------------------------------------------------
+  // Scoreboard: hop-level legality, integrity, ordering and cycle-exact
+  // equivalence with the golden mesh
+  //----------------------------------------------------------------------------
+  class noc_scoreboard;
+    noc_cfg          cfg;
+    noc_ref_model    model;
+    noc_cdg          cdg_obs;
+    int unsigned     err_cnt[int'(E_NUM_CATEGORIES)];
+    int unsigned     total_errors;
+    bit              abort_req;
+    int unsigned     n_cycles;
+    int unsigned     n_inj;
+    int unsigned     n_xfer;
+    int unsigned     n_ej;
+    int unsigned     link_xfers[NOC_RP];
+    longint unsigned flow_last[int unsigned];
+
+    function new(noc_cfg cfg_h, noc_ref_model model_h);
+      cfg     = cfg_h;
+      model   = model_h;
+      cdg_obs = new("observed");
+      foreach (err_cnt[i])    err_cnt[i]    = 0;
+      foreach (link_xfers[i]) link_xfers[i] = 0;
+      total_errors = 0;
+      abort_req    = 1'b0;
+      n_cycles = 0; n_inj = 0; n_xfer = 0; n_ej = 0;
+    endfunction
+
+    function void error(noc_err_e cat, longint cyc, string msg);
+      err_cnt[cat]++;
+      total_errors++;
+      $display("[NOC-ERR] cyc=%0d %s: %s", cyc, cat.name(), msg);
+      if (total_errors >= cfg.max_errors) abort_req = 1'b1;
+    endfunction
+
+    function void reset_epoch();
+      flow_last.delete();
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Reset cycles: no transfer or ejection from the second reset cycle
+    //--------------------------------------------------------------------------
+    function void check_reset_cycle(noc_obs o, int unsigned idx);
+      if (idx < 2) return;
+      if (o.trc_valid != '0) error(E_RESET, o.cyc, $sformatf("router transfer trace active in reset cycle %0d", idx));
+      if (o.ej_valid != '0)  error(E_RESET, o.cyc, $sformatf("ej_valid=%b in reset cycle %0d", o.ej_valid, idx));
+    endfunction
+
+    local function string flit_diff(noc_flit_t a, noc_flit_t e);
+      string s = "";
+      if (a.dst_x != e.dst_x || a.dst_y != e.dst_y) s = {s, $sformatf(" dst(%0d,%0d)!=(%0d,%0d)", a.dst_x, a.dst_y, e.dst_x, e.dst_y)};
+      if (a.src_x != e.src_x || a.src_y != e.src_y) s = {s, $sformatf(" src(%0d,%0d)!=(%0d,%0d)", a.src_x, a.src_y, e.src_x, e.src_y)};
+      if (a.id != e.id)                             s = {s, $sformatf(" id 0x%04h!=0x%04h", a.id, e.id)};
+      if (a.payload != e.payload)                   s = {s, $sformatf(" payload 0x%016h!=0x%016h", a.payload, e.payload)};
+      if (a.chk != e.chk)                           s = {s, $sformatf(" chk 0x%04h!=0x%04h", a.chk, e.chk)};
+      return s;
+    endfunction
+
+    // Map an observed flit to its in-network packet; classify anything else.
+    local function noc_packet resolve(noc_flit_t f, int unsigned r, int unsigned p, longint cyc);
+      bit [NOC_ID_W-1:0] id  = f.id;
+      string             loc = noc_rp_name(r, p);
+      if (model.live.exists(id)) return model.live[id];
+      if (model.delivered.exists(id)) begin
+        noc_packet d = model.delivered[id];
+        error(E_DUPLICATE, cyc, $sformatf("%s carries %s already ejected at n%0d @%0d\n      path: %s", loc, d.brief(),
+                                          d.dst, d.eject_cycle, d.obs_path_str()));
+        return null;
+      end
+      if (model.stale.exists(id)) begin
+        error(E_STALE, cyc, $sformatf("%s carries id=0x%04h injected before the last reset", loc, id));
+        return null;
+      end
+      if (noc_flit_chk(f) != f.chk) begin
+        error(E_CORRUPT, cyc, $sformatf("%s carries unknown id=0x%04h with failing check code (header corruption)", loc, id));
+        return null;
+      end
+      error(E_PHANTOM, cyc, $sformatf("%s carries id=0x%04h dst=(%0d,%0d) that was never injected", loc, id, f.dst_x, f.dst_y));
+      return null;
+    endfunction
+
+    local function string fmt_grant(noc_packet p);
+      if (p == null) return "no transfer";
+      return $sformatf("%s (expected hop cycle %0d)", p.brief(), p.exp_hop_cycle);
+    endfunction
+
+    local function string fmt_path(noc_packet p);
+      if (p == null) return "-";
+      return $sformatf("expected %s | observed %s", p.exp_path_str(), p.obs_path_str());
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Per-cycle checks; produces the accepted events for the golden model.
+    //--------------------------------------------------------------------------
+    function noc_events check_cycle(noc_obs o, noc_pred pr, noc_packet cands[$]);
+      noc_events ev = new();
+      bit        claimed[int unsigned];
+      n_cycles++;
+
+      if (o.xmsg != "") error(E_XPROP, o.cyc, {"unknown value sampled on:", o.xmsg});
+
+      // ---- input buffer occupancy
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned i = 0; i < NOC_PORTS; i++) begin
+          int unsigned idx = r * NOC_PORTS + i;
+          int unsigned c   = o.buf_count[idx];
+          if (!noc_port_exists(r, i)) begin
+            if (c != 0) error(E_PROTOCOL, o.cyc, $sformatf("buf_count of non-existent port %s reads %0d", noc_rp_name(r, i), c));
+            continue;
+          end
+          if (c > NOC_FIFO_DEPTH)
+            error(E_OVERFLOW, o.cyc, $sformatf("buffer %s occupancy %0d exceeds depth %0d", noc_rp_name(r, i), c, NOC_FIFO_DEPTH));
+          else if (cfg.strict && c != pr.buf_count[idx])
+            error(E_BUF_COUNT, o.cyc, $sformatf("buffer %s occupancy %0d, golden model holds %0d\n%s", noc_rp_name(r, i), c,
+                                                pr.buf_count[idx], model.router_snapshot(r, o.ej_ready)));
+        end
+      end
+
+      // ---- injection
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        if (o.inj_ready[n] && !pr.inj_ready[n])
+          error(E_OVERFLOW, o.cyc, $sformatf("inj_ready[%0d] asserted with local buffer full (%0d/%0d)%s", n,
+                                             pr.buf_count[n * NOC_PORTS + P_L], NOC_FIFO_DEPTH,
+                                             noc_pick(o.inj_valid[n], " - injection accepted into a full buffer", "")));
+        else if (cfg.strict && o.inj_ready[n] != pr.inj_ready[n])
+          error(E_INJ_READY, o.cyc, $sformatf("inj_ready[%0d]=0 with local buffer at %0d/%0d", n,
+                                              pr.buf_count[n * NOC_PORTS + P_L], NOC_FIFO_DEPTH));
+        if (o.inj_valid[n] && o.inj_ready[n]) begin
+          noc_packet c = cands[n];
+          if (c == null) begin
+            error(E_TB_INTERNAL, o.cyc, $sformatf("injection handshake at n%0d without a presented packet", n));
+          end else begin
+            ev.inj[n] = c;
+            ev.n_inj++;
+            n_inj++;
+          end
+        end
+      end
+
+      // ---- ejection port vs router trace consistency
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        int unsigned idx = n * NOC_PORTS + P_L;
+        if (o.ej_valid[n] && !o.ej_ready[n])
+          error(E_PROTOCOL, o.cyc, $sformatf("ej_valid[%0d] asserted while ej_ready[%0d]=0 (id=0x%04h)", n, n, o.ej_flit[n].id));
+        if (o.ej_valid[n] != o.trc_valid[idx])
+          error(E_PROTOCOL, o.cyc, $sformatf("ej_valid[%0d]=%0b but local-output trace=%0b", n, o.ej_valid[n], o.trc_valid[idx]));
+        else if (o.ej_valid[n] && o.ej_flit[n] != o.trc_flit[idx])
+          error(E_PROTOCOL, o.cyc, $sformatf("ej_flit[%0d] differs from local-output trace:%s", n, flit_diff(o.ej_flit[n], o.trc_flit[idx])));
+      end
+
+      // ---- router transfers (hop level)
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned op = 0; op < NOC_PORTS; op++) begin
+          int unsigned idx = r * NOC_PORTS + op;
+          noc_flit_t   f   = o.trc_flit[idx];
+          noc_packet   p;
+          int unsigned xo;
+          if (!o.trc_valid[idx]) continue;
+          if (op == P_L && !o.ej_ready[r]) continue;
+          p = resolve(f, r, op, o.cyc);
+          if (p == null) continue;
+          if (claimed.exists(p.uid)) begin
+            error(E_DUPLICATE, o.cyc, $sformatf("%s forwarded on more than one output in one cycle (again on %s)\n      path: %s",
+                                                p.brief(), noc_rp_name(r, op), p.obs_path_str()));
+            continue;
+          end
+          claimed[p.uid] = 1'b1;
+          if (!noc_port_exists(r, op))
+            error(E_ROUTE, o.cyc, $sformatf("%s left %s through a port beyond the mesh edge\n      %s",
+                                            p.brief(), noc_node_name(r), fmt_path(p)));
+          if (f != p.flit)
+            error(E_CORRUPT, o.cyc, $sformatf("%s corrupted on %s (observed!=injected):%s", p.brief(), noc_rp_name(r, op),
+                                              flit_diff(f, p.flit)));
+          if (p.cur_router != r)
+            error(E_PATH, o.cyc, $sformatf("%s observed leaving %s but it is buffered at %s (in.%s)\n      %s%s", p.brief(),
+                                           noc_node_name(r), noc_node_name(p.cur_router), noc_port_name(p.cur_port),
+                                           fmt_path(p), p.trace()));
+          else if (cfg.strict && !model.at_head(p))
+            error(E_FIFO_ORDER, o.cyc, $sformatf("%s left %s while not at the head of input buffer in.%s\n%s", p.brief(),
+                                                 noc_node_name(r), noc_port_name(p.cur_port), model.router_snapshot(r, o.ej_ready)));
+          xo = noc_xy_route(r, noc_x(p.dst), noc_y(p.dst));
+          if (noc_port_exists(r, op) && op != xo)
+            error(E_ROUTE, o.cyc, $sformatf("%s routed %s at %s, XY requires %s\n      %s%s", p.brief(), noc_port_name(op),
+                                            noc_node_name(r), noc_port_name(xo), fmt_path(p), p.trace()));
+          if (op != P_L && noc_port_exists(r, op)) begin
+            if (model.count(noc_neighbor(r, op), noc_opposite(op)) >= NOC_FIFO_DEPTH)
+              error(E_OVERFLOW, o.cyc, $sformatf("%s pushed on %s into full buffer %s (packet overwrite)\n%s", p.brief(),
+                                                 noc_rp_name(r, op), noc_rp_name(noc_neighbor(r, op), noc_opposite(op)),
+                                                 model.congestion_snapshot(o.ej_ready)));
+          end
+          ev.xfer[idx]    = p;
+          ev.xfer_in[idx] = int'(p.cur_port);
+          ev.n_xfer++;
+          n_xfer++;
+          link_xfers[idx]++;
+          if (op == P_L) begin
+            ev.ej[r] = p;
+            ev.n_ej++;
+            n_ej++;
+          end else begin
+            ev.n_link_xfer++;
+          end
+        end
+      end
+
+      // ---- golden-model equivalence (router grants)
+      for (int unsigned idx = 0; idx < NOC_RP; idx++) begin
+        noc_packet e = pr.grant[idx];
+        if (e == null) continue;
+        if (e.exp_hop_cycle < 0) e.exp_hop_cycle = o.cyc;
+      end
+      if (cfg.strict) begin
+        for (int unsigned idx = 0; idx < NOC_RP; idx++) begin
+          noc_packet   e = pr.grant[idx];
+          noc_packet   a = ev.xfer[idx];
+          int unsigned r = idx / NOC_PORTS;
+          bit          idle_out;
+          if (e == a) continue;
+          idle_out = (a == null);
+          if (o.trc_valid[idx]) idle_out = 1'b0;
+          if (e != null) e.flagged = 1'b1;
+          if (a != null) a.flagged = 1'b1;
+          error(idle_out ? E_WORK_CONSERVATION : E_GRANT_MISMATCH, o.cyc,
+                $sformatf("output %s (ready=%0b, %0d candidate(s), rr->%s) grant differs from golden model\n      expected: %s\n      actual  : %s\n      expected pkt: %s\n      actual pkt  : %s\n%s",
+                          noc_rp_name(r, idx % NOC_PORTS), pr.out_ready[idx], pr.n_cand[idx], noc_port_name(model.rr[idx]),
+                          fmt_grant(e), fmt_grant(a), fmt_path(e), fmt_path(a), model.congestion_snapshot(o.ej_ready)));
+        end
+      end
+      return ev;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // After the model moved the packets: delivery checks and hop-slip detail
+    //--------------------------------------------------------------------------
+    function void post_commit(noc_events ev, longint cyc);
+      for (int unsigned idx = 0; idx < NOC_RP; idx++) begin
+        noc_packet p = ev.xfer[idx];
+        longint    e;
+        if (p == null) continue;
+        if (!p.flagged) continue;
+        e = p.obs_exp_cycle[p.obs_exp_cycle.size() - 1];
+        if (e >= 0 && e != cyc)
+          $display("[NOC-ERR-DETAIL] %s hop %0d at %s: expected cycle %0d, actual cycle %0d", p.brief(),
+                   p.obs_router.size() - 1, noc_rp_name(idx / NOC_PORTS, idx % NOC_PORTS), e, cyc);
+      end
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_packet   p = ev.ej[n];
+        longint      lat;
+        int unsigned key;
+        if (p == null) continue;
+        lat = p.eject_cycle - p.inject_cycle;
+        key = p.flow();
+        if (p.dst != n)
+          error(E_ROUTE, cyc, $sformatf("%s ejected at %s%s", p.brief(), noc_node_name(n), p.trace()));
+        if (!p.path_matches())
+          error(E_PATH, cyc, $sformatf("%s path differs from XY\n      expected: %s\n      observed: %s%s", p.brief(),
+                                       p.exp_path_str(), p.obs_path_str(), p.trace()));
+        if (cfg.strict ? (lat < longint'(p.hops) + 1) : (lat < 1))
+          error(E_LATENCY, cyc, $sformatf("%s delivered after %0d cycles, below the %0d-cycle zero-load bound", p.brief(),
+                                          lat, p.hops + 1));
+        if (flow_last.exists(key)) begin
+          if (p.inj_seq < flow_last[key])
+            error(E_FLOW_ORDER, cyc, $sformatf("%s (injected @%0d) delivered after a younger packet of flow %s->%s",
+                                               p.brief(), p.inject_cycle, noc_node_name(p.src), noc_node_name(p.dst)));
+          else
+            flow_last[key] = p.inj_seq;
+        end else begin
+          flow_last[key] = p.inj_seq;
+        end
+        cdg_obs.add_path(p.src, p.obs_router, p.obs_port);
+      end
+    endfunction
+
+    // Latency bound: every packet in the fabric must eventually be delivered.
+    function void check_ages(longint cyc, bit [NOC_NODES-1:0] ej_ready);
+      foreach (model.live[k]) begin
+        noc_packet p = model.live[k];
+        if (p.age_reported) continue;
+        if (cyc - p.inject_cycle <= longint'(cfg.max_latency)) continue;
+        p.age_reported = 1'b1;
+        error(E_STARVATION, cyc, $sformatf("%s in flight for %0d cycles (bound %0d)\n      observed: %s\n%s", p.brief(),
+                                           cyc - p.inject_cycle, cfg.max_latency, p.obs_path_str(),
+                                           model.congestion_snapshot(ej_ready)));
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Model-independent audit of a drained traffic program
+    //--------------------------------------------------------------------------
+    function void audit_traffic(noc_traffic t, longint cyc);
+      int unsigned n_before = total_errors;
+      foreach (t.pkts[i]) begin
+        noc_packet p = t.pkts[i];
+        if (p.state == PK_FLUSHED) continue;
+        if (p.state != PK_DELIVERED || p.eject_count != 1) begin
+          error(E_LOST, cyc, $sformatf("[%s] %s state=%s ejected %0d time(s)\n      expected: %s\n      observed: %s", t.name,
+                                       p.brief(), p.state.name(), p.eject_count, p.exp_path_str(), p.obs_path_str()));
+          if (abort_req) break;
+          continue;
+        end
+        if (p.xfer_count != p.hops + 1)
+          error(E_PATH, cyc, $sformatf("[%s] %s took %0d router transfers for a %0d-hop route", t.name, p.brief(),
+                                       p.xfer_count, p.hops));
+      end
+      if (total_errors != n_before) $display("[NOC-TB] audit of '%s' reported %0d error(s)", t.name, total_errors - n_before);
+    endfunction
+  endclass : noc_scoreboard
+
+  //----------------------------------------------------------------------------
+  // Functional coverage: named bins with closure check + covergroups
+  //----------------------------------------------------------------------------
+  class noc_coverage;
+    int unsigned hits[string];
+    bit          mandatory[string];
+    string       order[$];
+    int unsigned flow_inflight[int unsigned];
+    int unsigned n_links;
+
+`ifndef SF_TB_NO_COVERGROUPS
+    covergroup cg_pkt with function sample(int unsigned src, int unsigned dst, int unsigned hops, int unsigned extra);
+      option.per_instance = 1;
+      cp_src   : coverpoint src   { bins n[] = {[0:NOC_NODES-1]}; }
+      cp_dst   : coverpoint dst   { bins n[] = {[0:NOC_NODES-1]}; }
+      cp_hops  : coverpoint hops  { bins h[] = {[0:2]}; }
+      cp_extra : coverpoint extra { bins zero_load = {0}; bins light = {[1:8]}; bins heavy = {[9:64]}; bins severe = {[65:$]}; }
+      x_pair       : cross cp_src, cp_dst;
+      x_hops_extra : cross cp_hops, cp_extra;
+    endgroup
+
+    covergroup cg_port with function sample(int unsigned r, int unsigned port, bit xfer, bit blocked, int unsigned cand);
+      option.per_instance = 1;
+      cp_r    : coverpoint r    { bins n[] = {[0:NOC_NODES-1]}; }
+      cp_port : coverpoint port { bins p[] = {[0:NOC_PORTS-1]}; }
+      cp_xfer : coverpoint xfer;
+      cp_bp   : coverpoint blocked;
+      cp_cand : coverpoint cand { bins one = {1}; bins two = {2}; bins many = {[3:NOC_PORTS]}; }
+      x_use   : cross cp_r, cp_port, cp_xfer;
+      x_bp    : cross cp_r, cp_port, cp_bp;
+    endgroup
+
+    covergroup cg_cycle with function sample(int unsigned links_active, int unsigned buffered, int unsigned n_ej, int unsigned n_inj);
+      option.per_instance = 1;
+      cp_links : coverpoint links_active { bins idle = {0}; bins some = {[1:3]}; bins most = {[4:7]}; bins all_l = {[8:$]}; }
+      cp_buf   : coverpoint buffered     { bins empty = {0}; bins light = {[1:4]}; bins mid = {[5:12]}; bins high = {[13:24]};
+                                           bins sat = {[25:$]}; }
+      cp_ej    : coverpoint n_ej         { bins e[] = {[0:NOC_NODES]}; }
+      cp_inj   : coverpoint n_inj        { bins i[] = {[0:NOC_NODES]}; }
+      x_load   : cross cp_links, cp_buf;
+    endgroup
+`endif
+
+    function new();
+      n_links = noc_num_links();
+      define_bins();
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_pkt   = new();
+      cg_port  = new();
+      cg_cycle = new();
+`endif
+    endfunction
+
+    function void declare(string name, bit mand = 1'b1);
+      if (hits.exists(name)) return;
+      hits[name]      = 0;
+      mandatory[name] = mand;
+      order.push_back(name);
+    endfunction
+
+    function void hit(string name);
+      if (!hits.exists(name)) declare(name, 1'b0);
+      hits[name]++;
+    endfunction
+
+    function void reset_flows();
+      flow_inflight.delete();
+    endfunction
+
+    function string turn_bin(noc_packet p);
+      int unsigned mid = p.exp_router[1];
+      return $sformatf("diag.turn.n%0d.%s->%s", mid, noc_port_name(noc_opposite(p.exp_port[0])), noc_port_name(p.exp_port[1]));
+    endfunction
+
+    function void define_bins();
+      for (int unsigned s = 0; s < NOC_NODES; s++)
+        for (int unsigned d = 0; d < NOC_NODES; d++) begin
+          declare($sformatf("pair.n%0d->n%0d", s, d));
+          if (noc_hops(s, d) == 2) begin
+            noc_packet p = new();
+            p.build(0, s, d, '0);
+            declare(turn_bin(p));
+          end
+        end
+      for (int unsigned h = 0; h <= 2; h++) declare($sformatf("hops.%0d", h));
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        for (int unsigned p = 0; p < NOC_PORTS; p++) begin
+          if (!noc_port_exists(r, p)) continue;
+          declare($sformatf("dir.%s", noc_rp_name(r, p)));
+          declare($sformatf("in.%s", noc_rp_name(r, p)));
+          declare($sformatf("buf.full.%s", noc_rp_name(r, p)));
+          if (p == P_L) declare($sformatf("bp.eject.n%0d", r));
+          else          declare($sformatf("bp.link.%s", noc_rp_name(r, p)));
+        end
+        declare($sformatf("bp.inject.n%0d", r));
+        declare($sformatf("arb.contend.n%0d", r));
+      end
+      declare("arb.contend.3p");
+      declare("congestion.level.0");
+      declare("congestion.level.1_4");
+      declare("congestion.level.5_12");
+      declare("congestion.level.13_24");
+      declare("congestion.level.25p");
+      declare("links.active.0");
+      declare("links.active.1_3");
+      declare("links.active.4_7");
+      declare("links.active.all");
+      declare("eject.all_nodes");
+      declare("inject.all_nodes");
+      declare("latency.zero_load");
+      declare("latency.extra.1_8");
+      declare("latency.extra.9_64");
+      declare("latency.extra.65p");
+      declare("order.flow_inflight_ge4");
+      declare("reset.with_inflight");
+      declare("reset.stale_probe");
+    endfunction
+
+    function void sample_cycle(noc_obs o, noc_pred pr, noc_events ev);
+      int unsigned links = 0;
+      for (int unsigned idx = 0; idx < NOC_RP; idx++) begin
+        noc_packet   p = ev.xfer[idx];
+        int unsigned r = idx / NOC_PORTS;
+        int unsigned op = idx % NOC_PORTS;
+        if (!noc_port_exists(r, op)) continue;
+        if (pr.blocked[idx]) begin
+          if (op == P_L) hit($sformatf("bp.eject.n%0d", r));
+          else           hit($sformatf("bp.link.%s", noc_rp_name(r, op)));
+        end
+        if (pr.n_cand[idx] >= 2) hit($sformatf("arb.contend.n%0d", r));
+        if (pr.n_cand[idx] >= 3) hit("arb.contend.3p");
+`ifndef SF_TB_NO_COVERGROUPS
+        cg_port.sample(r, op, o.trc_valid[idx], pr.blocked[idx], pr.n_cand[idx]);
+`endif
+        if (p == null) continue;
+        hit($sformatf("dir.%s", noc_rp_name(r, op)));
+        if (ev.xfer_in[idx] >= 0) begin
+          int unsigned ip = ev.xfer_in[idx];
+          hit($sformatf("in.%s", noc_rp_name(r, ip)));
+          if (ip != P_L && op != P_L && p.hops == 2) hit($sformatf("diag.turn.n%0d.%s->%s", r, noc_port_name(ip), noc_port_name(op)));
+        end
+        if (op != P_L) links++;
+      end
+      for (int unsigned idx = 0; idx < NOC_RP; idx++)
+        if (noc_port_exists(idx / NOC_PORTS, idx % NOC_PORTS) && pr.buf_count[idx] >= NOC_FIFO_DEPTH)
+          hit($sformatf("buf.full.%s", noc_rp_name(idx / NOC_PORTS, idx % NOC_PORTS)));
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_packet p = ev.ej[n];
+        noc_packet q = ev.inj[n];
+        if (o.inj_valid[n] && !o.inj_ready[n]) hit($sformatf("bp.inject.n%0d", n));
+        if (q != null) begin
+          int unsigned key = q.flow();
+          if (!flow_inflight.exists(key)) flow_inflight[key] = 0;
+          flow_inflight[key]++;
+          if (flow_inflight[key] >= 4) hit("order.flow_inflight_ge4");
+        end
+        if (p != null) begin
+          longint      extra = (p.eject_cycle - p.inject_cycle) - longint'(p.hops) - 1;
+          int unsigned key   = p.flow();
+          if (flow_inflight.exists(key)) begin
+            if (flow_inflight[key] > 0) flow_inflight[key]--;
+          end
+          hit($sformatf("pair.n%0d->n%0d", p.src, p.dst));
+          hit($sformatf("hops.%0d", p.hops));
+          if      (extra <= 0)  hit("latency.zero_load");
+          else if (extra <= 8)  hit("latency.extra.1_8");
+          else if (extra <= 64) hit("latency.extra.9_64");
+          else                  hit("latency.extra.65p");
+`ifndef SF_TB_NO_COVERGROUPS
+          cg_pkt.sample(p.src, p.dst, p.hops, (extra < 0) ? 0 : int'(extra));
+`endif
+        end
+      end
+      if      (pr.total_buffered == 0)  hit("congestion.level.0");
+      else if (pr.total_buffered <= 4)  hit("congestion.level.1_4");
+      else if (pr.total_buffered <= 12) hit("congestion.level.5_12");
+      else if (pr.total_buffered <= 24) hit("congestion.level.13_24");
+      else                              hit("congestion.level.25p");
+      if      (links == 0)       hit("links.active.0");
+      else if (links <= 3)       hit("links.active.1_3");
+      else if (links < n_links)  hit("links.active.4_7");
+      else                       hit("links.active.all");
+      if (ev.n_ej == NOC_NODES)  hit("eject.all_nodes");
+      if (ev.n_inj == NOC_NODES) hit("inject.all_nodes");
+`ifndef SF_TB_NO_COVERGROUPS
+      cg_cycle.sample(links, pr.total_buffered, ev.n_ej, ev.n_inj);
+`endif
+    endfunction
+
+    function void unhit_mandatory(ref string missing[$]);
+      missing.delete();
+      foreach (order[i]) if (mandatory[order[i]] && hits[order[i]] == 0) missing.push_back(order[i]);
+    endfunction
+
+    function void report();
+      int unsigned n_mand = 0;
+      int unsigned n_hit  = 0;
+      $display("[NOC-COV] ------------------------------------------------------------");
+      foreach (order[i]) begin
+        string nm = order[i];
+        if (mandatory[nm]) begin
+          n_mand++;
+          if (hits[nm] > 0) n_hit++;
+        end
+        $display("[NOC-COV]   %s %10d %s", noc_pad(nm, 34), hits[nm], noc_pick(mandatory[nm] && hits[nm] == 0, "<< UNHIT", ""));
+      end
+      $display("[NOC-COV] mandatory bins covered: %0d / %0d", n_hit, n_mand);
+`ifndef SF_TB_NO_COVERGROUPS
+      $display("[NOC-COV] covergroups: packet %0.1f%%  port %0.1f%%  cycle %0.1f%%",
+               cg_pkt.get_inst_coverage(), cg_port.get_inst_coverage(), cg_cycle.get_inst_coverage());
+`endif
+    endfunction
+  endclass : noc_coverage
+
+  //----------------------------------------------------------------------------
+  // Delivery tracker: ejected packets arrive through a mailbox; latency stats
+  //----------------------------------------------------------------------------
+  class noc_tracker;
+    mailbox #(noc_packet) mb;
+    int unsigned          n_by_hops [3];
+    longint               sum_lat   [3];
+    longint               max_lat   [3];
+    longint               sum_extra [3];
+    int unsigned          n_pair    [NOC_NODES * NOC_NODES];
+
+    function new();
+      mb = new();
+      for (int h = 0; h < 3; h++) begin
+        n_by_hops[h] = 0; sum_lat[h] = 0; max_lat[h] = 0; sum_extra[h] = 0;
+      end
+      foreach (n_pair[i]) n_pair[i] = 0;
+    endfunction
+
+    function void post(noc_packet p);
+      void'(mb.try_put(p));
+    endfunction
+
+    function void drain();
+      noc_packet p;
+      while (mb.try_get(p) > 0) begin
+        longint      lat = p.eject_cycle - p.inject_cycle;
+        int          h   = (p.hops > 2) ? 2 : int'(p.hops);
+        int unsigned fk  = p.flow();
+        n_by_hops[h]++;
+        sum_lat[h]   += lat;
+        sum_extra[h] += lat - longint'(p.hops) - 1;
+        if (lat > max_lat[h]) max_lat[h] = lat;
+        n_pair[fk]++;
+      end
+    endfunction
+
+    function void report();
+      for (int h = 0; h < 3; h++) begin
+        if (n_by_hops[h] == 0) continue;
+        $display("[NOC-STAT]   %0d-hop delivered %7d  avg latency %7.2f (zero-load %0d, max %0d)  avg queueing %6.2f",
+                 h, n_by_hops[h], real'(sum_lat[h]) / real'(n_by_hops[h]), h + 1, max_lat[h],
+                 real'(sum_extra[h]) / real'(n_by_hops[h]));
+      end
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        string line = $sformatf("[NOC-STAT]   from n%0d:", s);
+        for (int unsigned d = 0; d < NOC_NODES; d++) line = {line, $sformatf(" ->n%0d %6d", d, n_pair[s * NOC_NODES + d])};
+        $display("%s", line);
+      end
+    endfunction
+  endclass : noc_tracker
+
+  //----------------------------------------------------------------------------
+  // Environment: cycle orchestration, reset sequencing, traffic execution,
+  // forward-progress watchdog, test bookkeeping and final verdict.
+  //----------------------------------------------------------------------------
+  class noc_env;
+    noc_cfg          cfg;
+    virtual noc_if   vif;
+    noc_prng         rng_gen;
+    noc_prng         rng_drv;
+    noc_traffic_gen  gen;
+    noc_inj_driver   drv[$];
+    noc_ej_sink      sink[$];
+    noc_ref_model    model;
+    noc_scoreboard   sb;
+    noc_coverage     cov;
+    noc_tracker      trk;
+    noc_cdg          cdg_golden;
+
+    longint          cyc;
+    longint          last_progress;
+    longint          traffic_start;
+    int unsigned     reset_idx;
+    bit              traffic_aborted;
+    bit [NOC_NODES-1:0] last_ej_ready;
+    int unsigned     last_buf_total;
+    int unsigned     total_pkts;
+    int unsigned     total_traffic;
+    bit              closure_done;
+    bit              sva_accounted;
+
+    string           test_names [$];
+    bit              test_pass  [$];
+    longint          test_cyc   [$];
+    int unsigned     test_pkts  [$];
+    int unsigned     test_errs  [$];
+    string           cur_test;
+    int unsigned     test_err_base;
+    longint          test_cyc_base;
+    int unsigned     test_pkt_base;
+
+    function new(noc_cfg cfg_h, virtual noc_if vif_h);
+      cfg     = cfg_h;
+      vif     = vif_h;
+      rng_gen = new(cfg.seed ^ 64'h0123_4567_89AB_CDEF);
+      rng_drv = new(cfg.seed ^ 64'hFEDC_BA98_7654_3210);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_prng       ri = new(cfg.seed ^ (64'hA5A5_5A5A_0F0F_F0F0 + 64'(n)));
+        noc_prng       rs = new(cfg.seed ^ (64'h3C3C_C3C3_9696_6969 + 64'(n)));
+        noc_inj_driver d  = new(n, ri);
+        noc_ej_sink    k  = new(n, rs);
+        drv.push_back(d);
+        sink.push_back(k);
+      end
+      gen        = new(rng_gen);
+      model      = new();
+      sb         = new(cfg, model);
+      cov        = new();
+      trk        = new();
+      cdg_golden = new("golden-XY");
+      cyc             = 0;
+      last_progress   = 0;
+      traffic_start   = 0;
+      reset_idx       = 0;
+      traffic_aborted = 1'b0;
+      last_ej_ready   = '1;
+      last_buf_total  = 0;
+      total_pkts      = 0;
+      total_traffic   = 0;
+      closure_done    = 1'b0;
+      sva_accounted   = 1'b0;
+      cur_test        = "";
+    endfunction
+
+    function void info(int unsigned lvl, string msg);
+      if (cfg.verbosity >= lvl) $display("[NOC-TB] cyc=%0d %s", cyc, msg);
+    endfunction
+
+    function void reseed(string tag);
+      rng_gen.reseed(noc_hash_str(tag, cfg.seed));
+      rng_drv.reseed(noc_hash_str(tag, cfg.seed ^ 64'h00FF_00FF_00FF_00FF));
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        noc_ej_sink    k = sink[n];
+        d.rng.reseed(noc_hash_str(tag, cfg.seed + (64'(n) + 64'd1) * 64'h1000_0000_0000_0001));
+        k.rng.reseed(noc_hash_str(tag, cfg.seed + (64'(n) + 64'd1) * 64'h0100_0000_0000_0011));
+      end
+    endfunction
+
+    function void init_signals();
+      vif.rst_n     = 1'b0;
+      vif.inj_valid = '0;
+      vif.inj_flit  = '0;
+      vif.ej_ready  = '1;
+    endfunction
+
+    function bit drivers_done();
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        if (!d.done()) return 1'b0;
+      end
+      return 1'b1;
+    endfunction
+
+    function void drive_reset_idle();
+      vif.inj_valid <= '0;
+      vif.ej_ready  <= '1;
+    endfunction
+
+    // Injection lanes for the next cycle (idle lanes carry random junk).
+    function void drive_injection();
+      bit   [NOC_NODES-1:0]                 v;
+      logic [NOC_NODES-1:0][NOC_FLIT_W-1:0] fl;
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        d.advance(cyc + 1);
+        v[n]  = 1'b0;
+        fl[n] = rng_drv.junk_flit();
+        if (d.cur != null) begin
+          noc_packet c = d.cur;
+          v[n]  = 1'b1;
+          fl[n] = c.flit;
+        end
+      end
+      vif.inj_valid <= v;
+      vif.inj_flit  <= fl;
+    endfunction
+
+    function void drive_sinks();
+      bit [NOC_NODES-1:0] rdy;
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_ej_sink k = sink[n];
+        k.advance(cyc + 1);
+        rdy[n] = k.ready_now;
+      end
+      vif.ej_ready <= rdy;
+    endfunction
+
+    function void reset_cycle(noc_obs o);
+      reset_idx++;
+      if (reset_idx == 1) begin
+        if (model.live.num() > 0) cov.hit("reset.with_inflight");
+        model.reset();
+        sb.reset_epoch();
+        cov.reset_flows();
+        for (int unsigned n = 0; n < NOC_NODES; n++) begin
+          noc_inj_driver d = drv[n];
+          noc_ej_sink    k = sink[n];
+          d.abort();
+          k.reset_state();
+        end
+      end
+      sb.check_reset_cycle(o, reset_idx);
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // One clock: sample -> predict -> check -> commit -> stimulate
+    //--------------------------------------------------------------------------
+    task run_cycle();
+      noc_obs    o = new();
+      noc_pred   pr;
+      noc_events ev;
+      noc_packet cands[$];
+      @(vif.mon_ev);
+      cyc++;
+      o.sample(vif, cyc);
+      if (!o.rst_n) begin
+        reset_cycle(o);
+        drive_reset_idle();
+        return;
+      end
+      reset_idx     = 0;
+      last_ej_ready = o.ej_ready;
+      pr            = model.predict(o.ej_ready);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        cands.push_back(d.cur);
+      end
+      ev = sb.check_cycle(o, pr, cands);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        void'(d.observe(o.inj_valid[n], o.inj_ready[n]));
+      end
+      model.commit(ev, cyc);
+      sb.post_commit(ev, cyc);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_packet p = ev.ej[n];
+        if (p == null) continue;
+        trk.post(p);
+        if (cfg.verbosity >= 3) info(3, $sformatf("EJECT %s %s", p.convert2string(), p.obs_path_str()));
+      end
+      cov.sample_cycle(o, pr, ev);
+      sb.check_ages(cyc, o.ej_ready);
+      last_buf_total = 0;
+      foreach (o.buf_count[i]) last_buf_total += o.buf_count[i];
+      if (ev.progress()) last_progress = cyc;
+      drive_injection();
+      drive_sinks();
+      if (sb.abort_req) begin
+        $display("[NOC-TB] error limit (%0d) reached - aborting", cfg.max_errors);
+        finish();
+      end
+    endtask
+
+    task run_cycles(int unsigned n);
+      repeat (n) run_cycle();
+    endtask
+
+    task reset_dut(int unsigned n);
+      vif.rst_n <= 1'b0;
+      for (int unsigned k = 0; k < NOC_NODES; k++) begin
+        noc_inj_driver d = drv[k];
+        d.abort();
+      end
+      drive_reset_idle();
+      repeat ((n < 2) ? 2 : n) run_cycle();
+      vif.rst_n <= 1'b1;
+    endtask
+
+    function void configure(noc_knobs k);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_ej_sink s = sink[n];
+        s.configure(k, cyc + 1);
+      end
+    endfunction
+
+    task load_traffic(noc_traffic t, noc_knobs k);
+      configure(k);
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        d.load(t, k.inj_rate_pm[n]);
+      end
+      drive_injection();
+      traffic_start   = cyc;
+      last_progress   = cyc;
+      traffic_aborted = 1'b0;
+      total_pkts     += t.size();
+      total_traffic++;
+      info(1, $sformatf("traffic '%s': %0d packets (n0:%0d n1:%0d n2:%0d n3:%0d)", t.name, t.size(),
+                        t.per_node[0], t.per_node[1], t.per_node[2], t.per_node[3]));
+    endtask
+
+    task recover(noc_traffic t, string why);
+      int unsigned listed = 0;
+      sb.error(E_DEADLOCK, cyc, $sformatf("traffic '%s': %s\n      %s\n      %s", t.name, why,
+                                          model.wait_for_analysis(last_ej_ready), model.congestion_snapshot(last_ej_ready)));
+      foreach (t.pkts[i]) begin
+        noc_packet p = t.pkts[i];
+        if (p.state == PK_DELIVERED || p.state == PK_FLUSHED) continue;
+        if (listed < 8)
+          sb.error(E_LOST, cyc, $sformatf("[%s] %s undelivered (state %s)\n      expected: %s\n      observed: %s", t.name,
+                                          p.brief(), p.state.name(), p.exp_path_str(), p.obs_path_str()));
+        listed++;
+        if (sb.abort_req) break;
+      end
+      traffic_aborted = 1'b1;
+      reset_dut(4);
+    endtask
+
+    task drain_traffic(noc_traffic t);
+      while (!(drivers_done() && model.empty())) begin
+        run_cycle();
+        if (cyc - last_progress > longint'(cfg.deadlock_cycles)) begin
+          recover(t, $sformatf("no injection, router transfer or ejection for %0d cycles", cfg.deadlock_cycles));
+          break;
+        end
+        if (cyc - traffic_start > cfg.traffic_timeout) begin
+          recover(t, $sformatf("traffic exceeded %0d cycles", cfg.traffic_timeout));
+          break;
+        end
+      end
+      if (!traffic_aborted) begin
+        run_cycles(3);
+        if (last_buf_total != 0)
+          sb.error(E_LOST, cyc, $sformatf("traffic '%s' drained but DUT buffers still report %0d flit(s)", t.name, last_buf_total));
+        sb.audit_traffic(t, cyc);
+        info(2, $sformatf("traffic '%s' drained in %0d cycles", t.name, cyc - traffic_start));
+      end
+      trk.drain();
+    endtask
+
+    task run_traffic(noc_traffic t, noc_knobs k);
+      load_traffic(t, k);
+      drain_traffic(t);
+    endtask
+
+    task idle(int unsigned n, noc_knobs k);
+      configure(k);
+      run_cycles(n);
+    endtask
+
+    //--------------------------------------------------------------------------
+    // Deadlock freedom: channel-dependency graphs
+    //--------------------------------------------------------------------------
+    function void check_golden_cdg();
+      string desc;
+      cdg_golden.clear();
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        for (int unsigned d = 0; d < NOC_NODES; d++) begin
+          noc_packet p = new();
+          p.build(0, s, d, '0);
+          cdg_golden.add_path(s, p.exp_router, p.exp_port);
+        end
+      end
+      if (cdg_golden.find_cycle(desc))
+        sb.error(E_CDG, cyc, {"golden XY routing function has a cyclic channel dependency: ", desc});
+      else
+        info(1, $sformatf("golden XY channel-dependency graph: %0d dependencies, acyclic", cdg_golden.n_edges));
+    endfunction
+
+    function void check_observed_cdg();
+      string desc;
+      if (sb.cdg_obs.find_cycle(desc))
+        sb.error(E_CDG, cyc, {"observed routing created a cyclic channel dependency: ", desc});
+      else
+        info(1, $sformatf("observed channel-dependency graph: %0d dependencies, acyclic", sb.cdg_obs.n_edges));
+      foreach (sb.cdg_obs.edge_set[key]) begin
+        if (!cdg_golden.edge_set.exists(key))
+          sb.error(E_CDG, cyc, $sformatf("observed dependency %s => %s is not produced by XY routing",
+                                         cdg_golden.ch_name(key / NOC_CH), cdg_golden.ch_name(key % NOC_CH)));
+        if (sb.abort_req) break;
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Test bookkeeping
+    //--------------------------------------------------------------------------
+    task begin_test(string name);
+      noc_knobs k = new();
+      cur_test      = name;
+      test_err_base = sb.total_errors;
+      test_cyc_base = cyc;
+      test_pkt_base = total_pkts;
+      reseed(name);
+      $display("[NOC-TB] ==== TEST %s ====", noc_pad(name, 24));
+      configure(k);
+      reset_dut(4);
+    endtask
+
+    function void end_test();
+      int unsigned errs = sb.total_errors - test_err_base;
+      test_names.push_back(cur_test);
+      test_pass.push_back(errs == 0);
+      test_cyc.push_back(cyc - test_cyc_base);
+      test_pkts.push_back(total_pkts - test_pkt_base);
+      test_errs.push_back(errs);
+      $display("[NOC-TB] ==== TEST %s %s (%0d cycles, %0d packets, %0d errors)", noc_pad(cur_test, 24),
+               noc_pick(errs == 0, "PASS", "FAIL"), cyc - test_cyc_base, total_pkts - test_pkt_base, errs);
+    endfunction
+
+    function void final_report();
+      string missing[$];
+      trk.drain();
+      if (!sva_accounted) begin
+        sva_accounted = 1'b1;
+        if (noc_sva_failures > 0) begin
+          sb.err_cnt[E_SVA] += noc_sva_failures;
+          sb.total_errors   += noc_sva_failures;
+        end
+      end
+      if (cfg.cov_closure && cfg.only_test == "" && !sb.abort_req && !closure_done) begin
+        closure_done = 1'b1;
+        cov.unhit_mandatory(missing);
+        foreach (missing[i]) sb.error(E_COVERAGE, cyc, $sformatf("mandatory bin '%s' never hit", missing[i]));
+      end
+      $display("");
+      $display("[NOC-TB] ==================================================================");
+      $display("[NOC-TB]  SilicaFlux 2x2 mesh NoC verification summary");
+      $display("[NOC-TB] ==================================================================");
+      $display("[NOC-TB]  seed %0d | mode %s | %0d cycles | %0d traffic programs | %0d packets",
+               cfg.seed, noc_pick(cfg.strict, "STRICT (cycle-exact)", "RELAXED (routing+integrity+liveness)"),
+               cyc, total_traffic, total_pkts);
+      $display("[NOC-TB]  checked: %0d cycles, %0d injections, %0d router transfers, %0d ejections, %0d CDG dependencies",
+               sb.n_cycles, sb.n_inj, sb.n_xfer, sb.n_ej, sb.cdg_obs.n_edges);
+      foreach (test_names[i])
+        $display("[NOC-TB]   %s %s  %8d cycles %7d packets %4d errors", noc_pad(test_names[i], 24),
+                 noc_pick(test_pass[i], "PASS", "FAIL"), test_cyc[i], test_pkts[i], test_errs[i]);
+      for (int c = 0; c < int'(E_NUM_CATEGORIES); c++) begin
+        noc_err_e e = noc_err_e'(c);
+        if (sb.err_cnt[c] > 0) $display("[NOC-TB]   errors %s %0d", noc_pad(e.name(), 22), sb.err_cnt[c]);
+      end
+      for (int unsigned r = 0; r < NOC_NODES; r++) begin
+        string line = $sformatf("[NOC-STAT]   %s transfers:", noc_node_name(r));
+        for (int unsigned p = 0; p < NOC_PORTS; p++)
+          if (noc_port_exists(r, p)) line = {line, $sformatf(" %s=%0d", noc_port_name(p), sb.link_xfers[r * NOC_PORTS + p])};
+        $display("%s", line);
+      end
+      for (int unsigned n = 0; n < NOC_NODES; n++) begin
+        noc_inj_driver d = drv[n];
+        noc_ej_sink    k = sink[n];
+        $display("[NOC-STAT]   n%0d NI: injected %0d, injection stall cycles %0d, sink not-ready cycles %0d (frozen %0d)",
+                 n, d.n_injected, d.n_stall_cycles, k.n_notready, k.n_frozen);
+      end
+      trk.report();
+      cov.report();
+      $display("[NOC-TB] ==================================================================");
+    endfunction
+
+    function void finish();
+      final_report();
+      if (sb.total_errors == 0) begin
+        $display("[NOC-TB] TB_RESULT: PASS");
+        $finish;
+      end else begin
+        $display("[NOC-TB] TB_RESULT: FAIL (%0d errors)", sb.total_errors);
+        $fatal(1, "[NOC-TB] mesh NoC verification FAILED");
+      end
+    endfunction
+  endclass : noc_env
+
+  //----------------------------------------------------------------------------
+  // Test library
+  //----------------------------------------------------------------------------
+  class noc_test_lib;
+    noc_env      env;
+    noc_cfg      cfg;
+    int unsigned n_selected;
+
+    function new(noc_env env_h);
+      env        = env_h;
+      cfg        = env_h.cfg;
+      n_selected = 0;
+    endfunction
+
+    function bit selected(string name);
+      bit sel = (cfg.only_test == "") || (cfg.only_test == name);
+      if (sel) n_selected++;
+      return sel;
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // Directed self-checks layered on the scoreboard
+    //--------------------------------------------------------------------------
+    // Contention-free traffic: every packet arrives at the zero-load latency.
+    function void check_zero_load(noc_traffic t);
+      if (!cfg.strict || env.traffic_aborted) return;
+      foreach (t.pkts[i]) begin
+        noc_packet p = t.pkts[i];
+        if (p.state != PK_DELIVERED) continue;
+        if (p.eject_cycle - p.inject_cycle != longint'(p.hops) + 1)
+          env.sb.error(E_LATENCY, env.cyc, $sformatf("[%s] %s took %0d cycles on an uncontended %0d-hop route (expected %0d)\n      observed: %s",
+                                                     t.name, p.brief(), p.eject_cycle - p.inject_cycle, p.hops, p.hops + 1,
+                                                     p.obs_path_str()));
+      end
+    endfunction
+
+    // Dimension order on the wire: every X hop precedes every Y hop, then eject.
+    function void check_xy_order(noc_traffic t);
+      if (env.traffic_aborted) return;
+      foreach (t.pkts[i]) begin
+        noc_packet p     = t.pkts[i];
+        bit        in_y  = 1'b0;
+        bit        bad   = 1'b0;
+        if (p.state != PK_DELIVERED) continue;
+        foreach (p.obs_port[k]) begin
+          int unsigned op = p.obs_port[k];
+          if (op == P_N || op == P_S) in_y = 1'b1;
+          if ((op == P_E || op == P_W) && in_y) bad = 1'b1;
+          if (op == P_L && k + 1 != p.obs_port.size()) bad = 1'b1;
+        end
+        if (p.obs_port.size() == 0) bad = 1'b1;
+        if (!bad) begin
+          if (p.obs_port[p.obs_port.size() - 1] != P_L) bad = 1'b1;
+        end
+        if (bad)
+          env.sb.error(E_ROUTE, env.cyc, $sformatf("[%s] %s did not traverse X before Y\n      expected: %s\n      observed: %s",
+                                                   t.name, p.brief(), p.exp_path_str(), p.obs_path_str()));
+      end
+    endfunction
+
+    // Delivery order per source->destination flow equals injection order.
+    function void check_flow_fifo(noc_traffic t);
+      longint last[int unsigned];
+      if (env.traffic_aborted) return;
+      foreach (t.pkts[i]) begin
+        noc_packet   p   = t.pkts[i];
+        int unsigned key = p.flow();
+        if (p.state != PK_DELIVERED) continue;
+        if (last.exists(key)) begin
+          if (p.eject_cycle <= last[key])
+            env.sb.error(E_FLOW_ORDER, env.cyc, $sformatf("[%s] %s ejected @%0d, not after its predecessor in flow (@%0d)",
+                                                          t.name, p.brief(), p.eject_cycle, last[key]));
+        end
+        last[key] = p.eject_cycle;
+      end
+    endfunction
+
+    //--------------------------------------------------------------------------
+    // reset_sanity: idle quiescence, junk on idle lanes, reset under load
+    //--------------------------------------------------------------------------
+    task t_reset_sanity();
+      noc_knobs   k  = new();
+      noc_knobs   ks = new();
+      noc_traffic t;
+      env.begin_test("reset_sanity");
+      ks.set_stall_all(400, 1, 3);
+      env.idle(24, ks);
+      env.reset_dut(3);
+      env.idle(8, k);
+      t = env.gen.gen_uniform("reset.burst", 40, 1, 1, 1);
+      env.load_traffic(t, ks);
+      env.run_cycles(16);
+      env.reset_dut(2);
+      env.idle(12, k);
+      t = env.gen.gen_uniform("reset.after", 16, 1, 1, 1);
+      env.run_traffic(t, k);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // loopback: injection -> ejection on every tile
+    //--------------------------------------------------------------------------
+    task t_loopback();
+      noc_knobs   k  = new();
+      noc_knobs   ks = new();
+      noc_traffic t;
+      env.begin_test("loopback");
+      t = env.gen.gen_loopback("loopback.all", 16);
+      env.run_traffic(t, k);
+      check_zero_load(t);
+      check_xy_order(t);
+      ks.set_stall_all(300, 1, 4);
+      t = env.gen.gen_loopback("loopback.stall", 24);
+      env.run_traffic(t, ks);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // one_hop: every adjacent ordered pair alone, then all together
+    //--------------------------------------------------------------------------
+    task t_one_hop();
+      noc_knobs   k = new();
+      noc_traffic t;
+      env.begin_test("one_hop");
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        for (int unsigned d = 0; d < NOC_NODES; d++) begin
+          if (noc_hops(s, d) != 1) continue;
+          t = env.gen.gen_pair($sformatf("hop1.n%0d->n%0d", s, d), s, d, 12);
+          env.run_traffic(t, k);
+          check_zero_load(t);
+          check_xy_order(t);
+          check_flow_fifo(t);
+        end
+      end
+      t = env.gen.gen_hop_class("hop1.all", 1, 10);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // diagonal: 2-hop pairs must take the X step, then the Y step
+    //--------------------------------------------------------------------------
+    task t_diagonal();
+      noc_knobs   k  = new();
+      noc_knobs   ks = new();
+      noc_traffic t;
+      env.begin_test("diagonal");
+      for (int unsigned s = 0; s < NOC_NODES; s++) begin
+        for (int unsigned d = 0; d < NOC_NODES; d++) begin
+          if (noc_hops(s, d) != 2) continue;
+          t = env.gen.gen_pair($sformatf("diag.n%0d->n%0d", s, d), s, d, 12);
+          env.run_traffic(t, k);
+          check_zero_load(t);
+          check_xy_order(t);
+          check_flow_fifo(t);
+        end
+      end
+      t = env.gen.gen_hop_class("diag.all", 2, 12);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      ks.set_stall_all(250, 1, 5);
+      t = env.gen.gen_hop_class("diag.all.stall", 2, 16);
+      env.run_traffic(t, ks);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // all_pairs: every source/destination combination, shuffled
+    //--------------------------------------------------------------------------
+    task t_all_pairs();
+      noc_knobs   k  = new();
+      noc_knobs   ks = new();
+      noc_traffic t;
+      env.begin_test("all_pairs");
+      k.set_rate_all(700);
+      t = env.gen.gen_all_pairs("pairs.paced", 6, 1'b1);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      ks.set_stall_all(200, 1, 4);
+      t = env.gen.gen_all_pairs("pairs.full_rate", 8, 1'b1);
+      env.run_traffic(t, ks);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // bidirectional: A->B with B->A on every pair, then full cross traffic
+    //--------------------------------------------------------------------------
+    task t_bidirectional();
+      noc_knobs   k  = new();
+      noc_knobs   ks = new();
+      noc_traffic t;
+      env.begin_test("bidirectional");
+      for (int unsigned a = 0; a < NOC_NODES; a++) begin
+        for (int unsigned b = a + 1; b < NOC_NODES; b++) begin
+          t = env.gen.gen_bidir($sformatf("bidir.n%0d<->n%0d", a, b), a, b, 32);
+          env.run_traffic(t, k);
+          check_xy_order(t);
+          check_flow_fifo(t);
+        end
+      end
+      t = new("bidir.cross");
+      for (int unsigned s = 0; s < NOC_NODES; s++) env.gen.add_flow(t, s, NOC_NODES - 1 - s, 40);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      ks.set_stall_all(250, 1, 6);
+      t = new("bidir.cross.stall");
+      for (int unsigned i = 0; i < 40; i++)
+        for (int unsigned s = 0; s < NOC_NODES; s++) begin
+          noc_packet p = env.gen.make(s, NOC_NODES - 1 - s);
+          noc_packet q = env.gen.make(s, (s % 2 == 0) ? s + 1 : s - 1);
+          t.add(p);
+          t.add(q);
+        end
+      env.run_traffic(t, ks);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // congestion: all tiles inject continuously; uniform, hotspot, transpose
+    //--------------------------------------------------------------------------
+    task t_congestion();
+      noc_knobs   k  = new();
+      noc_knobs   kh = new();
+      noc_knobs   kt = new();
+      noc_traffic t;
+      env.begin_test("congestion");
+      k.set_stall_all(300, 1, 6);
+      t = env.gen.gen_uniform("cong.uniform", 300, 1, 2, 2);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      kh.ej_stall_pm[3]  = 500;
+      kh.ej_stall_max[3] = 8;
+      t = env.gen.gen_hotspot("cong.hotspot_n3", 3, 250, 800);
+      env.run_traffic(t, kh);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      kt.set_stall_all(150, 1, 3);
+      t = env.gen.gen_transpose("cong.transpose", 120);
+      env.run_traffic(t, kt);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // backpressure: sink freezes fill every buffer and stall injection
+    //--------------------------------------------------------------------------
+    task t_backpressure();
+      noc_knobs   kg = new();
+      noc_knobs   kr = new();
+      noc_knobs   kh = new();
+      noc_traffic t;
+      env.begin_test("backpressure");
+      kg.add_freeze(-1, 40, 440);
+      t = env.gen.gen_uniform("bp.global_freeze", 250, 1, 2, 3);
+      env.run_traffic(t, kg);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      kr.add_freeze(0, 50, 250);
+      kr.add_freeze(1, 150, 350);
+      kr.add_freeze(2, 250, 450);
+      kr.add_freeze(3, 350, 550);
+      kr.set_stall_all(100, 1, 3);
+      t = env.gen.gen_all_pairs("bp.rolling_freeze", 16, 1'b1);
+      env.run_traffic(t, kr);
+      check_flow_fifo(t);
+      kh.add_freeze(3, 20, 600);
+      t = env.gen.gen_hotspot("bp.hotspot_freeze", 3, 200, 700);
+      env.run_traffic(t, kh);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // random_traffic: seeded random patterns, rates and sink behaviour
+    //--------------------------------------------------------------------------
+    task t_random_traffic();
+      noc_traffic t;
+      env.begin_test("random_traffic");
+      for (int unsigned it = 0; it < cfg.random_iters; it++) begin
+        noc_knobs    k = new();
+        noc_prng     r = env.gen.rng;
+        int unsigned n = r.range(60, 260);
+        for (int unsigned q = 0; q < NOC_NODES; q++) begin
+          k.inj_rate_pm[q]  = r.range(150, 1000);
+          k.ej_stall_pm[q]  = r.permille(300) ? 0 : r.range(0, 450);
+          k.ej_stall_min[q] = 1;
+          k.ej_stall_max[q] = r.range(1, 10);
+        end
+        if (r.permille(300)) begin
+          longint f = longint'(r.range(30, 300));
+          k.add_freeze(r.permille(500) ? -1 : int'(r.range(0, NOC_NODES - 1)), f, f + longint'(r.range(20, 200)));
+        end
+        case (r.range(0, 3))
+          0:       t = env.gen.gen_uniform($sformatf("random.%0d.uniform", it), n, r.range(0, 4), r.range(1, 6), r.range(1, 6));
+          1:       t = env.gen.gen_hotspot($sformatf("random.%0d.hotspot", it), r.range(0, NOC_NODES - 1), n, r.range(300, 900));
+          2:       t = env.gen.gen_all_pairs($sformatf("random.%0d.pairs", it), r.range(2, 12), 1'b1);
+          default: t = env.gen.gen_transpose($sformatf("random.%0d.transpose", it), n / 2 + 1);
+        endcase
+        env.run_traffic(t, k);
+        check_xy_order(t);
+        check_flow_fifo(t);
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // deadlock_freedom: acyclic channel dependencies + forward progress under
+    // saturation with heavy, alternating sink back-pressure
+    //--------------------------------------------------------------------------
+    task t_deadlock_freedom();
+      noc_knobs   k = new();
+      noc_traffic t;
+      env.begin_test("deadlock_freedom");
+      env.check_golden_cdg();
+      k.set_stall_all(550, 2, 12);
+      k.add_freeze(0, 100, 300);
+      k.add_freeze(3, 200, 400);
+      k.add_freeze(1, 300, 500);
+      k.add_freeze(2, 400, 600);
+      t = env.gen.gen_all_pairs("deadlock.saturate", 24, 1'b1);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.check_observed_cdg();
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // midrun_reset: reset with packets in every buffer; no stale delivery
+    //--------------------------------------------------------------------------
+    task t_midrun_reset();
+      noc_knobs    k  = new();
+      noc_knobs    k0 = new();
+      noc_traffic  t;
+      int unsigned n  = 0;
+      env.begin_test("midrun_reset");
+      k.set_stall_all(400, 2, 8);
+      t = env.gen.gen_uniform("reset.victim", 200, 1, 2, 3);
+      env.load_traffic(t, k);
+      env.run_cycles(80);
+      while (n < 400 && env.model.buffered() < 8) begin
+        env.run_cycle();
+        n++;
+      end
+      if (env.model.buffered() == 0)
+        env.sb.error(E_TB_INTERNAL, env.cyc, "midrun_reset: fabric empty at the reset point");
+      env.reset_dut(5);
+      env.idle(40, k0);
+      env.cov.hit("reset.stale_probe");
+      t = env.gen.gen_all_pairs("reset.restart", 6, 1'b1);
+      env.run_traffic(t, k);
+      check_xy_order(t);
+      check_flow_fifo(t);
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    // restart_determinism: same traffic and seeds after reset -> same schedule
+    //--------------------------------------------------------------------------
+    function longint rel_cyc(longint c, longint t0);
+      return (c < 0) ? -1 : c - t0;
+    endfunction
+
+    task t_restart_determinism();
+      noc_knobs   k = new();
+      noc_traffic ta;
+      noc_traffic tb;
+      longint     t0a;
+      longint     t0b;
+      env.begin_test("restart_determinism");
+      k.set_stall_all(250, 1, 6);
+      k.set_rate_all(800);
+      k.add_freeze(2, 60, 140);
+      ta = env.gen.gen_uniform("determinism.A", 150, 1, 2, 2);
+      tb = env.gen.clone(ta, "determinism.B");
+      env.reseed("determinism.replay");
+      env.reset_dut(4);
+      t0a = env.cyc;
+      env.run_traffic(ta, k);
+      env.reseed("determinism.replay");
+      env.reset_dut(4);
+      t0b = env.cyc;
+      env.run_traffic(tb, k);
+      foreach (ta.pkts[i]) begin
+        noc_packet a  = ta.pkts[i];
+        noc_packet b  = tb.pkts[i];
+        bit        eq = 1'b1;
+        if (rel_cyc(a.inject_cycle, t0a) != rel_cyc(b.inject_cycle, t0b)) eq = 1'b0;
+        if (rel_cyc(a.eject_cycle, t0a)  != rel_cyc(b.eject_cycle, t0b))  eq = 1'b0;
+        if (a.obs_router.size() != b.obs_router.size()) begin
+          eq = 1'b0;
+        end else begin
+          foreach (a.obs_router[h]) begin
+            if (a.obs_router[h] != b.obs_router[h]) eq = 1'b0;
+            if (a.obs_port[h] != b.obs_port[h]) eq = 1'b0;
+            if (rel_cyc(a.obs_cycle[h], t0a) != rel_cyc(b.obs_cycle[h], t0b)) eq = 1'b0;
+          end
+        end
+        if (!eq) begin
+          env.sb.error(E_DETERMINISM, env.cyc, $sformatf("replay diverged at packet %0d:\n      run A (t0=%0d): %s %s\n      run B (t0=%0d): %s %s",
+                                                         i, t0a, a.convert2string(), a.obs_path_str(),
+                                                         t0b, b.convert2string(), b.obs_path_str()));
+          break;
+        end
+      end
+      env.end_test();
+    endtask
+
+    //--------------------------------------------------------------------------
+    task run();
+      $display("[NOC-TB] SilicaFlux mesh NoC verification: seed=%0d mode=%s mesh=%0dx%0d depth=%0d flit=%0db",
+               cfg.seed, noc_pick(cfg.strict, "STRICT", "RELAXED"), NOC_MESH_X, NOC_MESH_Y, NOC_FIFO_DEPTH, NOC_FLIT_W);
+      env.check_golden_cdg();
+      if (selected("reset_sanity"))        t_reset_sanity();
+      if (selected("loopback"))            t_loopback();
+      if (selected("one_hop"))             t_one_hop();
+      if (selected("diagonal"))            t_diagonal();
+      if (selected("all_pairs"))           t_all_pairs();
+      if (selected("bidirectional"))       t_bidirectional();
+      if (selected("congestion"))          t_congestion();
+      if (selected("backpressure"))        t_backpressure();
+      if (selected("random_traffic"))      t_random_traffic();
+      if (selected("deadlock_freedom"))    t_deadlock_freedom();
+      if (selected("midrun_reset"))        t_midrun_reset();
+      if (selected("restart_determinism")) t_restart_determinism();
+      if (n_selected == 0) env.sb.error(E_TB_INTERNAL, env.cyc, $sformatf("unknown test '%s'", cfg.only_test));
+      env.check_observed_cdg();
+      env.finish();
+    endtask
+  endclass : noc_test_lib
+
+endpackage : noc_tb_pkg
+
+//==============================================================================
+// Top
+//==============================================================================
+module tb_noc_interconnect;
+  import noc_params_pkg::*;
+  import noc_tb_pkg::*;
+
+  localparam time CLK_HALF = 1ns;
+
+  logic clk = 1'b0;
+  always #(CLK_HALF) clk = ~clk;
+
+  noc_if nif (.clk(clk));
+
+  //----------------------------------------------------------------------------
+  // DUT
+  //----------------------------------------------------------------------------
+  noc_interconnect #(
+    .MESH_X     (NOC_MESH_X),
+    .MESH_Y     (NOC_MESH_Y),
+    .FLIT_W     (NOC_FLIT_W),
+    .COORD_W    (NOC_COORD_W),
+    .FIFO_DEPTH (NOC_FIFO_DEPTH),
+    .CNT_W      (NOC_CNT_W)
+  ) u_dut (
+    .clk_i       (clk),
+    .rst_ni      (nif.rst_n),
+    .inj_valid_i (nif.inj_valid),
+    .inj_ready_o (nif.inj_ready),
+    .inj_flit_i  (nif.inj_flit),
+    .ej_valid_o  (nif.ej_valid),
+    .ej_ready_i  (nif.ej_ready),
+    .ej_flit_o   (nif.ej_flit),
+    .trc_valid_o (nif.trc_valid),
+    .trc_flit_o  (nif.trc_flit),
+    .buf_count_o (nif.buf_count)
+  );
+
+  //----------------------------------------------------------------------------
+  // Concurrent assertions
+  //----------------------------------------------------------------------------
+  a_eject_needs_ready : assert property (@(posedge clk) disable iff (!nif.rst_n)
+      (nif.ej_valid & ~nif.ej_ready) == '0)
+    else noc_sva_fail($sformatf("%0t a_eject_needs_ready: ej_valid=%b ej_ready=%b", $time,
+                                $sampled(nif.ej_valid), $sampled(nif.ej_ready)));
+
+  a_outputs_known : assert property (@(posedge clk) disable iff (!nif.rst_n)
+      !$isunknown({nif.inj_ready, nif.ej_valid, nif.trc_valid, nif.buf_count}))
+    else noc_sva_fail($sformatf("%0t a_outputs_known: X/Z on NoC control outputs", $time));
+
+  a_quiet_in_reset : assert property (@(posedge clk)
+      (!nif.rst_n && $past(!nif.rst_n)) |-> (nif.trc_valid == '0 && nif.ej_valid == '0))
+    else noc_sva_fail($sformatf("%0t a_quiet_in_reset: transfer while reset held", $time));
+
+  for (genvar gn = 0; gn < NOC_NODES; gn++) begin : g_node_sva
+    a_eject_is_local_xfer : assert property (@(posedge clk) disable iff (!nif.rst_n)
+        nif.ej_valid[gn] == nif.trc_valid[gn][P_L])
+      else noc_sva_fail($sformatf("%0t a_eject_is_local_xfer[%0d]", $time, gn));
+
+    a_eject_flit_traced : assert property (@(posedge clk) disable iff (!nif.rst_n)
+        nif.ej_valid[gn] |-> (nif.ej_flit[gn] == nif.trc_flit[gn][P_L]))
+      else noc_sva_fail($sformatf("%0t a_eject_flit_traced[%0d]", $time, gn));
+
+    a_full_blocks_inject : assert property (@(posedge clk) disable iff (!nif.rst_n)
+        (nif.buf_count[gn][P_L] == NOC_CNT_W'(NOC_FIFO_DEPTH)) |-> !nif.inj_ready[gn])
+      else noc_sva_fail($sformatf("%0t a_full_blocks_inject[%0d]: inj_ready with full local buffer", $time, gn));
+
+    a_eject_at_destination : assert property (@(posedge clk) disable iff (!nif.rst_n)
+        nif.ej_valid[gn] |-> (noc_node(int'(nif.ej_flit[gn][NOC_COORD_W-1:0]),
+                                       int'(nif.ej_flit[gn][2*NOC_COORD_W-1:NOC_COORD_W])) == gn))
+      else noc_sva_fail($sformatf("%0t a_eject_at_destination[%0d]: flit for another tile ejected", $time, gn));
+
+    for (genvar gp = 0; gp < NOC_PORTS; gp++) begin : g_port_sva
+      if (noc_port_exists(gn, gp)) begin : g_link
+        a_xy_route : assert property (@(posedge clk) disable iff (!nif.rst_n)
+            nif.trc_valid[gn][gp] |-> (noc_xy_route(gn, int'(nif.trc_flit[gn][gp][NOC_COORD_W-1:0]),
+                                                    int'(nif.trc_flit[gn][gp][2*NOC_COORD_W-1:NOC_COORD_W])) == gp))
+          else noc_sva_fail($sformatf("%0t a_xy_route[n%0d.%s]: transfer violates XY routing", $time, gn, noc_port_name(gp)));
+
+        a_buffer_bound : assert property (@(posedge clk) disable iff (!nif.rst_n)
+            nif.buf_count[gn][gp] <= NOC_CNT_W'(NOC_FIFO_DEPTH))
+          else noc_sva_fail($sformatf("%0t a_buffer_bound[n%0d.%s]: occupancy %0d", $time, gn, noc_port_name(gp),
+                                      $sampled(nif.buf_count[gn][gp])));
+      end else begin : g_edge
+        a_edge_port_idle : assert property (@(posedge clk) disable iff (!nif.rst_n)
+            !nif.trc_valid[gn][gp] && nif.buf_count[gn][gp] == '0)
+          else noc_sva_fail($sformatf("%0t a_edge_port_idle[n%0d.%s]: activity beyond the mesh edge", $time, gn,
+                                      noc_port_name(gp)));
+      end
+    end
+  end
+
+  c_all_links_active : cover property (@(posedge clk) disable iff (!nif.rst_n)
+      nif.trc_valid[0][P_E] && nif.trc_valid[0][P_N] && nif.trc_valid[1][P_W] && nif.trc_valid[1][P_N] &&
+      nif.trc_valid[2][P_E] && nif.trc_valid[2][P_S] && nif.trc_valid[3][P_W] && nif.trc_valid[3][P_S]);
+  c_all_eject        : cover property (@(posedge clk) disable iff (!nif.rst_n) &nif.ej_valid);
+  c_all_inject_stall : cover property (@(posedge clk) disable iff (!nif.rst_n) (nif.inj_valid & ~nif.inj_ready) == '1);
+
+  //----------------------------------------------------------------------------
+  // Environment
+  //----------------------------------------------------------------------------
+  noc_cfg      cfg;
+  noc_env      env;
+  noc_test_lib tests;
+
+  initial begin
+    cfg = new();
+    cfg.load_plusargs();
+    env = new(cfg, nif);
+    env.init_signals();
+    tests = new(env);
+    tests.run();
+  end
+
+endmodule : tb_noc_interconnect
+
+`default_nettype wire
