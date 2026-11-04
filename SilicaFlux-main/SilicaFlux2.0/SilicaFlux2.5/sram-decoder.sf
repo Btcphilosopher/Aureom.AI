@@ -1,0 +1,32 @@
+
+module sf_sram_bank_decode #(
+    parameter int ADDR_W   = 32,
+    parameter int BANKS    = 4,
+    parameter int OFFSET_W = 4,
+    parameter int BANK_W   = $clog2(BANKS),
+    parameter int ROW_W    = ADDR_W - OFFSET_W - BANK_W
+) (
+    input  logic [ADDR_W-1:0]   addr_i,
+    output logic [BANK_W-1:0]   bank_o,
+    output logic [ROW_W-1:0]    row_o,
+    output logic [OFFSET_W-1:0] offset_o
+);
+
+    // 16 bytes per line when OFFSET_W = 4.
+    assign offset_o = addr_i[OFFSET_W-1:0];
+
+    // Interleave successive lines across banks.
+    assign bank_o = addr_i[OFFSET_W +: BANK_W];
+
+    // Remaining address bits select a row.
+    assign row_o = addr_i[ADDR_W-1:OFFSET_W+BANK_W];
+
+    initial begin
+        assert (BANKS >= 2 && (BANKS & (BANKS-1)) == 0)
+            else $fatal(1, "BANKS must be power of two");
+        assert (ROW_W > 0)
+            else $fatal(1, "Invalid address configuration");
+    end
+
+endmodule
+
