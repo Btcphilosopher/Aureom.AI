@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated": "2026-11-05T14:07:45",
+  "generated": "2026-11-05T14:12:01",
   "budget": {
     "node_nm": 65,
     "clock_hz": 200000000.0,
@@ -166,7 +166,7 @@
     },
     {
       "title": "A no-DRAM SilicaFlux-V demonstrates the core but starves the accelerators.",
-      "detail": "The documented no-DRAM target reaches 0.208 Gop/s suite geomean (QSPI-class link); the same machine with DDR3-1600 x16 reaches 1.55. On the 65 nm budget the best points per external memory are: QSPI 104 MHz (no DRAM) 0.25 Gop/s in 7.3 mm^2; HyperRAM 200 MHz x8 1.92 Gop/s in 5.5 mm^2; 2x HyperRAM 200 MHz x8 3.18 Gop/s in 5.5 mm^2; LPDDR2-800 x32 6.54 Gop/s in 7.8 mm^2; DDR3-1600 x16 6.54 Gop/s in 7.4 mm^2. HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; DDR3/LPDDR2 buys ~2-3x more."
+      "detail": "The documented no-DRAM target reaches 0.208 Gop/s suite geomean (QSPI-class link); the same machine with DDR3-1600 x16 reaches 1.55. On the 65 nm budget the best points per external memory are: QSPI 104 MHz (no DRAM) 0.25 Gop/s in 7.3 mm^2; HyperRAM 200 MHz x8 1.92 Gop/s in 5.5 mm^2; 2x HyperRAM 200 MHz x8 3.18 Gop/s in 5.5 mm^2; LPDDR2-800 x32 6.54 Gop/s in 7.8 mm^2; DDR3-1600 x16 6.54 Gop/s in 7.4 mm^2. HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; the best DDR-class point is 2.1-3.4x faster."
     },
     {
       "title": "Outstanding DMA capacity must cover the external memory's bandwidth-delay product.",
@@ -1538,7 +1538,7 @@
         "sf25_total_vector_responses": 9285.0,
         "sf25_total_burst_beats": 21633.0
       },
-      "seconds": 10.29,
+      "seconds": 10.9,
       "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_memctrl/sim.log",
       "description": "SilicaFlux 2.5 banked SPM controller: latency, streaming, burst-length sweep, bank contention, random traffic + backpressure, boundaries/overflow, parity, burst kill",
       "provenance": "RTL_SIMULATION"
@@ -1561,7 +1561,7 @@
         "sf25_tensor_flushed_ops": 6.0,
         "sf25_tensor_results_checked": 8002.0
       },
-      "seconds": 9.5,
+      "seconds": 10.13,
       "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_tensor/sim.log",
       "description": "SilicaFlux 2.5 tensor unit (4x4x4 INT8): golden results, wrap/saturate, latency, sustained issue rate with and without result backpressure",
       "provenance": "RTL_SIMULATION"
@@ -1586,7 +1586,7 @@
         "sf1_array_writes_in_one_cycle": 2.0,
         "sf1_dfburst_defect_reproduced": 2.0
       },
-      "seconds": 6.14,
+      "seconds": 6.53,
       "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf1_memctrl/sim.log",
       "description": "SilicaFlux v1 tile memory controller: latency / bandwidth; reproduces the DFLOAD/DFSTORE > 4-word burst defect",
       "provenance": "RTL_SIMULATION"
@@ -1603,7 +1603,7 @@
         "sf1_tensor_products_per_cycle": 0.014706,
         "sf1_tensor_macs_per_cycle": 0.941176
       },
-      "seconds": 3.56,
+      "seconds": 3.84,
       "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf1_tensor/sim.log",
       "description": "SilicaFlux v1 sequential tensor unit: golden results and start-to-done latency",
       "provenance": "RTL_SIMULATION"
@@ -1627,9 +1627,9 @@
         "sf25_dma_concurrent_bytes_per_cycle": 6.595813,
         "sf25_bridge_strobe_errors": 1.0
       },
-      "seconds": 8.1,
+      "seconds": 9.02,
       "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_dma_bridge/sim.log",
-      "description": "MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through sf_mc25_vport_bridge; read back through the SilicaFlux scalar port",
+      "description": "MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through sf_mc25_vport_bridge; byte-exact EXT->SPM->EXT and SPM->SPM round trips, controller exceptions -> DMA bus errors, partial-lane poisoning",
       "provenance": "RTL_SIMULATION"
     }
   },

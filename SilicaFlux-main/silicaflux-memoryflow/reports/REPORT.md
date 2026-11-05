@@ -1,6 +1,6 @@
 # SilicaFlux MemoryFlow - engineering report
 
-Generated 2026-11-05T14:07:45 by memoryflow 2.0.0. Budget `silicaflux-v-65`: node 65 nm, 200 MHz, 8.0 mm2 core / 1.0 W (DOCUMENTED: SilicaFlux-V reduced-ASIC p.1/p.3, 03-11-26 update p.7-9).
+Generated 2026-11-05T14:12:01 by memoryflow 2.0.0. Budget `silicaflux-v-65`: node 65 nm, 200 MHz, 8.0 mm2 core / 1.0 W (DOCUMENTED: SilicaFlux-V reduced-ASIC p.1/p.3, 03-11-26 update p.7-9).
 
 Provenance tags: THEORETICAL ceilings, ANALYTICAL models, PY_SIMULATION, RTL_SIMULATION. No silicon or FPGA MEASURED data exists yet.
 
@@ -53,7 +53,7 @@ Provenance tags: THEORETICAL ceilings, ANALYTICAL models, PY_SIMULATION, RTL_SIM
 
 **For the full SilicaFlux, multi-channel LPDDR is the commercial sweet spot; HBM is a stretch option.** At 28 nm (no HBM PHY assumed) the recommended full chip is 32x 256KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32: 193 Gop/s suite geomean in 37 mm^2, 3.2 W; a single LPDDR4X x32 channel caps any configuration at 109 Gop/s. At 16 nm, LPDDR5 4x32 reaches 539 Gop/s (45 % of HBM2E's 1197) at 5.6 W vs 14.7 W, on an organic package instead of a 2.5D interposer. Tile scaling: 32 -> 64 tiles behind LPDDR4X-4266 2x32: +9 % performance for +83 % area (80 % of kernels bound by external memory or the DMA); 32 -> 64 tiles behind HBM2E 1 stack: +54 % performance for +45 % area (40 % of kernels bound by external memory or the DMA). Behind LPDDR the knee is well below the recommendation rule's pick (see the best-Gop/s-per-mm^2 rows); behind HBM more tiles keep paying. Full-chip envelopes are ASSUMPTIONS.
 
-**A no-DRAM SilicaFlux-V demonstrates the core but starves the accelerators.** The documented no-DRAM target reaches 0.208 Gop/s suite geomean (QSPI-class link); the same machine with DDR3-1600 x16 reaches 1.55. On the 65 nm budget the best points per external memory are: QSPI 104 MHz (no DRAM) 0.25 Gop/s in 7.3 mm^2; HyperRAM 200 MHz x8 1.92 Gop/s in 5.5 mm^2; 2x HyperRAM 200 MHz x8 3.18 Gop/s in 5.5 mm^2; LPDDR2-800 x32 6.54 Gop/s in 7.8 mm^2; DDR3-1600 x16 6.54 Gop/s in 7.4 mm^2. HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; DDR3/LPDDR2 buys ~2-3x more.
+**A no-DRAM SilicaFlux-V demonstrates the core but starves the accelerators.** The documented no-DRAM target reaches 0.208 Gop/s suite geomean (QSPI-class link); the same machine with DDR3-1600 x16 reaches 1.55. On the 65 nm budget the best points per external memory are: QSPI 104 MHz (no DRAM) 0.25 Gop/s in 7.3 mm^2; HyperRAM 200 MHz x8 1.92 Gop/s in 5.5 mm^2; 2x HyperRAM 200 MHz x8 3.18 Gop/s in 5.5 mm^2; LPDDR2-800 x32 6.54 Gop/s in 7.8 mm^2; DDR3-1600 x16 6.54 Gop/s in 7.4 mm^2. HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; the best DDR-class point is 2.1-3.4x faster.
 
 **Outstanding DMA capacity must cover the external memory's bandwidth-delay product.** RTL reference (16 outstanding 64-bit beats, LPDDR2-800 x32, ~100 ns at 200 MHz): DMA read path 0.95 GB/s, write path 0.47 GB/s, DRAM sustained 2.08 GB/s. Covering the bandwidth-delay product of the recommended memory (DDR3-1600 x16) needs >= 13 128-bit beats in flight; the recommendation uses 16 outstanding reads and 32 outstanding write acks.
 
@@ -125,7 +125,7 @@ Provenance tags: THEORETICAL ceilings, ANALYTICAL models, PY_SIMULATION, RTL_SIM
 | sf25_tensor | PASS | PASS | OK | 32016 | SilicaFlux 2.5 tensor unit (4x4x4 INT8): golden results, wrap/saturate, latency, sustained issue rate with and without result backpressure |
 | sf1_memctrl | DEFECT | DEFECT | OK | 302 | SilicaFlux v1 tile memory controller: latency / bandwidth; reproduces the DFLOAD/DFSTORE > 4-word burst defect |
 | sf1_tensor | PASS | PASS | OK | 3216 | SilicaFlux v1 sequential tensor unit: golden results and start-to-done latency |
-| sf25_dma_bridge | PASS | PASS | OK | 4140 | MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through sf_mc25_vport_bridge; read back through the SilicaFlux scalar port |
+| sf25_dma_bridge | PASS | PASS | OK | 4140 | MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through sf_mc25_vport_bridge; byte-exact EXT->SPM->EXT and SPM->SPM round trips, controller exceptions -> DMA bus errors, partial-lane poisoning |
 
 
 | measurement | value | unit | testbench |
