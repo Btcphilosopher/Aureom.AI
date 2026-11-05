@@ -27,6 +27,21 @@ class ComputeConfig:
     tensor_ops_per_mac: float = 2.0
     tensor_in_bytes: int = 1               # int8 operands
     tensor_acc_bytes: int = 4              # int32 accumulators
+    # Tensor dataflow.  "outer_product": MemoryFlow sf_tensor_array (TR x TC MACs
+    # per cycle, accumulators held in the array, A streamed, B reused).
+    # "block": the SilicaFlux 2.5 tensor_unit style - one DIM x DIM x DIM
+    # product per cycle (tensor_depth = DIM), no accumulation buffer: partial C
+    # tiles leave the unit and are accumulated elsewhere.
+    tensor_dataflow: str = "outer_product"
+    tensor_depth: int = 1                  # MACs per (row, col) per cycle
+    # Bytes/cycle the tensor RESULT path can absorb (0 = unlimited).  SilicaFlux
+    # 2.5: 16 (one 128-bit vector-register write port) - see tb_sf25_tensor.
+    tensor_drain_bytes_per_cycle: float = 0.0
+    vec_lane_bits: int = 16                # element width of one vector lane
+
+    @property
+    def tensor_macs_per_cycle(self) -> int:
+        return self.tensor_rows * self.tensor_cols * self.tensor_depth
 
     def peak_ops(self, unit: str) -> Quantity:
         f = self.clock_hz
@@ -35,14 +50,14 @@ class ComputeConfig:
         elif unit == "vector":
             v = self.vec_lanes * self.vec_ops_per_lane * f
         elif unit == "tensor":
-            v = self.tensor_rows * self.tensor_cols * self.tensor_ops_per_mac * f
+            v = self.tensor_macs_per_cycle * self.tensor_ops_per_mac * f
         else:
             raise ValueError(unit)
         return Quantity(v, "op/s", Provenance.THEORETICAL, f"{unit} peak = width x clock")
 
     @property
     def vec_datapath_bits(self) -> int:
-        return self.vec_lanes * 16
+        return self.vec_lanes * self.vec_lane_bits
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -56,6 +71,10 @@ class ScratchpadConfig:
     ports: int = 3                         # DMA read, DMA write, CPU/host
     ecc: str = "secded"                    # none | parity | secded
     interleave: str = "xor"                # modulo | xor | block
+    # measured fraction of the port's width x clock actually delivered to an
+    # engine (1.0 for MemoryFlow's pipelined SPM; e.g. 0.57 for the SilicaFlux
+    # v1 FSM controller, RTL_SIMULATION tb_sf1_memctrl)
+    port_efficiency: float = 1.0
 
     @property
     def words_per_bank(self) -> int:
@@ -88,6 +107,7 @@ class DmaConfig:
     beat_bytes: int = 8
     channels: int = 4
     engines: int = 2                       # MM2S/MEM2MEM + S2MM
+    wout: int = 8                          # outstanding write acknowledgements (sf_dma WOUT)
 
 
 @dataclass(frozen=True)
@@ -133,7 +153,17 @@ class ExtMemConfig:
 _SRC_DRAM = ("indicative public-literature range (JEDEC rates; energy per O'Connor et al., "
              "MICRO 2017 and vendor briefs) -- replace with datasheet values")
 
+_SRC_SERIAL = ("device rates from public QSPI-flash (104 MHz SDR) and HyperBus/HyperRAM (200 MHz DDR x8) "
+               "datasheets; efficiency covers command/address/latency overhead; digital PHY (pads + DLL) "
+               "so no analog DDR PHY is needed at mature nodes -- energy and area are indicative")
+
 EXTMEM_PRESETS: dict[str, ExtMemConfig] = {m.name: m for m in [
+    # mature-node, low-pin options (added v2: SilicaFlux-V targets 65 / 130 nm)
+    ExtMemConfig("QSPI 104 MHz (no DRAM)", "QSPI", 104, 4, 1, 0.50, 400, 60.0, 0.02, 180, _SRC_SERIAL),
+    ExtMemConfig("HyperRAM 200 MHz x8", "HyperRAM", 400, 8, 1, 0.60, 70, 20.0, 0.05, 180, _SRC_SERIAL),
+    ExtMemConfig("2x HyperRAM 200 MHz x8", "HyperRAM", 400, 8, 2, 0.60, 70, 20.0, 0.10, 180, _SRC_SERIAL),
+    ExtMemConfig("LPDDR2-800 x32", "LPDDR2", 800, 32, 1, 0.65, 100, 12.0, 2.2, 65, _SRC_DRAM),
+    # v1 presets (unchanged)
     ExtMemConfig("DDR3-1600 x16", "DDR3", 1600, 16, 1, 0.65, 95, 25.0, 1.8, 130, _SRC_DRAM),
     ExtMemConfig("DDR4-2400 x16", "DDR4", 2400, 16, 1, 0.70, 90, 15.0, 2.0, 55, _SRC_DRAM),
     ExtMemConfig("DDR4-3200 x32", "DDR4", 3200, 32, 1, 0.70, 90, 15.0, 3.2, 40, _SRC_DRAM),
@@ -154,21 +184,26 @@ class SystemConfig:
     extmem: ExtMemConfig = field(default_factory=lambda: EXTMEM_PRESETS["DDR4-3200 x32"])
     node_nm: int = 40
     name: str = "SilicaFlux-V"
+    # Replicated compute tiles (tensor + vector + SPM + DMA each) sharing ONE
+    # external-memory interface.  1 = SilicaFlux-V; the full SilicaFlux cluster
+    # (silicaflux_top.sf: 2 complexes x 4 cores) is modelled with tiles = 4..16.
+    tiles: int = 1
 
     def with_(self, **kw) -> "SystemConfig":
         return replace(self, **kw)
 
     def spm_to_accel_bw(self) -> Quantity:
-        """On-chip operand path: one DMA read beat (bank width) per cycle."""
-        v = self.spm.bank_width_bits / 8 * self.compute.clock_hz
+        """On-chip operand path: one DMA read beat (bank width) per cycle per tile."""
+        v = self.spm.bank_width_bits / 8 * self.compute.clock_hz * self.tiles * self.spm.port_efficiency
         return Quantity(v, "B/s", Provenance.THEORETICAL, "DMA engine 0 read path, 1 beat/cycle")
 
     def spm_peak_bw(self) -> Quantity:
-        v = self.spm.peak_bytes_per_cycle() * self.compute.clock_hz
+        v = self.spm.peak_bytes_per_cycle() * self.compute.clock_hz * self.tiles
         return Quantity(v, "B/s", Provenance.THEORETICAL, "min(banks, ports) x width x clock")
 
     def label(self) -> str:
         c, s = self.compute, self.spm
-        return (f"{s.capacity_bytes // 1024}KiB/{s.banks}b/{s.bank_width_bits}w "
-                f"T{c.tensor_rows}x{c.tensor_cols} V{c.vec_lanes} "
+        return ((f"{self.tiles}x " if self.tiles > 1 else "") + f"{s.capacity_bytes // 1024}KiB/{s.banks}b/{s.bank_width_bits}w "
+                f"T{c.tensor_rows}x{c.tensor_cols}{'x%d' % c.tensor_depth if c.tensor_depth > 1 else ''} "
+                f"V{c.vec_lanes} "
                 f"B{self.dma.burst_beats}/F{self.dma.dfifo_depth} {self.extmem.name}")

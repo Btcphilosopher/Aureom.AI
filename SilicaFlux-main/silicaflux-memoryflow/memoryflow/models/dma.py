@@ -175,6 +175,15 @@ def dma_path_bw(beat_bytes: int, clock_hz: float, latency_cycles: float, burst: 
     return rate * beat_bytes * clock_hz
 
 
+def dma_write_bw(beat_bytes: int, clock_hz: float, latency_cycles: float, wout: int = 8,
+                 onchip_latency: float = 6.0) -> float:
+    """Sustained bytes/s of the DMA WRITE path: at most ``wout`` writes may wait
+    for their acknowledgement, so rate <= wout / ack round trip (Little's law).
+    Calibrated by tb_sf25_dma_bridge: SPM -> EXT with WOUT = 8 and a 20-cycle
+    memory runs at 6.06 B/cycle (model: 8 / 21 x 16 = 6.10)."""
+    return min(1.0, wout / (latency_cycles + onchip_latency + 1)) * beat_bytes * clock_hz
+
+
 def required_outstanding_beats(bw_bytes_s: float, latency_s: float, beat_bytes: int) -> int:
     """Bandwidth-delay product in DMA beats."""
     return math.ceil(bw_bytes_s * latency_s / beat_bytes)

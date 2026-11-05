@@ -39,6 +39,16 @@ class Workload(ABC):
         """Bytes the engine pulls from the SPM (default: every operand once)."""
         return self.dram_bytes(cfg)
 
+    def write_share(self, cfg: SystemConfig) -> float:
+        """Fraction of DRAM traffic that is writes (output data).  Sets how much
+        the DMA write path (outstanding write acknowledgements) matters."""
+        return 1.0 / 3.0
+
+    def result_bytes(self, cfg: SystemConfig) -> float:
+        """Bytes leaving the executing engine's result port (0 = not modelled).
+        Bounds tensor throughput when the result path is narrow (drain ceiling)."""
+        return 0.0
+
     def ai(self, cfg: SystemConfig) -> float:
         return self.ops / max(self.dram_bytes(cfg), 1.0)
 
@@ -79,14 +89,31 @@ class Gemm(Workload):
         return float(self.tiling(cfg).dram_bytes)
 
     def onchip_bytes(self, cfg: SystemConfig) -> float:
+        c = cfg.compute
+        if c.tensor_dataflow == "block":
+            # SilicaFlux 2.5 tensor_unit: every DIM^3 block reads an A and a B
+            # tile and emits a DIM x DIM partial C (accumulator width) that has
+            # to be written out and read back to accumulate over K.
+            blocks = self.m * self.n * self.k / c.tensor_macs_per_cycle
+            r, cc, d = c.tensor_rows, c.tensor_cols, c.tensor_depth
+            return blocks * ((r * d + d * cc) * self.in_bytes + 2 * r * cc * c.tensor_acc_bytes)
         # Each MAC step reads one A beat (TR bytes) from SPM; B tiles are
         # replayed from the reuse buffer, so SPM sees B once per tile column.
-        c = cfg.compute
         steps = self.m * self.n * self.k / (c.tensor_rows * c.tensor_cols)
         a = steps * c.tensor_rows * self.in_bytes
         b = self.k * self.n * self.in_bytes * math.ceil(self.m / max(self.tiling(cfg).tm, 1))
         out = self.m * self.n * self.out_bytes
         return a + b + out
+
+    def result_bytes(self, cfg: SystemConfig) -> float:
+        c = cfg.compute
+        if c.tensor_dataflow == "block":
+            return self.m * self.n * self.k / c.tensor_depth * c.tensor_acc_bytes
+        return self.m * self.n * c.tensor_acc_bytes          # one drain per output element
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return min(1.0, self.m * self.n * self.out_bytes / max(self.dram_bytes(cfg), 1.0))
 
 
 @dataclass
@@ -123,6 +150,10 @@ class Dot(Workload):
     @property
     def compulsory_bytes(self) -> float:
         return 2.0 * self.n * self.elem_bytes + 8
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return 0.0
 
 
 @dataclass
@@ -168,8 +199,17 @@ class Conv2d(Workload):
 
     def onchip_bytes(self, cfg: SystemConfig) -> float:
         # implicit-GEMM on the tensor array: M=K, N=P*Q, Kdim=C*R*S
-        g = Gemm(self.k, self.batch * self.p * self.q, self.c * self.r * self.s, self.in_bytes, self.out_bytes)
-        return g.onchip_bytes(cfg)
+        return self._as_gemm().onchip_bytes(cfg)
+
+    def result_bytes(self, cfg: SystemConfig) -> float:
+        return self._as_gemm().result_bytes(cfg)
+
+    def _as_gemm(self) -> "Gemm":
+        return Gemm(self.k, self.batch * self.p * self.q, self.c * self.r * self.s, self.in_bytes, self.out_bytes)
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return min(1.0, self.batch * self.k * self.p * self.q * self.out_bytes / max(self.dram_bytes(cfg), 1.0))
 
 
 @dataclass
@@ -193,6 +233,10 @@ class Fir(Workload):
     def onchip_bytes(self, cfg: SystemConfig) -> float:
         # register blocking: taps held in registers, each sample read once
         return self.compulsory_bytes
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return 0.5
 
 
 @dataclass
@@ -220,6 +264,10 @@ class Fft(Workload):
             return self.compulsory_bytes
         passes = math.ceil(math.log2(self.points) / math.log2(fit_points))
         return self.compulsory_bytes * passes
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return 0.5
 
 
 @dataclass
@@ -254,6 +302,10 @@ class Stencil2D(Workload):
         return self.compulsory_bytes * math.ceil(self.iters / tb)
 
 
+    def write_share(self, cfg: SystemConfig) -> float:
+        return 0.5
+
+
 @dataclass
 class SpMV(Workload):
     rows: int = 1 << 17
@@ -284,6 +336,10 @@ class SpMV(Workload):
             return self.compulsory_bytes
         # x does not fit: irregular gathers cost one 8-byte beat each
         return self.compulsory_bytes + self.nnz * 8 * (1 - (cfg.spm.capacity_bytes // 2) / x_bytes)
+
+
+    def write_share(self, cfg: SystemConfig) -> float:
+        return self.rows * self.value_bytes / max(self.dram_bytes(cfg), 1.0)
 
 
 def default_suite() -> list[Workload]:

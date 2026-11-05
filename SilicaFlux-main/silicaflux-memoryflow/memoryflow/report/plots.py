@@ -173,12 +173,13 @@ def dma_burst_chart(rows: Sequence[dict], out: str, skew: dict | None = None) ->
     return S.save(fig, out)
 
 
-def dma_outstanding_chart(out: str, clock_hz: float = 500e6) -> list[str]:
+def dma_outstanding_chart(out: str, clock_hz: float = 500e6,
+                          mems: Sequence[str] = ("DDR4-3200 x32", "LPDDR4X-4266 x32")) -> list[str]:
     S.apply()
     fig, ax = plt.subplots(figsize=(8.5, 4.2))
     depths = [8, 16, 32, 64, 128, 256]
     i = 0
-    for em_name in ("DDR4-3200 x32", "LPDDR4X-4266 x32"):
+    for em_name in mems:
         em = EXTMEM_PRESETS[em_name]
         for width in (64, 128):
             bw = [min(em.sustained_bw().value, dma_path_bw(width // 8, clock_hz, em.latency_cycles(clock_hz), 16, d, 8)) / 1e9
@@ -373,4 +374,122 @@ def sram_area_chart(out: str) -> list[str]:
     ax.legend(loc="upper left")
     ax.set_title("SRAM area estimation interface (analytical model)")
     _sub(ax, "indicative HD 6T bitcell areas; replace with memory-compiler CSV via CompilerTableAreaModel")
+    return S.save(fig, out)
+
+
+# =============================================================================
+# v2: figures for the existing SilicaFlux RTL and the repository baselines
+# =============================================================================
+def sf25_burst_chart(metrics: dict[str, float], out: str) -> list[str]:
+    """SilicaFlux 2.5 burst port: beats/cycle vs burst length, RTL vs L/(L+overhead)."""
+    S.apply()
+    fig, ax = plt.subplots(figsize=(8.0, 4.0))
+    lens = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    for i, (kind, ovh) in enumerate((("store", 3), ("load", 4))):
+        rtl = [metrics.get(f"sf25_burst_{kind}_beats_per_cycle_L{n}") for n in lens]
+        xs = [n for n, v in zip(lens, rtl) if v is not None]
+        ys = [v for v in rtl if v is not None]
+        ax.plot(lens, [n / (n + ovh) for n in lens], color=S.SERIES[i], lw=1.4,
+                label=f"model L/(L+{ovh}) ({kind})")
+        ax.scatter(xs, ys, marker="D", s=40, color=S.SERIES[i], edgecolor=S.SURFACE, linewidth=1.2, zorder=3,
+                   label=f"RTL simulation ({kind})")
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(lens)
+    ax.set_xticklabels([str(n) for n in lens])
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("burst length (128-bit beats)")
+    ax.set_ylabel("beats per cycle")
+    ax.legend(loc="lower right")
+    ax.set_title("SilicaFlux 2.5 SPM burst port: one descriptor in flight")
+    _sub(ax, "RTL_SIMULATION of the unmodified memory_controller.sf (tb_sf25_memctrl); "
+             "3 / 4 cycles of overhead per store / load burst")
+    return S.save(fig, out)
+
+
+def tensor_feed_chart(rows: Sequence[tuple[str, float, float]], out: str) -> list[str]:
+    """MAC/cycle a tensor engine actually sustains under different feeds.
+    rows: (label, mac_per_cycle, provenance_is_rtl)"""
+    S.apply()
+    fig, ax = plt.subplots(figsize=(8.5, 0.46 * len(rows) + 1.3))
+    y = np.arange(len(rows))
+    cols = [S.SERIES[2] if r[2] else S.SERIES[0] for r in rows]
+    ax.barh(y, [r[1] for r in rows], 0.6, color=cols, edgecolor=S.SURFACE, linewidth=2)
+    for yi, r in zip(y, rows):
+        ax.text(r[1] * 1.04 + 0.3, yi, f"{r[1]:.1f}", va="center", fontsize=7.5, color=S.TEXT2)
+    ax.set_yticks(y)
+    ax.set_yticklabels([r[0] for r in rows], fontsize=7.5)
+    ax.invert_yaxis()
+    ax.set_xlabel("sustained MAC / cycle")
+    ax.set_title("SilicaFlux 2.5 tensor unit: peak vs what its memory system can feed")
+    _sub(ax, "green = RTL_SIMULATION (tb_sf25_tensor), blue = ANALYTICAL roofline of the 2.5 tile (+ MemoryFlow DMA)")
+    return S.save(fig, out)
+
+
+def baseline_chart(points: Sequence[tuple[str, object]], out: str) -> list[str]:
+    """Per-workload achievable Gop/s for each machine (log scale)."""
+    S.apply()
+    names = list(points[0][1].perf)
+    fig, ax = plt.subplots(figsize=(10, 4.8))
+    n = len(points)
+    w = 0.8 / n
+    x = np.arange(len(names))
+    for i, (label, p) in enumerate(points):
+        ax.bar(x + (i - (n - 1) / 2) * w, [p.perf[k] / 1e9 for k in names], w * 0.92, color=S.SERIES[i % 8],
+               label=label, edgecolor=S.SURFACE, linewidth=0.8)
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels([k.split(" n=")[0].replace(" int8", "").replace(" int16", "") for k in names],
+                       rotation=30, ha="right", fontsize=7.2)
+    ax.set_ylabel("achievable Gop/s (log)")
+    ax.legend(loc="upper right", fontsize=7)
+    ax.set_title("SilicaFlux as built vs documented target vs MemoryFlow recommendation")
+    _sub(ax, "ANALYTICAL roofline evaluation; as-built parameters measured by RTL_SIMULATION where available")
+    return S.save(fig, out)
+
+
+def node_memory_chart(rows: Sequence[dict], out: str) -> list[str]:
+    """Best feasible suite geomean per external memory, one series per budget."""
+    S.apply()
+    budgets = list(dict.fromkeys(r["budget"] for r in rows))
+    mems = list(dict.fromkeys(r["extmem"] for r in rows))
+    fig, ax = plt.subplots(figsize=(10, 4.4))
+    w = 0.8 / max(len(budgets), 1)
+    x = np.arange(len(mems))
+    for i, b in enumerate(budgets):
+        vals = []
+        for m in mems:
+            v = [r["geomean"] for r in rows if r["budget"] == b and r["extmem"] == m]
+            vals.append(v[0] if v else 0.0)
+        ax.bar(x + (i - (len(budgets) - 1) / 2) * w, vals, w * 0.92, color=S.SERIES[i], label=b,
+               edgecolor=S.SURFACE, linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(mems, rotation=25, ha="right", fontsize=7.2)
+    ax.set_ylabel("best feasible suite geomean (Gop/s)")
+    ax.legend(loc="upper left", fontsize=7.5)
+    ax.set_title("External-memory choice by node budget (missing bar = PHY not available / nothing fits)")
+    _sub(ax, "ANALYTICAL design-space exploration; SilicaFlux-V budgets DOCUMENTED, v1 / full-chip budgets ASSUMED")
+    return S.save(fig, out)
+
+
+def balance_chart(kernels: Sequence, title: str, out: str) -> list[str]:
+    """Headroom: how much faster each kernel gets if its binding resource were unlimited."""
+    S.apply()
+    fig, ax = plt.subplots(figsize=(8.5, 0.36 * len(kernels) + 1.3))
+    res_col = {"compute": S.SERIES[2], "spm": S.SERIES[0], "dram": S.SERIES[1], "dma": S.SERIES[3],
+               "drain": S.SERIES[4]}
+    y = np.arange(len(kernels))
+    hr = [min(k.headroom, 50.0) for k in kernels]
+    ax.barh(y, hr, 0.6, color=[res_col.get(k.bound, S.NEUTRAL) for k in kernels], edgecolor=S.SURFACE, linewidth=2)
+    for yi, k, v in zip(y, kernels, hr):
+        ax.text(v * 1.03, yi, f"{k.bound} -> {k.next_bound}  x{k.headroom:.2f}", va="center", fontsize=7.3,
+                color=S.TEXT2)
+    ax.set_xscale("log")
+    ax.axvline(1.0, color=S.NEUTRAL, lw=1)
+    ax.set_yticks(y)
+    ax.set_yticklabels([k.name for k in kernels], fontsize=7.3)
+    ax.invert_yaxis()
+    ax.set_xlabel("headroom: next ceiling / binding ceiling (log; 1 = two resources bind together)")
+    ax.set_title(title)
+    _sub(ax, "ANALYTICAL; bar colour = binding resource (green compute, blue SPM path, orange DRAM, "
+             "yellow DMA, pink tensor drain)")
     return S.save(fig, out)

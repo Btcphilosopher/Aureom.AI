@@ -29,14 +29,46 @@ KIB = 1024
 
 @dataclass(frozen=True)
 class Budget:
-    """Assumed envelope of the first-silicon SilicaFlux-V prototype."""
+    """Envelope a design point must fit.
 
-    node_nm: int = 40
-    clock_hz: float = 500e6
-    max_core_area_mm2: float = 12.0        # logic + SRAM + DRAM PHY, excluding pad ring
-    max_power_w: float = 1.5
+    The default is the *documented* SilicaFlux-V target (see
+    :data:`BUDGETS` and memoryflow.silicaflux.doc_targets): 65 nm, 200 MHz,
+    < 10 mm^2 die (8 mm^2 of core after an assumed 20 % pad ring / seal ring /
+    I/O allowance), < 1 W.  MemoryFlow v1 assumed 40 nm / 500 MHz / 12 mm^2 /
+    1.5 W before the repository documents were available; that envelope is
+    kept as the ``v1-assumed-40`` preset."""
+
+    node_nm: int = 65
+    clock_hz: float = 200e6
+    max_core_area_mm2: float = 8.0         # logic + SRAM + DRAM PHY, excluding pad ring
+    max_power_w: float = 1.0
     require_mature_dram: bool = True
     min_cpu_cores: int = 1
+    name: str = "silicaflux-v-65"
+    source: str = "DOCUMENTED: SilicaFlux-V reduced-ASIC p.1/p.3, 03-11-26 update p.7-9"
+
+
+#: Named envelopes.  ``DOCUMENTED`` values come from the repository's design
+#: documents (cited in memoryflow.silicaflux.doc_targets); ``ASSUMPTION``
+#: values are MemoryFlow's and are labelled as such everywhere they appear.
+BUDGETS: dict[str, Budget] = {b.name: b for b in [
+    Budget(),
+    Budget(130, 100e6, 8.0, 1.0, True, 1, "silicaflux-v-130",
+           "DOCUMENTED fallback node (reduced-ASIC p.3, node comparison p.3); 100 MHz per reduced-ASIC p.1"),
+    Budget(40, 500e6, 12.0, 1.5, True, 1, "v1-assumed-40",
+           "ASSUMPTION of MemoryFlow v1 (made without the repository documents) - kept for comparison"),
+    Budget(28, 800e6, 60.0, 8.0, False, 8, "full-28",
+           "ASSUMPTION for the full 8-core SilicaFlux (core count DOCUMENTED, silicaflux_top.sf); "
+           "area / power / clock are MemoryFlow assumptions"),
+    Budget(16, 1.2e9, 80.0, 15.0, False, 8, "full-16",
+           "ASSUMPTION: advanced-node full SilicaFlux variant with HBM option"),
+]}
+
+
+def leakage_share(node_nm: int) -> float:
+    """Static power as a share of dynamic (indicative LP-process trend)."""
+    table = {180: 0.02, 130: 0.04, 90: 0.06, 65: 0.08, 55: 0.09, 40: 0.10, 28: 0.15, 16: 0.20, 7: 0.25}
+    return table.get(node_nm, table[min(table, key=lambda n: abs(n - node_nm))])
 
 
 @dataclass
@@ -93,14 +125,14 @@ def load_synth_ge(path: Path | None) -> dict[str, float] | None:
 def area_breakdown(cfg: SystemConfig, ref_ge: dict[str, float] | None = None) -> dict[str, float]:
     c, s, node = cfg.compute, cfg.spm, cfg.node_nm
     spm, _ = A.spm_area_mm2(s.capacity_bytes, s.banks, s.bank_width_bits, s.stored_bits_per_word(), node)
-    ge = A.scaled_logic_ge(c.tensor_rows, c.tensor_cols, c.vec_lanes, s.banks, s.bank_width_bits,
+    ge = A.scaled_logic_ge(c.tensor_rows, c.tensor_cols * c.tensor_depth, c.vec_lanes, s.banks, s.bank_width_bits,
                            cfg.dma.channels, ref_ge, c.cpu_cores)
     # DMA data FIFOs beyond 16 beats are SRAM/register-file, cost ~ flops
     extra_fifo_bits = max(cfg.dma.dfifo_depth - 16, 0) * s.bank_width_bits * cfg.dma.engines
     ge["dma"] += extra_fifo_bits * 6.5
     l1 = c.cpu_cores * A.spm_area_mm2(32 * KIB, 2, 64, 72, node)[0]       # 16 KiB I + 16 KiB D per core
-    out = {k: A.logic_area_mm2(v, node) for k, v in ge.items()}
-    out["spm_sram"] = spm
+    out = {k: A.logic_area_mm2(v, node) * (cfg.tiles if k != "cpu" else 1) for k, v in ge.items()}
+    out["spm_sram"] = spm * cfg.tiles
     out["cpu_l1"] = l1
     out["dram_phy"] = cfg.extmem.phy_area_mm2      # hard IP, quoted at its own node
     return out
@@ -135,7 +167,7 @@ def evaluate(cfg: SystemConfig, suite: Sequence[Workload] | None = None, budget:
     budget = budget or Budget()
     perf, bound, util, pj_op, power, dma_bw, dram_bw, area = _eval_cached(
         cfg, key, tuple(sorted(ref_ge.items())) if ref_ge else None)
-    leak = 0.10 * power                              # indicative static share at 40 nm LP
+    leak = leakage_share(cfg.node_nm) * power        # indicative static share (LP process)
     power_total = power + leak
     total_area = sum(area.values())
     dense = [perf[w.name] for w in suite if w.unit == "tensor"]
@@ -145,13 +177,17 @@ def evaluate(cfg: SystemConfig, suite: Sequence[Workload] | None = None, budget:
         reasons.append(f"area {total_area:.1f} > {budget.max_core_area_mm2} mm2")
     if power_total > budget.max_power_w:
         reasons.append(f"power {power_total:.2f} > {budget.max_power_w} W")
-    if budget.require_mature_dram and not cfg.extmem.available_at(cfg.node_nm):
+    if not cfg.extmem.available_at(cfg.node_nm):
+        # physical: the PHY / controller IP has to exist at this node
         reasons.append(f"{cfg.extmem.kind} PHY not assumed available at {cfg.node_nm} nm "
                        f"(needs <= {cfg.extmem.max_node_nm} nm)")
+    elif budget.require_mature_dram and not cfg.extmem.mature_node_ok:
+        reasons.append(f"{cfg.extmem.kind} PHY is not mature-node IP (needs <= {cfg.extmem.max_node_nm} nm)")
     c = cfg.compute
     cfgd = {"spm_kib": cfg.spm.capacity_bytes // KIB, "banks": cfg.spm.banks, "width": cfg.spm.bank_width_bits,
-            "burst": cfg.dma.burst_beats, "dfifo": cfg.dma.dfifo_depth, "lanes": c.vec_lanes,
-            "tensor": f"{c.tensor_rows}x{c.tensor_cols}", "cores": c.cpu_cores, "extmem": cfg.extmem.name,
+            "burst": cfg.dma.burst_beats, "dfifo": cfg.dma.dfifo_depth, "wout": cfg.dma.wout, "lanes": c.vec_lanes,
+            "tensor": f"{c.tensor_rows}x{c.tensor_cols}", "cores": c.cpu_cores, "tiles": cfg.tiles,
+            "extmem": cfg.extmem.name,
             "node": cfg.node_nm, "clock_mhz": c.clock_hz / 1e6}
     return DesignPoint(cfg.label(), cfgd, perf, bound, util, _gm(perf.values()) / 1e9,
                        _gm(dense) / 1e9 if dense else 0.0, _gm(stream) / 1e9 if stream else 0.0,
@@ -159,27 +195,40 @@ def evaluate(cfg: SystemConfig, suite: Sequence[Workload] | None = None, budget:
                        not reasons, reasons)
 
 
+#: preferred external memory per node class (first one whose PHY exists at the node)
+EXTMEM_PREFERENCE = ("DDR4-3200 x32", "LPDDR2-800 x32", "DDR3-1600 x16", "2x HyperRAM 200 MHz x8",
+                     "HyperRAM 200 MHz x8", "QSPI 104 MHz (no DRAM)")
+
+
+def default_extmem(node_nm: int) -> ExtMemConfig:
+    for name in EXTMEM_PREFERENCE:
+        if EXTMEM_PRESETS[name].available_at(node_nm):
+            return EXTMEM_PRESETS[name]
+    return EXTMEM_PRESETS["QSPI 104 MHz (no DRAM)"]
+
+
 def baseline(budget: Budget | None = None) -> SystemConfig:
     b = budget or Budget()
-    return SystemConfig(ComputeConfig(clock_hz=b.clock_hz), ScratchpadConfig(), DmaConfig(),
-                        EXTMEM_PRESETS["DDR4-3200 x32"], b.node_nm)
+    return SystemConfig(ComputeConfig(clock_hz=b.clock_hz, cpu_cores=b.min_cpu_cores), ScratchpadConfig(),
+                        DmaConfig(), default_extmem(b.node_nm), b.node_nm)
 
 
 def mk(base: SystemConfig, spm_kib: int | None = None, banks: int | None = None, width: int | None = None,
        burst: int | None = None, dfifo: int | None = None, lanes: int | None = None,
-       tensor: tuple[int, int] | None = None, extmem: str | None = None, cores: int | None = None) -> SystemConfig:
+       tensor: tuple[int, int] | None = None, extmem: str | None = None, cores: int | None = None,
+       wout: int | None = None, tiles: int | None = None) -> SystemConfig:
     s, c, d = base.spm, base.compute, base.dma
     if spm_kib or banks or width:
         s = replace(s, capacity_bytes=(spm_kib or s.capacity_bytes // KIB) * KIB, banks=banks or s.banks,
                     bank_width_bits=width or s.bank_width_bits)
-    if burst or dfifo or width:
+    if burst or dfifo or width or wout:
         d = replace(d, burst_beats=burst or d.burst_beats, dfifo_depth=dfifo or d.dfifo_depth,
-                    beat_bytes=(width or s.bank_width_bits) // 8)
+                    beat_bytes=(width or s.bank_width_bits) // 8, wout=wout or d.wout)
     if lanes or tensor or cores:
         c = replace(c, vec_lanes=lanes or c.vec_lanes, tensor_rows=(tensor or (c.tensor_rows,))[0],
                     tensor_cols=(tensor or (0, c.tensor_cols))[1], cpu_cores=cores or c.cpu_cores)
     em = EXTMEM_PRESETS[extmem] if extmem else base.extmem
-    return replace(base, spm=s, dma=d, compute=c, extmem=em)
+    return replace(base, spm=s, dma=d, compute=c, extmem=em, tiles=tiles or base.tiles)
 
 
 SWEEPS: dict[str, dict] = {
@@ -188,6 +237,7 @@ SWEEPS: dict[str, dict] = {
     "bus_width": {"width": [32, 64, 128, 256]},
     "dma_burst": {"burst": [1, 2, 4, 8, 16]},
     "dma_outstanding": {"dfifo": [16, 32, 64, 128, 256]},
+    "dma_write_acks": {"wout": [4, 8, 16, 32, 64]},
     "vector_lanes": {"lanes": [2, 4, 8, 16, 32]},      # (one-at-a-time: datapath width not co-scaled)
     "tensor_array": {"tensor": [(4, 4), (8, 8), (16, 16), (32, 32)]},
     "extmem": {"extmem": list(EXTMEM_PRESETS)},
@@ -211,17 +261,26 @@ def joint_grid(base: SystemConfig | None = None, suite: Sequence[Workload] | Non
                width: Sequence[int] = (64, 128), dfifo: Sequence[int] = (16, 64, 128),
                lanes: Sequence[int] = (4, 8, 16),
                tensor: Sequence[tuple[int, int]] = ((4, 4), (8, 8), (16, 16)),
-               extmem: Sequence[str] = ("DDR3-1600 x16", "DDR4-2400 x16", "DDR4-3200 x32",
-                                        "LPDDR4X-4266 x32", "HBM2E 1 stack"),
-               burst: Sequence[int] = (16,)) -> list[DesignPoint]:
+               extmem: Sequence[str] = ("QSPI 104 MHz (no DRAM)", "HyperRAM 200 MHz x8", "2x HyperRAM 200 MHz x8",
+                                        "LPDDR2-800 x32", "DDR3-1600 x16", "DDR4-2400 x16", "DDR4-3200 x32",
+                                        "LPDDR4X-4266 x32", "LPDDR5-6400 x32", "HBM2E 1 stack", "HBM3 1 stack"),
+               burst: Sequence[int] = (16,), wout: Sequence[int] = (8, 32),
+               tiles: Sequence[int] | None = None) -> list[DesignPoint]:
     base = base or baseline(budget)
+    budget = budget or Budget()
+    tiles = tiles or ((1,) if budget.min_cpu_cores <= 1 else (4, 8, 16))
     pts = []
-    for sk, b, wd, df, ln, tn, em, bu in itertools.product(spm_kib, banks, width, dfifo, lanes, tensor, extmem, burst):
+    for sk, b, wd, df, ln, tn, em, bu, wo, nt in itertools.product(spm_kib, banks, width, dfifo, lanes, tensor,
+                                                                    extmem, burst, wout, tiles):
         # implementability with the MemoryFlow RTL: the vector unit's lanes and
         # the tensor array's A-beat (TR x int8) are carried by one DMA beat
         if ln * 16 > wd or tn[0] * 8 > wd:
             continue
-        pts.append(evaluate(mk(base, sk, b, wd, bu, df, ln, tn, em), suite, budget, ref_ge))
+        # a PHY that does not exist at this node is not a design point (it is
+        # still reported as infeasible by evaluate() when built explicitly)
+        if not EXTMEM_PRESETS[em].available_at(base.node_nm):
+            continue
+        pts.append(evaluate(mk(base, sk, b, wd, bu, df, ln, tn, em, wout=wo, tiles=nt), suite, budget, ref_ge))
     return pts
 
 
