@@ -1,0 +1,30 @@
+
+26. Printing statistics.
+
+=== syn_dma ===
+
+   Number of wires:              25472
+   Number of wire bits:          30431
+   Number of public wires:         251
+   Number of public wire bits:    5027
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              29943
+     $_ANDNOT_                    6548
+     $_AND_                        695
+     $_DFFE_PN0N_                   38
+     $_DFFE_PN0P_                  902
+     $_DFFE_PN1P_                   12
+     $_DFFE_PP_                   2488
+     $_DFF_PN0_                    698
+     $_DFF_PN1_                      4
+     $_MUX_                       7304
+     $_NAND_                       501
+     $_NOR_                       2251
+     $_NOT_                        960
+     $_ORNOT_                      762
+     $_OR_                        2710
+     $_XNOR_                      1193
+     $_XOR_                       2877
+

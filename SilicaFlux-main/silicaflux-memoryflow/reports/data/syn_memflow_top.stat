@@ -1,0 +1,32 @@
+
+26. Printing statistics.
+
+=== syn_memflow_top ===
+
+   Number of wires:             131035
+   Number of wire bits:         169319
+   Number of public wires:         869
+   Number of public wire bits:   26194
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             158967
+     $_ANDNOT_                   38465
+     $_AND_                       6869
+     $_DFFE_PN0N_                    4
+     $_DFFE_PN0P_                 1625
+     $_DFFE_PN1P_                   16
+     $_DFFE_PN_                    128
+     $_DFFE_PP_                  20036
+     $_DFF_PN0_                    795
+     $_DFF_PN1_                      4
+     $_MUX_                      23183
+     $_NAND_                      2395
+     $_NOR_                      12033
+     $_NOT_                       3646
+     $_ORNOT_                     4490
+     $_OR_                       16132
+     $_XNOR_                      9661
+     $_XOR_                      19421
+     sf_macro_1rw_leaf              64
+

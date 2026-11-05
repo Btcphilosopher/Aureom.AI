@@ -1,0 +1,26 @@
+{
+  "rmw_merge_uses_raw_word": {
+    "testbench": "bank_secded",
+    "status": "FAIL",
+    "errors": 1,
+    "killed": true
+  },
+  "spm_overflow_off_by_one": {
+    "testbench": "spm_mod",
+    "status": "FAIL",
+    "errors": 32,
+    "killed": true
+  },
+  "dma_tail_strobe_off": {
+    "testbench": "dma",
+    "status": "FAIL",
+    "errors": 8,
+    "killed": true
+  },
+  "ecc_ignore_overall_parity": {
+    "testbench": "ecc",
+    "status": "FAIL",
+    "errors": 64688,
+    "killed": true
+  }
+}

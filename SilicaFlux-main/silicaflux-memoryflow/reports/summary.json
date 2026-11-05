@@ -1,0 +1,1252 @@
+{
+  "version": "1.0.0",
+  "generated": "2026-11-03T19:45:17",
+  "budget": {
+    "node_nm": 40,
+    "clock_hz": 500000000.0,
+    "max_core_area_mm2": 12.0,
+    "max_power_w": 1.5,
+    "require_mature_dram": true,
+    "min_cpu_cores": 1
+  },
+  "recommendation": {
+    "Minimal": {
+      "label": "128KiB/4b/128w T16x16 V8 B16/F64 DDR4-2400 x16",
+      "geomean_gops": 12.760616922401393,
+      "dense_gops": 180.47854299624603,
+      "stream_gops": 2.181904482553618,
+      "total_area_mm2": 3.4509416546520146,
+      "power_w": 0.47619642459794165,
+      "pj_per_op": 27.99232879639766,
+      "dma_bw_gbs": 7.529411764705882,
+      "dram_bw_gbs": 3.36,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.5903179371428571,
+      "area_vector": 0.07810385428571429,
+      "area_dma": 0.21535395428571427,
+      "area_spm_logic": 0.021931494285714285,
+      "area_cpu": 0.06085714285714286,
+      "area_spm_sram": 0.3779866256410256,
+      "area_cpu_l1": 0.10639064615384614,
+      "area_dram_phy": 2.0,
+      "perf_per_mm2": 3.697720274464665,
+      "cfg_spm_kib": 128,
+      "cfg_banks": 4,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 64,
+      "cfg_lanes": 8,
+      "cfg_tensor": "16x16",
+      "cfg_cores": 1,
+      "cfg_extmem": "DDR4-2400 x16",
+      "cfg_node": 40,
+      "cfg_clock_mhz": 500.0
+    },
+    "Recommended": {
+      "label": "128KiB/8b/128w T16x16 V8 B16/F64 DDR4-3200 x32",
+      "geomean_gops": 17.801542112915847,
+      "dense_gops": 193.36986749597793,
+      "stream_gops": 3.629416786960837,
+      "total_area_mm2": 4.702657764322344,
+      "power_w": 1.0440954076719733,
+      "pj_per_op": 27.558375323809532,
+      "dma_bw_gbs": 7.529411764705882,
+      "dram_bw_gbs": 8.96,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.5903179371428571,
+      "area_vector": 0.07810385428571429,
+      "area_dma": 0.21535395428571427,
+      "area_spm_logic": 0.04386298857142857,
+      "area_cpu": 0.06085714285714286,
+      "area_spm_sram": 0.407771241025641,
+      "area_cpu_l1": 0.10639064615384614,
+      "area_dram_phy": 3.2,
+      "perf_per_mm2": 3.7854215647948726,
+      "cfg_spm_kib": 128,
+      "cfg_banks": 8,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 64,
+      "cfg_lanes": 8,
+      "cfg_tensor": "16x16",
+      "cfg_cores": 1,
+      "cfg_extmem": "DDR4-3200 x32",
+      "cfg_node": 40,
+      "cfg_clock_mhz": 500.0
+    },
+    "Stretch": {
+      "label": "1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-3200 x32",
+      "geomean_gops": 19.359106600362793,
+      "dense_gops": 205.2887065153554,
+      "stream_gops": 4.010810530835048,
+      "total_area_mm2": 7.243504055457875,
+      "power_w": 1.1094000285135215,
+      "pj_per_op": 27.988553688556696,
+      "dma_bw_gbs": 7.529411764705882,
+      "dram_bw_gbs": 8.96,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.5903179371428571,
+      "area_vector": 0.07810385428571429,
+      "area_dma": 0.21535395428571427,
+      "area_spm_logic": 0.08772597714285714,
+      "area_cpu": 0.06085714285714286,
+      "area_spm_sram": 2.904754543589743,
+      "area_cpu_l1": 0.10639064615384614,
+      "area_dram_phy": 3.2,
+      "perf_per_mm2": 2.6726162437606407,
+      "cfg_spm_kib": 1024,
+      "cfg_banks": 16,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 64,
+      "cfg_lanes": 8,
+      "cfg_tensor": "16x16",
+      "cfg_cores": 1,
+      "cfg_extmem": "DDR4-3200 x32",
+      "cfg_node": 40,
+      "cfg_clock_mhz": 500.0
+    }
+  },
+  "rationale": [
+    "864 of 1440 evaluated configurations fit the mature-node budget.",
+    "Best feasible suite geomean: 19.36 Gop/s (1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-3200 x32, 7.2 mm2).",
+    "Recommended = smallest-area point within 90 % of that: 17.80 Gop/s in 4.7 mm2.",
+    "DMA path 7.53 GB/s vs DRAM sustained 8.96 GB/s."
+  ],
+  "findings": [
+    {
+      "title": "DMA outstanding capacity, not DRAM, limits streaming kernels in the RTL reference.",
+      "detail": "With 16 outstanding 64-bit beats and ~90 ns DRAM latency the DMA path sustains 1.23 GB/s against 8.96 GB/s of DDR4-3200 x32. Covering the bandwidth-delay product of the recommended memory needs >= 51 128-bit beats in flight; the recommendation uses 64."
+    },
+    {
+      "title": "A single shared DMA engine deadlocks against its own accelerator.",
+      "detail": "tb_system hung when an accelerator->SRAM (S2MM) channel occupied the only read engine while the operands it was waiting for were queued behind it. sf_dma now has independent MM2S/MEM2MEM and S2MM engines sharing one channel table; tb_dma, tb_system and tb_deadlock pass on the fixed RTL."
+    },
+    {
+      "title": "Joined operand streams need FIFO depth >= DMA burst length (or sequenced loads).",
+      "detail": "tb_deadlock: with a 4-entry vector-unit FIFO and 16-beat bursts the DMA stalls after 4 beats and the watchdog fires; with 16 entries all 256 result beats complete. Predicate joined_stream_deadlock(4,16)=True."
+    },
+    {
+      "title": "Bank-aligned SRAM-to-SRAM copies resonate into read/write bank conflicts.",
+      "detail": "RTL: a 4 KiB SPM->SPM copy with 16-beat bursts takes 652 cycles, but 556 cycles when the destination is skewed by one beat. XOR interleave or buffer skew removes it; the Python cycle model matches the skewed case but not the aligned resonance (listed as a model limitation)."
+    },
+    {
+      "title": "Power-of-two strides: XOR interleave fixes strides up to the fold width only.",
+      "detail": "RTL tb_spm (4 banks, 3 ports): stride 4 throughput 1.50 (modulo) -> 2.39 (XOR); stride 16 gives 1.00 with the 2-bit XOR fold. Block interleave is worst for streaming (1.23 at stride 1, 8 banks) and best for random traffic (2.63 requests/cycle)."
+    },
+    {
+      "title": "Accumulator double-buffering is worth ~1.8x on the tensor array when K equals the drain length.",
+      "detail": "RTL tb_accel, K=32: 88.6 % vs 49.7 % MAC utilisation. The analytical tile model (per tile max(K, drain) with double-buffering, K + drain without) reproduces RTL to 0.0 % after fitting its 1-3 cycle pipeline fill to these runs; the per-tile slope is not fitted."
+    },
+    {
+      "title": "Response-credit depth must cover the 4-cycle SPM round trip.",
+      "detail": "RTL: RSP_DEPTH=2 gives 0.50 vs 1.00 requests/cycle single-port throughput with RSP_DEPTH=4, exactly as Little's law predicts (credits / round trip)."
+    }
+  ],
+  "inventory": {
+    "by_category": {
+      "Data staging buffer": {
+        "SYNTHESIZABLE": [
+          "sf_reuse_buffer"
+        ]
+      },
+      "Tensor accumulation / MAC array": {
+        "SYNTHESIZABLE": [
+          "sf_tensor_array"
+        ]
+      },
+      "Vector unit": {
+        "SYNTHESIZABLE": [
+          "sf_vec_unit"
+        ]
+      },
+      "FIFO / flow control": {
+        "SYNTHESIZABLE": [
+          "sf_fifo",
+          "sf_skid_buffer"
+        ]
+      },
+      "Interconnect / router": {
+        "SYNTHESIZABLE": [
+          "sf_rr_arbiter",
+          "sf_mem_router"
+        ]
+      },
+      "DMA engine": {
+        "SYNTHESIZABLE": [
+          "sf_dma",
+          "sf_dma_engine"
+        ]
+      },
+      "ECC / parity": {
+        "SYNTHESIZABLE": [
+          "sf_ecc_secded_dec",
+          "sf_ecc_secded_enc"
+        ]
+      },
+      "SRAM array / macro": {
+        "BEHAVIOURAL": [
+          "sf_macro_1rw_leaf"
+        ],
+        "BLACKBOX": [
+          "sf_macro_1rw_leaf"
+        ],
+        "SYNTHESIZABLE": [
+          "sf_sram_1r1w_inferred",
+          "sf_sram_1rw",
+          "sf_sram_1rw_inferred",
+          "sf_sram_2rw_inferred",
+          "sf_sram_bank"
+        ]
+      },
+      "MBIST": {
+        "SYNTHESIZABLE": [
+          "sf_mbist_march"
+        ]
+      },
+      "Scratchpad memory": {
+        "SYNTHESIZABLE": [
+          "sf_spm_banked"
+        ]
+      },
+      "Control / registers": {
+        "SYNTHESIZABLE": [
+          "sf_ctrl_regs"
+        ]
+      },
+      "Subsystem integration": {
+        "SYNTHESIZABLE": [
+          "sf_memflow_top"
+        ]
+      },
+      "Synthesis wrapper": {
+        "SYNTHESIZABLE": [
+          "syn_spm_256k",
+          "syn_dma",
+          "syn_tensor_8x8",
+          "syn_vec4x16",
+          "syn_router2",
+          "syn_ecc64",
+          "syn_memflow_top"
+        ]
+      },
+      "External memory model": {
+        "BEHAVIOURAL": [
+          "sf_extmem_model"
+        ]
+      },
+      "testbench": {
+        "TESTBENCH": [
+          "tb_deadlock",
+          "tb_param_smoke",
+          "tb_system",
+          "tb_accel",
+          "tb_dma",
+          "tb_ecc",
+          "tb_mbist",
+          "tb_router",
+          "tb_spm",
+          "tb_sram_bank",
+          "tb_sram_prims"
+        ]
+      }
+    },
+    "proposed": {
+      "CPU cache interface": "SilicaFlux core L1 <-> SPM host port adapter (SF-MEM valid/ready); MemoryFlow provides the TCM-style host port on sf_spm_banked port 2.",
+      "L2 / last-level cache": "Not recommended for SilicaFlux-V first silicon: DMA-managed SPM gives deterministic bandwidth; revisit for multi-core variants.",
+      "Vector register file": "Vector RF of the SilicaFlux vector pipeline (if separate from the streaming sf_vec_unit) -- 2R1W, 32 x VLEN, sf_sram_1r1w-based.",
+      "Memory controller": "Licensed DDR4/LPDDR4 controller IP behind an SF-MEM->AXI4 bridge (bridge is a proposed MemoryFlow addition).",
+      "External memory interface": "DDR4 x32 PHY hard IP (mature node); HBM only for future advanced-node variants."
+    }
+  },
+  "rtl": [
+    {
+      "name": "ecc",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 108568,
+      "metrics": {
+        "ecc_single_bit_injections": 28416.0,
+        "ecc_double_bit_injections": 79128.0
+      },
+      "seconds": 24.35,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/ecc/sim.log",
+      "description": "SECDED K=32/64 vs Python golden; exhaustive 1-bit and 2-bit injection",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "sram_prims",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 44956,
+      "metrics": {
+        "sram_1rw_random_reads": 9107.0
+      },
+      "seconds": 9.23,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/sram_prims/sim.log",
+      "description": "1RW inferred vs macro-tiled equivalence, 1R1W read-first, 2RW",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "bank_secded",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 37514,
+      "metrics": {
+        "bank_random_ops_cycles": 9355.0,
+        "bank_partial_writes": 2062.0
+      },
+      "seconds": 10.49,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_secded/sim.log",
+      "description": "bank: SECDED, byte-enable RMW, injection, RMW-uncorrectable suppression",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "bank_parity",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 35508,
+      "metrics": {
+        "bank_random_ops_cycles": 7542.0,
+        "bank_partial_writes": 2062.0
+      },
+      "seconds": 4.75,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_parity/sim.log",
+      "description": "bank: per-byte parity, native byte enables, detection",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "bank_noecc_macro",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 35475,
+      "metrics": {
+        "bank_random_ops_cycles": 7542.0,
+        "bank_partial_writes": 2062.0
+      },
+      "seconds": 4.44,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_noecc_macro/sim.log",
+      "description": "bank: no ECC on the foundry-macro abstraction (IMPL=1)",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "spm_mod",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 46643,
+      "metrics": {
+        "spm_hotbank_throughput": 1.0,
+        "spm_stride1_throughput": 2.988327,
+        "spm_stride2_throughput": 2.994152,
+        "spm_stride4_throughput": 1.5,
+        "spm_stride8_throughput": 1.5,
+        "spm_stride16_throughput": 1.5,
+        "spm_random3_throughput": 2.287457,
+        "spm_single_port_throughput": 1.0,
+        "spm_conflict_cycles": 7811.0
+      },
+      "seconds": 14.39,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_mod/sim.log",
+      "description": "SPM random multi-port + contention + backpressure + overflow, modulo map",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "spm_xor",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 46618,
+      "metrics": {
+        "spm_hotbank_throughput": 1.0,
+        "spm_stride1_throughput": 2.643718,
+        "spm_stride2_throughput": 2.657439,
+        "spm_stride4_throughput": 2.388802,
+        "spm_stride8_throughput": 1.997399,
+        "spm_stride16_throughput": 1.0,
+        "spm_random3_throughput": 2.260739,
+        "spm_single_port_throughput": 1.0,
+        "spm_conflict_cycles": 7875.0
+      },
+      "seconds": 15.1,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_xor/sim.log",
+      "description": "SPM same suite with XOR-hash interleave",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "spm_block_8b",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 47729,
+      "metrics": {
+        "spm_hotbank_throughput": 1.0,
+        "spm_stride1_throughput": 1.229784,
+        "spm_stride2_throughput": 1.375112,
+        "spm_stride4_throughput": 1.462857,
+        "spm_stride8_throughput": 1.494163,
+        "spm_stride16_throughput": 1.769585,
+        "spm_random3_throughput": 2.628121,
+        "spm_single_port_throughput": 1.0,
+        "spm_conflict_cycles": 8280.0
+      },
+      "seconds": 17.03,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_block_8b/sim.log",
+      "description": "SPM same suite, block interleave, 8 banks",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "spm_rsp2",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 46678,
+      "metrics": {
+        "spm_hotbank_throughput": 1.0,
+        "spm_stride1_throughput": 1.5,
+        "spm_stride2_throughput": 1.501466,
+        "spm_stride4_throughput": 1.5,
+        "spm_stride8_throughput": 1.5,
+        "spm_stride16_throughput": 1.5,
+        "spm_random3_throughput": 1.445435,
+        "spm_single_port_throughput": 0.500489,
+        "spm_conflict_cycles": 3235.0
+      },
+      "seconds": 15.73,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_rsp2/sim.log",
+      "description": "SPM with shallow response FIFO (credit-limited throughput)",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "mbist_clean",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 6,
+      "metrics": {
+        "mbist_march_c_cycles": 2817.0,
+        "mbist_words_per_bank": 256.0
+      },
+      "seconds": 12.21,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_clean/sim.log",
+      "description": "March C- on fault-free SPM banks -> pass",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "mbist_fault",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 8,
+      "metrics": {
+        "mbist_march_c_cycles": 2817.0,
+        "mbist_words_per_bank": 256.0
+      },
+      "seconds": 11.28,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_fault/sim.log",
+      "description": "March C- with injected stuck-at cell -> fail, bank/addr located",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "router",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 14243,
+      "metrics": {
+        "router_reads": 4000.0,
+        "router_writes": 1500.0
+      },
+      "seconds": 4.46,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/router/sim.log",
+      "description": "address router: ordering across unequal slave latencies, decode errors",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "dma",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 56285,
+      "metrics": {
+        "dma_4ch_concurrent_cycles": 674.0,
+        "dma_ext2spm_4k_burst1_cycles": 2480.0,
+        "dma_spm2spm_4k_burst1_cycles": 1036.0,
+        "dma_spm2spm_4k_burst1_skew1_cycles": 1036.0,
+        "dma_ext2spm_4k_burst2_cycles": 1306.0,
+        "dma_spm2spm_4k_burst2_cycles": 780.0,
+        "dma_spm2spm_4k_burst2_skew1_cycles": 780.0,
+        "dma_ext2spm_4k_burst4_cycles": 730.0,
+        "dma_spm2spm_4k_burst4_cycles": 652.0,
+        "dma_spm2spm_4k_burst4_skew1_cycles": 652.0,
+        "dma_ext2spm_4k_burst8_cycles": 728.0,
+        "dma_spm2spm_4k_burst8_cycles": 652.0,
+        "dma_spm2spm_4k_burst8_skew1_cycles": 588.0,
+        "dma_ext2spm_4k_burst16_cycles": 728.0,
+        "dma_spm2spm_4k_burst16_cycles": 652.0,
+        "dma_spm2spm_4k_burst16_skew1_cycles": 556.0
+      },
+      "seconds": 24.7,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/dma/sim.log",
+      "description": "DMA: mem2mem, ext<->SPM, 2-D, streams, boundaries, errors, IRQ, multi-channel",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "accel",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 2572,
+      "metrics": {
+        "tensor_dbuf1_k8_8tiles_cycles": 265.0,
+        "tensor_dbuf0_k8_8tiles_cycles": 323.0,
+        "tensor_dbuf1_k8_mac_util": 0.241509,
+        "tensor_dbuf0_k8_mac_util": 0.198142,
+        "tensor_dbuf1_k32_8tiles_cycles": 289.0,
+        "tensor_dbuf0_k32_8tiles_cycles": 515.0,
+        "tensor_dbuf1_k32_mac_util": 0.885813,
+        "tensor_dbuf0_k32_mac_util": 0.497087
+      },
+      "seconds": 15.8,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/accel/sim.log",
+      "description": "tensor array vs golden (K=1,8,37), double-buffer timing, vec ops, reuse buffer",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "system",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 33,
+      "metrics": {
+        "sys_gemm_16x8x32_cycles": 160.0,
+        "sys_gemm_mac_steps": 64.0,
+        "sys_gemm_macs": 4096.0,
+        "sys_gemm_b_bytes_dma": 256.0,
+        "sys_gemm_b_bytes_without_reuse": 512.0,
+        "sys_vadd_256_cycles": 162.0,
+        "sys_dot_256_cycles": 162.0,
+        "sys_prefetch_512B_ext_cycles": 128.0,
+        "sys_spm_conflict_cycles": 0.0,
+        "sys_mbist_cycles": 11268.0
+      },
+      "seconds": 18.83,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/system/sim.log",
+      "description": "full subsystem: GEMM with B reuse, vector add/axpy/dot, ECC + MBIST via regs",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "deadlock_fifo4",
+      "status": "DEADLOCK",
+      "expected": "DEADLOCK",
+      "ok": true,
+      "errors": 0,
+      "checks": 0,
+      "metrics": {
+        "deadlock_vec_in_fifo": 4.0,
+        "deadlock_dma_burst_beats": 16.0,
+        "deadlock_beats_a": 4.0,
+        "deadlock_beats_b": 0.0,
+        "deadlock_beats_result": 0.0
+      },
+      "seconds": 15.66,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo4/sim.log",
+      "description": "joined-stream deadlock: operand FIFO (4) < DMA burst (16) -> watchdog fires",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "param_recommended",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 200,
+      "metrics": {
+        "param_dw": 128.0,
+        "param_tensor_rows": 16.0
+      },
+      "seconds": 38.5,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_recommended/sim.log",
+      "description": "recommended prototype parameterisation: 128-bit, 8 banks XOR, 16x16 tensor, 8 lanes, FIFO 64",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "param_reference",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 312,
+      "metrics": {
+        "param_dw": 64.0,
+        "param_tensor_rows": 8.0
+      },
+      "seconds": 20.99,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_reference/sim.log",
+      "description": "same smoke test at the reference parameterisation (cross-check of the parametric TB)",
+      "provenance": "RTL_SIMULATION"
+    },
+    {
+      "name": "deadlock_fifo16",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 1,
+      "metrics": {
+        "deadlock_vec_in_fifo": 16.0,
+        "deadlock_dma_burst_beats": 16.0,
+        "deadlock_beats_a": 256.0,
+        "deadlock_beats_b": 256.0,
+        "deadlock_beats_result": 256.0
+      },
+      "seconds": 14.94,
+      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo16/sim.log",
+      "description": "same scenario with FIFO >= burst -> completes",
+      "provenance": "RTL_SIMULATION"
+    }
+  ],
+  "synth": [
+    {
+      "top": "syn_ecc64",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 72,
+        "$_AND_": 1,
+        "$_NAND_": 3,
+        "$_NOR_": 3,
+        "$_NOT_": 5,
+        "$_ORNOT_": 10,
+        "$_OR_": 85,
+        "$_XNOR_": 142,
+        "$_XOR_": 278
+      },
+      "flops": 0,
+      "comb_ge": 1211.4,
+      "total_ge": 1211.4,
+      "macros": 0,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_router2",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 97,
+        "$_AND_": 3,
+        "$_DFFE_PN0P_": 10,
+        "$_DFFE_PP_": 16,
+        "$_MUX_": 81,
+        "$_NAND_": 70,
+        "$_NOR_": 1,
+        "$_NOT_": 7,
+        "$_ORNOT_": 6,
+        "$_OR_": 80,
+        "$_XNOR_": 3,
+        "$_XOR_": 8
+      },
+      "flops": 26,
+      "comb_ge": 537.4,
+      "total_ge": 676.0,
+      "macros": 0,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_vec4x16",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 4357,
+        "$_AND_": 761,
+        "$_DFFE_PN0N_": 1,
+        "$_DFFE_PN0P_": 91,
+        "$_DFFE_PN_": 65,
+        "$_DFFE_PP_": 2129,
+        "$_MUX_": 2260,
+        "$_NAND_": 560,
+        "$_NOR_": 666,
+        "$_NOT_": 397,
+        "$_ORNOT_": 530,
+        "$_OR_": 1529,
+        "$_XNOR_": 1429,
+        "$_XOR_": 2869
+      },
+      "flops": 2286,
+      "comb_ge": 26317.5,
+      "total_ge": 38501.9,
+      "macros": 0,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_tensor_8x8",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 24693,
+        "$_AND_": 3028,
+        "$_DFFE_PN0N_": 1,
+        "$_DFFE_PN0P_": 99,
+        "$_DFFE_PN1P_": 1,
+        "$_DFFE_PN_": 65,
+        "$_DFFE_PP_": 6209,
+        "$_MUX_": 2130,
+        "$_NAND_": 3335,
+        "$_NOR_": 4885,
+        "$_NOT_": 1303,
+        "$_ORNOT_": 2340,
+        "$_OR_": 12578,
+        "$_XNOR_": 2763,
+        "$_XOR_": 14729
+      },
+      "flops": 6375,
+      "comb_ge": 111522.1,
+      "total_ge": 145500.9,
+      "macros": 0,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_dma",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 6548,
+        "$_AND_": 695,
+        "$_DFFE_PN0N_": 38,
+        "$_DFFE_PN0P_": 902,
+        "$_DFFE_PN1P_": 12,
+        "$_DFFE_PP_": 2488,
+        "$_DFF_PN0_": 698,
+        "$_DFF_PN1_": 4,
+        "$_MUX_": 7304,
+        "$_NAND_": 501,
+        "$_NOR_": 2251,
+        "$_NOT_": 960,
+        "$_ORNOT_": 762,
+        "$_OR_": 2710,
+        "$_XNOR_": 1193,
+        "$_XOR_": 2877
+      },
+      "flops": 4142,
+      "comb_ge": 44147.6,
+      "total_ge": 66224.4,
+      "macros": 0,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_spm_256k",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 1178,
+        "$_AND_": 851,
+        "$_DFFE_PN0P_": 66,
+        "$_DFFE_PP_": 716,
+        "$_DFF_PN0_": 30,
+        "$_MUX_": 4001,
+        "$_NAND_": 53,
+        "$_NOR_": 58,
+        "$_NOT_": 913,
+        "$_ORNOT_": 67,
+        "$_OR_": 713,
+        "$_XNOR_": 384,
+        "$_XOR_": 1124,
+        "sf_macro_1rw_leaf": 16
+      },
+      "flops": 812,
+      "comb_ge": 17294.7,
+      "total_ge": 21622.6,
+      "macros": 16,
+      "provenance": "ANALYTICAL"
+    },
+    {
+      "top": "syn_memflow_top",
+      "ok": true,
+      "cells": {
+        "$_ANDNOT_": 38465,
+        "$_AND_": 6869,
+        "$_DFFE_PN0N_": 4,
+        "$_DFFE_PN0P_": 1625,
+        "$_DFFE_PN1P_": 16,
+        "$_DFFE_PN_": 128,
+        "$_DFFE_PP_": 20036,
+        "$_DFF_PN0_": 795,
+        "$_DFF_PN1_": 4,
+        "$_MUX_": 23183,
+        "$_NAND_": 2395,
+        "$_NOR_": 12033,
+        "$_NOT_": 3646,
+        "$_ORNOT_": 4490,
+        "$_OR_": 16132,
+        "$_XNOR_": 9661,
+        "$_XOR_": 19421,
+        "sf_macro_1rw_leaf": 64
+      },
+      "flops": 22608,
+      "comb_ge": 226369.8,
+      "total_ge": 346870.4,
+      "macros": 64,
+      "provenance": "ANALYTICAL"
+    }
+  ],
+  "mutation": {
+    "rmw_merge_uses_raw_word": {
+      "testbench": "bank_secded",
+      "status": "FAIL",
+      "errors": 1,
+      "killed": true
+    },
+    "spm_overflow_off_by_one": {
+      "testbench": "spm_mod",
+      "status": "FAIL",
+      "errors": 32,
+      "killed": true
+    },
+    "dma_tail_strobe_off": {
+      "testbench": "dma",
+      "status": "FAIL",
+      "errors": 8,
+      "killed": true
+    },
+    "ecc_ignore_overall_parity": {
+      "testbench": "ecc",
+      "status": "FAIL",
+      "errors": 64688,
+      "killed": true
+    }
+  },
+  "calibration": {
+    "spm": [
+      {
+        "test": "spm_mod",
+        "metric": "spm_stride1_throughput",
+        "rtl": 2.988327,
+        "model": 2.9941520467836256,
+        "error_pct": 0.19492668585551745,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_stride2_throughput",
+        "rtl": 2.994152,
+        "model": 2.9941520467836256,
+        "error_pct": 1.5625000139639163e-06,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_stride4_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_stride8_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_stride16_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_random3_throughput",
+        "rtl": 2.287457,
+        "model": 2.249718785151856,
+        "error_pct": -1.6497890385761906,
+        "analytic": 2.3125
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_single_port_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_mod",
+        "metric": "spm_hotbank_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_stride1_throughput",
+        "rtl": 2.643718,
+        "model": 2.6391752577319587,
+        "error_pct": -0.1718315746248684,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_stride2_throughput",
+        "rtl": 2.657439,
+        "model": 2.657439446366782,
+        "error_pct": 1.6796877812017932e-05,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_stride4_throughput",
+        "rtl": 2.388802,
+        "model": 2.3962558502340094,
+        "error_pct": 0.3120329869955464,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_stride8_throughput",
+        "rtl": 1.997399,
+        "model": 1.9973992197659298,
+        "error_pct": 1.1002605383230164e-05,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_stride16_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_random3_throughput",
+        "rtl": 2.260739,
+        "model": 2.245508982035928,
+        "error_pct": -0.6736743146410029,
+        "analytic": 2.3125
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_single_port_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_xor",
+        "metric": "spm_hotbank_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_stride1_throughput",
+        "rtl": 1.229784,
+        "model": 1.2278177458033572,
+        "error_pct": -0.1598861423341626,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_stride2_throughput",
+        "rtl": 1.375112,
+        "model": 1.3702051739518286,
+        "error_pct": -0.3568310107228557,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_stride4_throughput",
+        "rtl": 1.462857,
+        "model": 1.461465271170314,
+        "error_pct": -0.09513772225761497,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_stride8_throughput",
+        "rtl": 1.494163,
+        "model": 1.504407443682664,
+        "error_pct": 0.6856309306724959,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_stride16_throughput",
+        "rtl": 1.769585,
+        "model": 1.7716262975778547,
+        "error_pct": 0.11535459318737226,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_random3_throughput",
+        "rtl": 2.628121,
+        "model": 2.6166593981683386,
+        "error_pct": -0.43611393203210813,
+        "analytic": 2.640625
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_single_port_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_block_8b",
+        "metric": "spm_hotbank_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_stride1_throughput",
+        "rtl": 1.5,
+        "model": 1.501466275659824,
+        "error_pct": 0.09775171065493637,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_stride2_throughput",
+        "rtl": 1.501466,
+        "model": 1.501466275659824,
+        "error_pct": 1.8359378372756312e-05,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_stride4_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_stride8_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_stride16_throughput",
+        "rtl": 1.5,
+        "model": 1.5,
+        "error_pct": 0.0,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_random3_throughput",
+        "rtl": 1.445435,
+        "model": 1.448225923244026,
+        "error_pct": 0.19308535105528554,
+        "analytic": 2.3125
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_single_port_throughput",
+        "rtl": 0.500489,
+        "model": 0.5004887585532747,
+        "error_pct": -4.824216421935641e-05,
+        "analytic": null
+      },
+      {
+        "test": "spm_rsp2",
+        "metric": "spm_hotbank_throughput",
+        "rtl": 1.0,
+        "model": 1.0,
+        "error_pct": 0.0,
+        "analytic": null
+      }
+    ],
+    "dma": [
+      {
+        "metric": "dma_ext2spm_4k_burst1_cycles",
+        "burst": 1,
+        "path": "ext2spm",
+        "rtl": 2480.0,
+        "sim": 2482,
+        "analytic": 2278.8,
+        "sim_err_pct": 0.08064516129032258,
+        "analytic_err_pct": -8.112903225806445
+      },
+      {
+        "metric": "dma_spm2spm_4k_burst1_cycles",
+        "burst": 1,
+        "path": "spm2spm",
+        "rtl": 1036.0,
+        "sim": 1037,
+        "analytic": 1033.0,
+        "sim_err_pct": 0.09652509652509653,
+        "analytic_err_pct": -0.28957528957528955
+      },
+      {
+        "metric": "dma_ext2spm_4k_burst2_cycles",
+        "burst": 2,
+        "path": "ext2spm",
+        "rtl": 1306.0,
+        "sim": 1308,
+        "analytic": 1152.4,
+        "sim_err_pct": 0.15313935681470137,
+        "analytic_err_pct": -11.761102603369059
+      },
+      {
+        "metric": "dma_spm2spm_4k_burst2_cycles",
+        "burst": 2,
+        "path": "spm2spm",
+        "rtl": 780.0,
+        "sim": 781,
+        "analytic": 777.0,
+        "sim_err_pct": 0.1282051282051282,
+        "analytic_err_pct": -0.38461538461538464
+      },
+      {
+        "metric": "dma_ext2spm_4k_burst4_cycles",
+        "burst": 4,
+        "path": "ext2spm",
+        "rtl": 730.0,
+        "sim": 732,
+        "analytic": 730.0,
+        "sim_err_pct": 0.273972602739726,
+        "analytic_err_pct": 0.0
+      },
+      {
+        "metric": "dma_spm2spm_4k_burst4_cycles",
+        "burst": 4,
+        "path": "spm2spm",
+        "rtl": 652.0,
+        "sim": 653,
+        "analytic": 649.0,
+        "sim_err_pct": 0.15337423312883436,
+        "analytic_err_pct": -0.4601226993865031
+      },
+      {
+        "metric": "dma_ext2spm_4k_burst8_cycles",
+        "burst": 8,
+        "path": "ext2spm",
+        "rtl": 728.0,
+        "sim": 730,
+        "analytic": 730.0,
+        "sim_err_pct": 0.27472527472527475,
+        "analytic_err_pct": 0.27472527472527475
+      },
+      {
+        "metric": "dma_spm2spm_4k_burst8_cycles",
+        "burst": 8,
+        "path": "spm2spm",
+        "rtl": 652.0,
+        "sim": 591,
+        "analytic": 585.0,
+        "sim_err_pct": -9.355828220858896,
+        "analytic_err_pct": -10.276073619631902
+      },
+      {
+        "metric": "dma_ext2spm_4k_burst16_cycles",
+        "burst": 16,
+        "path": "ext2spm",
+        "rtl": 728.0,
+        "sim": 729,
+        "analytic": 730.0,
+        "sim_err_pct": 0.13736263736263737,
+        "analytic_err_pct": 0.27472527472527475
+      },
+      {
+        "metric": "dma_spm2spm_4k_burst16_cycles",
+        "burst": 16,
+        "path": "spm2spm",
+        "rtl": 652.0,
+        "sim": 559,
+        "analytic": 553.0,
+        "sim_err_pct": -14.263803680981596,
+        "analytic_err_pct": -15.184049079754601
+      }
+    ],
+    "tensor": [
+      {
+        "case": "K=8 dbuf=1",
+        "rtl_cycles": 265.0,
+        "model_cycles": 265,
+        "error_pct": 0.0
+      },
+      {
+        "case": "K=8 dbuf=0",
+        "rtl_cycles": 323.0,
+        "model_cycles": 323,
+        "error_pct": 0.0
+      },
+      {
+        "case": "K=32 dbuf=1",
+        "rtl_cycles": 289.0,
+        "model_cycles": 289,
+        "error_pct": 0.0
+      },
+      {
+        "case": "K=32 dbuf=0",
+        "rtl_cycles": 515.0,
+        "model_cycles": 515,
+        "error_pct": 0.0
+      }
+    ]
+  },
+  "measured_points": [
+    {
+      "name": "GEMM 16x8x32 (RTL)",
+      "unit": "tensor",
+      "ai": 6.4,
+      "perf": 25600000000.0,
+      "bound": "measured",
+      "provenance": "RTL_SIMULATION",
+      "peak": 64000000000.0,
+      "utilisation": 0.4,
+      "note": "8192 ops in 160 cycles",
+      "config": "RTL reference"
+    },
+    {
+      "name": "VADD 256 (RTL)",
+      "unit": "vector",
+      "ai": 0.16666666666666666,
+      "perf": 790123456.7901235,
+      "bound": "measured",
+      "provenance": "RTL_SIMULATION",
+      "peak": 4000000000.0,
+      "utilisation": 0.19753086419753085,
+      "note": "256 ops in 162 cycles",
+      "config": "RTL reference"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+
+26. Printing statistics.
+
+=== syn_tensor_8x8 ===
+
+   Number of wires:              68014
+   Number of wire bits:          82500
+   Number of public wires:         199
+   Number of public wire bits:    6679
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              78159
+     $_ANDNOT_                   24693
+     $_AND_                       3028
+     $_DFFE_PN0N_                    1
+     $_DFFE_PN0P_                   99
+     $_DFFE_PN1P_                    1
+     $_DFFE_PN_                     65
+     $_DFFE_PP_                   6209
+     $_MUX_                       2130
+     $_NAND_                      3335
+     $_NOR_                       4885
+     $_NOT_                       1303
+     $_ORNOT_                     2340
+     $_OR_                       12578
+     $_XNOR_                      2763
+     $_XOR_                      14729
+

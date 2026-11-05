@@ -1,0 +1,28 @@
+
+26. Printing statistics.
+
+=== syn_vec4x16 ===
+
+   Number of wires:              15341
+   Number of wire bits:          17797
+   Number of public wires:          62
+   Number of public wire bits:    2510
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              17644
+     $_ANDNOT_                    4357
+     $_AND_                        761
+     $_DFFE_PN0N_                    1
+     $_DFFE_PN0P_                   91
+     $_DFFE_PN_                     65
+     $_DFFE_PP_                   2129
+     $_MUX_                       2260
+     $_NAND_                       560
+     $_NOR_                        666
+     $_NOT_                        397
+     $_ORNOT_                      530
+     $_OR_                        1529
+     $_XNOR_                      1429
+     $_XOR_                       2869
+

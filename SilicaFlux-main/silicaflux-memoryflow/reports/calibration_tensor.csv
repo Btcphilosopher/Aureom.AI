@@ -1,0 +1,5 @@
+case,rtl_cycles,model_cycles,error_pct
+K=8 dbuf=1,265.0,265,0.0
+K=8 dbuf=0,323.0,323,0.0
+K=32 dbuf=1,289.0,289,0.0
+K=32 dbuf=0,515.0,515,0.0

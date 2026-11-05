@@ -1,0 +1,367 @@
+[
+  {
+    "name": "ecc",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 108568,
+    "metrics": {
+      "ecc_single_bit_injections": 28416.0,
+      "ecc_double_bit_injections": 79128.0
+    },
+    "seconds": 24.35,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/ecc/sim.log",
+    "description": "SECDED K=32/64 vs Python golden; exhaustive 1-bit and 2-bit injection",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "sram_prims",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 44956,
+    "metrics": {
+      "sram_1rw_random_reads": 9107.0
+    },
+    "seconds": 9.23,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/sram_prims/sim.log",
+    "description": "1RW inferred vs macro-tiled equivalence, 1R1W read-first, 2RW",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "bank_secded",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 37514,
+    "metrics": {
+      "bank_random_ops_cycles": 9355.0,
+      "bank_partial_writes": 2062.0
+    },
+    "seconds": 10.49,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_secded/sim.log",
+    "description": "bank: SECDED, byte-enable RMW, injection, RMW-uncorrectable suppression",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "bank_parity",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 35508,
+    "metrics": {
+      "bank_random_ops_cycles": 7542.0,
+      "bank_partial_writes": 2062.0
+    },
+    "seconds": 4.75,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_parity/sim.log",
+    "description": "bank: per-byte parity, native byte enables, detection",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "bank_noecc_macro",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 35475,
+    "metrics": {
+      "bank_random_ops_cycles": 7542.0,
+      "bank_partial_writes": 2062.0
+    },
+    "seconds": 4.44,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_noecc_macro/sim.log",
+    "description": "bank: no ECC on the foundry-macro abstraction (IMPL=1)",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "spm_mod",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 46643,
+    "metrics": {
+      "spm_hotbank_throughput": 1.0,
+      "spm_stride1_throughput": 2.988327,
+      "spm_stride2_throughput": 2.994152,
+      "spm_stride4_throughput": 1.5,
+      "spm_stride8_throughput": 1.5,
+      "spm_stride16_throughput": 1.5,
+      "spm_random3_throughput": 2.287457,
+      "spm_single_port_throughput": 1.0,
+      "spm_conflict_cycles": 7811.0
+    },
+    "seconds": 14.39,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_mod/sim.log",
+    "description": "SPM random multi-port + contention + backpressure + overflow, modulo map",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "spm_xor",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 46618,
+    "metrics": {
+      "spm_hotbank_throughput": 1.0,
+      "spm_stride1_throughput": 2.643718,
+      "spm_stride2_throughput": 2.657439,
+      "spm_stride4_throughput": 2.388802,
+      "spm_stride8_throughput": 1.997399,
+      "spm_stride16_throughput": 1.0,
+      "spm_random3_throughput": 2.260739,
+      "spm_single_port_throughput": 1.0,
+      "spm_conflict_cycles": 7875.0
+    },
+    "seconds": 15.1,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_xor/sim.log",
+    "description": "SPM same suite with XOR-hash interleave",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "spm_block_8b",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 47729,
+    "metrics": {
+      "spm_hotbank_throughput": 1.0,
+      "spm_stride1_throughput": 1.229784,
+      "spm_stride2_throughput": 1.375112,
+      "spm_stride4_throughput": 1.462857,
+      "spm_stride8_throughput": 1.494163,
+      "spm_stride16_throughput": 1.769585,
+      "spm_random3_throughput": 2.628121,
+      "spm_single_port_throughput": 1.0,
+      "spm_conflict_cycles": 8280.0
+    },
+    "seconds": 17.03,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_block_8b/sim.log",
+    "description": "SPM same suite, block interleave, 8 banks",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "spm_rsp2",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 46678,
+    "metrics": {
+      "spm_hotbank_throughput": 1.0,
+      "spm_stride1_throughput": 1.5,
+      "spm_stride2_throughput": 1.501466,
+      "spm_stride4_throughput": 1.5,
+      "spm_stride8_throughput": 1.5,
+      "spm_stride16_throughput": 1.5,
+      "spm_random3_throughput": 1.445435,
+      "spm_single_port_throughput": 0.500489,
+      "spm_conflict_cycles": 3235.0
+    },
+    "seconds": 15.73,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_rsp2/sim.log",
+    "description": "SPM with shallow response FIFO (credit-limited throughput)",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "mbist_clean",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 6,
+    "metrics": {
+      "mbist_march_c_cycles": 2817.0,
+      "mbist_words_per_bank": 256.0
+    },
+    "seconds": 12.21,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_clean/sim.log",
+    "description": "March C- on fault-free SPM banks -> pass",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "mbist_fault",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 8,
+    "metrics": {
+      "mbist_march_c_cycles": 2817.0,
+      "mbist_words_per_bank": 256.0
+    },
+    "seconds": 11.28,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_fault/sim.log",
+    "description": "March C- with injected stuck-at cell -> fail, bank/addr located",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "router",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 14243,
+    "metrics": {
+      "router_reads": 4000.0,
+      "router_writes": 1500.0
+    },
+    "seconds": 4.46,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/router/sim.log",
+    "description": "address router: ordering across unequal slave latencies, decode errors",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "dma",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 56285,
+    "metrics": {
+      "dma_4ch_concurrent_cycles": 674.0,
+      "dma_ext2spm_4k_burst1_cycles": 2480.0,
+      "dma_spm2spm_4k_burst1_cycles": 1036.0,
+      "dma_spm2spm_4k_burst1_skew1_cycles": 1036.0,
+      "dma_ext2spm_4k_burst2_cycles": 1306.0,
+      "dma_spm2spm_4k_burst2_cycles": 780.0,
+      "dma_spm2spm_4k_burst2_skew1_cycles": 780.0,
+      "dma_ext2spm_4k_burst4_cycles": 730.0,
+      "dma_spm2spm_4k_burst4_cycles": 652.0,
+      "dma_spm2spm_4k_burst4_skew1_cycles": 652.0,
+      "dma_ext2spm_4k_burst8_cycles": 728.0,
+      "dma_spm2spm_4k_burst8_cycles": 652.0,
+      "dma_spm2spm_4k_burst8_skew1_cycles": 588.0,
+      "dma_ext2spm_4k_burst16_cycles": 728.0,
+      "dma_spm2spm_4k_burst16_cycles": 652.0,
+      "dma_spm2spm_4k_burst16_skew1_cycles": 556.0
+    },
+    "seconds": 24.7,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/dma/sim.log",
+    "description": "DMA: mem2mem, ext<->SPM, 2-D, streams, boundaries, errors, IRQ, multi-channel",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "accel",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 2572,
+    "metrics": {
+      "tensor_dbuf1_k8_8tiles_cycles": 265.0,
+      "tensor_dbuf0_k8_8tiles_cycles": 323.0,
+      "tensor_dbuf1_k8_mac_util": 0.241509,
+      "tensor_dbuf0_k8_mac_util": 0.198142,
+      "tensor_dbuf1_k32_8tiles_cycles": 289.0,
+      "tensor_dbuf0_k32_8tiles_cycles": 515.0,
+      "tensor_dbuf1_k32_mac_util": 0.885813,
+      "tensor_dbuf0_k32_mac_util": 0.497087
+    },
+    "seconds": 15.8,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/accel/sim.log",
+    "description": "tensor array vs golden (K=1,8,37), double-buffer timing, vec ops, reuse buffer",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "system",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 33,
+    "metrics": {
+      "sys_gemm_16x8x32_cycles": 160.0,
+      "sys_gemm_mac_steps": 64.0,
+      "sys_gemm_macs": 4096.0,
+      "sys_gemm_b_bytes_dma": 256.0,
+      "sys_gemm_b_bytes_without_reuse": 512.0,
+      "sys_vadd_256_cycles": 162.0,
+      "sys_dot_256_cycles": 162.0,
+      "sys_prefetch_512B_ext_cycles": 128.0,
+      "sys_spm_conflict_cycles": 0.0,
+      "sys_mbist_cycles": 11268.0
+    },
+    "seconds": 18.83,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/system/sim.log",
+    "description": "full subsystem: GEMM with B reuse, vector add/axpy/dot, ECC + MBIST via regs",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "deadlock_fifo4",
+    "status": "DEADLOCK",
+    "expected": "DEADLOCK",
+    "ok": true,
+    "errors": 0,
+    "checks": 0,
+    "metrics": {
+      "deadlock_vec_in_fifo": 4.0,
+      "deadlock_dma_burst_beats": 16.0,
+      "deadlock_beats_a": 4.0,
+      "deadlock_beats_b": 0.0,
+      "deadlock_beats_result": 0.0
+    },
+    "seconds": 15.66,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo4/sim.log",
+    "description": "joined-stream deadlock: operand FIFO (4) < DMA burst (16) -> watchdog fires",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "param_recommended",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 200,
+    "metrics": {
+      "param_dw": 128.0,
+      "param_tensor_rows": 16.0
+    },
+    "seconds": 38.5,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_recommended/sim.log",
+    "description": "recommended prototype parameterisation: 128-bit, 8 banks XOR, 16x16 tensor, 8 lanes, FIFO 64",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "param_reference",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 312,
+    "metrics": {
+      "param_dw": 64.0,
+      "param_tensor_rows": 8.0
+    },
+    "seconds": 20.99,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_reference/sim.log",
+    "description": "same smoke test at the reference parameterisation (cross-check of the parametric TB)",
+    "provenance": "RTL_SIMULATION"
+  },
+  {
+    "name": "deadlock_fifo16",
+    "status": "PASS",
+    "expected": "PASS",
+    "ok": true,
+    "errors": 0,
+    "checks": 1,
+    "metrics": {
+      "deadlock_vec_in_fifo": 16.0,
+      "deadlock_dma_burst_beats": 16.0,
+      "deadlock_beats_a": 256.0,
+      "deadlock_beats_b": 256.0,
+      "deadlock_beats_result": 256.0
+    },
+    "seconds": 14.94,
+    "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo16/sim.log",
+    "description": "same scenario with FIFO >= burst -> completes",
+    "provenance": "RTL_SIMULATION"
+  }
+]

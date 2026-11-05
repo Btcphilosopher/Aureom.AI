@@ -1,0 +1,22 @@
+"""End-to-end report generation (uses whatever RTL/synth results exist)."""
+from memoryflow.report.build import generate
+from memoryflow.cli import main
+
+
+def test_report_generates_all_artifacts(tmp_path):
+    s = generate(tmp_path, verbose=False)
+    for f in ("report.html", "REPORT.md", "inventory.md", "summary.json", "design_space_grid.csv",
+              "sweeps_one_at_a_time.csv", "figures/roofline.png", "figures/banking_maps.svg",
+              "figures/architecture_recommended.svg", "figures/pareto.png", "figures/sram_area.png"):
+        assert (tmp_path / f).exists(), f
+    assert s["recommendation"]["Recommended"]["feasible"]
+    html = (tmp_path / "report.html").read_text()
+    assert "Repository evidence" in html and "PROPOSED" in html
+    assert "MEASURED" in html
+
+
+def test_cli_roofline_and_explore(capsys):
+    assert main(["roofline", "--config", "reference"]) == 0
+    assert "DMA path" in capsys.readouterr().out
+    assert main(["explore", "--top", "3"]) == 0
+    assert "recommended" in capsys.readouterr().out
