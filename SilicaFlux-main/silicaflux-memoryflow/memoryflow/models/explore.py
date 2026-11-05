@@ -267,7 +267,7 @@ def joint_grid(base: SystemConfig | None = None, suite: Sequence[Workload] | Non
                tiles: Sequence[int] | None = None) -> list[DesignPoint]:
     base = base or baseline(budget)
     budget = budget or Budget()
-    tiles = tiles or ((1,) if budget.min_cpu_cores <= 1 else (4, 8, 16))
+    tiles = tiles or ((1,) if budget.min_cpu_cores <= 1 else (4, 8, 16, 32))
     pts = []
     for sk, b, wd, df, ln, tn, em, bu, wo, nt in itertools.product(spm_kib, banks, width, dfifo, lanes, tensor,
                                                                     extmem, burst, wout, tiles):

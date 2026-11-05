@@ -63,7 +63,7 @@ For DIM = 4, INT8 → INT32 the block dataflow needs 160 B per 128 ops (0.8 op/B
 SPM 128/256/512/1024 KiB, banks, bus width, DMA burst, DMA outstanding reads, DMA write acks (v2),
 vector lanes, tensor-array dimensions, external memories and CPU cores.
 `explore.joint_grid` evaluates the factorial grid (plus `wout` ∈ {8, 32} and, for full-chip budgets,
-`tiles` ∈ {4, 8, 16}), keeping only points the RTL can build (lanes × 16 ≤ width, TR × 8 ≤ width) and
+`tiles` ∈ {4, 8, 16, 32}), keeping only points the RTL can build (lanes × 16 ≤ width, TR × 8 ≤ width) and
 external memories whose PHY exists at the node.
 
 **Budgets (v2, `explore.BUDGETS`, `--budget` on the CLI):**

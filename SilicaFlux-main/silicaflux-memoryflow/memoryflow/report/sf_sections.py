@@ -54,6 +54,27 @@ def _cfg_from_point(base: SystemConfig, rc: dict) -> SystemConfig:
               tiles=rc.get("tiles"))
 
 
+def _ratio(hr: dict) -> str:
+    """'a-bx' speed-up of the best DDR-class memory over two / one HyperRAM devices (65 nm study)."""
+    ddr = max((v["geomean"] for k, v in hr.items() if k.startswith(("DDR", "LPDDR"))), default=0)
+    h1, h2 = hr.get("HyperRAM 200 MHz x8"), hr.get("2x HyperRAM 200 MHz x8")
+    if not ddr or not h1 or not h2:
+        return ""
+    return f"{ddr / h2['geomean']:.1f}-{ddr / h1['geomean']:.1f}x"
+
+
+def _tile_scaling(rr, bud: Budget, suite, ref_ge) -> tuple[str, float, float, float]:
+    """Marginal value of doubling the tile count behind the same memory interface:
+    (memory name, performance gain, area gain, share of kernels bound by external memory / DMA)."""
+    from memoryflow.models.explore import evaluate, mk
+    cfg = _cfg_from_point(baseline(bud), rr.recommended.cfg)
+    a = evaluate(cfg, suite, bud, ref_ge)
+    b = evaluate(mk(cfg, tiles=2 * cfg.tiles), suite, bud, ref_ge)
+    mb = machine_balance(cfg, list(suite))
+    return (f"{cfg.tiles} -> {2 * cfg.tiles} tiles behind {cfg.extmem.name}", b.geomean_gops / a.geomean_gops - 1,
+            b.total_area_mm2 / a.total_area_mm2 - 1, mb.bound_share.get("dram", 0) + mb.bound_share.get("dma", 0))
+
+
 def build(out: Path, fig: Path, budget: Budget, suite, rec, rec_cfg: SystemConfig, ref_ge, log) -> dict:
     H: list[str] = []          # html fragments, in order
     MD: list[str] = []
@@ -322,7 +343,9 @@ one), so a QSPI-class host link is assumed for them.</p>
                                 f"{maxspm} KiB", rr.recommended.label, f"{rr.recommended.geomean_gops:.2f}",
                                 f"{rr.recommended.total_area_mm2:.2f}", f"{rr.recommended.power_w:.2f}"])
             if key.startswith("full"):
-                for n, p in (("minimal", rr.minimal), ("recommended", rr.recommended), ("stretch", rr.stretch)):
+                knee = max(feas, key=lambda p: p.geomean_gops / p.total_area_mm2)
+                for n, p in (("minimal", rr.minimal), ("recommended", rr.recommended), ("stretch", rr.stretch),
+                             ("best Gop/s per mm2", knee)):
                     full_rows.append([key, n, p.label, f"{p.dense_gops:.1f}", f"{p.stream_gops:.2f}",
                                       f"{p.geomean_gops:.1f}", f"{p.total_area_mm2:.1f}", f"{p.power_w:.2f}"])
                 for em in ("LPDDR4X-4266 x32", "LPDDR4X-4266 2x32", "LPDDR5-6400 x32", "LPDDR5-6400 2x32",
@@ -374,8 +397,13 @@ own (ANALYTICAL).</p>
             (f"; a single LPDDR4X x32 channel caps any configuration at {one28.geomean_gops:.0f} Gop/s" if one28 else "") +
             f". At 16 nm, LPDDR5 4x32 reaches {l4.geomean_gops:.0f} Gop/s ({l4.geomean_gops / h.geomean_gops * 100:.0f} % "
             f"of HBM2E's {h.geomean_gops:.0f}) at {l4.power_w:.1f} W vs {h.power_w:.1f} W, on an organic package instead "
-            "of a 2.5D interposer. Beyond ~16 tiles per memory interface the chip is DRAM-bound (see balance). "
-            "Full-chip envelopes are ASSUMPTIONS."))
+            "of a 2.5D interposer. Tile scaling: " +
+            "; ".join(f"{n}: {g * 100:+.0f} % performance for {a * 100:+.0f} % area ({m * 100:.0f} % of kernels "
+                      "bound by external memory or the DMA)"
+                      for n, g, a, m in (_tile_scaling(best_by[k], BUDGETS[k], suite, ref_ge)
+                                         for k in ("full-28", "full-16") if k in best_by)) +
+            ". Behind LPDDR the knee is well below the recommendation rule's pick (see the best-Gop/s-per-mm^2 "
+            "rows); behind HBM more tiles keep paying. Full-chip envelopes are ASSUMPTIONS."))
     hr = {r["extmem"]: r for r in nm_rows if r["budget"] == "silicaflux-v-65"}
     if hr:
         findings.append((
@@ -384,7 +412,8 @@ own (ANALYTICAL).</p>
             f"same machine with DDR3-1600 x16 reaches {dram.geomean_gops:.2f}. On the 65 nm budget the best points per "
             "external memory are: " + "; ".join(f"{k} {v['geomean']:.2f} Gop/s in {v['area']:.1f} mm^2"
                                                 for k, v in hr.items()) +
-            ". HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; DDR3/LPDDR2 buys ~2-3x more."))
+            ". HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option" +
+            (f"; the best DDR-class point is {_ratio(hr):s} faster" if _ratio(hr) else "") + "."))
     summ["budgets"] = {"rows": budget_rows, "extmem": nm_rows, "full": full_rows}
 
     # ================================================================ balance

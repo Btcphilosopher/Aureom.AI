@@ -1,0 +1,2615 @@
+{
+ "available": true,
+ "root": "/home/user/Aureom.AI/SilicaFlux-main",
+ "files": 246,
+ "lines": 94507,
+ "tops": [
+  {
+   "module": "silicaflux_top",
+   "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_top.sv",
+   "instances": 9,
+   "types": 9,
+   "undefined_types": [],
+   "undefined_instances": 0
+  },
+  {
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "instances": 32,
+   "types": 27,
+   "undefined_types": [
+    "sf_apb_cdc",
+    "sf_axi_cdc",
+    "sf_axi_edge",
+    "sf_clk_ctrl",
+    "sf_cluster_csr",
+    "sf_coh_mgr",
+    "sf_coh_xbar",
+    "sf_core",
+    "sf_dbg_module",
+    "sf_dispatch_fabric",
+    "sf_dma_bridge",
+    "sf_fault_ctrl",
+    "sf_irq_ctrl",
+    "sf_l2_cache",
+    "sf_llc_bank",
+    "sf_mem_fabric",
+    "sf_pmu",
+    "sf_pwr_ctrl",
+    "sf_reg_slice",
+    "sf_rst_ctrl",
+    "sf_sched_domain",
+    "sf_sync",
+    "sf_tensor_engine",
+    "sf_tlb_subsys",
+    "sf_trace_agg",
+    "sf_vector_unit"
+   ],
+   "undefined_instances": 31
+  },
+  {
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl.zip::silicaflux/rtl/silicaflux_top.sf",
+   "instances": 16,
+   "types": 11,
+   "undefined_types": [
+    "sf_axi_mem_edge",
+    "sf_core_complex",
+    "sf_debug_module",
+    "sf_dma_bridge",
+    "sf_fifo",
+    "sf_icg",
+    "sf_irq_ctrl",
+    "sf_llc_bank",
+    "sf_perf_monitor",
+    "sf_sync"
+   ],
+   "undefined_instances": 15
+  },
+  {
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "instances": 16,
+   "types": 11,
+   "undefined_types": [
+    "sf_axi_mem_edge",
+    "sf_core_complex",
+    "sf_debug_module",
+    "sf_dma_bridge",
+    "sf_fifo",
+    "sf_icg",
+    "sf_irq_ctrl",
+    "sf_llc_bank",
+    "sf_perf_monitor",
+    "sf_sync"
+   ],
+   "undefined_instances": 15
+  },
+  {
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "instances": 9,
+   "types": 9,
+   "undefined_types": [],
+   "undefined_instances": 0
+  },
+  {
+   "module": "compute_tile",
+   "origin": "silicaflux.zip::silicaflux/rtl/compute_tile.sv",
+   "instances": 3,
+   "types": 3,
+   "undefined_types": [],
+   "undefined_instances": 0
+  },
+  {
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "instances": 4,
+   "types": 4,
+   "undefined_types": [],
+   "undefined_instances": 0
+  },
+  {
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/compute_tile.sv",
+   "instances": 3,
+   "types": 3,
+   "undefined_types": [],
+   "undefined_instances": 0
+  }
+ ],
+ "sets": {
+  "sf1": {
+   "title": "SilicaFlux v1 cluster (silicaflux.zip)",
+   "generation": "Gen-1",
+   "files": 23,
+   "missing": [],
+   "core": true
+  },
+  "sf25": {
+   "title": "SilicaFlux 2.x unit sources (loose .sf files)",
+   "generation": "Gen-2.5",
+   "files": 33,
+   "missing": [],
+   "core": true
+  },
+  "sf2_rtl": {
+   "title": "SilicaFlux 2.x top/front-end archives",
+   "generation": "Gen-2.5",
+   "files": 8,
+   "missing": [],
+   "core": true
+  },
+  "sfx_ai": {
+   "title": "SilicaFlux-AI GEMM engine (silicafluxai.zip)",
+   "generation": "SilicaFlux-AI",
+   "files": 30,
+   "missing": [],
+   "core": true
+  },
+  "sf_ml": {
+   "title": "SilicaFlux-ML learning controller",
+   "generation": "SilicaFlux-ML",
+   "files": 13,
+   "missing": [],
+   "core": true
+  },
+  "testcore": {
+   "title": "SilicaFlux TestCore DFT (MBIST/LBIST/TAP)",
+   "generation": "SilicaFlux-DFT",
+   "files": 32,
+   "missing": [],
+   "core": true
+  },
+  "timinglab": {
+   "title": "SilicaFlux TimingLab pipelined drop-ins",
+   "generation": "Gen-1 (optimised)",
+   "files": 35,
+   "missing": [],
+   "core": true
+  },
+  "memcache": {
+   "title": "Generic cache / RAM / SDRAM-FSM library",
+   "generation": "library",
+   "files": 15,
+   "missing": [],
+   "core": false
+  },
+  "soc": {
+   "title": "SoC integration example",
+   "generation": "library",
+   "files": 14,
+   "missing": [],
+   "core": false
+  },
+  "cpu": {
+   "title": "CPU cores (cpu_core, RISC-V, pipelined)",
+   "generation": "library",
+   "files": 37,
+   "missing": [],
+   "core": false
+  },
+  "powerlink": {
+   "title": "PowerLink support RTL",
+   "generation": "support",
+   "files": 6,
+   "missing": [],
+   "core": false
+  }
+ },
+ "modules": 178,
+ "findings": [
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "line": 1333,
+   "detail": "instance u_alu of `alu` (SilicaFlux2.0/SilicaFlux2.5/silicaflux_alu.zip::silicaflux/rtl/alu.sf:47): 8/11 named ports and 1/1 parameters absent on the definition (e.g. br_res_i, req_valid_i, req_i, req_ready_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "line": 1385,
+   "detail": "instance u_vector_engine of `vector_engine` (vector_engine (1).sf:85): 13/17 named ports and 0/1 parameters absent on the definition (e.g. br_res_i, req_valid_i, req_i, req_ready_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "line": 1448,
+   "detail": "instance u_tensor_unit of `tensor_unit` (tensor_unit.sf:43): 13/17 named ports and 1/1 parameters absent on the definition (e.g. br_res_i, cmd_valid_i, cmd_i, cmd_ready_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "line": 1953,
+   "detail": "instance u_memory_controller of `memory_controller` (memory_controller.sf:94): 7/9 named ports and 2/2 parameters absent on the definition (e.g. req_valid_i, req_i, req_ready_o, rsp_valid_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tc_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_top.sv",
+   "line": 155,
+   "detail": "instance u_tap of `tc_tap` (SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_tap.sv:25): 18/18 named ports and 0/0 parameters absent on the definition (e.g. tck, trst_n, tms, tdi)",
+   "set_key": "testcore"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tc_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_top.sv",
+   "line": 176,
+   "detail": "instance u_mode of `tc_mode_ctrl` (SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_mode_ctrl.sv:32): 30/30 named ports and 0/0 parameters absent on the definition (e.g. tck, tap_rst_n, por_n, tap_state)",
+   "set_key": "testcore"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tc_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_top.sv",
+   "line": 269,
+   "detail": "instance u_bridge of `tc_reg_bridge` (SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_reg_bridge.sv:29): 16/16 named ports and 0/0 parameters absent on the definition (e.g. tck, por_n, tap_state, sel)",
+   "set_key": "testcore"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_tap_fsm",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/tb/tb_tap_fsm.sv",
+   "line": 23,
+   "detail": "instance dut of `tc_tap` (SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_tap.sv:25): 18/18 named ports and 0/0 parameters absent on the definition (e.g. tck, trst_n, tms, tdi)",
+   "set_key": "testcore"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "sf_compute_tile_pipe",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/rtl/opt/sf_compute_tile_pipe.sv",
+   "line": 93,
+   "detail": "instance u_mem of `memory_controller` (memory_cache_repo.zip::memory_cache_repo/rtl/memory_controller.sv:31): 8/16 named ports and 0/0 parameters absent on the definition (e.g. req_opcode, req_vwdata, req_length, resp_vrdata)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "sf_compute_tile_pipe",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/rtl/opt/sf_compute_tile_pipe.sv",
+   "line": 148,
+   "detail": "instance u_tensor of `sf_tensor_unit_pipe` (SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/rtl/opt/sf_tensor_unit_pipe.sv:29): 17/17 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, start, mat_a_row0)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/compute_tile.sv",
+   "line": 88,
+   "detail": "instance u_mem of `memory_controller` (memory_cache_repo.zip::memory_cache_repo/rtl/memory_controller.sv:31): 8/16 named ports and 0/0 parameters absent on the definition (e.g. req_opcode, req_vwdata, req_length, resp_vrdata)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/compute_tile.sv",
+   "line": 143,
+   "detail": "instance u_tensor of `tensor_unit` (silicaflux.zip::silicaflux/rtl/tensor_unit.sv:16): 17/17 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, start, mat_a_row0)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 157,
+   "detail": "instance u_fetch of `fetch_unit` (silicaflux.zip::silicaflux/rtl/fetch_unit.sv:18): 10/10 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, stall, flush)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 190,
+   "detail": "instance u_regs of `register_bank` (silicaflux.zip::silicaflux/rtl/register_bank.sv:19): 16/16 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, s_rd_addr1, s_rd_addr2)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 212,
+   "detail": "instance u_dec of `decoder` (silicaflux.zip::silicaflux/rtl/decoder.sv:20): 14/14 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, stall, flush)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 233,
+   "detail": "instance u_ctrl_mem of `memory_controller` (memory_cache_repo.zip::memory_cache_repo/rtl/memory_controller.sv:31): 8/16 named ports and 0/0 parameters absent on the definition (e.g. req_opcode, req_vwdata, req_length, resp_vrdata)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 252,
+   "detail": "instance u_ctrl of `control_core` (silicaflux.zip::silicaflux/rtl/control_core.sv:19): 28/28 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, id_is, id_stall)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip::silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv",
+   "line": 302,
+   "detail": "instance u_sched of `scheduler` (silicaflux.zip::silicaflux/rtl/scheduler.sv:17): 35/35 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, instr_in, instr_valid)",
+   "set_key": "timinglab"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 238,
+   "detail": "instance u_rst_sync_por of `sf_rst_sync` (silicaflux-powerlink.zip::silicaflux-powerlink/rtl/sf_sync.sv:35): 4/4 named ports and 0/0 parameters absent on the definition (e.g. clk_i, rst_ni, scan_mode_i, rst_no)",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 579,
+   "detail": "instance u_memedge_rst_sync of `sf_rst_sync` (silicaflux-powerlink.zip::silicaflux-powerlink/rtl/sf_sync.sv:35): 5/5 named ports and 0/1 parameters absent on the definition (e.g. clk_i, rst_ni, test_mode_i, test_rst_ni)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_compute_tile.sf",
+   "line": 3691,
+   "detail": "instance u_dut of `compute_tile` (silicaflux.zip::silicaflux/rtl/compute_tile.sv:24): 35/37 named ports and 6/7 parameters absent on the definition (e.g. stall_i, flush_i, issue_valid_i, issue_ready_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_memory_controller",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_memory_controller.sf",
+   "line": 1251,
+   "detail": "instance dut of `memory_controller` (memory_controller.sf:94): 45/47 named ports and 4/4 parameters absent on the definition (e.g. s_req_valid_i, s_req_ready_o, s_req_we_i, s_req_addr_i)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_noc_interconnect",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_noc_interconnect.sf",
+   "line": 2853,
+   "detail": "instance u_dut of `noc_interconnect` (SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:811): 9/11 named ports and 4/6 parameters absent on the definition (e.g. inj_valid_i, inj_ready_o, inj_flit_i, ej_valid_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_scheduler",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_scheduler.sf",
+   "line": 3436,
+   "detail": "instance u_dut of `scheduler` (SilicaFlux2.0/SilicaFlux2.5/scheduler.sf:62): 22/28 named ports and 9/9 parameters absent on the definition (e.g. disp_id_i, disp_opcode_i, disp_src_valid_i, disp_src_tag_i)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_silicaflux_top.sf",
+   "line": 3514,
+   "detail": "instance u_dut of `silicaflux_top` (SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl.zip::silicaflux/rtl/silicaflux_top.sf:36): 56/57 named ports and 5/5 parameters absent on the definition (e.g. rst_ni, run_i, stall_i, halted_o)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_vector_engine",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tb_vector_engine.sf",
+   "line": 588,
+   "detail": "instance u_dut of `vector_engine` (silicaflux.zip::silicaflux/rtl/vector_engine.sv:27): 8/10 named ports and 3/4 parameters absent on the definition (e.g. in_valid, in_ready, in_op, in_a)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_memory_controller",
+   "origin": "silicaflux.zip::silicaflux/tb/tb_memory_controller.sv",
+   "line": 32,
+   "detail": "instance dut of `memory_controller` (memory_cache_repo.zip::memory_cache_repo/rtl/memory_controller.sv:31): 8/16 named ports and 0/0 parameters absent on the definition (e.g. req_opcode, req_vwdata, req_length, resp_vrdata)",
+   "set_key": "sf1"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_scheduler",
+   "origin": "silicaflux.zip::silicaflux/tb/tb_scheduler.sv",
+   "line": 23,
+   "detail": "instance dut of `scheduler` (silicaflux.zip::silicaflux/rtl/scheduler.sv:17): 35/35 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, instr_in, instr_valid)",
+   "set_key": "sf1"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_tensor_unit",
+   "origin": "silicaflux.zip::silicaflux/tb/tb_tensor_unit.sv",
+   "line": 11,
+   "detail": "instance dut of `tensor_unit` (silicaflux.zip::silicaflux/rtl/tensor_unit.sv:16): 17/17 named ports and 0/0 parameters absent on the definition (e.g. clk, rst_n, start, mat_a_row0)",
+   "set_key": "sf1"
+  },
+  {
+   "kind": "INTERFACE_DRIFT",
+   "module": "tb_tensor_unit",
+   "origin": "tb_tensor_unit.sf",
+   "line": 849,
+   "detail": "instance u_dut of `tensor_unit` (silicaflux.zip::silicaflux/rtl/tensor_unit.sv:16): 5/5 named ports and 4/4 parameters absent on the definition (e.g. clk, rst_n, in_valid, in_b)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "compute_tile",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "line": 142,
+   "detail": "29 of 30 package types used are defined by no package in set `sf25` (e.g. sf_alu_req_t, sf_alu_rsp_t, sf_br_mask_t, sf_br_res_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "noc_router",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "line": 80,
+   "detail": "1 of 1 package types used are defined by no package in set `sf25` (e.g. noc_packet_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "noc_interconnect",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "line": 811,
+   "detail": "1 of 1 package types used are defined by no package in set `sf25` (e.g. noc_packet_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "scheduler",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/scheduler.sf",
+   "line": 62,
+   "detail": "10 of 11 package types used are defined by no package in set `sf25` (e.g. sf_barrier_meta_t, sf_br_mask_t, sf_br_res_t, sf_cmpl_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 29,
+   "detail": "32 of 32 package types used are defined by no package in set `sf25` (e.g. sf_apb_req_t, sf_apb_rsp_t, sf_axi_req_t, sf_axi_rsp_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "tile_interface",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/tile_interface.sf",
+   "line": 156,
+   "detail": "11 of 11 package types used are defined by no package in set `sf25` (e.g. sf_exec_pkt_t, sf_mem_req_t, sf_mem_rsp_t, sf_noc_flit_t)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "MISSING_TYPES",
+   "module": "vector_engine",
+   "origin": "vector_engine (1).sf",
+   "line": 85,
+   "detail": "3 of 3 package types used are defined by no package in set `sf25` (e.g. sf_uop_tag_t, sf_vex_ctrl_t, sf_vop_e)",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 245,
+   "detail": "instance u_sync_sys_rst of `sf_sync`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 252,
+   "detail": "instance u_sync_rtc of `sf_sync`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 259,
+   "detail": "instance u_sync_ext_irq of `sf_sync`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 532,
+   "detail": "instance u_core_icg of `sf_icg`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 549,
+   "detail": "instance u_core of `sf_core_complex`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 607,
+   "detail": "instance u_dma_bridge of `sf_dma_bridge`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 747,
+   "detail": "instance u_rsp_q of `sf_fifo`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 936,
+   "detail": "instance u_req_q of `sf_fifo`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 948,
+   "detail": "instance u_srsp_q of `sf_fifo`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 963,
+   "detail": "instance u_llc_bank of `sf_llc_bank`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 1055,
+   "detail": "instance u_mem_edge of `sf_axi_mem_edge`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 1321,
+   "detail": "instance u_irq_ctrl of `sf_irq_ctrl`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 1339,
+   "detail": "instance u_debug of `sf_debug_module`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 1394,
+   "detail": "instance u_trace_q of `sf_fifo`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip::silicaflux/rtl/silicaflux_top.sf",
+   "line": 1437,
+   "detail": "instance u_perf_mon of `sf_perf_monitor`: no definition in repository",
+   "set_key": "sf2_rtl"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 542,
+   "detail": "instance u_rst_ctrl of `sf_rst_ctrl`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 589,
+   "detail": "instance u_memedge_ack_sync of `sf_sync`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 618,
+   "detail": "instance u_clk_ctrl of `sf_clk_ctrl`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 638,
+   "detail": "instance u_ext_irq_sync of `sf_sync`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 648,
+   "detail": "instance u_ctrl_in_sync of `sf_sync`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 834,
+   "detail": "instance u_pwr_ctrl of `sf_pwr_ctrl`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 889,
+   "detail": "instance u_core of `sf_core`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 967,
+   "detail": "instance u_l2 of `sf_l2_cache`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1008,
+   "detail": "instance u_snp_slice of `sf_reg_slice`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1032,
+   "detail": "instance u_sched of `sf_sched_domain`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1061,
+   "detail": "instance u_vpu of `sf_vector_unit`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1095,
+   "detail": "instance u_tlb_subsys of `sf_tlb_subsys`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1140,
+   "detail": "instance u_dispatch of `sf_dispatch_fabric`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1161,
+   "detail": "instance u_tensor of `sf_tensor_engine`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1201,
+   "detail": "instance u_dma_cdc of `sf_axi_cdc`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1215,
+   "detail": "instance u_dma_bridge of `sf_dma_bridge`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1238,
+   "detail": "instance u_dbg of `sf_dbg_module`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1319,
+   "detail": "instance u_req_slice of `sf_reg_slice`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1333,
+   "detail": "instance u_rsp_slice of `sf_reg_slice`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1389,
+   "detail": "instance u_coh_xbar of `sf_coh_xbar`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1419,
+   "detail": "instance u_llc_bank of `sf_llc_bank`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1461,
+   "detail": "instance u_coh_mgr of `sf_coh_mgr`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1494,
+   "detail": "instance u_mem_fabric of `sf_mem_fabric`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1518,
+   "detail": "instance u_axi_edge of `sf_axi_edge`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1538,
+   "detail": "instance u_mem_cdc of `sf_axi_cdc`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1557,
+   "detail": "instance u_host_apb_cdc of `sf_apb_cdc`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1670,
+   "detail": "instance u_csr of `sf_cluster_csr`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1691,
+   "detail": "instance u_irq_ctrl of `sf_irq_ctrl`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1713,
+   "detail": "instance u_trace of `sf_trace_agg`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1765,
+   "detail": "instance u_pmu of `sf_pmu`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "REFERENCED_ONLY",
+   "module": "silicaflux_top",
+   "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "line": 1830,
+   "detail": "instance u_fault_ctrl of `sf_fault_ctrl`: no definition in repository",
+   "set_key": "sf25"
+  },
+  {
+   "kind": "VARIANTS",
+   "module": "sf_alu",
+   "origin": "alu.sf",
+   "line": 16,
+   "detail": "2 diverging definitions: alu.sf:16 (659 lines); SilicaFlux2.0/SilicaFlux2.5/alu (1).sf:213 (450 lines)",
+   "set_key": "sf25"
+  }
+ ],
+ "blocks": [
+  {
+   "block": {
+    "category": "CPU cache interface",
+    "name": "Core L1 <-> L2 port (sf_core / sf_l2_cache)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "silicaflux_top.sf wires 8 superscalar cores to per-complex L2 caches; neither module exists.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_core\\s+#\\(",
+      "what": "sf_core instance"
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_l2_cache\\s+#\\(",
+      "what": "sf_l2_cache instance"
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "sf_spm_banked host port (TCM-style, no cache)",
+    "docs": []
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "sf_core instance",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 888,
+     "text": "",
+     "found": true
+    },
+    {
+     "what": "sf_l2_cache instance",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 967,
+     "text": "sf_l2_cache #(",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "CPU cache interface",
+    "name": "Coherence write-notify hook",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "memory_controller.sf broadcasts every committed line write for a future L1 invalidate; no consumer exists.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "output logic\\s+\\[NUM_BANKS-1:0\\]\\s+coh_wr_valid_o",
+      "what": "coherence hook port"
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "coherence hook port",
+     "origin": "memory_controller.sf",
+     "line": 157,
+     "text": "output logic      [NUM_BANKS-1:0]     coh_wr_valid_o,",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "CPU cache interface",
+    "name": "Direct-mapped / set-associative caches",
+    "generation": "library",
+    "status": "STANDALONE",
+    "summary": "Generic write-back caches (256 x 64 B lines; 128 sets x 4 ways) in memory_cache_repo; not instantiated by any SilicaFlux top and carry simulation-only initial blocks.",
+    "anchors": [
+     {
+      "set_key": "memcache",
+      "origin": "rtl/direct_mapped_cache.sv",
+      "regex": "CACHE_LINES\\s*=\\s*256",
+      "what": ""
+     },
+     {
+      "set_key": "memcache",
+      "origin": "rtl/set_assoc_cache.sv",
+      "regex": "NUM_WAYS\\s*=\\s*4",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "set_assoc_cache",
+     null
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "CACHE_LINES\\s*=\\s*256",
+     "origin": "memory_cache_repo.zip::memory_cache_repo/rtl/direct_mapped_cache.sv",
+     "line": 33,
+     "text": "parameter int CACHE_LINES = 256,",
+     "found": true
+    },
+    {
+     "what": "NUM_WAYS\\s*=\\s*4",
+     "origin": "memory_cache_repo.zip::memory_cache_repo/rtl/set_assoc_cache.sv",
+     "line": 8,
+     "text": "//    NUM_WAYS = 4  \u2192 pseudo-LRU (PLRU) binary tree using 3 bits per set",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [
+    "%Error-BLKLOOPINIT: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:243:20: Unsupported: Delayed assignment to array inside for loops (non-delayed is ok - see docs)",
+    "%Error-BLKLOOPINIT: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:245:28: Unsupported: Delayed assignment to array inside for loops (non-delayed is ok - see docs)",
+    "%Error-BLKLOOPINIT: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:246:28: Unsupported: Delayed assignment to array inside for loops (non-delayed is ok - see docs)",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:358: syntax error",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:358: error: Invalid module item.",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/set_assoc_cache.sv:359: syntax error"
+   ],
+   "note": "elaboration inconclusive: Verilator and Icarus both stop on legal SV they do not support (Delayed assignment to array inside for loops (non-delayed is; Delayed assignment to array inside for loops (non-delayed is)"
+  },
+  {
+   "block": {
+    "category": "L1 / L2 / last-level cache",
+    "name": "SilicaFlux-V L1 I/D caches (16 KB + 16 KB)",
+    "generation": "SilicaFlux-V",
+    "status": "DOCUMENTED_ONLY",
+    "summary": "Reduced-ASIC design proposes 16 KB I + 16 KB D L1 and a 256 KB L2/scratch; no RTL.",
+    "anchors": [],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": [
+     "sfv_l1",
+     "sfv_l2"
+    ]
+   },
+   "status": "DOCUMENTED_ONLY",
+   "anchors": [],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "L1 / L2 / last-level cache",
+    "name": "Cluster L2 (2 MiB / complex, 16-way)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "Parameterised in silicaflux_top.sf; sf_l2_cache is not defined anywhere.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "L2_SIZE_KB\\s*=\\s*2048",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_l2_cache\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "not recommended for SilicaFlux-V (DMA-managed SPM); modelled in memoryflow.models.cache",
+    "docs": []
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "L2_SIZE_KB\\s*=\\s*2048",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 50,
+     "text": "parameter int unsigned L2_SIZE_KB             = 2048,",
+     "found": true
+    },
+    {
+     "what": "^\\s*sf_l2_cache\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 967,
+     "text": "sf_l2_cache #(",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "L1 / L2 / last-level cache",
+    "name": "LLC (8 banks x 4 MiB) + coherent crossbar",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "32 MiB of LLC SRAM implied by parameters; sf_llc_bank / sf_coh_xbar / sf_coh_mgr undefined.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "NUM_LLC_BANKS\\s*=\\s*8",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "LLC_BANK_SIZE_KB\\s*=\\s*4096",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_llc_bank\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": [
+     "full_sram"
+    ]
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "NUM_LLC_BANKS\\s*=\\s*8",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 35,
+     "text": "parameter int unsigned NUM_LLC_BANKS          = 8,",
+     "found": true
+    },
+    {
+     "what": "LLC_BANK_SIZE_KB\\s*=\\s*4096",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 52,
+     "text": "parameter int unsigned LLC_BANK_SIZE_KB       = 4096,",
+     "found": true
+    },
+    {
+     "what": "^\\s*sf_llc_bank\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1419,
+     "text": "sf_llc_bank #(",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Scratchpad memory",
+    "name": "Gen-1 per-tile scratchpad (4 x 1 KiB)",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "256 x 32-bit words per tile behind a single FSM: one access at a time, 1 word/cycle bursts.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+      "regex": "SRAM_DEPTH\\s*=\\s*256",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+      "regex": "logic \\[XLEN-1:0\\] sram \\[0:SRAM_DEPTH-1\\]",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/compute_tile.sv",
+      "regex": "memory_controller u_mem",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "silicaflux_top",
+     "silicaflux.zip::silicaflux/rtl/silicaflux_top.sv"
+    ],
+    "integrated_in": "silicaflux_top (Gen-1)",
+    "memoryflow": "sf_spm_banked",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "SRAM_DEPTH\\s*=\\s*256",
+     "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+     "line": 27,
+     "text": "parameter int SRAM_DEPTH    = 256;  // Scratchpad SRAM words per tile",
+     "found": true
+    },
+    {
+     "what": "logic \\[XLEN-1:0\\] sram \\[0:SRAM_DEPTH-1\\]",
+     "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+     "line": 52,
+     "text": "logic [XLEN-1:0] sram [0:SRAM_DEPTH-1];",
+     "found": true
+    },
+    {
+     "what": "memory_controller u_mem",
+     "origin": "silicaflux.zip::silicaflux/rtl/compute_tile.sv",
+     "line": 88,
+     "text": "memory_controller u_mem (",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Scratchpad memory",
+    "name": "Gen-2.5 banked scratchpad controller",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "8 banks x 512 x 128 b (64 KiB) default, scalar + vector + burst requesters, per-bank arbitration, credit-reserved responses, per-byte parity. Elaborates stand-alone; its only instantiation (compute_tile.sf) uses a different port list.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "NUM_BANKS\\s*=\\s*8,",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "BANK_DEPTH\\s*=\\s*512,",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "localparam int unsigned NUM_REQ\\s*=\\s*3",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "\\.NUM_PORTS\\s*\\(NUM_MC_PORTS\\)",
+      "what": "compute_tile instantiation (drifted)"
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_spm_banked + sf_mc25_vport_bridge",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "NUM_BANKS\\s*=\\s*8,",
+     "origin": "memory_controller.sf",
+     "line": 99,
+     "text": "parameter int unsigned NUM_BANKS         = 8,              // power of two, >= 2",
+     "found": true
+    },
+    {
+     "what": "BANK_DEPTH\\s*=\\s*512,",
+     "origin": "memory_controller.sf",
+     "line": 100,
+     "text": "parameter int unsigned BANK_DEPTH        = 512,            // lines per bank, power of two, >= 2",
+     "found": true
+    },
+    {
+     "what": "localparam int unsigned NUM_REQ\\s*=\\s*3",
+     "origin": "memory_controller.sf",
+     "line": 169,
+     "text": "localparam int unsigned NUM_REQ     = 3;",
+     "found": true
+    },
+    {
+     "what": "compute_tile instantiation (drifted)",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 1954,
+     "text": ".NUM_PORTS   (NUM_MC_PORTS),",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Scratchpad memory",
+    "name": "Gen-2.5 tile SPM regions (16 KiB scalar + 64 KiB vector)",
+    "generation": "Gen-2.5",
+    "status": "NOT_ELABORABLE",
+    "summary": "compute_tile.sf maps a scalar and a vector SPM window, but the tile cannot be elaborated (memory_controller / tensor_unit interface drift, missing package types).",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "SPM_S_BYTES\\s*=\\s*32'h0000_4000",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "SPM_V_BYTES\\s*=\\s*32'h0001_0000",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "compute_tile",
+     "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "NOT_ELABORABLE",
+   "anchors": [
+    {
+     "what": "SPM_S_BYTES\\s*=\\s*32'h0000_4000",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 162,
+     "text": "parameter int unsigned SPM_S_BYTES    = 32'h0000_4000,",
+     "found": true
+    },
+    {
+     "what": "SPM_V_BYTES\\s*=\\s*32'h0001_0000",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 164,
+     "text": "parameter int unsigned SPM_V_BYTES    = 32'h0001_0000,",
+     "found": true
+    }
+   ],
+   "lint_ok": false,
+   "lint_errors": [
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:307:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:313:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:317:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:320:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:324:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:331:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:335:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:338:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:344:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:348:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:367:33: syntax error, unexpected IDENTIFIER, expecting '(' or ';'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:369:7: syntax error, unexpected return"
+   ],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "SRAM array",
+    "name": "Gen-1 inferred arrays (SPM, IMEM, register file)",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "Plain reg arrays; the SPM array is written from two always_ff blocks (FSM + tile write-back port), i.e. a 2-write-port memory that no single-port macro can implement.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+      "regex": "sram\\[wb_addr\\[",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+      "regex": "sram\\[word_addr\\]\\s*<= req_wdata",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/fetch_unit.sv",
+      "regex": "logic \\[XLEN-1:0\\] imem \\[0:IMEM_DEPTH-1\\]",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "silicaflux.zip::silicaflux/rtl/memory_controller.sv"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_sram_1rw / sf_sram_bank",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "sram\\[wb_addr\\[",
+     "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+     "line": 87,
+     "text": "sram[wb_addr[($clog2(SRAM_DEPTH)+1):2]] <= wb_data;",
+     "found": true
+    },
+    {
+     "what": "sram\\[word_addr\\]\\s*<= req_wdata",
+     "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+     "line": 129,
+     "text": "sram[word_addr] <= req_wdata;",
+     "found": true
+    },
+    {
+     "what": "logic \\[XLEN-1:0\\] imem \\[0:IMEM_DEPTH-1\\]",
+     "origin": "silicaflux.zip::silicaflux/rtl/fetch_unit.sv",
+     "line": 45,
+     "text": "logic [XLEN-1:0] imem [0:IMEM_DEPTH-1];",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "SRAM array",
+    "name": "Gen-2.5 bank arrays inside memory_controller",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "Per-bank `mem_q` arrays inferred inside the controller with byte enables; no wrapper, no foundry-macro abstraction, no MBIST port.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "sf_vword_t\\s+mem_q\\s+\\[BANK_DEPTH\\]",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_sram_1rw IMPL=0|1 + sf_macro_1rw_leaf",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "sf_vword_t\\s+mem_q\\s+\\[BANK_DEPTH\\]",
+     "origin": "memory_controller.sf",
+     "line": 980,
+     "text": "sf_vword_t  mem_q [BANK_DEPTH];",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "SRAM array",
+    "name": "sf_sram_bank_decode helper",
+    "generation": "Gen-2.5",
+    "status": "STANDALONE",
+    "summary": "Bank/row/offset decoder in sram-decoder.sf; instantiated by nothing.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/sram-decoder.sf",
+      "regex": "module sf_sram_bank_decode",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "sf_sram_bank_decode",
+     null
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "module sf_sram_bank_decode",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/sram-decoder.sf",
+     "line": 2,
+     "text": "module sf_sram_bank_decode #(",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "SRAM array",
+    "name": "sfx_sram_interface (SilicaFlux-AI)",
+    "generation": "SilicaFlux-AI",
+    "status": "STANDALONE",
+    "summary": "Single-port, byte-strobed, 1-cycle synchronous SRAM wrapper used by the GEMM engine.",
+    "anchors": [
+     {
+      "set_key": "sfx_ai",
+      "origin": "rtl/memory/sfx_sram_interface.sv",
+      "regex": "Single-port synchronous SRAM wrapper",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "sfx_sram_interface",
+     null
+    ],
+    "integrated_in": "sfx_gemm_controller (SilicaFlux-AI)",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "Single-port synchronous SRAM wrapper",
+     "origin": "SilicaFlux2.0/silicafluxai.zip::silicaflux-ai/rtl/memory/sfx_sram_interface.sv",
+     "line": 5,
+     "text": "// Single-port synchronous SRAM wrapper: one address bus shared between read",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "SRAM array",
+    "name": "TestCore behavioural SRAM model",
+    "generation": "SilicaFlux-DFT",
+    "status": "BEHAVIOURAL",
+    "summary": "tc_sram_model is a testbench model for the MBIST collar.",
+    "anchors": [
+     {
+      "set_key": "testcore",
+      "origin": "tb/models/tc_sram_model.sv",
+      "regex": "module tc_sram_model",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "BEHAVIOURAL",
+   "anchors": [
+    {
+     "what": "module tc_sram_model",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/tb/models/tc_sram_model.sv",
+     "line": 21,
+     "text": "module tc_sram_model #(",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "DMA engine",
+    "name": "Gen-1 DFLOAD / DFSTORE bursts",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "ISA-level burst ops served by the tile memory controller. The burst address never advances and the buffer index wraps at 4, so bursts > 4 words re-read / re-write the same 4 words (reproduced by tb_sf1_memctrl).",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+      "regex": "OP_DFLOAD\\s*=\\s*5'h0A",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+      "regex": "2'd3: burst_rd_buf\\[ 96 \\+: XLEN\\] <= sram\\[burst_addr \\+ 3\\]",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "silicaflux.zip::silicaflux/rtl/memory_controller.sv"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_dma",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "OP_DFLOAD\\s*=\\s*5'h0A",
+     "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+     "line": 50,
+     "text": "parameter logic [4:0] OP_DFLOAD   = 5'h0A; // Stream burst from SRAM to tile",
+     "found": true
+    },
+    {
+     "what": "2'd3: burst_rd_buf\\[ 96 \\+: XLEN\\] <= sram\\[burst_addr \\+ 3\\]",
+     "origin": "silicaflux.zip::silicaflux/rtl/memory_controller.sv",
+     "line": 195,
+     "text": "2'd3: burst_rd_buf[ 96 +: XLEN] <= sram[burst_addr + 3];",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "DMA engine",
+    "name": "Gen-2.5 burst descriptor port",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "memory_controller.sf exposes a burst port ('the DMA port'): one descriptor in flight, a done handshake per burst, <= 256 beats, no page crossing. There is no DMA engine behind it.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "DMA attachment\\s*:",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "assign burst_req_ready_o = init_done_q & \\(b_state_q == BST_IDLE\\)",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_dma (+ sf_mc25_vport_bridge)",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "DMA attachment\\s*:",
+     "origin": "memory_controller.sf",
+     "line": 83,
+     "text": "//  * DMA attachment    : the burst descriptor/data channels are the DMA port.",
+     "found": true
+    },
+    {
+     "what": "assign burst_req_ready_o = init_done_q & \\(b_state_q == BST_IDLE\\)",
+     "origin": "memory_controller.sf",
+     "line": 738,
+     "text": "assign burst_req_ready_o = init_done_q & (b_state_q == BST_IDLE);",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "DMA engine",
+    "name": "Cluster DMA bridge (sf_dma_bridge)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "IO-coherent DMA ingress in silicaflux_top.sf; undefined.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_dma_bridge\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "^\\s*sf_dma_bridge\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1214,
+     "text": "",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "DMA engine",
+    "name": "sfx_dma (SilicaFlux-AI)",
+    "generation": "SilicaFlux-AI",
+    "status": "STANDALONE",
+    "summary": "Single-channel word-copy engine, one command in flight, FIFO-decoupled; no registers, IRQ, 2-D or error handling.",
+    "anchors": [
+     {
+      "set_key": "sfx_ai",
+      "origin": "rtl/dma/sfx_dma.sv",
+      "regex": "Only one command may be in(?:\\s|//)+flight",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "sfx_dma",
+     null
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "Only one command may be in(?:\\s|//)+flight",
+     "origin": "SilicaFlux2.0/silicafluxai.zip::silicaflux-ai/rtl/dma/sfx_dma.sv",
+     "line": 36,
+     "text": "// handshakes (see docs/MEMORY_PROTOCOL.md). Only one command may be in",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Interconnect / router",
+    "name": "Gen-1 2x2 XY mesh NoC",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "32-bit single-flit packets, XY routing, 4 tiles.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+      "regex": "NOC_WIDTH\\s*=\\s*32",
+      "what": ""
+     },
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/noc_router.sv",
+      "regex": "module noc_router",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "noc_interconnect",
+     "silicaflux.zip::silicaflux/rtl/noc_interconnect.sv"
+    ],
+    "integrated_in": "silicaflux_top (Gen-1)",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "NOC_WIDTH\\s*=\\s*32",
+     "origin": "silicaflux.zip::silicaflux/rtl/silicaflux_pkg.sv",
+     "line": 28,
+     "text": "parameter int NOC_WIDTH     = 32;   // NoC flit data width",
+     "found": true
+    },
+    {
+     "what": "module noc_router",
+     "origin": "silicaflux.zip::silicaflux/rtl/noc_router.sv",
+     "line": 8,
+     "text": "module noc_router",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Interconnect / router",
+    "name": "Gen-2.5 parametric wormhole mesh router",
+    "generation": "Gen-2.5",
+    "status": "NOT_ELABORABLE",
+    "summary": "noc_interconnect.sf: 5-port XY wormhole router, MESH_X x MESH_Y, BUF_DEPTH-deep input buffers. Its packet type defaults to silicaflux_pkg::noc_packet_t, which no package in the repository defines.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+      "regex": "MESH_X\\s*=\\s*2",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+      "regex": "parameter type\\s+pkt_t\\s*=\\s*noc_packet_t",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "noc_router",
+     "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "NOT_ELABORABLE",
+   "anchors": [
+    {
+     "what": "MESH_X\\s*=\\s*2",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+     "line": 84,
+     "text": "parameter int unsigned  MESH_X               = 2,",
+     "found": true
+    },
+    {
+     "what": "parameter type\\s+pkt_t\\s*=\\s*noc_packet_t",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+     "line": 83,
+     "text": "parameter type          pkt_t                = noc_packet_t,",
+     "found": true
+    }
+   ],
+   "lint_ok": false,
+   "lint_errors": [
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:83:50: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:85:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:86:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:87:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:88:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:89:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:90:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:91:3: syntax error, unexpected parameter, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:92:3: syntax error, unexpected localparam, expecting IDENTIFIER or randomize",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:93:1: syntax error, unexpected ')', expecting ';'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:95:3: syntax error, unexpected input",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf:98:3: syntax error, unexpected input"
+   ],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Interconnect / router",
+    "name": "Tile-local crossbar (compute_tile.sf)",
+    "generation": "Gen-2.5",
+    "status": "NOT_ELABORABLE",
+    "summary": "Per-target arbiters with write-burst lock and starvation counters, embedded in the tile.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "XB_STARVE_LIM\\s*=\\s*16",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "compute_tile",
+     "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "NOT_ELABORABLE",
+   "anchors": [
+    {
+     "what": "XB_STARVE_LIM\\s*=\\s*16",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 157,
+     "text": "parameter int unsigned XB_STARVE_LIM  = 16,",
+     "found": true
+    }
+   ],
+   "lint_ok": false,
+   "lint_errors": [
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:307:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:313:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:317:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:320:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:324:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:331:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:335:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:338:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:344:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:348:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:367:33: syntax error, unexpected IDENTIFIER, expecting '(' or ';'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:369:7: syntax error, unexpected return"
+   ],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Interconnect / router",
+    "name": "Coherent / memory fabric (sf_coh_xbar, sf_mem_fabric)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "Cluster-level fabrics instantiated in silicaflux_top.sf; undefined.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_coh_xbar\\s+#\\(",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_mem_fabric\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "sf_mem_router",
+    "docs": []
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "^\\s*sf_coh_xbar\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1388,
+     "text": "",
+     "found": true
+    },
+    {
+     "what": "^\\s*sf_mem_fabric\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1493,
+     "text": "",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Vector register file",
+    "name": "Gen-1 register bank (16 x 128 b)",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "32 x 32 b scalar + 16 x 128 b vector registers.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/register_bank.sv",
+      "regex": "logic \\[VLEN-1:0\\] vregs \\[0:NUM_VREGS-1\\]",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "register_bank",
+     "silicaflux.zip::silicaflux/rtl/register_bank.sv"
+    ],
+    "integrated_in": "silicaflux_top (Gen-1)",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "logic \\[VLEN-1:0\\] vregs \\[0:NUM_VREGS-1\\]",
+     "origin": "silicaflux.zip::silicaflux/rtl/register_bank.sv",
+     "line": 52,
+     "text": "logic [VLEN-1:0] vregs [0:NUM_VREGS-1];",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Vector register file",
+    "name": "Gen-2.5 register bank (16 x 128 b, 3R/1W)",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "Lane-masked VRF with 3 read and 1 write port. One write port bounds tensor results (512 b per 4x4 product) to one product per 4 cycles if they are written back to the VRF.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+      "regex": "VRF_ENTRIES\\s*=\\s*16",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+      "regex": "VRF_WR_PORTS\\s*=\\s*1",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+      "regex": "VRF_RD_PORTS\\s*=\\s*3",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "register_bank",
+     "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "VRF_ENTRIES\\s*=\\s*16",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+     "line": 49,
+     "text": "parameter  int unsigned VRF_ENTRIES        = 16,",
+     "found": true
+    },
+    {
+     "what": "VRF_WR_PORTS\\s*=\\s*1",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+     "line": 53,
+     "text": "parameter  int unsigned VRF_WR_PORTS       = 1,",
+     "found": true
+    },
+    {
+     "what": "VRF_RD_PORTS\\s*=\\s*3",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+     "line": 52,
+     "text": "parameter  int unsigned VRF_RD_PORTS       = 3,",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Tensor accumulation buffer",
+    "name": "Gen-1 tensor unit (sequential 4x4)",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "One 32-bit MAC per cycle, 64 MACs in ~66 cycles; results held in output registers, no accumulation across operations.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/tensor_unit.sv",
+      "regex": "Latency: 64 MAC cycles \\+ 2 state cycles",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "tensor_unit",
+     "silicaflux.zip::silicaflux/rtl/tensor_unit.sv"
+    ],
+    "integrated_in": "silicaflux_top (Gen-1)",
+    "memoryflow": "sf_tensor_array",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "Latency: 64 MAC cycles \\+ 2 state cycles",
+     "origin": "silicaflux.zip::silicaflux/rtl/tensor_unit.sv",
+     "line": 7,
+     "text": "// Latency: 64 MAC cycles + 2 state cycles = ~66 cycles.",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Tensor accumulation buffer",
+    "name": "Gen-2.5 pipelined tensor unit (4x4x4 INT8 / cycle)",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "64 MAC/cycle claimed, 21-cycle latency; output-stationary within one product only. The fused-accumulate input (VEC_FUSE_EN) is reserved and $fatal if set: there is no accumulation buffer.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "tensor_unit.sf",
+      "regex": "Sustained throughput: one DIMxDIM matrix product per cycle",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "tensor_unit.sf",
+      "regex": "VEC_FUSE_EN\\s*=\\s*1'b0",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "tensor_unit.sf",
+      "regex": "reserved extension parameter set",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "tensor_unit",
+     "tensor_unit.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_tensor_array (double-buffered accumulators)",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "Sustained throughput: one DIMxDIM matrix product per cycle",
+     "origin": "tensor_unit.sf",
+     "line": 40,
+     "text": "//  Sustained throughput: one DIMxDIM matrix product per cycle.",
+     "found": true
+    },
+    {
+     "what": "VEC_FUSE_EN\\s*=\\s*1'b0",
+     "origin": "tensor_unit.sf",
+     "line": 56,
+     "text": "parameter bit          VEC_FUSE_EN    = 1'b0   // vector-tensor fused accumulate input",
+     "found": true
+    },
+    {
+     "what": "reserved extension parameter set",
+     "origin": "tensor_unit.sf",
+     "line": 249,
+     "text": "$fatal(1, \"tensor_unit: reserved extension parameter set\");",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Tensor accumulation buffer",
+    "name": "Memory-fetching tensor engine (cmd: a/b/c_addr, k_m1, acc)",
+    "generation": "Gen-2.5",
+    "status": "NOT_ELABORABLE",
+    "summary": "compute_tile.sf drives a tensor engine that fetches operands and accumulates C in the SPM; the in-repo tensor_unit has register operands only (interface drift).",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "cmd\\.k_m1\\s*=\\s*timm\\.k_m1",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+      "regex": "cmd\\.acc\\s*=\\s*timm\\.acc",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "compute_tile",
+     "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "NOT_ELABORABLE",
+   "anchors": [
+    {
+     "what": "cmd\\.k_m1\\s*=\\s*timm\\.k_m1",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 1442,
+     "text": "cmd.k_m1   = timm.k_m1;",
+     "found": true
+    },
+    {
+     "what": "cmd\\.acc\\s*=\\s*timm\\.acc",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+     "line": 1443,
+     "text": "cmd.acc    = timm.acc;",
+     "found": true
+    }
+   ],
+   "lint_ok": false,
+   "lint_errors": [
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:307:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:313:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:317:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:320:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:324:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:331:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:335:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:338:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:344:5: syntax error, unexpected IDENTIFIER, expecting TYPE-IDENTIFIER",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:348:3: syntax error, unexpected '}'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:367:33: syntax error, unexpected IDENTIFIER, expecting '(' or ';'",
+    "%Error: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/sf25/loose/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf:369:7: syntax error, unexpected return"
+   ],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Tensor accumulation buffer",
+    "name": "sfx_accumulator + systolic GEMM (SilicaFlux-AI)",
+    "generation": "SilicaFlux-AI",
+    "status": "STANDALONE",
+    "summary": "Addressable read-modify-write accumulator (32 entries) behind a weight-stationary array; tiles run strictly sequentially (no overlap).",
+    "anchors": [
+     {
+      "set_key": "sfx_ai",
+      "origin": "rtl/arithmetic/sfx_accumulator.sv",
+      "regex": "module sfx_accumulator",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "sfx_gemm_controller",
+     null
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "module sfx_accumulator",
+     "origin": "SilicaFlux2.0/silicafluxai.zip::silicaflux-ai/rtl/arithmetic/sfx_accumulator.sv",
+     "line": 36,
+     "text": "module sfx_accumulator #(",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Tensor accumulation buffer",
+    "name": "Cluster tensor engine (sf_tensor_engine)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "Instantiated in silicaflux_top.sf; undefined.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_tensor_engine\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "^\\s*sf_tensor_engine\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1160,
+     "text": "",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Memory controller",
+    "name": "On-chip SPM controllers (Gen-1, Gen-2.5)",
+    "generation": "Gen-1/2.5",
+    "status": "IMPLEMENTED",
+    "summary": "Both `memory_controller` modules are scratchpad controllers, not DRAM controllers.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "Unified banked scratchpad memory controller",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "Unified banked scratchpad memory controller",
+     "origin": "memory_controller.sf",
+     "line": 7,
+     "text": "//  Unified banked scratchpad memory controller.",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "Memory controller",
+    "name": "SDRAM-style controller FSM (memory_cache_repo)",
+    "generation": "library",
+    "status": "STANDALONE",
+    "summary": "ACTIVATE/CAS/PRECHARGE/REFRESH FSM for teaching; single outstanding request, no PHY.",
+    "anchors": [
+     {
+      "set_key": "memcache",
+      "origin": "rtl/memory_controller.sv",
+      "regex": "DRAM-Style Memory Controller FSM",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_cache_repo/rtl/memory_controller.sv"
+    ],
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "DRAM-Style Memory Controller FSM",
+     "origin": "memory_cache_repo.zip::memory_cache_repo/rtl/memory_controller.sv",
+     "line": 2,
+     "text": "//  memory_controller.sv  \u00b7  DRAM-Style Memory Controller FSM",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [
+    "%Error-UNSUPPORTED: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/memory_controller.sv:368:32: Unsupported: ## range cycle delay range expression",
+    "%Error-UNSUPPORTED: /home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/memory_controller.sv:368:57: Unsupported: ## (in sequence expression)",
+    "%Error: Exiting due to 2 error(s)",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/memory_controller.sv:357: syntax error",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/memory_controller.sv:357: error: Invalid module item.",
+    "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_src/memcache/memory_cache_repo/memory_cache_repo/rtl/memory_controller.sv:358: syntax error"
+   ],
+   "note": "elaboration inconclusive: Verilator and Icarus both stop on legal SV they do not support (## range cycle delay range expression; ## (in sequence expression))"
+  },
+  {
+   "block": {
+    "category": "Memory controller",
+    "name": "SilicaFlux DDR / LPDDR controller",
+    "generation": "all",
+    "status": "ABSENT",
+    "summary": "No DRAM controller exists for any SilicaFlux generation.",
+    "anchors": [],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "DDR4/LPDDR4 controller IP behind an SF-MEM -> AXI4 bridge (proposed)",
+    "docs": []
+   },
+   "status": "ABSENT",
+   "anchors": [],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "External memory interface",
+    "name": "Cluster AXI memory ports (2 x AXI master)",
+    "generation": "Gen-2.5",
+    "status": "REFERENCED_ONLY",
+    "summary": "silicaflux_top.sf declares NUM_MEM_PORTS AXI masters behind sf_mem_fabric / sf_axi_edge, neither of which exists.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "NUM_MEM_PORTS\\s*=\\s*2",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "mem_axi_req_o",
+      "what": ""
+     },
+     {
+      "set_key": "sf25",
+      "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+      "regex": "^\\s*sf_axi_edge\\s+#\\(",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": [
+     "sfv_no_dram"
+    ]
+   },
+   "status": "REFERENCED_ONLY",
+   "anchors": [
+    {
+     "what": "NUM_MEM_PORTS\\s*=\\s*2",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 36,
+     "text": "parameter int unsigned NUM_MEM_PORTS          = 2,",
+     "found": true
+    },
+    {
+     "what": "mem_axi_req_o",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 93,
+     "text": "output sf_axi_req_t [NUM_MEM_PORTS-1:0]         mem_axi_req_o,",
+     "found": true
+    },
+    {
+     "what": "^\\s*sf_axi_edge\\s+#\\(",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+     "line": 1517,
+     "text": "",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "External memory interface",
+    "name": "Gen-1 chiplet tile interface",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "Serialises 32-bit NoC flits over an 8/16/32-bit link (die-to-die, not a DRAM interface).",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/tile_interface.sv",
+      "regex": "Serialises 32-bit NoC flits over a narrow parallel link",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "tile_interface",
+     "silicaflux.zip::silicaflux/rtl/tile_interface.sv"
+    ],
+    "integrated_in": "silicaflux_top (Gen-1)",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "Serialises 32-bit NoC flits over a narrow parallel link",
+     "origin": "silicaflux.zip::silicaflux/rtl/tile_interface.sv",
+     "line": 6,
+     "text": "// deployments. Serialises 32-bit NoC flits over a narrow parallel link",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "External memory interface",
+    "name": "DDR / LPDDR / HBM PHY",
+    "generation": "all",
+    "status": "ABSENT",
+    "summary": "No PHY or PHY model in the repository.",
+    "anchors": [],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "sf_extmem_model (behavioural, latency/bandwidth) + PHY presets in models.hardware",
+    "docs": []
+   },
+   "status": "ABSENT",
+   "anchors": [],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "ECC / parity",
+    "name": "Gen-2.5 per-byte parity",
+    "generation": "Gen-2.5",
+    "status": "IMPLEMENTED",
+    "summary": "Detection only; exceptions SF_MEM_EXC_ECC on load. No correction, no injection hook.",
+    "anchors": [
+     {
+      "set_key": "sf25",
+      "origin": "memory_controller.sf",
+      "regex": "PARITY_EN\\s*=\\s*1'b1",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "memory_controller",
+     "memory_controller.sf"
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_ecc_secded_enc/dec + sf_sram_bank (SECDED, scrub on RMW, injection)",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "PARITY_EN\\s*=\\s*1'b1",
+     "origin": "memory_controller.sf",
+     "line": 116,
+     "text": "parameter logic        PARITY_EN         = 1'b1,",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "ECC / parity",
+    "name": "Gen-1 link parity placeholder",
+    "generation": "Gen-1",
+    "status": "IMPLEMENTED",
+    "summary": "Flag-only parity on chiplet beats; SPM has no protection.",
+    "anchors": [
+     {
+      "set_key": "sf1",
+      "origin": "silicaflux.zip::silicaflux/rtl/tile_interface.sv",
+      "regex": "ECC placeholder",
+      "what": ""
+     }
+    ],
+    "lint": null,
+    "integrated_in": "",
+    "memoryflow": "",
+    "docs": []
+   },
+   "status": "IMPLEMENTED",
+   "anchors": [
+    {
+     "what": "ECC placeholder",
+     "origin": "silicaflux.zip::silicaflux/rtl/tile_interface.sv",
+     "line": 18,
+     "text": "//   - ECC placeholder (parity bit on each beat, not correcting \u2014 flag only)",
+     "found": true
+    }
+   ],
+   "lint_ok": null,
+   "lint_errors": [],
+   "note": ""
+  },
+  {
+   "block": {
+    "category": "MBIST",
+    "name": "TestCore MBIST controller + collar",
+    "generation": "SilicaFlux-DFT",
+    "status": "STANDALONE",
+    "summary": "March-style MBIST with a collar for a generic SRAM; not connected to any SilicaFlux SPM.",
+    "anchors": [
+     {
+      "set_key": "testcore",
+      "origin": "rtl/tc_mbist.sv",
+      "regex": "module tc_mbist",
+      "what": ""
+     },
+     {
+      "set_key": "testcore",
+      "origin": "rtl/tc_mbist_collar.sv",
+      "regex": "module tc_mbist_collar",
+      "what": ""
+     }
+    ],
+    "lint": [
+     "tc_mbist",
+     null
+    ],
+    "integrated_in": "",
+    "memoryflow": "sf_mbist_march (parallel banks, wired into sf_spm_banked)",
+    "docs": [
+     "sfv_mbist"
+    ]
+   },
+   "status": "STANDALONE",
+   "anchors": [
+    {
+     "what": "module tc_mbist",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_mbist.sv",
+     "line": 45,
+     "text": "module tc_mbist",
+     "found": true
+    },
+    {
+     "what": "module tc_mbist_collar",
+     "origin": "SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip::silicaflux-testcore/rtl/tc_mbist_collar.sv",
+     "line": 21,
+     "text": "module tc_mbist_collar #(",
+     "found": true
+    }
+   ],
+   "lint_ok": true,
+   "lint_errors": [],
+   "note": ""
+  }
+ ]
+}

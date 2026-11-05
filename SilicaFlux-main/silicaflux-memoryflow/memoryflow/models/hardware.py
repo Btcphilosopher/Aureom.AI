@@ -190,7 +190,7 @@ class SystemConfig:
     name: str = "SilicaFlux-V"
     # Replicated compute tiles (tensor + vector + SPM + DMA each) sharing ONE
     # external-memory interface.  1 = SilicaFlux-V; the full SilicaFlux cluster
-    # (silicaflux_top.sf: 2 complexes x 4 cores) is modelled with tiles = 4..16.
+    # (silicaflux_top.sf: 2 complexes x 4 cores) is modelled with tiles = 4..32.
     tiles: int = 1
 
     def with_(self, **kw) -> "SystemConfig":

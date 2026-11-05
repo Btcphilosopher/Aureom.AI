@@ -58,7 +58,7 @@ From `reports/inventory.md` (246 HDL files, 94.5 k lines, 11 source sets):
 * The SilicaFlux 2.5 tensor unit sustains 63 MAC/cycle in isolation (RTL) but reaches ~9 % of its
   peak inside its tile, because it has no accumulation buffer behind a 16 B/cycle vector port and a
   single 128-bit register write port. MemoryFlow's outer-product array with in-array accumulators
-  reaches ~30× the dense throughput in a similar area.
+  reaches ~30× the dense throughput in ~1.3× the area (4.6 vs 3.5 mm²).
 * Recommended SilicaFlux-V (65 nm, 200 MHz): 128 KiB SPM in 4 banks × 128 b with XOR interleave and
   SECDED, 16×16 INT8 tensor array with double-buffered accumulators, 8 × 16-bit vector lanes, a DMA
   with 16 outstanding reads and 32 outstanding write acknowledgements, DDR3-1600 x16 (LPDDR2-800 x32
@@ -66,8 +66,10 @@ From `reports/inventory.md` (246 HDL files, 94.5 k lines, 11 source sets):
   the DDR3 suite geomean. The documented no-DRAM part runs streaming kernels ~20× slower than the
   same machine with DDR3.
 * 130 nm only works if SilicaFlux-V drops to 128 KiB: the documented 256 KiB costs ~6.9 mm² there.
-* Full SilicaFlux: 16 tiles per memory interface; multi-channel LPDDR4X (28 nm) or LPDDR5 4×32
-  (16 nm, ~2/3 of HBM2E's performance at under half the power). HBM is a stretch option.
+* Full SilicaFlux (assumed envelopes): behind LPDDR the performance-per-area knee is ~8 tiles per
+  memory interface (28 nm, LPDDR4X 2×32: ~127 Gop/s in 13 mm², 1.75 W); past 32 tiles each doubling adds
+  under 10 %. At 16 nm, LPDDR5 4×32 reaches ~45 % of HBM2E's performance at ~40 % of its power without
+  an interposer; behind HBM more tiles keep paying. HBM is the stretch option.
 
 ## Repository map
 

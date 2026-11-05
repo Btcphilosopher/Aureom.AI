@@ -1,128 +1,176 @@
 {
-  "version": "1.0.0",
-  "generated": "2026-11-03T19:45:17",
+  "version": "2.0.0",
+  "generated": "2026-11-05T14:07:45",
   "budget": {
-    "node_nm": 40,
-    "clock_hz": 500000000.0,
-    "max_core_area_mm2": 12.0,
-    "max_power_w": 1.5,
+    "node_nm": 65,
+    "clock_hz": 200000000.0,
+    "max_core_area_mm2": 8.0,
+    "max_power_w": 1.0,
     "require_mature_dram": true,
-    "min_cpu_cores": 1
+    "min_cpu_cores": 1,
+    "name": "silicaflux-v-65",
+    "source": "DOCUMENTED: SilicaFlux-V reduced-ASIC p.1/p.3, 03-11-26 update p.7-9"
   },
   "recommendation": {
     "Minimal": {
-      "label": "128KiB/4b/128w T16x16 V8 B16/F64 DDR4-2400 x16",
-      "geomean_gops": 12.760616922401393,
-      "dense_gops": 180.47854299624603,
-      "stream_gops": 2.181904482553618,
-      "total_area_mm2": 3.4509416546520146,
-      "power_w": 0.47619642459794165,
-      "pj_per_op": 27.99232879639766,
-      "dma_bw_gbs": 7.529411764705882,
-      "dram_bw_gbs": 3.36,
+      "label": "128KiB/4b/128w T8x8 V8 B16/F16 DDR3-1600 x16",
+      "geomean_gops": 3.9560695437260147,
+      "dense_gops": 25.599999999999973,
+      "stream_gops": 1.1392347372253273,
+      "total_area_mm2": 3.7389100723809525,
+      "power_w": 0.4795130739569455,
+      "pj_per_op": 46.64203188666927,
+      "dma_bw_gbs": 1.9692307692307693,
+      "dram_bw_gbs": 2.08,
       "feasible": true,
       "reasons": [],
       "provenance": "ANALYTICAL",
-      "area_tensor": 0.5903179371428571,
-      "area_vector": 0.07810385428571429,
-      "area_dma": 0.21535395428571427,
-      "area_spm_logic": 0.021931494285714285,
-      "area_cpu": 0.06085714285714286,
-      "area_spm_sram": 0.3779866256410256,
-      "area_cpu_l1": 0.10639064615384614,
-      "area_dram_phy": 2.0,
-      "perf_per_mm2": 3.697720274464665,
+      "area_tensor": 0.2993161371428571,
+      "area_vector": 0.15840781714285715,
+      "area_dma": 0.2724661028571428,
+      "area_spm_logic": 0.04448077714285714,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.8122026666666669,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 1.8,
+      "perf_per_mm2": 1.0580809559847943,
       "cfg_spm_kib": 128,
       "cfg_banks": 4,
       "cfg_width": 128,
       "cfg_burst": 16,
-      "cfg_dfifo": 64,
+      "cfg_dfifo": 16,
+      "cfg_wout": 8,
       "cfg_lanes": 8,
-      "cfg_tensor": "16x16",
+      "cfg_tensor": "8x8",
       "cfg_cores": 1,
-      "cfg_extmem": "DDR4-2400 x16",
-      "cfg_node": 40,
-      "cfg_clock_mhz": 500.0
+      "cfg_tiles": 1,
+      "cfg_extmem": "DDR3-1600 x16",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
     },
     "Recommended": {
-      "label": "128KiB/8b/128w T16x16 V8 B16/F64 DDR4-3200 x32",
-      "geomean_gops": 17.801542112915847,
-      "dense_gops": 193.36986749597793,
-      "stream_gops": 3.629416786960837,
-      "total_area_mm2": 4.702657764322344,
-      "power_w": 1.0440954076719733,
-      "pj_per_op": 27.558375323809532,
-      "dma_bw_gbs": 7.529411764705882,
-      "dram_bw_gbs": 8.96,
+      "label": "128KiB/4b/128w T16x16 V8 B16/F16 DDR3-1600 x16",
+      "geomean_gops": 6.0219733684333505,
+      "dense_gops": 72.19141719849836,
+      "stream_gops": 1.1496730188082263,
+      "total_area_mm2": 4.636858483809524,
+      "power_w": 0.4812774339569454,
+      "pj_per_op": 46.53773080891784,
+      "dma_bw_gbs": 1.9692307692307693,
+      "dram_bw_gbs": 2.08,
       "feasible": true,
       "reasons": [],
       "provenance": "ANALYTICAL",
-      "area_tensor": 0.5903179371428571,
-      "area_vector": 0.07810385428571429,
-      "area_dma": 0.21535395428571427,
-      "area_spm_logic": 0.04386298857142857,
-      "area_cpu": 0.06085714285714286,
-      "area_spm_sram": 0.407771241025641,
-      "area_cpu_l1": 0.10639064615384614,
-      "area_dram_phy": 3.2,
-      "perf_per_mm2": 3.7854215647948726,
+      "area_tensor": 1.1972645485714284,
+      "area_vector": 0.15840781714285715,
+      "area_dma": 0.2724661028571428,
+      "area_spm_logic": 0.04448077714285714,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.8122026666666669,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 1.8,
+      "perf_per_mm2": 1.2987183864808942,
       "cfg_spm_kib": 128,
-      "cfg_banks": 8,
+      "cfg_banks": 4,
       "cfg_width": 128,
       "cfg_burst": 16,
-      "cfg_dfifo": 64,
+      "cfg_dfifo": 16,
+      "cfg_wout": 32,
       "cfg_lanes": 8,
       "cfg_tensor": "16x16",
       "cfg_cores": 1,
-      "cfg_extmem": "DDR4-3200 x32",
-      "cfg_node": 40,
-      "cfg_clock_mhz": 500.0
+      "cfg_tiles": 1,
+      "cfg_extmem": "DDR3-1600 x16",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
     },
     "Stretch": {
-      "label": "1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-3200 x32",
-      "geomean_gops": 19.359106600362793,
-      "dense_gops": 205.2887065153554,
-      "stream_gops": 4.010810530835048,
-      "total_area_mm2": 7.243504055457875,
-      "power_w": 1.1094000285135215,
-      "pj_per_op": 27.988553688556696,
-      "dma_bw_gbs": 7.529411764705882,
-      "dram_bw_gbs": 8.96,
+      "label": "512KiB/16b/128w T16x16 V8 B16/F64 LPDDR2-800 x32",
+      "geomean_gops": 6.536573033825747,
+      "dense_gops": 82.11548260614208,
+      "stream_gops": 1.2095769350317427,
+      "total_area_mm2": 7.77121692952381,
+      "power_w": 0.2531796214198815,
+      "pj_per_op": 24.149945567779298,
+      "dma_bw_gbs": 3.011764705882353,
+      "dram_bw_gbs": 2.08,
       "feasible": true,
       "reasons": [],
       "provenance": "ANALYTICAL",
-      "area_tensor": 0.5903179371428571,
-      "area_vector": 0.07810385428571429,
-      "area_dma": 0.21535395428571427,
-      "area_spm_logic": 0.08772597714285714,
-      "area_cpu": 0.06085714285714286,
-      "area_spm_sram": 2.904754543589743,
-      "area_cpu_l1": 0.10639064615384614,
-      "area_dram_phy": 3.2,
-      "perf_per_mm2": 2.6726162437606407,
-      "cfg_spm_kib": 1024,
+      "area_tensor": 1.1972645485714284,
+      "area_vector": 0.15840781714285715,
+      "area_dma": 0.43677421714285714,
+      "area_spm_logic": 0.17792310857142857,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 3.2488106666666674,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 2.2,
+      "perf_per_mm2": 0.8411260544011455,
+      "cfg_spm_kib": 512,
       "cfg_banks": 16,
       "cfg_width": 128,
       "cfg_burst": 16,
       "cfg_dfifo": 64,
+      "cfg_wout": 32,
       "cfg_lanes": 8,
       "cfg_tensor": "16x16",
       "cfg_cores": 1,
-      "cfg_extmem": "DDR4-3200 x32",
-      "cfg_node": 40,
-      "cfg_clock_mhz": 500.0
+      "cfg_tiles": 1,
+      "cfg_extmem": "LPDDR2-800 x32",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
     }
   },
   "rationale": [
-    "864 of 1440 evaluated configurations fit the mature-node budget.",
-    "Best feasible suite geomean: 19.36 Gop/s (1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-3200 x32, 7.2 mm2).",
-    "Recommended = smallest-area point within 90 % of that: 17.80 Gop/s in 4.7 mm2.",
-    "DMA path 7.53 GB/s vs DRAM sustained 8.96 GB/s."
+    "2484 of 2880 evaluated configurations fit the budget.",
+    "Best feasible suite geomean: 6.54 Gop/s (512KiB/16b/128w T16x16 V8 B16/F64 LPDDR2-800 x32, 7.8 mm2).",
+    "Recommended = smallest-area point within 90 % of that: 6.02 Gop/s in 4.6 mm2.",
+    "DMA path 1.97 GB/s vs DRAM sustained 2.08 GB/s."
   ],
   "findings": [
     {
-      "title": "DMA outstanding capacity, not DRAM, limits streaming kernels in the RTL reference.",
-      "detail": "With 16 outstanding 64-bit beats and ~90 ns DRAM latency the DMA path sustains 1.23 GB/s against 8.96 GB/s of DDR4-3200 x32. Covering the bandwidth-delay product of the recommended memory needs >= 51 128-bit beats in flight; the recommendation uses 64."
+      "title": "The SilicaFlux 2.5 tensor unit is starved by its own memory system.",
+      "detail": "In isolation it sustains 63.4 MAC/cycle (RTL_SIMULATION). It has no accumulation buffer, so every 4x4x4 product moves 32 B of operands in and 64 B of INT32 partials out; the tile's 16 B/cycle vector port and single 128-bit register write port cap it at 9 % of peak on a 512^3 GEMM even with MemoryFlow's DMA and DDR3 (2.40 of 25.3 Gop/s; bound: spm). The recommended outer-product array with in-array accumulators reaches 71.7 Gop/s (30x) in 4.6 mm^2."
+    },
+    {
+      "title": "The SilicaFlux 2.x hierarchy above the tile exists only as instantiations.",
+      "detail": "silicaflux_top.sf (Gen-2.5) instantiates 27 module types; 26 of them (31 of 32 instances) are defined nowhere in the repository, including the L2 (sf_l2_cache, 2 MiB/complex), the LLC (sf_llc_bank, 8 x 4 MiB), the coherent crossbar, the memory fabric / AXI edge and the DMA bridge; the earlier silicaflux_rtl*.zip tops leave 10 of 11 types undefined. Only the Gen-1 top is complete. No SilicaFlux generation has a DRAM controller or PHY, so the external-memory side of the processor has to be designed, not integrated; MemoryFlow supplies the DMA, router, SPM, bridge and models for it."
+    },
+    {
+      "title": "The Gen-2.5 compute tile cannot be elaborated from repository sources.",
+      "detail": "instance u_memory_controller of `memory_controller` (memory_controller.sf:94): 7/9 named ports and 2/2 parameters absent on the definition (e.g. req_valid_i, req_i, req_ready_o, rsp_valid_o). 29 of 30 package types used are defined by no package in set `sf25` (e.g. sf_alu_req_t, sf_alu_rsp_t, sf_br_mask_t, sf_br_res_t). The 2.5 testbenches tb_memory_controller.sf and tb_tensor_unit.sf also target interfaces the in-repo modules do not have. The individual units (memory_controller.sf, tensor_unit.sf, vector_engine.sf, register_bank.sf) do elaborate and were characterised directly."
+    },
+    {
+      "title": "The documented SRAM area is about 3x optimistic.",
+      "detail": "The reduced-ASIC plan prices 256 KB at ~0.5 mm^2 using a 0.12 um^2 bitcell at 65 nm, about 4x smaller than published 65 nm high-density 6T cells (~0.52 um^2); with macro periphery MemoryFlow estimates 1.46 mm^2 at 65 nm and 6.89 mm^2 at 130 nm (ANALYTICAL, replace with memory-compiler data). At 130 nm the documented 256 KiB alone exceeds the 8 mm^2 core budget."
+    },
+    {
+      "title": "The Gen-2.5 scratchpad controller is sound; its burst port is the weak link.",
+      "detail": "150k+ self-checks pass on the unmodified memory_controller.sf (random traffic with backpressure, range/domain/overflow protection, parity detection, burst kill). Each port sustains ~1 request/cycle with a 3-cycle load latency; three requesters together move 29.9 B/cycle. The burst ('DMA') port allows one descriptor in flight with a done handshake, costing 3 (store) / 4 (load) cycles per burst: 0.20 beats/cycle at 1 beat, 0.80 at 16. A second descriptor slot would hide it."
+    },
+    {
+      "title": "Gen-1 DFLOAD/DFSTORE bursts longer than 4 words are broken, and its SPM needs two write ports.",
+      "detail": "tb_sf1_memctrl: a DFSTORE of 8 words leaves 4 words unwritten and a DFLOAD of 8 re-reads words 0..3 (burst_addr never advances; the 128-bit buffer index wraps). The tile write-back port and the FSM write the array in the same cycle (2 writes measured), which no single-port SRAM macro can implement. Gen-1 bandwidth: 2.29 B/cycle per tile."
+    },
+    {
+      "title": "DMA write acknowledgements, not reads, limit write-back to memory.",
+      "detail": "MemoryFlow sf_dma driving the unmodified 2.5 SPM through sf_mc25_vport_bridge: EXT->SPM 11.4 B/cycle, but SPM->EXT only 6.06 B/cycle: 8 outstanding write acks against a 20-cycle memory (Little's law: 8/21 x 16 B = 6.10). The models now carry this DMA write path (WOUT is an exploration dimension). SPM->SPM copies reach 8.0 B/cycle because reads and writes share the controller's single vector port."
+    },
+    {
+      "title": "130 nm is a fallback only if SilicaFlux-V shrinks to 128 KiB.",
+      "detail": "At 130 nm / 100 MHz no configuration with more than 128 KiB of SPM fits the 8 mm^2 core budget, and the best point reaches 1.28 Gop/s (vs 6.02 at 65 nm). DDR-class PHYs are not assumed at 130 nm; HyperRAM is the practical external memory there."
+    },
+    {
+      "title": "For the full SilicaFlux, multi-channel LPDDR is the commercial sweet spot; HBM is a stretch option.",
+      "detail": "At 28 nm (no HBM PHY assumed) the recommended full chip is 32x 256KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32: 193 Gop/s suite geomean in 37 mm^2, 3.2 W; a single LPDDR4X x32 channel caps any configuration at 109 Gop/s. At 16 nm, LPDDR5 4x32 reaches 539 Gop/s (45 % of HBM2E's 1197) at 5.6 W vs 14.7 W, on an organic package instead of a 2.5D interposer. Tile scaling: 32 -> 64 tiles behind LPDDR4X-4266 2x32: +9 % performance for +83 % area (80 % of kernels bound by external memory or the DMA); 32 -> 64 tiles behind HBM2E 1 stack: +54 % performance for +45 % area (40 % of kernels bound by external memory or the DMA). Behind LPDDR the knee is well below the recommendation rule's pick (see the best-Gop/s-per-mm^2 rows); behind HBM more tiles keep paying. Full-chip envelopes are ASSUMPTIONS."
+    },
+    {
+      "title": "A no-DRAM SilicaFlux-V demonstrates the core but starves the accelerators.",
+      "detail": "The documented no-DRAM target reaches 0.208 Gop/s suite geomean (QSPI-class link); the same machine with DDR3-1600 x16 reaches 1.55. On the 65 nm budget the best points per external memory are: QSPI 104 MHz (no DRAM) 0.25 Gop/s in 7.3 mm^2; HyperRAM 200 MHz x8 1.92 Gop/s in 5.5 mm^2; 2x HyperRAM 200 MHz x8 3.18 Gop/s in 5.5 mm^2; LPDDR2-800 x32 6.54 Gop/s in 7.8 mm^2; DDR3-1600 x16 6.54 Gop/s in 7.4 mm^2. HyperRAM (digital PHY, ~12 pins) is the low-cost, mature-node option; DDR3/LPDDR2 buys ~2-3x more."
+    },
+    {
+      "title": "Outstanding DMA capacity must cover the external memory's bandwidth-delay product.",
+      "detail": "RTL reference (16 outstanding 64-bit beats, LPDDR2-800 x32, ~100 ns at 200 MHz): DMA read path 0.95 GB/s, write path 0.47 GB/s, DRAM sustained 2.08 GB/s. Covering the bandwidth-delay product of the recommended memory (DDR3-1600 x16) needs >= 13 128-bit beats in flight; the recommendation uses 16 outstanding reads and 32 outstanding write acks."
     },
     {
       "title": "A single shared DMA engine deadlocks against its own accelerator.",
@@ -166,16 +214,17 @@
           "sf_vec_unit"
         ]
       },
+      "Interconnect / router": {
+        "SYNTHESIZABLE": [
+          "sf_mc25_vport_bridge",
+          "sf_rr_arbiter",
+          "sf_mem_router"
+        ]
+      },
       "FIFO / flow control": {
         "SYNTHESIZABLE": [
           "sf_fifo",
           "sf_skid_buffer"
-        ]
-      },
-      "Interconnect / router": {
-        "SYNTHESIZABLE": [
-          "sf_rr_arbiter",
-          "sf_mem_router"
         ]
       },
       "DMA engine": {
@@ -243,6 +292,11 @@
       },
       "testbench": {
         "TESTBENCH": [
+          "tb_sf1_memctrl",
+          "tb_sf1_tensor",
+          "tb_sf25_dma_bridge",
+          "tb_sf25_memctrl",
+          "tb_sf25_tensor",
           "tb_deadlock",
           "tb_param_smoke",
           "tb_system",
@@ -277,8 +331,8 @@
         "ecc_single_bit_injections": 28416.0,
         "ecc_double_bit_injections": 79128.0
       },
-      "seconds": 24.35,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/ecc/sim.log",
+      "seconds": 20.12,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/ecc/sim.log",
       "description": "SECDED K=32/64 vs Python golden; exhaustive 1-bit and 2-bit injection",
       "provenance": "RTL_SIMULATION"
     },
@@ -292,8 +346,8 @@
       "metrics": {
         "sram_1rw_random_reads": 9107.0
       },
-      "seconds": 9.23,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/sram_prims/sim.log",
+      "seconds": 6.49,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/sram_prims/sim.log",
       "description": "1RW inferred vs macro-tiled equivalence, 1R1W read-first, 2RW",
       "provenance": "RTL_SIMULATION"
     },
@@ -308,8 +362,8 @@
         "bank_random_ops_cycles": 9355.0,
         "bank_partial_writes": 2062.0
       },
-      "seconds": 10.49,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_secded/sim.log",
+      "seconds": 6.49,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/bank_secded/sim.log",
       "description": "bank: SECDED, byte-enable RMW, injection, RMW-uncorrectable suppression",
       "provenance": "RTL_SIMULATION"
     },
@@ -324,8 +378,8 @@
         "bank_random_ops_cycles": 7542.0,
         "bank_partial_writes": 2062.0
       },
-      "seconds": 4.75,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_parity/sim.log",
+      "seconds": 3.6,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/bank_parity/sim.log",
       "description": "bank: per-byte parity, native byte enables, detection",
       "provenance": "RTL_SIMULATION"
     },
@@ -340,8 +394,8 @@
         "bank_random_ops_cycles": 7542.0,
         "bank_partial_writes": 2062.0
       },
-      "seconds": 4.44,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/bank_noecc_macro/sim.log",
+      "seconds": 3.91,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/bank_noecc_macro/sim.log",
       "description": "bank: no ECC on the foundry-macro abstraction (IMPL=1)",
       "provenance": "RTL_SIMULATION"
     },
@@ -363,8 +417,8 @@
         "spm_single_port_throughput": 1.0,
         "spm_conflict_cycles": 7811.0
       },
-      "seconds": 14.39,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_mod/sim.log",
+      "seconds": 8.34,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/spm_mod/sim.log",
       "description": "SPM random multi-port + contention + backpressure + overflow, modulo map",
       "provenance": "RTL_SIMULATION"
     },
@@ -386,8 +440,8 @@
         "spm_single_port_throughput": 1.0,
         "spm_conflict_cycles": 7875.0
       },
-      "seconds": 15.1,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_xor/sim.log",
+      "seconds": 8.29,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/spm_xor/sim.log",
       "description": "SPM same suite with XOR-hash interleave",
       "provenance": "RTL_SIMULATION"
     },
@@ -409,8 +463,8 @@
         "spm_single_port_throughput": 1.0,
         "spm_conflict_cycles": 8280.0
       },
-      "seconds": 17.03,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_block_8b/sim.log",
+      "seconds": 10.57,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/spm_block_8b/sim.log",
       "description": "SPM same suite, block interleave, 8 banks",
       "provenance": "RTL_SIMULATION"
     },
@@ -432,8 +486,8 @@
         "spm_single_port_throughput": 0.500489,
         "spm_conflict_cycles": 3235.0
       },
-      "seconds": 15.73,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/spm_rsp2/sim.log",
+      "seconds": 8.54,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/spm_rsp2/sim.log",
       "description": "SPM with shallow response FIFO (credit-limited throughput)",
       "provenance": "RTL_SIMULATION"
     },
@@ -448,8 +502,8 @@
         "mbist_march_c_cycles": 2817.0,
         "mbist_words_per_bank": 256.0
       },
-      "seconds": 12.21,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_clean/sim.log",
+      "seconds": 7.2,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/mbist_clean/sim.log",
       "description": "March C- on fault-free SPM banks -> pass",
       "provenance": "RTL_SIMULATION"
     },
@@ -464,8 +518,8 @@
         "mbist_march_c_cycles": 2817.0,
         "mbist_words_per_bank": 256.0
       },
-      "seconds": 11.28,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/mbist_fault/sim.log",
+      "seconds": 7.7,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/mbist_fault/sim.log",
       "description": "March C- with injected stuck-at cell -> fail, bank/addr located",
       "provenance": "RTL_SIMULATION"
     },
@@ -480,8 +534,8 @@
         "router_reads": 4000.0,
         "router_writes": 1500.0
       },
-      "seconds": 4.46,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/router/sim.log",
+      "seconds": 3.58,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/router/sim.log",
       "description": "address router: ordering across unequal slave latencies, decode errors",
       "provenance": "RTL_SIMULATION"
     },
@@ -510,8 +564,8 @@
         "dma_spm2spm_4k_burst16_cycles": 652.0,
         "dma_spm2spm_4k_burst16_skew1_cycles": 556.0
       },
-      "seconds": 24.7,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/dma/sim.log",
+      "seconds": 12.62,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/dma/sim.log",
       "description": "DMA: mem2mem, ext<->SPM, 2-D, streams, boundaries, errors, IRQ, multi-channel",
       "provenance": "RTL_SIMULATION"
     },
@@ -532,8 +586,8 @@
         "tensor_dbuf1_k32_mac_util": 0.885813,
         "tensor_dbuf0_k32_mac_util": 0.497087
       },
-      "seconds": 15.8,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/accel/sim.log",
+      "seconds": 10.95,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/accel/sim.log",
       "description": "tensor array vs golden (K=1,8,37), double-buffer timing, vec ops, reuse buffer",
       "provenance": "RTL_SIMULATION"
     },
@@ -556,8 +610,8 @@
         "sys_spm_conflict_cycles": 0.0,
         "sys_mbist_cycles": 11268.0
       },
-      "seconds": 18.83,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/system/sim.log",
+      "seconds": 12.34,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/system/sim.log",
       "description": "full subsystem: GEMM with B reuse, vector add/axpy/dot, ECC + MBIST via regs",
       "provenance": "RTL_SIMULATION"
     },
@@ -575,8 +629,8 @@
         "deadlock_beats_b": 0.0,
         "deadlock_beats_result": 0.0
       },
-      "seconds": 15.66,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo4/sim.log",
+      "seconds": 8.3,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/deadlock_fifo4/sim.log",
       "description": "joined-stream deadlock: operand FIFO (4) < DMA burst (16) -> watchdog fires",
       "provenance": "RTL_SIMULATION"
     },
@@ -591,8 +645,8 @@
         "param_dw": 128.0,
         "param_tensor_rows": 16.0
       },
-      "seconds": 38.5,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_recommended/sim.log",
+      "seconds": 21.09,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/param_recommended/sim.log",
       "description": "recommended prototype parameterisation: 128-bit, 8 banks XOR, 16x16 tensor, 8 lanes, FIFO 64",
       "provenance": "RTL_SIMULATION"
     },
@@ -607,8 +661,8 @@
         "param_dw": 64.0,
         "param_tensor_rows": 8.0
       },
-      "seconds": 20.99,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/param_reference/sim.log",
+      "seconds": 10.05,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/param_reference/sim.log",
       "description": "same smoke test at the reference parameterisation (cross-check of the parametric TB)",
       "provenance": "RTL_SIMULATION"
     },
@@ -626,8 +680,8 @@
         "deadlock_beats_b": 256.0,
         "deadlock_beats_result": 256.0
       },
-      "seconds": 14.94,
-      "log_path": "/home/claude/silicaflux-memoryflow/build/rtl/deadlock_fifo16/sim.log",
+      "seconds": 8.74,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/rtl/deadlock_fifo16/sim.log",
       "description": "same scenario with FIFO >= burst -> completes",
       "provenance": "RTL_SIMULATION"
     }
@@ -1228,10 +1282,10 @@
       "name": "GEMM 16x8x32 (RTL)",
       "unit": "tensor",
       "ai": 6.4,
-      "perf": 25600000000.0,
+      "perf": 10240000000.0,
       "bound": "measured",
       "provenance": "RTL_SIMULATION",
-      "peak": 64000000000.0,
+      "peak": 25600000000.0,
       "utilisation": 0.4,
       "note": "8192 ops in 160 cycles",
       "config": "RTL reference"
@@ -1240,13 +1294,1058 @@
       "name": "VADD 256 (RTL)",
       "unit": "vector",
       "ai": 0.16666666666666666,
-      "perf": 790123456.7901235,
+      "perf": 316049382.7160494,
       "bound": "measured",
       "provenance": "RTL_SIMULATION",
-      "peak": 4000000000.0,
+      "peak": 1600000000.0,
       "utilisation": 0.19753086419753085,
       "note": "256 ops in 162 cycles",
       "config": "RTL reference"
     }
-  ]
+  ],
+  "silicaflux_inventory": {
+    "available": true,
+    "root": "/home/user/Aureom.AI/SilicaFlux-main",
+    "files": 246,
+    "lines": 94507,
+    "modules": 178
+  },
+  "documented_targets": {
+    "sfv_perf": {
+      "key": "sfv_perf",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "~20 MIPS at 100 MHz",
+      "value": 100000000.0,
+      "unit": "Hz",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_die": {
+      "key": "sfv_die",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "<10 mm\u00b2 die",
+      "value": 10.0,
+      "unit": "mm2",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_power": {
+      "key": "sfv_power",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "<1 W)",
+      "value": 1.0,
+      "unit": "W",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_cores": {
+      "key": "sfv_cores",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "Reduce from 8 cores to 1 core",
+      "value": 1,
+      "unit": "cores",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_l1": {
+      "key": "sfv_l1",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "16 KB I + 16 KB D L1 caches",
+      "value": 16384,
+      "unit": "B per cache",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_l2": {
+      "key": "sfv_l2",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "256 KB L2 block (acting as a scratchpad)",
+      "value": 262144,
+      "unit": "B",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_no_dram": {
+      "key": "sfv_no_dram",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "we suggest no external DRAM",
+      "value": null,
+      "unit": "",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_no_vector": {
+      "key": "sfv_no_vector",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 1,
+      "quote": "no vector unit",
+      "value": null,
+      "unit": "",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_node": {
+      "key": "sfv_node",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 3,
+      "quote": "We lean toward 65 nm as a sweet spot; 130 nm is a fallback",
+      "value": 65,
+      "unit": "nm",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_l2_macro": {
+      "key": "sfv_l2_macro",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 7,
+      "quote": "32K * 64 * bitcell_area (~0.12 \u00b5m\u00b2 each at 65 nm) \u2248 0.5 mm\u00b2",
+      "value": 0.5,
+      "unit": "mm2",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "sfv_mbist": {
+      "key": "sfv_mbist",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 9,
+      "quote": "For each SRAM macro, include a built-in self-test (BIST)",
+      "value": null,
+      "unit": "",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "full_sram": {
+      "key": "full_sram",
+      "doc": "SilicaFlux-V_ Reduced-ASIC Prototype Design.pdf",
+      "page": 3,
+      "quote": "36 Mb (full SilicaFlux)",
+      "value": 4718592,
+      "unit": "B",
+      "applies_to": "full SilicaFlux",
+      "verified": true
+    },
+    "upd_params": {
+      "key": "upd_params",
+      "doc": "SilicaFlux2.0/SilicaFlux2.5/SilicaFlux_Update 03-11-26.pdf",
+      "page": 7,
+      "quote": "4 lanes, 128-bit width, 200 MHz",
+      "value": 200000000.0,
+      "unit": "Hz",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "upd_soc": {
+      "key": "upd_soc",
+      "doc": "SilicaFlux2.0/SilicaFlux2.5/SilicaFlux_Update 03-11-26.pdf",
+      "page": 8,
+      "quote": "four-vector lane SIMD unit, 4\u00d74 INT8 MAC tensor unit, and ~256 KiB of on-chip SRAM",
+      "value": 262144,
+      "unit": "B",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "upd_clock": {
+      "key": "upd_clock",
+      "doc": "SilicaFlux2.0/SilicaFlux2.5/SilicaFlux_Update 03-11-26.pdf",
+      "page": 9,
+      "quote": "200 MHz CPU clock",
+      "value": 200000000.0,
+      "unit": "Hz",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "node_65": {
+      "key": "node_65",
+      "doc": "Process Node Comparison for SilicaFlux\u2011V.pdf",
+      "page": 3,
+      "quote": "65 nm emerges as the best compromise for SilicaFlux\u2011V",
+      "value": 65,
+      "unit": "nm",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "node_130": {
+      "key": "node_130",
+      "doc": "Process Node Comparison for SilicaFlux\u2011V.pdf",
+      "page": 3,
+      "quote": "130 nm is a solid fallback",
+      "value": 130,
+      "unit": "nm",
+      "applies_to": "SilicaFlux-V",
+      "verified": true
+    },
+    "research_tensor_lat": {
+      "key": "research_tensor_lat",
+      "doc": "SilicaFlux2.0/SilicaFlux2.5/SilicaFlux Codebase Research Report.pdf",
+      "page": 1,
+      "quote": "documented latency in source is about 66 cycles",
+      "value": 66,
+      "unit": "cycles",
+      "applies_to": "Gen-1",
+      "verified": true
+    }
+  },
+  "silicaflux_characterisation": {
+    "sf25_memctrl": {
+      "name": "sf25_memctrl",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 150843,
+      "metrics": {
+        "sf25_init_cycles": 512.0,
+        "sf25_scalar_load_latency_cycles": 3.0,
+        "sf25_vector_load_latency_cycles": 3.0,
+        "sf25_scalar_store_stream_words_per_cycle": 0.999512,
+        "sf25_scalar_load_stream_words_per_cycle": 0.999512,
+        "sf25_vector_store_stream_lines_per_cycle": 0.999024,
+        "sf25_vector_load_stream_lines_per_cycle": 0.999024,
+        "sf25_vector_load_stream_bytes_per_cycle": 15.98439,
+        "sf25_burst_store_beats_per_cycle_L1": 0.25,
+        "sf25_burst_load_beats_per_cycle_L1": 0.2,
+        "sf25_burst_store_beats_per_cycle_L2": 0.4,
+        "sf25_burst_load_beats_per_cycle_L2": 0.333333,
+        "sf25_burst_store_beats_per_cycle_L4": 0.571429,
+        "sf25_burst_load_beats_per_cycle_L4": 0.5,
+        "sf25_burst_store_beats_per_cycle_L8": 0.727273,
+        "sf25_burst_load_beats_per_cycle_L8": 0.666667,
+        "sf25_burst_store_beats_per_cycle_L16": 0.842105,
+        "sf25_burst_load_beats_per_cycle_L16": 0.8,
+        "sf25_burst_store_beats_per_cycle_L32": 0.914286,
+        "sf25_burst_load_beats_per_cycle_L32": 0.888889,
+        "sf25_burst_store_beats_per_cycle_L64": 0.955224,
+        "sf25_burst_load_beats_per_cycle_L64": 0.941176,
+        "sf25_burst_store_beats_per_cycle_L128": 0.977099,
+        "sf25_burst_load_beats_per_cycle_L128": 0.969697,
+        "sf25_burst_store_beats_per_cycle_L256": 0.988417,
+        "sf25_burst_load_beats_per_cycle_L256": 0.984615,
+        "sf25_sv_disjoint_bank_requests_per_cycle": 1.992218,
+        "sf25_sv_same_bank_requests_per_cycle": 0.998051,
+        "sf25_sv_same_bank_conflict_cycles": 1023.0,
+        "sf25_three_port_stream_requests_per_cycle": 2.489465,
+        "sf25_three_port_stream_bytes_per_cycle": 29.873582,
+        "sf25_kill_committed_beats": 13.0,
+        "sf25_kill_accepted_beats": 14.0,
+        "sf25_total_scalar_responses": 13253.0,
+        "sf25_total_vector_responses": 9285.0,
+        "sf25_total_burst_beats": 21633.0
+      },
+      "seconds": 10.29,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_memctrl/sim.log",
+      "description": "SilicaFlux 2.5 banked SPM controller: latency, streaming, burst-length sweep, bank contention, random traffic + backpressure, boundaries/overflow, parity, burst kill",
+      "provenance": "RTL_SIMULATION"
+    },
+    "sf25_tensor": {
+      "name": "sf25_tensor",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 32016,
+      "metrics": {
+        "sf25_tensor_latency_cycles": 21.0,
+        "sf25_tensor_products_per_cycle": 0.990099,
+        "sf25_tensor_macs_per_cycle": 63.366337,
+        "sf25_tensor_operand_bytes_per_product": 32.0,
+        "sf25_tensor_result_bytes_per_product": 64.0,
+        "sf25_tensor_products_per_cycle_bp50": 0.508906,
+        "sf25_tensor_products_per_cycle_drain1of4": 0.248942,
+        "sf25_tensor_flushed_ops": 6.0,
+        "sf25_tensor_results_checked": 8002.0
+      },
+      "seconds": 9.5,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_tensor/sim.log",
+      "description": "SilicaFlux 2.5 tensor unit (4x4x4 INT8): golden results, wrap/saturate, latency, sustained issue rate with and without result backpressure",
+      "provenance": "RTL_SIMULATION"
+    },
+    "sf1_memctrl": {
+      "name": "sf1_memctrl",
+      "status": "DEFECT",
+      "expected": "DEFECT",
+      "ok": true,
+      "errors": 0,
+      "checks": 302,
+      "metrics": {
+        "sf1_scalar_load_words_per_cycle": 0.333333,
+        "sf1_scalar_load_cycles_per_word": 3.0,
+        "sf1_scalar_load_bytes_per_cycle": 1.333333,
+        "sf1_vstore_bytes_per_cycle": 2.285714,
+        "sf1_vload_bytes_per_cycle": 2.285714,
+        "sf1_dfstore8_cycles": 11.0,
+        "sf1_dfstore8_words_not_written": 4.0,
+        "sf1_dfload8_cycles": 11.0,
+        "sf1_dfload8_useful_bytes_per_cycle": 1.454545,
+        "sf1_array_writes_in_one_cycle": 2.0,
+        "sf1_dfburst_defect_reproduced": 2.0
+      },
+      "seconds": 6.14,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf1_memctrl/sim.log",
+      "description": "SilicaFlux v1 tile memory controller: latency / bandwidth; reproduces the DFLOAD/DFSTORE > 4-word burst defect",
+      "provenance": "RTL_SIMULATION"
+    },
+    "sf1_tensor": {
+      "name": "sf1_tensor",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 3216,
+      "metrics": {
+        "sf1_tensor_latency_cycles": 67.0,
+        "sf1_tensor_products_per_cycle": 0.014706,
+        "sf1_tensor_macs_per_cycle": 0.941176
+      },
+      "seconds": 3.56,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf1_tensor/sim.log",
+      "description": "SilicaFlux v1 sequential tensor unit: golden results and start-to-done latency",
+      "provenance": "RTL_SIMULATION"
+    },
+    "sf25_dma_bridge": {
+      "name": "sf25_dma_bridge",
+      "status": "PASS",
+      "expected": "PASS",
+      "ok": true,
+      "errors": 0,
+      "checks": 4140,
+      "metrics": {
+        "sf25_dma_ext_to_spm_bytes_per_cycle": 11.425384,
+        "sf25_dma_spm_to_ext_bytes_per_cycle": 6.059172,
+        "sf25_dma_spm_to_spm_bytes_per_cycle": 7.961127,
+        "sf25_dma_ext_to_spm_bytes_per_cycle_burst1": 3.303226,
+        "sf25_dma_ext_to_spm_bytes_per_cycle_burst2": 6.272588,
+        "sf25_dma_ext_to_spm_bytes_per_cycle_burst4": 11.221918,
+        "sf25_dma_ext_to_spm_bytes_per_cycle_burst8": 11.221918,
+        "sf25_dma_ext_to_spm_bytes_per_cycle_burst16": 11.221918,
+        "sf25_dma_concurrent_bytes_per_cycle": 6.595813,
+        "sf25_bridge_strobe_errors": 1.0
+      },
+      "seconds": 8.1,
+      "log_path": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-memoryflow/build/sf_char/sf25_dma_bridge/sim.log",
+      "description": "MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through sf_mc25_vport_bridge; read back through the SilicaFlux scalar port",
+      "provenance": "RTL_SIMULATION"
+    }
+  },
+  "baselines": {
+    "SilicaFlux v1 cluster (as built)": {
+      "label": "4x 1KiB/1b/32w T1x1 V4 B4/F1 SF1 chiplet link x8 (no DRAM)",
+      "geomean_gops": 0.1507839425372844,
+      "dense_gops": 0.719154548952885,
+      "stream_gops": 0.05321617671774022,
+      "total_area_mm2": 0.9539172704761905,
+      "power_w": 0.021141672300000004,
+      "pj_per_op": 151.8198468838133,
+      "dma_bw_gbs": 0.059259259259259255,
+      "dram_bw_gbs": 0.08,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.01871202857142857,
+      "area_vector": 0.31661074285714286,
+      "area_dma": 0.14985545142857146,
+      "area_spm_logic": 0.030857142857142857,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.08584533333333333,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 0.0,
+      "perf_per_mm2": 0.1580681545497272,
+      "cfg_spm_kib": 1,
+      "cfg_banks": 1,
+      "cfg_width": 32,
+      "cfg_burst": 4,
+      "cfg_dfifo": 1,
+      "cfg_wout": 1,
+      "cfg_lanes": 4,
+      "cfg_tensor": "1x1",
+      "cfg_cores": 1,
+      "cfg_tiles": 4,
+      "cfg_extmem": "SF1 chiplet link x8 (no DRAM)",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 100.0
+    },
+    "SilicaFlux 2.5 tile (as built)": {
+      "label": "64KiB/8b/128w T4x4x4 V4 B16/F16 QSPI 104 MHz (no DRAM)",
+      "geomean_gops": 0.14961447874871775,
+      "dense_gops": 1.872668612854447,
+      "stream_gops": 0.027753350391247957,
+      "total_area_mm2": 1.7093799771428568,
+      "power_w": 0.021690738147184297,
+      "pj_per_op": 109.47567351101112,
+      "dma_bw_gbs": 0.5885057471264369,
+      "dram_bw_gbs": 0.026,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.2993924571428571,
+      "area_vector": 0.07915268571428571,
+      "area_dma": 0.19072511999999997,
+      "area_spm_logic": 0.24685714285714286,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.5212159999999999,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 0.02,
+      "perf_per_mm2": 0.08752558281324371,
+      "cfg_spm_kib": 64,
+      "cfg_banks": 8,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 16,
+      "cfg_wout": 8,
+      "cfg_lanes": 4,
+      "cfg_tensor": "4x4",
+      "cfg_cores": 1,
+      "cfg_tiles": 1,
+      "cfg_extmem": "QSPI 104 MHz (no DRAM)",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
+    },
+    "SilicaFlux 2.5 tile + MemoryFlow DMA + DDR3": {
+      "label": "64KiB/8b/128w T4x4x4 V4 B16/F16 DDR3-1600 x16",
+      "geomean_gops": 1.014525088287938,
+      "dense_gops": 2.397658500000001,
+      "stream_gops": 0.5718030064300237,
+      "total_area_mm2": 3.489379977142857,
+      "power_w": 0.46567711109673215,
+      "pj_per_op": 48.089244409087776,
+      "dma_bw_gbs": 1.9692307692307693,
+      "dram_bw_gbs": 2.08,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.2993924571428571,
+      "area_vector": 0.07915268571428571,
+      "area_dma": 0.19072511999999997,
+      "area_spm_logic": 0.24685714285714286,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.5212159999999999,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 1.8,
+      "perf_per_mm2": 0.2907465208528658,
+      "cfg_spm_kib": 64,
+      "cfg_banks": 8,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 16,
+      "cfg_wout": 8,
+      "cfg_lanes": 4,
+      "cfg_tensor": "4x4",
+      "cfg_cores": 1,
+      "cfg_tiles": 1,
+      "cfg_extmem": "DDR3-1600 x16",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
+    },
+    "SilicaFlux-V documented target (no DRAM)": {
+      "label": "256KiB/4b/64w T4x4 V4 B16/F16 QSPI 104 MHz (no DRAM)",
+      "geomean_gops": 0.20826895123268416,
+      "dense_gops": 4.138260642808174,
+      "stream_gops": 0.028389799347432933,
+      "total_area_mm2": 2.186085219047619,
+      "power_w": 0.017945307665203265,
+      "pj_per_op": 107.66721615565264,
+      "dma_bw_gbs": 0.29425287356321844,
+      "dram_bw_gbs": 0.026,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.07484811428571428,
+      "area_vector": 0.07915268571428571,
+      "area_dma": 0.13623222857142855,
+      "area_spm_logic": 0.061714285714285715,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 1.4621013333333333,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 0.02,
+      "perf_per_mm2": 0.09527028014187744,
+      "cfg_spm_kib": 256,
+      "cfg_banks": 4,
+      "cfg_width": 64,
+      "cfg_burst": 16,
+      "cfg_dfifo": 16,
+      "cfg_wout": 8,
+      "cfg_lanes": 4,
+      "cfg_tensor": "4x4",
+      "cfg_cores": 1,
+      "cfg_tiles": 1,
+      "cfg_extmem": "QSPI 104 MHz (no DRAM)",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
+    },
+    "SilicaFlux-V documented target + DDR3": {
+      "label": "256KiB/4b/64w T4x4 V4 B16/F16 DDR3-1600 x16",
+      "geomean_gops": 1.5546325711698428,
+      "dense_gops": 6.3999999999999915,
+      "stream_gops": 0.6052381400669404,
+      "total_area_mm2": 3.966085219047619,
+      "power_w": 0.33074882102270237,
+      "pj_per_op": 47.752660776814146,
+      "dma_bw_gbs": 0.9846153846153847,
+      "dram_bw_gbs": 2.08,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 0.07484811428571428,
+      "area_vector": 0.07915268571428571,
+      "area_dma": 0.13623222857142855,
+      "area_spm_logic": 0.061714285714285715,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 1.4621013333333333,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 1.8,
+      "perf_per_mm2": 0.3919816356198112,
+      "cfg_spm_kib": 256,
+      "cfg_banks": 4,
+      "cfg_width": 64,
+      "cfg_burst": 16,
+      "cfg_dfifo": 16,
+      "cfg_wout": 8,
+      "cfg_lanes": 4,
+      "cfg_tensor": "4x4",
+      "cfg_cores": 1,
+      "cfg_tiles": 1,
+      "cfg_extmem": "DDR3-1600 x16",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
+    },
+    "MemoryFlow recommended": {
+      "label": "128KiB/4b/128w T16x16 V8 B16/F16 DDR3-1600 x16",
+      "geomean_gops": 6.0219733684333505,
+      "dense_gops": 72.19141719849836,
+      "stream_gops": 1.1496730188082263,
+      "total_area_mm2": 4.636858483809524,
+      "power_w": 0.4812774339569454,
+      "pj_per_op": 46.53773080891784,
+      "dma_bw_gbs": 1.9692307692307693,
+      "dram_bw_gbs": 2.08,
+      "feasible": true,
+      "reasons": [],
+      "provenance": "ANALYTICAL",
+      "area_tensor": 1.1972645485714284,
+      "area_vector": 0.15840781714285715,
+      "area_dma": 0.2724661028571428,
+      "area_spm_logic": 0.04448077714285714,
+      "area_cpu": 0.12342857142857143,
+      "area_spm_sram": 0.8122026666666669,
+      "area_cpu_l1": 0.22860799999999995,
+      "area_dram_phy": 1.8,
+      "perf_per_mm2": 1.2987183864808942,
+      "cfg_spm_kib": 128,
+      "cfg_banks": 4,
+      "cfg_width": 128,
+      "cfg_burst": 16,
+      "cfg_dfifo": 16,
+      "cfg_wout": 32,
+      "cfg_lanes": 8,
+      "cfg_tensor": "16x16",
+      "cfg_cores": 1,
+      "cfg_tiles": 1,
+      "cfg_extmem": "DDR3-1600 x16",
+      "cfg_node": 65,
+      "cfg_clock_mhz": 200.0
+    }
+  },
+  "budgets": {
+    "rows": [
+      [
+        "silicaflux-v-65",
+        "65 nm / 200 MHz / 8.0 mm2 / 1.0 W",
+        "DOCUMENTED",
+        "2484/2880",
+        "1024 KiB",
+        "128KiB/4b/128w T16x16 V8 B16/F16 DDR3-1600 x16",
+        "6.02",
+        "4.64",
+        "0.48"
+      ],
+      [
+        "silicaflux-v-130",
+        "130 nm / 100 MHz / 8.0 mm2 / 1.0 W",
+        "DOCUMENTED fallback node (reduced-ASIC p.3, node comparison p.3); 100 MHz per reduced-ASIC p.1",
+        "102/2304",
+        "128 KiB",
+        "128KiB/4b/64w T8x8 V4 B16/F16 2x HyperRAM 200 MHz x8",
+        "1.16",
+        "7.52",
+        "0.10"
+      ],
+      [
+        "v1-assumed-40",
+        "40 nm / 500 MHz / 12.0 mm2 / 1.5 W",
+        "ASSUMPTION of MemoryFlow v1 (made without the repository documents) - kept for comparison",
+        "4032/4032",
+        "1024 KiB",
+        "128KiB/8b/128w T16x16 V8 B16/F64 DDR4-3200 x32",
+        "17.80",
+        "4.70",
+        "1.04"
+      ],
+      [
+        "full-28",
+        "28 nm / 800 MHz / 60.0 mm2 / 8.0 W",
+        "ASSUMPTION for the full 8-core SilicaFlux (core count DOCUMENTED, silicaflux_top.sf); area / power / clock are MemoryFlow assumptions",
+        "19966/20736",
+        "1024 KiB",
+        "32x 256KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32",
+        "193.44",
+        "36.79",
+        "3.22"
+      ],
+      [
+        "full-16",
+        "16 nm / 1200 MHz / 80.0 mm2 / 15.0 W",
+        "ASSUMPTION",
+        "29892/29952",
+        "1024 KiB",
+        "32x 128KiB/8b/128w T16x16 V8 B16/F64 HBM2E 1 stack",
+        "1091.51",
+        "27.75",
+        "13.39"
+      ]
+    ],
+    "extmem": [
+      {
+        "budget": "silicaflux-v-65",
+        "extmem": "QSPI 104 MHz (no DRAM)",
+        "geomean": 0.2508395023088915,
+        "area": 7.328486057142856,
+        "label": "1024KiB/4b/64w T8x8 V4 B16/F16 QSPI 104 MHz (no DRAM)"
+      },
+      {
+        "budget": "silicaflux-v-65",
+        "extmem": "HyperRAM 200 MHz x8",
+        "geomean": 1.9236171284117647,
+        "area": 5.456908815238096,
+        "label": "512KiB/16b/128w T16x16 V8 B16/F16 HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "silicaflux-v-65",
+        "extmem": "2x HyperRAM 200 MHz x8",
+        "geomean": 3.1769100591339527,
+        "area": 5.506908815238096,
+        "label": "512KiB/16b/128w T16x16 V8 B16/F16 2x HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "silicaflux-v-65",
+        "extmem": "LPDDR2-800 x32",
+        "geomean": 6.536573033825747,
+        "area": 7.77121692952381,
+        "label": "512KiB/16b/128w T16x16 V8 B16/F64 LPDDR2-800 x32"
+      },
+      {
+        "budget": "silicaflux-v-65",
+        "extmem": "DDR3-1600 x16",
+        "geomean": 6.536573033825747,
+        "area": 7.37121692952381,
+        "label": "512KiB/16b/128w T16x16 V8 B16/F64 DDR3-1600 x16"
+      },
+      {
+        "budget": "silicaflux-v-130",
+        "extmem": "QSPI 104 MHz (no DRAM)",
+        "geomean": 0.2067446633657637,
+        "area": 7.824074372893773,
+        "label": "128KiB/4b/128w T8x8 V4 B16/F16 QSPI 104 MHz (no DRAM)"
+      },
+      {
+        "budget": "silicaflux-v-130",
+        "extmem": "HyperRAM 200 MHz x8",
+        "geomean": 0.972152090249427,
+        "area": 7.854074372893773,
+        "label": "128KiB/4b/128w T8x8 V4 B16/F16 HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "silicaflux-v-130",
+        "extmem": "2x HyperRAM 200 MHz x8",
+        "geomean": 1.2827623735585234,
+        "area": 7.904074372893773,
+        "label": "128KiB/4b/128w T8x8 V4 B16/F16 2x HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "QSPI 104 MHz (no DRAM)",
+        "geomean": 0.2508395023088915,
+        "area": 3.3288468587637356,
+        "label": "1024KiB/4b/64w T4x4 V4 B16/F16 QSPI 104 MHz (no DRAM)"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "HyperRAM 200 MHz x8",
+        "geomean": 2.3154415597743823,
+        "area": 3.8573426978754575,
+        "label": "1024KiB/4b/128w T16x16 V8 B16/F16 HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "2x HyperRAM 200 MHz x8",
+        "geomean": 4.238444128846249,
+        "area": 4.0624910268864465,
+        "label": "1024KiB/16b/128w T16x16 V8 B16/F16 2x HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "LPDDR2-800 x32",
+        "geomean": 11.731803897554503,
+        "area": 6.162491026886446,
+        "label": "1024KiB/16b/128w T16x16 V8 B16/F16 LPDDR2-800 x32"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "DDR3-1600 x16",
+        "geomean": 11.731803897554503,
+        "area": 5.762491026886447,
+        "label": "1024KiB/16b/128w T16x16 V8 B16/F16 DDR3-1600 x16"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "DDR4-2400 x16",
+        "geomean": 14.248682534234613,
+        "area": 6.043504055457875,
+        "label": "1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-2400 x16"
+      },
+      {
+        "budget": "v1-assumed-40",
+        "extmem": "DDR4-3200 x32",
+        "geomean": 19.471232478800815,
+        "area": 7.243504055457875,
+        "label": "1024KiB/16b/128w T16x16 V8 B16/F64 DDR4-3200 x32"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "QSPI 104 MHz (no DRAM)",
+        "geomean": 0.2508395023088915,
+        "area": 7.499335479230768,
+        "label": "4x 1024KiB/4b/64w T4x4 V4 B16/F16 QSPI 104 MHz (no DRAM)"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "HyperRAM 200 MHz x8",
+        "geomean": 2.3154415597743823,
+        "area": 14.226006096923076,
+        "label": "8x 1024KiB/4b/64w T4x4 V4 B16/F16 HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "2x HyperRAM 200 MHz x8",
+        "geomean": 4.6308831195487725,
+        "area": 27.669347332307687,
+        "label": "16x 1024KiB/4b/64w T4x4 V4 B16/F16 2x HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "LPDDR2-800 x32",
+        "geomean": 20.067160184711316,
+        "area": 30.99155489230769,
+        "label": "16x 1024KiB/4b/64w T8x8 V4 B16/F16 LPDDR2-800 x32"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "DDR3-1600 x16",
+        "geomean": 20.067160184711316,
+        "area": 30.591554892307688,
+        "label": "16x 1024KiB/4b/64w T8x8 V4 B16/F16 DDR3-1600 x16"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "DDR4-2400 x16",
+        "geomean": 32.41618183684135,
+        "area": 58.80044492307692,
+        "label": "32x 1024KiB/4b/64w T8x8 V4 B16/F16 DDR4-2400 x16"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "DDR4-3200 x32",
+        "geomean": 83.60662911973475,
+        "area": 59.698086998974354,
+        "label": "32x 1024KiB/4b/128w T8x8 V8 B16/F16 DDR4-3200 x32"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "LPDDR4X-4266 x32",
+        "geomean": 109.10813735450041,
+        "area": 45.68578103794872,
+        "label": "32x 512KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 x32"
+      },
+      {
+        "budget": "full-28",
+        "extmem": "LPDDR4X-4266 2x32",
+        "geomean": 201.35329390447473,
+        "area": 51.43937360410256,
+        "label": "32x 512KiB/16b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "QSPI 104 MHz (no DRAM)",
+        "geomean": 0.2508395023088915,
+        "area": 4.245170806593405,
+        "label": "4x 1024KiB/4b/64w T4x4 V4 B16/F16 QSPI 104 MHz (no DRAM)"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "HyperRAM 200 MHz x8",
+        "geomean": 2.3154415597743823,
+        "area": 4.2751708065934055,
+        "label": "4x 1024KiB/4b/64w T4x4 V4 B16/F16 HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "2x HyperRAM 200 MHz x8",
+        "geomean": 4.6308831195487725,
+        "area": 8.152937340659339,
+        "label": "8x 1024KiB/4b/64w T4x4 V4 B16/F16 2x HyperRAM 200 MHz x8"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR2-800 x32",
+        "geomean": 20.067160184711316,
+        "area": 33.219536545054936,
+        "label": "32x 1024KiB/4b/64w T4x4 V4 B16/F16 LPDDR2-800 x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "DDR3-1600 x16",
+        "geomean": 20.067160184711316,
+        "area": 32.81953654505494,
+        "label": "32x 1024KiB/4b/64w T4x4 V4 B16/F16 DDR3-1600 x16"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "DDR4-2400 x16",
+        "geomean": 32.41618183684135,
+        "area": 18.207330637362634,
+        "label": "16x 1024KiB/4b/64w T8x8 V4 B16/F16 DDR4-2400 x16"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "DDR4-3200 x32",
+        "geomean": 86.44315156491035,
+        "area": 34.23741322783882,
+        "label": "32x 1024KiB/4b/128w T8x8 V4 B16/F16 DDR4-3200 x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR4X-4266 x32",
+        "geomean": 115.23952642997094,
+        "area": 38.18031242783882,
+        "label": "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR4X-4266 2x32",
+        "geomean": 225.49765035560148,
+        "area": 40.980312427838825,
+        "label": "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR5-6400 x32",
+        "geomean": 172.8863031298204,
+        "area": 38.380312427838824,
+        "label": "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR5-6400 x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR5-6400 2x32",
+        "geomean": 318.25857768504045,
+        "area": 42.84772791794872,
+        "label": "32x 1024KiB/16b/128w T16x16 V8 B16/F16 LPDDR5-6400 2x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "LPDDR5-6400 4x32",
+        "geomean": 538.9901750954286,
+        "area": 49.577986203663,
+        "label": "32x 1024KiB/16b/128w T16x16 V8 B16/F64 LPDDR5-6400 4x32"
+      },
+      {
+        "budget": "full-16",
+        "extmem": "HBM2E 1 stack",
+        "geomean": 1197.2186068150843,
+        "area": 53.551663917948716,
+        "label": "32x 1024KiB/16b/128w T16x16 V8 B16/F128 HBM2E 1 stack"
+      }
+    ],
+    "full": [
+      [
+        "full-28",
+        "minimal",
+        "8x 128KiB/4b/128w T16x16 V8 B16/F64 LPDDR4X-4266 2x32",
+        "2283.4",
+        "18.46",
+        "126.8",
+        "13.0",
+        "1.75"
+      ],
+      [
+        "full-28",
+        "recommended",
+        "32x 256KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32",
+        "4566.0",
+        "23.51",
+        "193.4",
+        "36.8",
+        "3.22"
+      ],
+      [
+        "full-28",
+        "stretch",
+        "32x 512KiB/16b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32",
+        "4866.6",
+        "24.09",
+        "201.4",
+        "51.4",
+        "3.35"
+      ],
+      [
+        "full-28",
+        "best Gop/s per mm2",
+        "8x 128KiB/4b/128w T16x16 V8 B16/F64 LPDDR4X-4266 2x32",
+        "2283.4",
+        "18.46",
+        "126.8",
+        "13.0",
+        "1.75"
+      ],
+      [
+        "full-28",
+        "best on LPDDR4X-4266 x32",
+        "32x 512KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 x32",
+        "2545.5",
+        "13.36",
+        "109.1",
+        "45.7",
+        "2.42"
+      ],
+      [
+        "full-28",
+        "best on LPDDR4X-4266 2x32",
+        "32x 512KiB/16b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32",
+        "4866.6",
+        "24.09",
+        "201.4",
+        "51.4",
+        "3.35"
+      ],
+      [
+        "full-16",
+        "minimal",
+        "32x 128KiB/4b/128w T16x16 V4 B16/F64 HBM2E 1 stack",
+        "13860.8",
+        "146.27",
+        "903.2",
+        "26.9",
+        "13.73"
+      ],
+      [
+        "full-16",
+        "recommended",
+        "32x 128KiB/8b/128w T16x16 V8 B16/F64 HBM2E 1 stack",
+        "14850.8",
+        "191.52",
+        "1091.5",
+        "27.7",
+        "13.39"
+      ],
+      [
+        "full-16",
+        "stretch",
+        "32x 1024KiB/16b/128w T16x16 V8 B16/F128 HBM2E 1 stack",
+        "15766.2",
+        "214.69",
+        "1197.2",
+        "53.6",
+        "14.71"
+      ],
+      [
+        "full-16",
+        "best Gop/s per mm2",
+        "32x 128KiB/8b/128w T16x16 V8 B16/F64 HBM2E 1 stack",
+        "14850.8",
+        "191.52",
+        "1091.5",
+        "27.7",
+        "13.39"
+      ],
+      [
+        "full-16",
+        "best on LPDDR4X-4266 x32",
+        "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 x32",
+        "2656.2",
+        "14.23",
+        "115.2",
+        "38.2",
+        "2.25"
+      ],
+      [
+        "full-16",
+        "best on LPDDR4X-4266 2x32",
+        "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR4X-4266 2x32",
+        "5312.3",
+        "27.44",
+        "225.5",
+        "41.0",
+        "4.49"
+      ],
+      [
+        "full-16",
+        "best on LPDDR5-6400 x32",
+        "32x 1024KiB/4b/128w T16x16 V8 B16/F16 LPDDR5-6400 x32",
+        "3984.9",
+        "21.35",
+        "172.9",
+        "38.4",
+        "3.20"
+      ],
+      [
+        "full-16",
+        "best on LPDDR5-6400 2x32",
+        "32x 1024KiB/16b/128w T16x16 V8 B16/F16 LPDDR5-6400 2x32",
+        "7571.5",
+        "38.48",
+        "318.3",
+        "42.8",
+        "4.22"
+      ],
+      [
+        "full-16",
+        "best on LPDDR5-6400 4x32",
+        "32x 1024KiB/16b/128w T16x16 V8 B16/F64 LPDDR5-6400 4x32",
+        "11882.2",
+        "68.55",
+        "539.0",
+        "49.6",
+        "5.64"
+      ],
+      [
+        "full-16",
+        "best on HBM2E 1 stack",
+        "32x 1024KiB/16b/128w T16x16 V8 B16/F128 HBM2E 1 stack",
+        "15766.2",
+        "214.69",
+        "1197.2",
+        "53.6",
+        "14.71"
+      ]
+    ]
+  },
+  "balance": {
+    "bound_share": {
+      "spm": 0.4,
+      "dram": 0.2,
+      "dma": 0.2,
+      "compute": 0.2
+    },
+    "geomean_headroom": 1.808051586334461,
+    "bytes_per_op": {
+      "DRAM sustained": 0.019622641509433963,
+      "DMA read path": 0.018577648766328014,
+      "DMA write path": 0.03018867924528302,
+      "SPM -> engine": 0.026415094339622643
+    }
+  }
 }
