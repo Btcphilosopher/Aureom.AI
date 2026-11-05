@@ -19,13 +19,13 @@ from memoryflow import __version__
 from memoryflow.inspect_rtl import MEMORY_SUBSYSTEM, inspect, summarise, to_markdown
 from memoryflow.models import banking, dma
 from memoryflow.models.dataflow import joined_stream_deadlock, tensor_tiles_cycles
-from memoryflow.models.explore import (Budget, baseline, joint_grid, load_synth_ge, mk, one_at_a_time,
-                                       pareto, recommend, evaluate)
+from memoryflow.models.explore import (BUDGETS, Budget, baseline, default_extmem, joint_grid, load_synth_ge, mk,
+                                       one_at_a_time, pareto, recommend, evaluate)
 from memoryflow.models.hardware import ComputeConfig, DmaConfig, ScratchpadConfig, SystemConfig, EXTMEM_PRESETS
 from memoryflow.models.roofline import Roofline, measured_point
 from memoryflow.models.workloads import default_suite
 from memoryflow.provenance import Provenance
-from memoryflow.report import diagrams, plots
+from memoryflow.report import diagrams, plots, sf_sections
 from memoryflow.verify.rtl_runner import TESTBENCHES, parse_log
 
 REPO = Path(__file__).resolve().parents[2]
@@ -35,7 +35,7 @@ def rtl_reference_config(budget: Budget) -> SystemConfig:
     """The parameterisation the RTL regression actually runs (sf_memflow_top defaults)."""
     return SystemConfig(ComputeConfig(clock_hz=budget.clock_hz, vec_lanes=4, tensor_rows=8, tensor_cols=8),
                         ScratchpadConfig(capacity_bytes=32 * 1024, banks=4, bank_width_bits=64, interleave="modulo"),
-                        DmaConfig(burst_beats=16, dfifo_depth=16), EXTMEM_PRESETS["DDR4-3200 x32"], budget.node_nm,
+                        DmaConfig(burst_beats=16, dfifo_depth=16), default_extmem(budget.node_nm), budget.node_nm,
                         name="RTL reference")
 
 
@@ -94,7 +94,7 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
     out = Path(out)
     fig = out / "figures"
     fig.mkdir(parents=True, exist_ok=True)
-    budget = budget or Budget()
+    budget = budget or BUDGETS["silicaflux-v-65"]
     log = (lambda *a: print("  [report]", *a)) if verbose else (lambda *a: None)
 
     # ------------------------------------------------------------ inputs
@@ -108,15 +108,23 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
                 or {})
     metrics = _rtl_metrics(rtl_results)
     ref_ge = load_synth_ge(synth_path)
+    # archive the fresh results next to the report so it can always be regenerated from what it shows
+    import shutil
+    (out / "data").mkdir(parents=True, exist_ok=True)
+    for src in [REPO / "build" / "rtl_results.json", REPO / "build" / "mutation_results.json",
+                REPO / "build" / "sf_char_results.json", REPO / "build" / "syn" / "synth_results.json",
+                *sorted((REPO / "build" / "syn").glob("*.stat"))]:
+        if src.exists() and src.resolve() != (out / "data" / src.name).resolve():
+            shutil.copy(src, out / "data" / src.name)
     suite = default_suite()
 
     # ------------------------------------------------------------ inventory
     mods, inv = inspect(REPO)
-    note = ("**Repository evidence.** The original SilicaFlux RTL repository was not available to this "
-            "build session, so this inventory covers the MemoryFlow tree itself. Run "
-            "`memoryflow inspect <path-to-silicaflux> --yosys` to produce the same table for the core repo.")
-    (out / "inventory.md").write_text(to_markdown(mods, "silicaflux-memoryflow", note))
-    log("inventory:", len(mods), "modules")
+    note = ("**Repository evidence.** This table classifies the MemoryFlow tree itself (what MemoryFlow "
+            "adds). The SilicaFlux repository inventory is `inventory.md` (memoryflow sf-inventory).")
+    (out / "memoryflow_inventory.md").write_text(to_markdown(mods, "silicaflux-memoryflow", note))
+    (out / "inventory.md").write_text(to_markdown(mods, "silicaflux-memoryflow", note))   # replaced below
+    log("MemoryFlow self-inventory:", len(mods), "modules")
 
     # ------------------------------------------------------------ calibrations
     spm_cal = banking.calibration_table({k: v for k, v in metrics.items() if k.startswith("spm_")})
@@ -150,14 +158,15 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
     # SPM size x external memory matrix at the recommended other parameters
     rc = rec.recommended.cfg
     mat_rows = []
+    mems = [em for em in EXTMEM_PRESETS if EXTMEM_PRESETS[em].available_at(budget.node_nm)]
     for kib in (128, 256, 512, 1024):
         row = [f"{kib} KiB"]
-        for em in EXTMEM_PRESETS:
+        for em in mems:
             p = evaluate(mk(base, kib, rc["banks"], rc["width"], rc["burst"], rc["dfifo"], rc["lanes"],
-                            tuple(int(x) for x in rc["tensor"].split("x")), em), suite, budget, ref_ge)
-            row.append(f"{p.geomean_gops:.1f}{'' if p.feasible else '*'}")
+                            tuple(int(x) for x in rc["tensor"].split("x")), em, wout=rc["wout"]), suite, budget, ref_ge)
+            row.append(f"{p.geomean_gops:.2f}{'' if p.feasible else '*'}")
         mat_rows.append(row)
-    mat_hdr = ["SPM \\ ext. memory"] + list(EXTMEM_PRESETS)
+    mat_hdr = ["SPM \\ ext. memory"] + mems
 
     # banks x width matrix (SPM->engine bandwidth and area)
     bw_rows = []
@@ -165,7 +174,7 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
         row = [f"{banks} banks"]
         for width in (32, 64, 128, 256):
             p = evaluate(mk(base, rc["spm_kib"], banks, width, rc["burst"], rc["dfifo"], min(rc["lanes"], width // 16),
-                            (min(16, width // 8),) * 2, rc["extmem"]), suite, budget, ref_ge)
+                            (min(16, width // 8),) * 2, rc["extmem"], wout=rc["wout"]), suite, budget, ref_ge)
             row.append(f"{p.geomean_gops:.1f} / {p.total_area_mm2:.1f}")
         bw_rows.append(row)
     bw_hdr = ["banks \\ width (Gop/s / mm2)", "32 b", "64 b", "128 b", "256 b"]
@@ -185,8 +194,7 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
         measured.append(dict(asdict(mp), config="RTL reference", provenance=mp.provenance.value))
 
     # ------------------------------------------------------------ figures
-    rec_cfg = mk(base, rc["spm_kib"], rc["banks"], rc["width"], rc["burst"], rc["dfifo"], rc["lanes"],
-                 tuple(int(x) for x in rc["tensor"].split("x")), rc["extmem"])
+    rec_cfg = sf_sections._cfg_from_point(base, rc)
     figs = {}
     figs["roofline"] = plots.roofline_chart([("RTL reference", rtl_cfg), ("Recommended SilicaFlux-V", rec_cfg)],
                                             suite, measured, str(fig / "roofline"))
@@ -200,7 +208,9 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
         skew = {b: metrics["dma"][f"dma_spm2spm_4k_burst{b}_skew1_cycles"] for b in (1, 2, 4, 8, 16)
                 if f"dma_spm2spm_4k_burst{b}_skew1_cycles" in metrics.get("dma", {})}
         figs["dma_burst"] = plots.dma_burst_chart(dma_cal, str(fig / "dma_burst_bandwidth"), skew)
-    figs["dma_out"] = plots.dma_outstanding_chart(str(fig / "dma_outstanding_bandwidth"), budget.clock_hz)
+    dram_mems = [m for m in ("DDR4-3200 x32", "LPDDR4X-4266 x32", "LPDDR2-800 x32", "DDR3-1600 x16",
+                             "2x HyperRAM 200 MHz x8") if EXTMEM_PRESETS[m].available_at(budget.node_nm)][:2]
+    figs["dma_out"] = plots.dma_outstanding_chart(str(fig / "dma_outstanding_bandwidth"), budget.clock_hz, dram_mems)
     if acc:
         figs["tensor"] = plots.tensor_util_chart(acc, ten_model, str(fig / "tensor_double_buffer"))
     if spm_cal:
@@ -214,17 +224,24 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
     (fig / "architecture_recommended.svg").write_text(diagrams.architecture_svg(rec_cfg, False))
     log("figures:", len(figs) + 2)
 
+    # ------------------------------------------------------------ SilicaFlux repository evidence (v2)
+    sf = sf_sections.build(out, fig, budget, suite, rec, rec_cfg, ref_ge, log)
+    figs.update(sf["figs"])
+    log("SilicaFlux sections:", len(sf["findings"]), "evidence findings")
+
     # ------------------------------------------------------------ findings
     em = rec_cfg.extmem
     from memoryflow.models.dma import required_outstanding_beats
     bdp = required_outstanding_beats(em.sustained_bw().value, em.latency_ns * 1e-9, rc["width"] // 8)
     ref_roof = Roofline(rtl_cfg)
     findings = [
-        ("DMA outstanding capacity, not DRAM, limits streaming kernels in the RTL reference.",
-         f"With 16 outstanding 64-bit beats and ~{rtl_cfg.extmem.latency_ns:.0f} ns DRAM latency the DMA path sustains "
-         f"{ref_roof.ceilings['DMA path'][0] / 1e9:.2f} GB/s against {ref_roof.ceilings['DRAM sustained'][0] / 1e9:.2f} GB/s "
-         f"of DDR4-3200 x32. Covering the bandwidth-delay product of the recommended memory needs >= {bdp} "
-         f"{rc['width']}-bit beats in flight; the recommendation uses {rc['dfifo']}."),
+        ("Outstanding DMA capacity must cover the external memory's bandwidth-delay product.",
+         f"RTL reference (16 outstanding 64-bit beats, {rtl_cfg.extmem.name}, ~{rtl_cfg.extmem.latency_ns:.0f} ns at "
+         f"{budget.clock_hz / 1e6:.0f} MHz): DMA read path {ref_roof.ceilings['DMA path'][0] / 1e9:.2f} GB/s, write path "
+         f"{ref_roof.ceilings['DMA write path'][0] / 1e9:.2f} GB/s, DRAM sustained "
+         f"{ref_roof.ceilings['DRAM sustained'][0] / 1e9:.2f} GB/s. Covering the bandwidth-delay product of the "
+         f"recommended memory ({em.name}) needs >= {bdp} {rc['width']}-bit beats in flight; the recommendation uses "
+         f"{rc['dfifo']} outstanding reads and {rc['wout']} outstanding write acks."),
         ("A single shared DMA engine deadlocks against its own accelerator.",
          "tb_system hung when an accelerator->SRAM (S2MM) channel occupied the only read engine while the "
          "operands it was waiting for were queued behind it. sf_dma now has independent MM2S/MEM2MEM and S2MM "
@@ -273,12 +290,14 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
 
     mut_rows = [[m, d["testbench"], d["status"], d["errors"], "killed" if d["killed"] else "SURVIVED"]
                 for m, d in mutation.items()]
+    findings = sf["findings"] + findings
     tiers = [("Minimal", rec.minimal), ("Recommended", rec.recommended), ("Stretch", rec.stretch)]
     tier_rows = [[n, p.cfg["spm_kib"], p.cfg["banks"], p.cfg["width"], p.cfg["tensor"], p.cfg["lanes"],
-                  p.cfg["burst"], p.cfg["dfifo"], p.cfg["extmem"], f"{p.dense_gops:.1f}", f"{p.stream_gops:.2f}",
-                  f"{p.geomean_gops:.2f}", f"{p.total_area_mm2:.2f}", f"{p.power_w:.2f}"] for n, p in tiers]
-    tier_hdr = ["tier", "SPM KiB", "banks", "width b", "tensor", "vec lanes", "burst", "DMA FIFO", "DRAM",
-                "dense Gop/s", "stream Gop/s", "geomean", "mm2", "W"]
+                  p.cfg["burst"], p.cfg["dfifo"], p.cfg["wout"], p.cfg["extmem"], f"{p.dense_gops:.1f}",
+                  f"{p.stream_gops:.2f}", f"{p.geomean_gops:.2f}", f"{p.total_area_mm2:.2f}", f"{p.power_w:.2f}"]
+                 for n, p in tiers]
+    tier_hdr = ["tier", "SPM KiB", "banks", "width b", "tensor", "vec lanes", "burst", "DMA rd out", "DMA wr acks",
+                "ext. memory", "dense Gop/s", "stream Gop/s", "geomean", "mm2", "W"]
     rtl_map = [
         ["SPM capacity", f"{rc['spm_kib']} KiB", f"SPM_NBANKS={rc['banks']}, SPM_BANK_DEPTH={rc['spm_kib'] * 1024 // (rc['banks'] * rc['width'] // 8)}"],
         ["datapath width", f"{rc['width']} b", f"DW={rc['width']}"],
@@ -286,7 +305,8 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
         ["ECC", "SECDED", f"SPM_ECC=2 ({rec_cfg.spm.stored_bits_per_word()}-bit stored word)"],
         ["tensor array", rc["tensor"], f"TEN_TR={rc['tensor'].split('x')[0]}, TEN_TC={rc['tensor'].split('x')[1]}, TEN_ACC_DBUF=1"],
         ["vector lanes", str(rc["lanes"]), f"VEC_EW=16 (lanes = DW/16 = {rc['width'] // 16})"],
-        ["DMA", f"burst {rc['burst']}, {rc['dfifo']} outstanding", f"DMA_MAXBURST=4, DMA_DFIFO={rc['dfifo']}, DMA_NCH=4"],
+        ["DMA", f"burst {rc['burst']}, {rc['dfifo']} outstanding reads, {rc['wout']} write acks",
+         f"DMA_MAXBURST=4, DMA_DFIFO={rc['dfifo']}, DMA_NCH=4 (sf_dma WOUT={rc['wout']})"],
         ["operand FIFOs", ">= burst", f"VEC_IN_FIFO={rc['burst']}, TEN_IN_FIFO={rc['burst']}"],
         ["macros", "foundry", "SPM_IMPL=1 + compiler views (MACRO_W/MACRO_D per bank)"],
     ]
@@ -298,13 +318,15 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
         "inventory": inv, "rtl": rtl_results, "synth": synth, "mutation": mutation, "calibration": {"spm": spm_cal, "dma": dma_cal,
                                                                              "tensor": ten_rows},
         "measured_points": measured,
+        **sf["summary"],
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
 
     # ------------------------------------------------------------ markdown
     md = [f"# SilicaFlux MemoryFlow - engineering report", "",
-          f"Generated {summary['generated']} by memoryflow {__version__}. Node {budget.node_nm} nm, "
-          f"{budget.clock_hz / 1e6:.0f} MHz, budget {budget.max_core_area_mm2} mm2 / {budget.max_power_w} W.", "",
+          f"Generated {summary['generated']} by memoryflow {__version__}. Budget `{budget.name}`: node {budget.node_nm} nm, "
+          f"{budget.clock_hz / 1e6:.0f} MHz, {budget.max_core_area_mm2} mm2 core / {budget.max_power_w} W "
+          f"({budget.source}).", "",
           "Provenance tags: THEORETICAL ceilings, ANALYTICAL models, PY_SIMULATION, RTL_SIMULATION. "
           "No silicon or FPGA MEASURED data exists yet.", "", "## Recommended prototype memory configurations", "",
           _md_table(tier_rows, tier_hdr), "", *[f"* {r}" for r in rec.rationale], "",
@@ -312,20 +334,23 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
           "", "## Key findings", ""]
     for t, d in findings:
         md += [f"**{t}** {d}", ""]
+    md += sf["md"]
     md += ["## Verification", "", _md_table(rtl_rows, ["testbench", "result", "expected", "ok", "checks", "scope"]) if rtl_rows
            else "_RTL regression JSON not found (run `memoryflow rtl`)._", "",
            "## Mutation testing", "",
            _md_table(mut_rows, ["mutant", "testbench", "result", "errors", "verdict"]) if mut_rows else "_not run_", "",
            "## Synthesis (Yosys generic, SRAM as blackbox macros)", "",
            _md_table(syn_rows, ["wrapper", "ok", "flops", "comb GE", "total GE", "macros"]) if syn_rows else "_not run_", "",
-           "## SPM size x external memory (suite geomean Gop/s; * = infeasible at 40 nm)", "", _md_table(mat_rows, mat_hdr), "",
+           f"## SPM size x external memory (suite geomean Gop/s; * = infeasible at {budget.node_nm} nm)", "",
+           _md_table(mat_rows, mat_hdr), "",
            "## Banks x width", "", _md_table(bw_rows, bw_hdr), "",
            "## Model calibration", "", f"SPM banking model: {len(spm_cal)} cases, max |error| "
            f"{max((abs(r['error_pct']) for r in spm_cal), default=0):.2f} %.", "",
            _md_table([[r["metric"], r["rtl"], f"{r['sim']:.0f}", f"{r['sim_err_pct']:+.1f}%", f"{r['analytic']:.0f}",
                        f"{r['analytic_err_pct']:+.1f}%"] for r in dma_cal],
                      ["DMA case", "RTL cycles", "cycle model", "err", "analytic", "err"]), "",
-           "Figures: see `figures/`. Matrices: `*.csv`. Inventory: `inventory.md`."]
+           "Figures: see `figures/`. Matrices: `*.csv`. SilicaFlux inventory: `inventory.md`; "
+           "MemoryFlow self-inventory: `memoryflow_inventory.md`."]
     (out / "REPORT.md").write_text("\n".join(md) + "\n")
 
     # ------------------------------------------------------------ HTML
@@ -349,6 +374,7 @@ def generate(out: str | Path = "reports", budget: Budget | None = None, verbose:
     findings_html = "".join(f'<div class="finding"><h4>{html.escape(t)}</h4><p>{html.escape(d)}</p></div>' for t, d in findings)
     page = HTML_TEMPLATE.format(
         version=__version__, generated=summary["generated"], node=budget.node_nm, clock=budget.clock_hz / 1e6,
+        budget_name=html.escape(budget.name), budget_src=html.escape(budget.source), sf_sections=sf["html"],
         area=budget.max_core_area_mm2, power=budget.max_power_w,
         rec_label=html.escape(rec.recommended.label), rec_gm=f"{rec.recommended.geomean_gops:.1f}",
         rec_area=f"{rec.recommended.total_area_mm2:.1f}", rec_power=f"{rec.recommended.power_w:.2f}",
@@ -421,10 +447,12 @@ ul{{color:var(--ink2)}}code{{color:var(--cyan)}}
 </style></head><body><main>
 <div class="kicker">SilicaFlux / memory subsystem / engineering report</div>
 <h1>Memory<span>Flow</span></h1>
-<p>High-bandwidth memory, SRAM and accelerator dataflow engineering for SilicaFlux-V. Generated {generated} by memoryflow {version};
-target {node} nm, {clock:.0f} MHz, budget {area} mm&sup2; / {power} W (assumptions, overridable).</p>
+<p>High-bandwidth memory, SRAM and accelerator dataflow engineering for SilicaFlux-V and the full SilicaFlux processor.
+Generated {generated} by memoryflow {version}; budget <b>{budget_name}</b>: {node} nm, {clock:.0f} MHz, {area} mm&sup2; core /
+{power} W ({budget_src}).</p>
 <div class="prov"><span>THEORETICAL - pin/datapath ceilings</span><span>ANALYTICAL - roofline, tiling, area, energy</span>
-<span>PY_SIMULATION - cycle models</span><span>RTL_SIMULATION - Verilator cycle counts</span><span>MEASURED - none yet (no silicon/FPGA)</span></div>
+<span>PY_SIMULATION - cycle models</span><span>RTL_SIMULATION - Verilator cycle counts (MemoryFlow and existing SilicaFlux RTL)</span>
+<span>DOCUMENTED - repository design documents</span><span>MEASURED - none yet (no silicon/FPGA)</span></div>
 <div class="tiles">
 <div class="tile"><small>recommended geomean</small><b>{rec_gm} Gop/s</b><small>dense {rec_dense} Gop/s</small></div>
 <div class="tile"><small>recommended area</small><b>{rec_area} mm&sup2;</b><small>{power} W budget, est. {rec_power} W</small></div>
@@ -442,9 +470,10 @@ target {node} nm, {clock:.0f} MHz, budget {area} mm&sup2; / {power} W (assumptio
 <h2>Memory architecture</h2>
 <h3>RTL reference parameterisation (verified)</h3><div class="svgwrap">{arch_ref}</div>
 <h3>Recommended SilicaFlux-V prototype</h3><div class="svgwrap">{arch_rec}</div>
-<h2>Repository evidence and inventory</h2>
-<p>The original SilicaFlux repository was not available to this build session; the inventory below is produced by
-<code>memoryflow inspect</code> on the MemoryFlow tree. Run it on the SilicaFlux repository to classify that tree the same way.</p>
+{sf_sections}
+<h2>Repository evidence: what MemoryFlow adds</h2>
+<p>The SilicaFlux inventory is above. This table classifies the MemoryFlow tree itself with <code>memoryflow inspect</code>
+(categories without a synthesizable MemoryFlow block are PROPOSED additions).</p>
 {inventory}
 <h3>Proposed additions</h3>{proposed}
 <h2>Verification</h2>
@@ -464,7 +493,7 @@ target {node} nm, {clock:.0f} MHz, budget {area} mm&sup2; / {power} W (assumptio
 {fig_tensor}
 <h2>Parameter exploration</h2>
 {fig_sweeps}
-<h3>SPM size x external memory (suite geomean Gop/s, * = infeasible at {node} nm)</h3>{matrix}
+<h3>SPM size x external memory available at {node} nm (suite geomean Gop/s, * = infeasible)</h3>{matrix}
 <h3>Banks x datapath width</h3>{bwmatrix}
 {fig_pareto}
 <h2>Area</h2>
@@ -473,7 +502,15 @@ target {node} nm, {clock:.0f} MHz, budget {area} mm&sup2; / {power} W (assumptio
 <ul>
 <li>Bitcell, NAND2, DRAM energy/latency and PHY-area figures are indicative public-literature values; replace with foundry
 memory-compiler CSVs (<code>CompilerTableAreaModel</code>) and vendor datasheets before tape-out decisions.</li>
-<li>PHY availability by node is an assumption encoded in <code>ExtMemConfig.max_node_nm</code>.</li>
+<li>PHY availability by node is an assumption encoded in <code>ExtMemConfig.max_node_nm</code>; HyperRAM / QSPI presets
+assume a digital PHY (pads + DLL) and indicative energy.</li>
+<li>The as-built SilicaFlux machines cannot be synthesised with Yosys 0.33 (it rejects the SilicaFlux packages); their logic
+area comes from MemoryFlow's Yosys-anchored scaling laws. Running sv2v or a commercial front end would replace it.</li>
+<li>compute_tile.sf does not elaborate; the Gen-2.5 tile baseline is assembled from the units that do, so tile-level
+crossbar and LSU effects are not in its numbers.</li>
+<li>Full-SilicaFlux area, power and clock envelopes are MemoryFlow assumptions; only the core count and the L2/LLC
+parameters are taken from silicaflux_top.sf.</li>
+<li>CPU orchestration costs (cycles per DMA transfer / tensor command) are assumptions, not measurements.</li>
 <li>The full RTL regression runs at the reference parameterisation (64-bit, 4 banks, 8x8 array); the recommended
 parameterisation (128-bit, 8 banks XOR, 16x16 array, 64-deep DMA FIFOs) passes the parametric system smoke test
 <code>tb_param_smoke</code> and lint, not the full regression.</li>

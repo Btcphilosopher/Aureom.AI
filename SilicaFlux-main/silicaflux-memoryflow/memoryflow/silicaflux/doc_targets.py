@@ -69,8 +69,8 @@ CONFLICTS = [
      "100 MHz (reduced-ASIC) vs 200 MHz (update). MemoryFlow uses 200 MHz at 65 nm and 100 MHz at 130 nm."),
     ("SRAM density", "sfv_l2_macro", None,
      "The 0.12 um^2 / 65 nm bitcell (0.5 mm^2 for 256 KB) is ~4x denser than published 65 nm high-density "
-     "6T cells (~0.5 um^2); MemoryFlow's area model uses the published value, so 256 KiB costs ~1.6-2 mm^2 "
-     "at 65 nm including periphery."),
+     "6T cells (~0.5 um^2); MemoryFlow's area model uses the published value, so 256 KiB costs ~1.5 mm^2 "
+     "at 65 nm including macro periphery (about 3x the documented estimate)."),
 ]
 
 

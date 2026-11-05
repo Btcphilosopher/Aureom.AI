@@ -4,8 +4,10 @@ from pathlib import Path
 import pytest
 
 from memoryflow.inspect_rtl import inspect, scan_repo, summarise, to_markdown
-from memoryflow.models.explore import (Budget, baseline, evaluate, joint_grid, mk, one_at_a_time, pareto,
-                                       recommend)
+from memoryflow.models.explore import (BUDGETS, Budget, baseline, evaluate, joint_grid, mk, one_at_a_time,
+                                       pareto, recommend)
+
+V1 = BUDGETS["v1-assumed-40"]           # the envelope MemoryFlow v1 assumed
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,16 +18,30 @@ def test_evaluate_baseline_point():
     assert set(p.area_mm2) >= {"spm_sram", "tensor", "dma", "dram_phy"}
 
 
-def test_hbm_infeasible_at_40nm_but_ok_at_7nm():
+def test_default_budget_is_the_documented_silicaflux_v_target():
+    b = Budget()
+    assert (b.node_nm, b.clock_hz, b.max_power_w) == (65, 200e6, 1.0) and b.name == "silicaflux-v-65"
+    assert b.max_core_area_mm2 < 10.0                  # < 10 mm2 die (reduced-ASIC p.1)
+
+
+def test_hbm_infeasible_at_silicaflux_v_node_but_ok_at_7nm():
     assert not evaluate(mk(baseline(), extmem="HBM3 1 stack")).feasible
+    assert not evaluate(mk(baseline(V1), extmem="HBM3 1 stack"), budget=V1).feasible
     b7 = Budget(node_nm=7, max_core_area_mm2=40.0)   # HBM PHY alone is ~18 mm2
     assert evaluate(mk(baseline(b7), extmem="HBM3 1 stack"), budget=b7).feasible
 
 
 def test_outstanding_depth_raises_streaming_perf():
-    s16 = evaluate(mk(baseline(), dfifo=16)).stream_gops
-    s64 = evaluate(mk(baseline(), dfifo=64)).stream_gops
+    # v1 envelope, write acks generous so the read path is what varies
+    s16 = evaluate(mk(baseline(V1), dfifo=16, wout=64), budget=V1).stream_gops
+    s64 = evaluate(mk(baseline(V1), dfifo=64, wout=64), budget=V1).stream_gops
     assert s64 > 1.3 * s16
+
+
+def test_write_acks_matter_when_the_write_path_binds():
+    lo = evaluate(mk(baseline(V1), dfifo=64, wout=4), budget=V1).stream_gops
+    hi = evaluate(mk(baseline(V1), dfifo=64, wout=32), budget=V1).stream_gops
+    assert hi > 1.2 * lo
 
 
 def test_one_at_a_time_covers_requested_dimensions():
@@ -35,8 +51,9 @@ def test_one_at_a_time_covers_requested_dimensions():
 
 
 def test_recommendation_is_feasible_and_pareto_sane():
-    pts = joint_grid(spm_kib=(128, 512), banks=(4, 8), width=(64, 128), dfifo=(16, 64), lanes=(4, 8),
-                     tensor=((8, 8), (16, 16)), extmem=("DDR4-3200 x32", "HBM2E 1 stack"))
+    pts = joint_grid(baseline(V1), budget=V1, spm_kib=(128, 512), banks=(4, 8), width=(64, 128), dfifo=(16, 64),
+                     lanes=(4, 8), tensor=((8, 8), (16, 16)), extmem=("DDR4-3200 x32", "HBM2E 1 stack"))
+    assert all(p.cfg["extmem"] == "DDR4-3200 x32" for p in pts)        # no HBM PHY at 40 nm
     rec = recommend(pts)
     assert rec.recommended.feasible and rec.minimal.feasible and rec.stretch.feasible
     assert rec.recommended.geomean_gops >= 0.9 * rec.stretch.geomean_gops

@@ -66,7 +66,8 @@ CHAR_TBS: dict[str, SfTbSpec] = {t.name: t for t in [
              (PKG_MC, ("sf25", "memory_controller.sf")), mf_rtl=True,
              mf_files=("rtl/bridge/sf_mc25_vport_bridge.sv",),
              description="MemoryFlow sf_dma moving data DRAM <-> the unmodified SilicaFlux 2.5 SPM through "
-                         "sf_mc25_vport_bridge; read back through the SilicaFlux scalar port"),
+                         "sf_mc25_vport_bridge; byte-exact EXT->SPM->EXT and SPM->SPM round trips, controller "
+                         "exceptions -> DMA bus errors, partial-lane poisoning"),
 ]}
 
 

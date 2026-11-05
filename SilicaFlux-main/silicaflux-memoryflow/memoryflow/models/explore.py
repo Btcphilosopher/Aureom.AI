@@ -42,7 +42,7 @@ class Budget:
     clock_hz: float = 200e6
     max_core_area_mm2: float = 8.0         # logic + SRAM + DRAM PHY, excluding pad ring
     max_power_w: float = 1.0
-    require_mature_dram: bool = True
+    require_mature_dram: bool = True       # v1 compatibility; PHY availability at the node is always enforced
     min_cpu_cores: int = 1
     name: str = "silicaflux-v-65"
     source: str = "DOCUMENTED: SilicaFlux-V reduced-ASIC p.1/p.3, 03-11-26 update p.7-9"
@@ -178,11 +178,9 @@ def evaluate(cfg: SystemConfig, suite: Sequence[Workload] | None = None, budget:
     if power_total > budget.max_power_w:
         reasons.append(f"power {power_total:.2f} > {budget.max_power_w} W")
     if not cfg.extmem.available_at(cfg.node_nm):
-        # physical: the PHY / controller IP has to exist at this node
+        # physical, so always enforced (v1 only checked it when require_mature_dram was set)
         reasons.append(f"{cfg.extmem.kind} PHY not assumed available at {cfg.node_nm} nm "
                        f"(needs <= {cfg.extmem.max_node_nm} nm)")
-    elif budget.require_mature_dram and not cfg.extmem.mature_node_ok:
-        reasons.append(f"{cfg.extmem.kind} PHY is not mature-node IP (needs <= {cfg.extmem.max_node_nm} nm)")
     c = cfg.compute
     cfgd = {"spm_kib": cfg.spm.capacity_bytes // KIB, "banks": cfg.spm.banks, "width": cfg.spm.bank_width_bits,
             "burst": cfg.dma.burst_beats, "dfifo": cfg.dma.dfifo_depth, "wout": cfg.dma.wout, "lanes": c.vec_lanes,
@@ -263,7 +261,8 @@ def joint_grid(base: SystemConfig | None = None, suite: Sequence[Workload] | Non
                tensor: Sequence[tuple[int, int]] = ((4, 4), (8, 8), (16, 16)),
                extmem: Sequence[str] = ("QSPI 104 MHz (no DRAM)", "HyperRAM 200 MHz x8", "2x HyperRAM 200 MHz x8",
                                         "LPDDR2-800 x32", "DDR3-1600 x16", "DDR4-2400 x16", "DDR4-3200 x32",
-                                        "LPDDR4X-4266 x32", "LPDDR5-6400 x32", "HBM2E 1 stack", "HBM3 1 stack"),
+                                        "LPDDR4X-4266 x32", "LPDDR4X-4266 2x32", "LPDDR5-6400 x32",
+                                        "LPDDR5-6400 2x32", "LPDDR5-6400 4x32", "HBM2E 1 stack", "HBM3 1 stack"),
                burst: Sequence[int] = (16,), wout: Sequence[int] = (8, 32),
                tiles: Sequence[int] | None = None) -> list[DesignPoint]:
     base = base or baseline(budget)
@@ -314,7 +313,7 @@ def recommend(points: Sequence[DesignPoint], target_fraction: float = 0.90,
     ok_min = [p for p in feas if p.geomean_gops >= minimal_fraction * best.geomean_gops]
     minimal = min(ok_min, key=lambda p: p.total_area_mm2)
     rationale = [
-        f"{len(feas)} of {len(points)} evaluated configurations fit the mature-node budget.",
+        f"{len(feas)} of {len(points)} evaluated configurations fit the budget.",
         f"Best feasible suite geomean: {best.geomean_gops:.2f} Gop/s ({best.label}, {best.total_area_mm2:.1f} mm2).",
         f"Recommended = smallest-area point within {int(target_fraction * 100)} % of that: "
         f"{rec.geomean_gops:.2f} Gop/s in {rec.total_area_mm2:.1f} mm2.",

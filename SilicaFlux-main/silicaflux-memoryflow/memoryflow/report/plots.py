@@ -412,7 +412,7 @@ def tensor_feed_chart(rows: Sequence[tuple[str, float, float]], out: str) -> lis
     S.apply()
     fig, ax = plt.subplots(figsize=(8.5, 0.46 * len(rows) + 1.3))
     y = np.arange(len(rows))
-    cols = [S.SERIES[2] if r[2] else S.SERIES[0] for r in rows]
+    cols = [S.NEUTRAL if r[2] is None else (S.SERIES[2] if r[2] else S.SERIES[0]) for r in rows]
     ax.barh(y, [r[1] for r in rows], 0.6, color=cols, edgecolor=S.SURFACE, linewidth=2)
     for yi, r in zip(y, rows):
         ax.text(r[1] * 1.04 + 0.3, yi, f"{r[1]:.1f}", va="center", fontsize=7.5, color=S.TEXT2)
@@ -421,7 +421,8 @@ def tensor_feed_chart(rows: Sequence[tuple[str, float, float]], out: str) -> lis
     ax.invert_yaxis()
     ax.set_xlabel("sustained MAC / cycle")
     ax.set_title("SilicaFlux 2.5 tensor unit: peak vs what its memory system can feed")
-    _sub(ax, "green = RTL_SIMULATION (tb_sf25_tensor), blue = ANALYTICAL roofline of the 2.5 tile (+ MemoryFlow DMA)")
+    _sub(ax, "grey = by construction (RTL structure), green = RTL_SIMULATION (tb_sf25_tensor), "
+             "blue = ANALYTICAL roofline")
     return S.save(fig, out)
 
 

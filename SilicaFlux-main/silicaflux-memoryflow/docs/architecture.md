@@ -26,6 +26,7 @@
 | `sf_vec_unit` | DW/16 int16 lanes: ADD, MUL, DOT (64-bit accumulate), AXPY; two joined input FIFOs | `IN_FIFO` |
 | `sf_tensor_array` | TR × TC int8 outer-product MAC array; int32 accumulation buffer, optional double-buffering (computes tile n+1 while tile n drains) | `TR, TC, ACC_DBUF` |
 | `sf_reuse_buffer` | Ping-pong operand buffer in one 1R1W SRAM; replays a sealed tile `cfg_replay` times (B-operand reuse), fills the other bank meanwhile | `DEPTH` |
+| `sf_mc25_vport_bridge` (v2) | SF-MEM read + write slave → the **existing SilicaFlux 2.5** `memory_controller` vector port: adds the SPM base, round-robins reads/writes onto the single port, reserves response-FIFO credit before issuing (the port's single in-order response stream would otherwise head-of-line block and deadlock a DMA), maps lane-granular strobes to the lane mask and poisons partial-lane writes. Verified in `tb_sf25_dma_bridge` | `SPM_BASE, RD_DEPTH, WR_DEPTH` |
 | `sf_memflow_top` | Integration: APB split (DMA / control), 3-port SPM (DMA rd, DMA wr, CPU host TCM port), two routers (SPM at 0x0, EXT at 0x8000_0000), DMA stream ports wired to the vector unit, tensor array and reuse buffer | all of the above |
 
 ## Address map (`sf_memflow_top`)

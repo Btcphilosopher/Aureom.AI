@@ -50,3 +50,43 @@ are blackboxes read with `-lib`, and each instance carries `(* keep *)`.
 | DMA cycle model, bank-aligned SPM→SPM bursts 8/16 | 2 | −9 % / −14 % (it misses the conflict resonance) |
 | Tensor tile model (`dataflow.tensor_tiles_cycles`) | K=8/32 × dbuf on/off | < 1.2 % |
 | Deadlock predicate | FIFO 4 vs 16 at burst 16 | matches |
+
+## v2: verification of the existing SilicaFlux RTL (`memoryflow sf-char`)
+
+The DUT files are compiled byte-for-byte from the repository (`memoryflow.silicaflux.sources`
+extracts them from the archives / loose `.sf` files with sha256 provenance); only the testbenches in
+`tb/silicaflux/` are MemoryFlow's.
+
+| Name | DUT (repository file) | Checks | What it proves / measures |
+|---|---|---|---|
+| sf25_memctrl | `memory_controller.sf` + `silicaflux_pkg (1).sf` | ~150 k | byte-accurate reference model on all three ports; 3-cycle load latency; ~1 req/cycle per port; burst-length sweep 1..256 (3 / 4 cycles overhead per store / load burst); bank contention (1.99 vs 1.00 req/cycle disjoint vs same bank); 3-port 29.9 B/cycle; random traffic with backpressure; range / domain / misalignment / page / aperture-overflow exceptions and that rejected stores write nothing; parity error detection via a corrupted bit; burst kill commits an exact beat count |
+| sf25_tensor | `tensor_unit.sf` + `silicaflux_pkg.sf` | ~32 k | every result vs a golden model (wrap, saturate, element enables, overflow flags, tag order); 21-cycle latency; 63.4 MAC/cycle sustained; 15.9 MAC/cycle when results drain through one 128-bit port; flush kills in-flight work |
+| sf1_memctrl (expect **DEFECT**) | `silicaflux.zip::silicaflux/rtl/memory_controller.sv` | ~300 | Gen-1 bandwidth (3 cycles/word, 2.29 B/cycle VLOAD); DFSTORE/DFLOAD of 8 words leave 4 words unwritten / re-read words 0..3; the write-back port and the FSM write the array in the same cycle |
+| sf1_tensor | `silicaflux.zip::silicaflux/rtl/tensor_unit.sv` | ~3 k | golden results; 67 cycles per 4x4 product (0.94 MAC/cycle) |
+| sf25_dma_bridge | `memory_controller.sf` + MemoryFlow `sf_dma`, `sf_mem_router`, `sf_mc25_vport_bridge` | ~4 k | byte-exact EXT→SPM→EXT and SPM→SPM round trips; the SilicaFlux controller's DOMAIN exceptions arrive at the DMA as RD/WR bus errors; a partial-lane write is poisoned and writes nothing; EXT→SPM 11.4, SPM→EXT 6.06 (write-ack bound), SPM→SPM 7.96 B/cycle |
+
+`DEFECT` expectations make a future fix visible: if the Gen-1 burst defect is repaired, `sf1_memctrl`
+reports PASS and the run is flagged until the expectation is updated.
+
+## v2: issues found by testing
+
+| # | Found by | Issue | Resolution |
+|---|---|---|---|
+| 11 | sf1_memctrl | **SilicaFlux Gen-1 DF bursts > 4 words are defective** (`burst_addr` never advances, buffer index wraps) and the tile SPM is written by two processes in one cycle | Reported (repository RTL is not modified); modelled as 4-word bursts in the Gen-1 baseline |
+| 12 | sf-inventory | **SilicaFlux 2.5 integration drift**: compute_tile.sf instantiates memory_controller / tensor_unit with ports and parameters the in-repo modules lack; 29 of its 30 package types are undefined; tb_memory_controller.sf / tb_tensor_unit.sf target other interfaces; 26 of 27 module types in silicaflux_top.sf are undefined | Reported with origin:line evidence; units characterised individually |
+| 13 | tb_sf25_memctrl first run | Every response showed tag 0 / RANGE: member-wise writes to a module-level packed struct from a suspended task did not propagate (Verilator 5.020, same family as bug 6) | Requests are built in a local variable and assigned as a whole struct |
+| 14 | tb_sf25_memctrl review | A boundary check compared the reference model with itself (snapshot taken before a legal store to the same line) | Check removed; the scoreboard's data check on read-backs is the proof that rejected stores write nothing |
+| 15 | tb_sf25_dma_bridge | The partial-lane test **passed vacuously**: the destination was exactly one byte past the SPM aperture, so the router, not the bridge, produced the error. Caught because the test also required the bridge's poison counter to move | Destination moved inside the aperture; read-back now proves the full beat landed and the poisoned beat wrote nothing |
+| 16 | bridge design | The 2.5 vector port returns reads and writes in ONE in-order stream; a DMA that stops accepting read data until write acks return would deadlock behind it | `sf_mc25_vport_bridge` reserves response-FIFO credit before issuing and never back-pressures the controller (assertion on overflow) |
+| 17 | tb_sf25_dma_bridge | The analytical DMA model had no write path: SPM→EXT ran at 6.06 vs 11.4 B/cycle EXT→SPM | `dma_write_bw` (Little's law on WOUT) added to the roofline; WOUT is an exploration dimension |
+| 18 | sf-inventory | Elaboration "failures" of two library blocks were simulator limitations (Verilator BLKLOOPINIT, Icarus concurrent SVA), not design defects | Third outcome *inconclusive*; curated status kept, with the reason |
+| 19 | Yosys 0.33 | The SilicaFlux packages (multi-dimensional packed typedefs) do not parse in the open flow the SilicaFlux update proposes | As-built logic area is ANALYTICAL (scaling laws); sv2v or a newer front end is needed for gate counts |
+
+## v2: model ↔ RTL calibration against the existing SilicaFlux RTL
+
+| Model | RTL measurement | Agreement |
+|---|---|---|
+| Burst-port efficiency `L/(L+3)` store, `L/(L+4)` load | tb_sf25_memctrl, L = 1..256 | exact at every L (the overhead is structural: descriptor, commit / read pipe, done handshake) |
+| DMA write path `WOUT/(L+1)` | tb_sf25_dma_bridge SPM→EXT, WOUT 8, 20-cycle memory | 6.10 vs 6.06 B/cycle (+0.6 %) |
+| DMA read path (outstanding / round trip) | tb_sf25_dma_bridge EXT→SPM, 16 outstanding | 12.2 vs 11.4 B/cycle (+7 %; router + bridge add ~1.4 cycles of round trip) |
+| Tensor drain ceiling | tb_sf25_tensor, results accepted 1 cycle in 4 | 16 vs 15.9 MAC/cycle |

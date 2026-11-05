@@ -524,7 +524,15 @@ def run(lint: bool = True, sf_root: Path | None = None) -> dict:
     blocks = resolve_blocks(ix, lint)
     nfiles = sum(len(m.files) for m in ix.sets.values())
     nlines = sum(f.lines for m in ix.sets.values() for f in m.files)
-    return {"available": True, "root": str(root), "files": nfiles, "lines": nlines,
+    tops = []
+    for name in ("silicaflux_top", "compute_tile"):
+        for d in ix.defs(name):
+            types = {i.module for i in d.instances}
+            undef = {t for t in types if not ix.defs(t)}
+            tops.append({"module": name, "origin": d.origin, "instances": len(d.instances), "types": len(types),
+                         "undefined_types": sorted(undef),
+                         "undefined_instances": sum(1 for i in d.instances if not ix.defs(i.module))})
+    return {"available": True, "root": str(root), "files": nfiles, "lines": nlines, "tops": tops,
             "sets": {k: {"title": m.set.title, "generation": m.set.generation, "files": len(m.files),
                          "missing": m.missing, "core": m.set.silicaflux_core} for k, m in ix.sets.items()},
             "modules": len(ix.modules),

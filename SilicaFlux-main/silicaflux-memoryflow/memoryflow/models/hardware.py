@@ -169,6 +169,10 @@ EXTMEM_PRESETS: dict[str, ExtMemConfig] = {m.name: m for m in [
     ExtMemConfig("DDR4-3200 x32", "DDR4", 3200, 32, 1, 0.70, 90, 15.0, 3.2, 40, _SRC_DRAM),
     ExtMemConfig("LPDDR4X-4266 x32", "LPDDR4X", 4266, 32, 1, 0.70, 110, 5.5, 2.8, 28, _SRC_DRAM),
     ExtMemConfig("LPDDR5-6400 x32", "LPDDR5", 6400, 32, 1, 0.70, 110, 4.5, 3.0, 16, _SRC_DRAM),
+    # multi-channel options for the full SilicaFlux (PHY area scales per channel)
+    ExtMemConfig("LPDDR4X-4266 2x32", "LPDDR4X", 4266, 32, 2, 0.70, 110, 5.5, 5.6, 28, _SRC_DRAM),
+    ExtMemConfig("LPDDR5-6400 2x32", "LPDDR5", 6400, 32, 2, 0.70, 110, 4.5, 6.0, 16, _SRC_DRAM),
+    ExtMemConfig("LPDDR5-6400 4x32", "LPDDR5", 6400, 32, 4, 0.70, 110, 4.5, 12.0, 16, _SRC_DRAM),
     ExtMemConfig("HBM2E 1 stack", "HBM2E", 3200, 1024, 1, 0.80, 100, 3.9, 15.0, 16, _SRC_DRAM),
     ExtMemConfig("HBM3 1 stack", "HBM3", 6400, 1024, 1, 0.80, 100, 3.0, 18.0, 7, _SRC_DRAM),
 ]}
