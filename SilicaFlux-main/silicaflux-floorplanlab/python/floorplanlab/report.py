@@ -63,6 +63,19 @@ def curate_run(r: dict) -> None:
                         shutil.copyfileobj(fi, fo)
                 else:
                     shutil.copy2(p, dst / n)
+    # OpenROAD-rendered views, downscaled, for the experiment set only (size)
+    tags = set((r.get("spec") or {}).get("tags") or [])
+    if tags & {"experiment", "locality", "baseline"}:
+        try:
+            from PIL import Image
+            for n in ("or_placement_density.png", "or_pdn.png", "or_placement.png"):
+                p = src / "export" / n
+                if p.is_file():
+                    im = Image.open(p)
+                    im.thumbnail((700, 700))
+                    im.save(dst / n, optimize=True)
+        except Exception as e:  # pragma: no cover
+            print(f"note: OpenROAD image curation skipped for {rid}: {e}")
     for p in (src / "orfs" / "inputs").glob("*"):
         if p.suffix in (".mk", ".tcl", ".sdc", ".svh"):
             (dst / "inputs").mkdir(exist_ok=True)
@@ -204,8 +217,11 @@ def build_reports(run_ids=None, baseline: str = "A_baseline") -> int:
           md_table(df, ["run_id", "die_w_um", "die_h_um", "die_area_mm2", "core_area_mm2", "std_cell_area_placed_um2",
                         "macro_area_um2", "std_cell_util_of_rows", "core_util_incl_macros"]),
           "", "## Performance (pre-route) and routability (preliminary)", "",
-          md_table(df, ["run_id", "wns_ns", "tns_ns", "whs_ns", "clk_path_delay_ns", "placed_hpwl_mm",
-                        "inter_group_hpwl_mm", "grt_completed", "grt_overflow", "grt_wirelength_mm", "grt_wns_ns"]),
+          md_table(df, ["run_id", "wns_ns", "tns_ns", "whs_ns", "reg2reg_slack_ns", "reg2reg_delay_ns", "placed_hpwl_mm",
+                        "inter_group_hpwl_mm", "grt_completed", "grt_overflow", "grt_hotspot_near_macro_frac",
+                        "grt_wirelength_mm", "grt_wns_ns"]),
+          "", "Worst register-to-register path per run (pre-route):", "",
+          md_table(df, ["run_id", "reg2reg_start", "reg2reg_end", "reg2reg_slack_ns"]),
           "", "## Power (information only)", "",
           md_table(df, ["run_id", "pdn_connected", "power_vectorless_mw"]),
           "", "Power = OpenSTA `report_power` with **no switching-activity file** (input activity 0.1); IHP SRAM",
@@ -216,6 +232,18 @@ def build_reports(run_ids=None, baseline: str = "A_baseline") -> int:
     dd = pd.DataFrame(cmp["deltas"])
     if not dd.empty:
         md.append(md_table(dd, list(dd.columns), 2))
+    # surrogate (annealing) vs measured: was the proposer any good?
+    alog = RESULTS / "sweeps" / "anneal" / "anneal_log.yaml"
+    if alog.is_file():
+        import yaml as _y
+        al = _y.safe_load(alog.read_text())
+        md += ["", "## Annealing proposer vs measured results", "",
+               f"Surrogate evaluations: {al.get('evaluated')}. The surrogate (optimiser.py) only proposes candidates;",
+               "the rows below are the measured outcomes of the proposed runs (SA_*) next to comparable manual runs.", ""]
+        sa = df[df.run_id.str.startswith("SA_") | df.run_id.isin(["C_sram_near_compute", "D_logic_consolidated",
+                                                                    "L_periphery_rows", "L_west_east_columns"])]
+        md.append(md_table(sa, ["run_id", "arrangement", "target_util", "die_area_mm2", "reg2reg_delay_ns",
+                                "grt_overflow", "grt_wirelength_mm", "physically_valid"]))
     md += ["", "## Pareto analysis", "", f"Rule: {cmp['rule']}.", "",
            f"Eligible runs: {', '.join(cmp['eligible']) or 'none'}", "",
            f"Non-dominated (Pareto) set: **{', '.join(cmp['pareto']) or 'none'}**", "",
@@ -238,15 +266,15 @@ def _html(df: pd.DataFrame, cmp: dict, out: Path) -> None:
     for sel, name, color, sym in ((df.run_id.isin(par), "Pareto (non-dominated)", BLUE, "circle"),
                                   (df.physically_valid & ~df.run_id.isin(par), "valid, dominated", GREY, "circle"),
                                   (~df.physically_valid, "invalid (gate failure) - not ranked", CRIT, "x-open")):
-        d = df[sel & df.die_area_mm2.notna() & df.clk_path_delay_ns.notna()]
+        d = df[sel & df.die_area_mm2.notna() & df.reg2reg_delay_ns.notna()]
         if d.empty:
             continue
-        f.add_trace(go.Scatter(x=d.die_area_mm2, y=d.clk_path_delay_ns, mode="markers+text", name=name, text=d.run_id,
+        f.add_trace(go.Scatter(x=d.die_area_mm2, y=d.reg2reg_delay_ns, mode="markers+text", name=name, text=d.run_id,
                                textposition="top center", marker=dict(size=11, color=color, symbol=sym,
                                                                       line=dict(width=2, color=SURF)),
-                               hovertemplate="%{text}<br>die %{x:.3f} mm2<br>clk path %{y:.3f} ns<extra></extra>"))
-    f.update_layout(title="Die area vs pre-route clk critical-path delay (lower-left is better)",
-                    xaxis_title="die area (mm2)", yaxis_title="clk critical-path delay, pre-route (ns)")
+                               hovertemplate="%{text}<br>die %{x:.3f} mm2<br>reg-to-reg path %{y:.3f} ns<extra></extra>"))
+    f.update_layout(title="Die area vs pre-route register-to-register path delay (lower-left is better)",
+                    xaxis_title="die area (mm2)", yaxis_title="reg-to-reg critical-path delay, pre-route (ns)")
     figs.append(f)
     for metric, title in (("grt_overflow", "Global-route overflow (preliminary)"),
                           ("grt_wirelength_mm", "Global-route wirelength (mm)"),
@@ -264,7 +292,7 @@ def _html(df: pd.DataFrame, cmp: dict, out: Path) -> None:
                         margin=dict(l=60, r=20, t=60, b=60), height=420)
     parts = [f.to_html(full_html=False, include_plotlyjs=("cdn" if i == 0 else False)) for i, f in enumerate(figs)]
     rows = "".join("<tr>" + "".join(f"<td>{html.escape(_fmt(r[c]))}</td>" for c in
-                                    ("run_id", "status", "die_area_mm2", "wns_ns", "clk_path_delay_ns", "grt_overflow",
+                                    ("run_id", "status", "die_area_mm2", "wns_ns", "reg2reg_delay_ns", "grt_overflow",
                                      "grt_wirelength_mm", "failed_gates")) + "</tr>" for _, r in df.iterrows())
     imgs = "".join(f'<figure><img src="../runs/{html.escape(r)}/floorplan.png" alt="floorplan {html.escape(r)}">'
                    f"<figcaption>{html.escape(r)}</figcaption></figure>"
@@ -279,7 +307,7 @@ figure{{display:inline-block;margin:6px;width:360px;max-width:100%}}img{{width:1
 <p class="note">Measured OpenROAD/OpenSTA results. Timing is pre-route (placement parasitics, ideal clocks); routing is a
 preliminary global route; nothing here is signoff. Invalid runs are shown in red/grey and never ranked.
 Pareto set: <b>{html.escape(', '.join(cmp['pareto']) or 'none')}</b>.</p>
-<table><tr><th>run</th><th>status</th><th>die mm2</th><th>WNS ns</th><th>clk path ns</th><th>GRT overflow</th><th>GRT WL mm</th><th>failed gates</th></tr>{rows}</table>
+<table><tr><th>run</th><th>status</th><th>die mm2</th><th>WNS ns</th><th>reg2reg ns</th><th>GRT overflow</th><th>GRT WL mm</th><th>failed gates</th></tr>{rows}</table>
 {''.join(parts)}
 <h2>Floorplans (OpenDB data)</h2>{imgs}
 </body></html>"""

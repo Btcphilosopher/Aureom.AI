@@ -1,0 +1,57 @@
+max slew
+
+Pin                                    Limit    Slew   Slack
+------------------------------------------------------------
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[24]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[56]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[25]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[57]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[27]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[59]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[39]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[7]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[29]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[61]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[42]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[10]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_ADDR[2]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[26]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[58]    0.48    0.48   -0.00 (VIOLATED)
+
+max fanout
+
+Pin                                   Limit Fanout  Slack
+---------------------------------------------------------
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_19_/Y      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_21_/Y      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_23_/Y      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_25_/Y      8     16     -8 (VIOLATED)
+g_sram[0].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_19_/Y      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_21_/Y      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_23_/Y      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_25_/Y      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_19_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_21_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_23_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_25_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_19_/Y      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_21_/Y      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_23_/Y      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_25_/Y      8     16     -8 (VIOLATED)
+g_sram[3].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+

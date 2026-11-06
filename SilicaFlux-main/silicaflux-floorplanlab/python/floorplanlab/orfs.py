@@ -211,8 +211,11 @@ class OrfsContext:
                 rc = 124
         return StepResult(" ".join(targets), rc, round(time.time() - t0, 1), str(log))
 
-    def openroad(self, script: Path, log_name: str, env_vars: dict[str, str], timeout: int = 4 * 3600) -> StepResult:
-        """Run a FloorplanLab analysis Tcl in OpenROAD with ORFS-like environment."""
+    def openroad(self, script: Path, log_name: str, env_vars: dict[str, str], timeout: int = 4 * 3600,
+                 gui: bool = False) -> StepResult:
+        """Run a FloorplanLab analysis Tcl in OpenROAD with ORFS-like environment.
+        gui=True: `openroad -gui` with an offscreen Qt platform (image rendering);
+        the script must call exit itself."""
         t = tools()
         log_dir = self.work_home / "flp_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -220,7 +223,11 @@ class OrfsContext:
         env = dict(os.environ)
         env.update(self.extra_env)
         env.update(env_vars)
-        cmd = [t["OPENROAD_EXE"], "-no_init", "-exit", str(script)]
+        if gui:
+            env["QT_QPA_PLATFORM"] = "offscreen"
+            cmd = [t["OPENROAD_EXE"], "-no_init", "-gui", str(script)]
+        else:
+            cmd = [t["OPENROAD_EXE"], "-no_init", "-exit", str(script)]
         t0 = time.time()
         with open(log, "w") as fh:
             fh.write("# " + " ".join(cmd) + "\n")

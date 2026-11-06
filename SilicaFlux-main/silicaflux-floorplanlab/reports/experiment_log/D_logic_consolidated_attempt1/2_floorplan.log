@@ -1,0 +1,89 @@
+# make -C /opt/eda/orfs/flow DESIGN_CONFIG=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/inputs/config.mk WORK_HOME=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs FLOW_VARIANT=base OPENROAD_EXE=/opt/eda/env/bin/openroad YOSYS_CMD=/opt/eda/env/bin/yosys KLAYOUT_CMD=/usr/bin/klayout do-2_1_floorplan do-2_2_floorplan_io do-2_3_floorplan_tdms do-2_4_floorplan_macro do-2_5_floorplan_tapcell
+make: Entering directory '/opt/eda/orfs/flow'
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_1_floorplan.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_1_floorplan.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/floorplan.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_1_floorplan.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_1_floorplan.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO ODB-0222] Reading LEF file: /opt/eda/orfs/flow/platforms/ihp-sg13g2/lef/sg13g2_tech.lef
+[INFO ODB-0223]     Created 19 technology layers
+[INFO ODB-0224]     Created 300 technology vias
+[INFO ODB-0226] Finished LEF file:  /opt/eda/orfs/flow/platforms/ihp-sg13g2/lef/sg13g2_tech.lef
+[INFO ODB-0222] Reading LEF file: /opt/eda/orfs/flow/platforms/ihp-sg13g2/lef/sg13g2_stdcell.lef
+[INFO ODB-0225]     Created 78 library cells
+[INFO ODB-0226] Finished LEF file:  /opt/eda/orfs/flow/platforms/ihp-sg13g2/lef/sg13g2_stdcell.lef
+[INFO ODB-0222] Reading LEF file: /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_2048x64_c2_bm_bist.lef
+[INFO ODB-0225]     Created 1 library cells
+[INFO ODB-0226] Finished LEF file:  /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_2048x64_c2_bm_bist.lef
+[INFO ODB-0222] Reading LEF file: /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_1024x64_c2_bm_bist.lef
+[INFO ODB-0225]     Created 1 library cells
+[INFO ODB-0226] Finished LEF file:  /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_1024x64_c2_bm_bist.lef
+[INFO ODB-0222] Reading LEF file: /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_512x64_c2_bm_bist.lef
+[INFO ODB-0225]     Created 1 library cells
+[INFO ODB-0226] Finished LEF file:  /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_512x64_c2_bm_bist.lef
+[INFO ODB-0222] Reading LEF file: /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_256x64_c2_bm_bist.lef
+[INFO ODB-0225]     Created 1 library cells
+[INFO ODB-0226] Finished LEF file:  /opt/eda/collateral/ihp-sg13g2-sram-d0e5b3c/lef/RM_IHPSG13_1P_256x64_c2_bm_bist.lef
+
+==========================================================================
+Floorplan check_setup
+--------------------------------------------------------------------------
+Warning: There are 2 input ports missing set_input_delay.
+Warning: There are 1701 unconstrained endpoints.
+number instances in verilog is 95096
+[INFO IFP-0001] Added 602 rows of 6871 site CoreSite.
+[INFO RSZ-0026] Removed 18211 buffers.
+Default units for flow
+ time 1ns
+ capacitance 1pF
+ resistance 1kohm
+ voltage 1v
+ current 1uA
+ power 1pW
+ distance 1um
+Warning: There are 2 input ports missing set_input_delay.
+Warning: There are 1701 unconstrained endpoints.
+
+==========================================================================
+floorplan final report_design_area
+--------------------------------------------------------------------------
+Design area 5514290 u^2 73% utilization.
+Elapsed time: 0:23.87[h:]min:sec. CPU time: user 11.55 sys 0.41 (50%). Peak memory: 435128KB.
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_2_floorplan_io.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_2_floorplan_io.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/io_placement_random.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_2_floorplan_io.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_2_floorplan_io.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO PPL-0048] Restrict pins [ clk rst_ni test_mode ] to region 1182.55u-2196.17u at the BOTTOM edge.
+[INFO PPL-0048] Restrict pins [ tck tdi tdo tdo_oe tms ... ] to region 0.00u-2358.72u at the LEFT edge.
+[INFO PPL-0048] Restrict pins [ spi_cs0_n spi_miso spi_mosi spi_sck uart_rx ... ] to region 0.00u-2358.72u at the RIGHT edge.
+[INFO PPL-0048] Restrict pins [ gpio_i[0] gpio_i[1] gpio_i[2] gpio_i[3] gpio_i[4] ... ] to region 0.00u-2358.72u at the RIGHT edge.
+[INFO PPL-0048] Restrict pins [ cpu_sleep test_fail test_pass test_status[0] test_status[10] ... ] to region 0.00u-3378.72u at the TOP edge.
+Found 12 macro blocks.
+[INFO PPL-0007] Random pin placement.
+Elapsed time: 0:01.14[h:]min:sec. CPU time: user 0.41 sys 0.13 (47%). Peak memory: 226336KB.
+cp /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/results/ihp-sg13g2/silicaflux_v/base/2_2_floorplan_io.odb /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/results/ihp-sg13g2/silicaflux_v/base/2_3_floorplan_tdms.odb
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_4_floorplan_macro.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_4_floorplan_macro.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/macro_place.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_4_floorplan_macro.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_4_floorplan_macro.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO ORD-0030] Using 4 thread(s).
+FLP-MACRO: g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (60.480, 1670.760) R0 FIRM
+FLP-MACRO: g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (885.120, 1670.760) R0 FIRM
+FLP-MACRO: g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (1709.280, 1670.760) R0 FIRM
+FLP-MACRO: g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (2533.920, 1670.760) R0 FIRM
+FLP-MACRO: g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (60.480, 960.120) R0 FIRM
+FLP-MACRO: g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (885.120, 960.120) R0 FIRM
+FLP-MACRO: g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (1709.280, 960.120) R0 FIRM
+FLP-MACRO: g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac (RM_IHPSG13_1P_2048x64_c2_bm_bist) at (2533.920, 960.120) R0 FIRM
+FLP-MACRO: u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac (RM_IHPSG13_1P_512x64_c2_bm_bist) at (60.480, 60.480) MX FIRM
+FLP-MACRO: u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac (RM_IHPSG13_1P_512x64_c2_bm_bist) at (885.120, 60.480) MX FIRM
+FLP-MACRO: u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac (RM_IHPSG13_1P_512x64_c2_bm_bist) at (1709.280, 60.480) MX FIRM
+FLP-MACRO: u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac (RM_IHPSG13_1P_512x64_c2_bm_bist) at (2533.920, 60.480) MX FIRM
+[INFO][FLOW-xxxx] Using manual macro placement file /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/inputs/macro_placement.tcl
+Elapsed time: 0:01.71[h:]min:sec. CPU time: user 0.70 sys 0.10 (47%). Peak memory: 226092KB.
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_5_floorplan_tapcell.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_5_floorplan_tapcell.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/tapcell.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_5_floorplan_tapcell.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_5_floorplan_tapcell.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO ODB-0303] The initial 602 rows (4136342 sites) were cut with 12 shapes for a total of 2158 rows (1578278 sites).
+Elapsed time: 0:00.59[h:]min:sec. CPU time: user 0.36 sys 0.05 (70%). Peak memory: 179952KB.
+make: Leaving directory '/opt/eda/orfs/flow'

@@ -1,0 +1,12 @@
+# make -C /opt/eda/orfs/flow DESIGN_CONFIG=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/inputs/config.mk WORK_HOME=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs FLOW_VARIANT=base OPENROAD_EXE=/opt/eda/env/bin/openroad YOSYS_CMD=/opt/eda/env/bin/yosys KLAYOUT_CMD=/usr/bin/klayout do-3_1_place_gp_skip_io do-3_2_place_iop do-3_3_place_gp do-3_4_place_resized do-3_5_place_dp do-3_place do-3_place.sdc
+make: Entering directory '/opt/eda/orfs/flow'
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/global_place_skip_io.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[ERROR ORD-0007] /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/results/ihp-sg13g2/silicaflux_v/base/2_floorplan.odb does not exist.
+Error: global_place_skip_io.tcl, 2 ORD-0007
+Command exited with non-zero status 1
+Elapsed time: 0:00.11[h:]min:sec. CPU time: user 0.10 sys 0.00 (97%). Peak memory: 100276KB.
+make: *** [Makefile:656: do-3_1_place_gp_skip_io] Error 1
+make: Leaving directory '/opt/eda/orfs/flow'

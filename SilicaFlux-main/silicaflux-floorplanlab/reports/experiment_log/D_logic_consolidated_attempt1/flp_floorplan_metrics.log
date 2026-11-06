@@ -1,0 +1,5 @@
+# /opt/eda/env/bin/openroad -no_init -exit /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/scripts/analysis/stage_metrics.tcl
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+FLP: wrote /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/analysis/floorplan_metrics.json

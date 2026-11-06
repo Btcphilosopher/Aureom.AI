@@ -1,0 +1,34 @@
+max slew
+
+Pin                                    Limit    Slew   Slack
+------------------------------------------------------------
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[5]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[37]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[13]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[45]    0.48    0.48   -0.01 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[14]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[46]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[8]    0.48    0.48   -0.00 (VIOLATED)
+u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DIN[40]    0.48    0.48   -0.00 (VIOLATED)
+
+max fanout
+
+Pin                                   Limit Fanout  Slack
+---------------------------------------------------------
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[1].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_19_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_20_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_21_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_22_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_23_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_24_/X      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_25_/Y      8     16     -8 (VIOLATED)
+g_sram[2].g_sfv.u_bank/u_ram/u_macro/_26_/X      8     16     -8 (VIOLATED)
+wire292/X                                 8     16     -8 (VIOLATED)
+wire293/X                                 8     16     -8 (VIOLATED)
+wire294/X                                 8     16     -8 (VIOLATED)
+wire295/X                                 8     16     -8 (VIOLATED)
+

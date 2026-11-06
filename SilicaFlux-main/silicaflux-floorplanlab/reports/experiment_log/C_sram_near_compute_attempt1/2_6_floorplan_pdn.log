@@ -1,0 +1,11 @@
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+FLP-PDN: macro grid sram_grid for cells: RM_IHPSG13_1P_2048x64_c2_bm_bist RM_IHPSG13_1P_512x64_c2_bm_bist (connect Metal4 TopMetal1)
+[INFO PDN-0001] Inserting grid: grid
+[WARNING PDN-0178] Remaining channel (2496.0000, 56.4800) - (2531.5200, 691.9600) on Metal1 for nets: VSS
+[WARNING PDN-0178] Remaining channel (2496.0000, 1666.7600) - (2531.5200, 2302.2400) on Metal1 for nets: VSS
+[ERROR PDN-0179] Unable to repair all channels.
+Error: pdn.tcl, 5 PDN-0179
+Command exited with non-zero status 1
+Elapsed time: 0:03.55[h:]min:sec. CPU time: user 1.54 sys 0.09 (45%). Peak memory: 263756KB.

@@ -1,0 +1,1147 @@
+{
+  "run_id": "L_periphery_rows",
+  "created": "2026-11-06T09:04:15+00:00",
+  "spec": {
+    "id": "L_periphery_rows",
+    "description": "Memory-centric: main SRAM rows on top/bottom edges, TSPM row across the centre",
+    "design": "silicaflux_v",
+    "platform": "ihp_sg13g2",
+    "seed": 1,
+    "clock_period_ns": null,
+    "floorplan": {
+      "mode": "B",
+      "die_area": null,
+      "core_area": null,
+      "target_util": 0.5,
+      "aspect_ratio": 1.0,
+      "core_margin_um": 40.0,
+      "logic_growth": 1.0,
+      "corridor_um": 0.0,
+      "pdn_overhead": 0.0
+    },
+    "macros": {
+      "mode": "physical",
+      "placement": "manual",
+      "arrangement": "periphery_rows",
+      "positions": null,
+      "halo_um": 20.0,
+      "channel_um": 40.0,
+      "auto_style": "corner_max_wl"
+    },
+    "pins": {
+      "mode": "plan",
+      "min_distance_tracks": 2,
+      "corner_avoidance_um": 50.0,
+      "edge_overrides": {}
+    },
+    "pdn": {
+      "params": {},
+      "check_power_grid": true,
+      "ir_drop": true
+    },
+    "place": {
+      "density": null,
+      "density_lb_addon": 0.2,
+      "timing_driven": true,
+      "routability_driven": true,
+      "pad_global": 2,
+      "pad_detail": 1
+    },
+    "route_estimate": {
+      "enabled": true,
+      "congestion_iterations": 50,
+      "allow_congestion": true
+    },
+    "tags": [
+      "locality"
+    ]
+  },
+  "design": {
+    "name": "silicaflux_v",
+    "top": "sfv_soc_df",
+    "description": "SilicaFlux-V + DataFabric (sfv_soc_df, PERF=0, ARB_MODE=1, DMA_ENGINE=0, SRAM_IMPL=0)"
+  },
+  "platform": {
+    "name": "ihp_sg13g2",
+    "status": "enabled",
+    "orfs_platform": "ihp-sg13g2",
+    "process": "IHP SG13G2 130 nm SiGe:C BiCMOS, 7 metal (Metal1-5, TopMetal1-2), open PDK",
+    "provenance": {
+      "orfs_revision": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+      "sram_collateral_revision": "d0e5b3c13e4bb9bdbd33493d5e87656dcae66384"
+    }
+  },
+  "stages": {
+    "synth": {
+      "rc": 0,
+      "shared": true,
+      "reused": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec"
+    },
+    "floorplan": {
+      "rc": 0,
+      "seconds": 16.3,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/flp_logs/2_floorplan.log",
+      "target": "do-2_1_floorplan do-2_2_floorplan_io do-2_3_floorplan_tdms do-2_4_floorplan_macro do-2_5_floorplan_tapcell",
+      "finished": "2026-11-06T09:04:33+00:00"
+    },
+    "metrics_floorplan": {
+      "rc": 0,
+      "seconds": 16.2,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/flp_logs/flp_floorplan_metrics.log",
+      "target": "stage_metrics.tcl",
+      "finished": "2026-11-06T09:04:50+00:00"
+    },
+    "pdn": {
+      "rc": 0,
+      "seconds": 58.6,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/flp_logs/2_6_pdn.log",
+      "target": "do-2_6_floorplan_pdn do-2_floorplan",
+      "finished": "2026-11-06T09:05:49+00:00"
+    },
+    "metrics_pdn": {
+      "rc": 0,
+      "seconds": 8.8,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/flp_logs/flp_pdn_metrics.log",
+      "target": "stage_metrics.tcl",
+      "finished": "2026-11-06T09:05:58+00:00"
+    },
+    "place": {
+      "rc": 2,
+      "seconds": 28.0,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/flp_logs/3_place.log",
+      "target": "do-3_1_place_gp_skip_io do-3_2_place_iop do-3_3_place_gp do-3_4_place_resized do-3_5_place_dp do-3_place do-3_place.sdc",
+      "finished": "2026-11-06T09:06:26+00:00"
+    }
+  },
+  "gates": {
+    "1": {
+      "name": "RTL inputs valid",
+      "status": "PASS",
+      "findings": []
+    },
+    "2": {
+      "name": "Synthesis succeeds",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 2,
+          "severity": "info",
+          "code": "YOSYS_WARNING",
+          "message": "1x Replacing memory \\dout with list of registers. See sfv_sram_macro_bank.sv:0"
+        },
+        {
+          "gate": 2,
+          "severity": "info",
+          "code": "YOSYS_WARNING",
+          "message": "1x Found unsupported expression 'SCE*SCD+SCE'*D' in pin attribute of cell 'sg13g2_sdfbbp_1' - skipping."
+        }
+      ]
+    },
+    "3": {
+      "name": "No unexpected unresolved black boxes",
+      "status": "PASS",
+      "findings": []
+    },
+    "4": {
+      "name": "Required technology inputs present",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "slow_1p08V_125C: sg13g2_stdcell_slow_1p08V_125C.lib not in ORFS ab2aaf0f"
+        },
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "fast_1p32V_m40C: sg13g2_stdcell_fast_1p32V_m40C.lib not in ORFS ab2aaf0f"
+        }
+      ]
+    },
+    "5": {
+      "name": "Die/core geometry valid",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        }
+      ]
+    },
+    "6": {
+      "name": "Macros legally placed",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        }
+      ],
+      "prechecks": [
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        },
+        {
+          "gate": 6,
+          "severity": "warning",
+          "code": "HALO_OUTSIDE_CORE",
+          "message": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac: halo of 20.0 um crosses the core edge"
+        }
+      ]
+    },
+    "7": {
+      "name": "I/O placement passes geometry checks",
+      "status": "NOT_RUN",
+      "findings": [],
+      "prechecks": []
+    },
+    "8": {
+      "name": "Tapcell/endcap stage completed",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 8,
+          "severity": "info",
+          "code": "TAPCELL_RESULT",
+          "message": "method=cut_rows tapcells=0 endcaps=0; The initial 581 rows (4132653 sites) were cut with 12 shapes for a total of 2137 rows (1574589 sites)."
+        }
+      ],
+      "note": "SG13G2 std-cell library has no well-tie or endcap cells (ORFS config.mk comment); the platform tapcell stage only cuts rows around macros (cut_rows). No arbitrary tap spacing is applied."
+    },
+    "9": {
+      "name": "PDN generation and connectivity checks pass",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "PDN_CONNECTED",
+          "message": "check_power_grid VSS: connected"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "PDN_CONNECTED",
+          "message": "check_power_grid VDD: connected"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "MACRO_PG_VIAS",
+          "message": "all 36 macro PG pins have PDN vias (min 88 per pin)"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "MACRO_PG_OK",
+          "message": "36 macro PG pins on the expected nets"
+        },
+        {
+          "gate": 9,
+          "severity": "warning",
+          "code": "PDN_WARNINGS",
+          "message": "pdngen warnings: PDN-0110 x275 (PDN-0110 = no via where parallel/non-overlapping shapes meet)"
+        }
+      ]
+    },
+    "10": {
+      "name": "Placement legality checks pass",
+      "status": "FAIL",
+      "findings": [
+        {
+          "gate": 10,
+          "severity": "error",
+          "code": "PLACE_FAILED",
+          "message": "ORFS placement failed; see log"
+        }
+      ]
+    },
+    "11": {
+      "name": "Timing analysis completes with valid constraints",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "12": {
+      "name": "Preliminary routing/congestion analysis completes",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "13": {
+      "name": "Results exported successfully",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "14": {
+      "name": "Experiment is reproducible",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 14,
+          "severity": "warning",
+          "code": "DIRTY_TREE",
+          "message": "FloorplanLab sources had uncommitted changes when the run started"
+        },
+        {
+          "gate": 14,
+          "severity": "info",
+          "code": "REPRO_METADATA_ONLY",
+          "message": "metadata complete; bit-exact re-run not performed for this run"
+        }
+      ]
+    },
+    "15": {
+      "name": "No fabricated metrics or undeclared substitutions",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 15,
+          "severity": "info",
+          "code": "PROVENANCE",
+          "message": "all metrics in run.json are parsed from Yosys/OpenROAD/OpenSTA outputs listed in 'stages'"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "std_cell_area_synth_um2": 1168347.991,
+    "macro_inventory": {
+      "RM_IHPSG13_1P_2048x64_c2_bm_bist": 8,
+      "RM_IHPSG13_1P_512x64_c2_bm_bist": 4
+    },
+    "floorplan": {
+      "die_um": [
+        0.0,
+        0.0,
+        3494.88,
+        2279.34
+      ],
+      "core_um": [
+        40.32,
+        41.58,
+        3454.56,
+        2237.76
+      ],
+      "die_area_mm2": 7.966,
+      "core_area_mm2": 7.4983,
+      "std_cell_area_um2": 980812.0,
+      "macro_area_um2": 4533478.5,
+      "instances": {
+        "macro": 12,
+        "std": 76827,
+        "tie": 46
+      },
+      "placement_rows": 2137,
+      "row_area_um2": 2856934.282,
+      "std_cell_util_of_rows": 0.3433,
+      "core_util_incl_macros": 0.7354,
+      "hpwl_um": 194362.8,
+      "std_cell_area_by_group_um2": {
+        "cpu": 171183.197,
+        "debug": 17703.101,
+        "dma": 47121.782,
+        "fabric": 74145.456,
+        "mbist": 6199.805,
+        "periph": 56768.947,
+        "rom": 29549.318,
+        "sram_ctrl": 11002.522,
+        "tensor": 293595.322,
+        "tile": 13715.05,
+        "top": 2930.256,
+        "vector": 256563.418
+      },
+      "placement_status": {
+        "FIRM": 12,
+        "NONE": 76873
+      },
+      "io_pins_total": 73,
+      "io_pins_placed": 73,
+      "high_fanout_nets": [
+        {
+          "net": "clk",
+          "fanout": 2915
+        },
+        {
+          "net": "sys_rst_n",
+          "fanout": 2441
+        },
+        {
+          "net": "u_cpu/_11515_",
+          "fanout": 1133
+        },
+        {
+          "net": "u_tile/gclk_te",
+          "fanout": 857
+        },
+        {
+          "net": "u_tile/u_te/first_q",
+          "fanout": 648
+        },
+        {
+          "net": "u_tile/u_ve/bsc_q",
+          "fanout": 563
+        },
+        {
+          "net": "u_tile/gclk_ve",
+          "fanout": 555
+        },
+        {
+          "net": "u_tile/u_te/mac",
+          "fanout": 539
+        },
+        {
+          "net": "u_tile/u_te/u_mac/_02395_",
+          "fanout": 474
+        },
+        {
+          "net": "u_tile/u_te/_00039_",
+          "fanout": 413
+        }
+      ],
+      "macros": [
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            1591.38,
+            844.96,
+            2218.08
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            923.52,
+            1591.38,
+            1708.0,
+            2218.08
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1787.04,
+            1591.38,
+            2571.52,
+            2218.08
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            2650.08,
+            1591.38,
+            3434.56,
+            2218.08
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            60.48,
+            844.96,
+            687.18
+          ],
+          "orient": "MX",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            923.52,
+            60.48,
+            1708.0,
+            687.18
+          ],
+          "orient": "MX",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1787.04,
+            60.48,
+            2571.52,
+            687.18
+          ],
+          "orient": "MX",
+          "status": "FIRM"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            2650.08,
+            60.48,
+            3434.56,
+            687.18
+          ],
+          "orient": "MX",
+          "status": "FIRM"
+        },
+        {
+          "name": "u_tile/g_bank\\[0\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            1043.28,
+            844.96,
+            1234.62
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "u_tile/g_bank\\[1\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            923.52,
+            1043.28,
+            1708.0,
+            1234.62
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "u_tile/g_bank\\[2\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            1787.04,
+            1043.28,
+            2571.52,
+            1234.62
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        },
+        {
+          "name": "u_tile/g_bank\\[3\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            2650.08,
+            1043.28,
+            3434.56,
+            1234.62
+          ],
+          "orient": "R0",
+          "status": "FIRM"
+        }
+      ]
+    },
+    "pdn": {
+      "nets": [
+        {
+          "net": "VSS",
+          "type": "GROUND",
+          "special": 1,
+          "iterms": 76885,
+          "vias": 50181,
+          "layers": {
+            "Metal1": {
+              "shapes": 1063,
+              "length_um": 389872.2
+            },
+            "Metal5": {
+              "shapes": 170,
+              "length_um": 43857.0
+            },
+            "TopMetal1": {
+              "shapes": 75,
+              "length_um": 257493.0
+            }
+          }
+        },
+        {
+          "net": "VDD",
+          "type": "POWER",
+          "special": 1,
+          "iterms": 76897,
+          "vias": 49270,
+          "layers": {
+            "Metal1": {
+              "shapes": 1063,
+              "length_um": 394058.1
+            },
+            "Metal5": {
+              "shapes": 173,
+              "length_um": 42715.2
+            },
+            "TopMetal1": {
+              "shapes": 74,
+              "length_um": 255095.8
+            }
+          }
+        }
+      ]
+    }
+  },
+  "status": "failed",
+  "failure_reason": "ORFS placement failed",
+  "updated": "2026-11-06T09:06:26+00:00",
+  "vendored_sources_check": "checked 66 vendored files: OK",
+  "tools": {
+    "openroad": "2.0-12331-g6011bbe77",
+    "yosys": "Yosys 0.38+92",
+    "orfs": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+    "klayout": "KLayout 0.28.16",
+    "python": "Python 3.13.18"
+  },
+  "git_revision": "fb7244d6554ecc20d6f17f052adf5dc05b48ebf8+dirty",
+  "synthesis": {
+    "netlist": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/results/ihp-sg13g2/silicaflux_v/base/1_synth.v",
+    "total_cells": 95096,
+    "std_cells": 95084,
+    "sequential_cells": 4512,
+    "latch_cells": 0,
+    "latch_cell_types": {},
+    "icg_cells": 2,
+    "async_reset_flops": 4512,
+    "combinational_cells": 90570,
+    "tie_cells": 46,
+    "buffer_inverter_cells": 20322,
+    "chip_area_incl_macros_um2": 5701826.5314,
+    "macro_area_um2": 4533478.541,
+    "std_cell_area_um2": 1168347.991,
+    "sequential_area_um2": 200727.072,
+    "macros": {
+      "RM_IHPSG13_1P_2048x64_c2_bm_bist": 8,
+      "RM_IHPSG13_1P_512x64_c2_bm_bist": 4
+    },
+    "macro_instances": [
+      {
+        "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      }
+    ],
+    "unknown_cell_types": {},
+    "unresolved_modules": [],
+    "check_problems": 0,
+    "warnings": [
+      {
+        "message": "Replacing memory \\dout with list of registers. See sfv_sram_macro_bank.sv:0",
+        "count": 1
+      },
+      {
+        "message": "Found unsupported expression 'SCE*SCD+SCE'*D' in pin attribute of cell 'sg13g2_sdfbbp_1' - skipping.",
+        "count": 1
+      }
+    ],
+    "area_by_instance": [
+      {
+        "instance": "u_tile",
+        "module": "$paramod$e1e19d502aed204329de22e3343ebff334944d0d\\sfv_tile",
+        "std_cell_area_um2": 700039.1,
+        "macro_area_um2": 600409.6
+      },
+      {
+        "instance": "u_cpu",
+        "module": "$paramod\\sfv_cpu\\BOOT_ADDR=32'00000000000000000000000000000000",
+        "std_cell_area_um2": 190759.7,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_xbar",
+        "module": "$paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\\sfb_crossbar",
+        "std_cell_area_um2": 55390.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_dma",
+        "module": "$paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\\silicaflux_dma",
+        "std_cell_area_um2": 51073.4,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_rom",
+        "module": "$paramod\\sfv_bootrom\\WORDS=s32'00000000000000000000010000000000",
+        "std_cell_area_um2": 37782.9,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_dbg",
+        "module": "sfv_jtag_dbg",
+        "std_cell_area_um2": 18525.0,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_timer",
+        "module": "sfv_timer",
+        "std_cell_area_um2": 17747.8,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_uart",
+        "module": "$paramod\\sfv_uart\\BAUD_RESET=16'0000000011011001",
+        "std_cell_area_um2": 16290.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_sysctrl",
+        "module": "sfv_sysctrl",
+        "std_cell_area_um2": 13021.7,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_pbr",
+        "module": "$paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\\sfv_periph_bridge",
+        "std_cell_area_um2": 7172.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_mbist",
+        "module": "$paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\\sfv_mbist",
+        "std_cell_area_um2": 6941.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_spi",
+        "module": "sfv_spi",
+        "std_cell_area_um2": 5920.1,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_gpio",
+        "module": "$paramod\\sfv_gpio\\N=s32'00000000000000000000000000001000",
+        "std_cell_area_um2": 5278.1,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[0].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[1].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[2].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[3].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[4].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[5].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[6].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_sram[0].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[1].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[2].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[3].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "u_intc",
+        "module": "$paramod\\sfv_intc\\N=s32'00000000000000000000000000001001",
+        "std_cell_area_um2": 1425.9,
+        "macro_area_um2": 0.0
+      }
+    ],
+    "top_glue_area_um2": 3284.0,
+    "clock_reset_observations": {
+      "icg_instances": 2,
+      "flops_with_async_reset": 4512,
+      "flops_total": 4512,
+      "note": "single functional clock clk + JTAG tck (SDC); resets async-assert/sync-deassert via sfv_rst_sync (u_rs_por/u_rs_sys/u_rs_cpu); the reset tree is unbuffered after synthesis (repair_design buffers it; balanced tree only at CTS)"
+    },
+    "stat_report": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/reports/ihp-sg13g2/silicaflux_v/base/synth_stat.txt"
+  },
+  "netlist_sha256": "14a43bb27555e29cdc70e873c7b87b9ef1ed0b43717c1e94470441b9b627fd08",
+  "synth_key": "silicaflux_v__ihp_sg13g2__b8f5a2cee7ec",
+  "geometry": {
+    "mode": "B",
+    "die_area_um": [
+      0.0,
+      0.0,
+      3494.88,
+      2279.34
+    ],
+    "core_area_um": [
+      40.32,
+      41.58,
+      3454.56,
+      2237.76
+    ],
+    "die_w_um": 3494.88,
+    "die_h_um": 2279.34,
+    "core_w_um": 3414.24,
+    "core_h_um": 2196.18,
+    "die_area_mm2": 7.96602,
+    "core_area_mm2": 7.498286,
+    "breakdown": {
+      "std_cell_area_mapped_um2": 1168347.991,
+      "logic_growth": 1.0,
+      "target_util": 0.5,
+      "std_cell_region_required_um2": 2336695.982,
+      "macro_area_um2": 4533478.5408,
+      "macro_halo_area_um2": 626908.8,
+      "routing_corridor_area_um2": 0.0,
+      "pdn_overhead_area_um2": 0.0,
+      "core_area_required_um2": 7497083.3228,
+      "core_area_um2": 7498285.6032,
+      "std_cell_region_available_um2": 2337898.2624,
+      "implied_std_cell_util": 0.499743,
+      "grown_to_arrangement_envelope": true,
+      "envelope_um": [
+        3414.2,
+        1644.74
+      ],
+      "core_margin_um": [
+        40.32,
+        41.58
+      ],
+      "io_ring": "not included (logical pins only)"
+    }
+  },
+  "arrangement": {
+    "name": "periphery_rows",
+    "description": "Memory-centric: main SRAM banks 0-1 along the top edge (pins down) and 2-3 along the bottom edge (pins up); the 4 tile-scratchpad (TSPM) macros as a row across the core centre (pins down). Logic fills the two bands between the rows."
+  },
+  "planned_macro_placement": [
+    {
+      "inst": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 60.48,
+      "y": 1591.38,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 923.52,
+      "y": 1591.38,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 1787.04,
+      "y": 1591.38,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 2650.08,
+      "y": 1591.38,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 60.48,
+      "y": 60.48,
+      "orient": "MX",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 923.52,
+      "y": 60.48,
+      "orient": "MX",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 1787.04,
+      "y": 60.48,
+      "orient": "MX",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+      "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+      "x": 2650.08,
+      "y": 60.48,
+      "orient": "MX",
+      "width": 784.48,
+      "height": 626.7
+    },
+    {
+      "inst": "u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+      "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+      "x": 60.48,
+      "y": 1043.28,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 191.34
+    },
+    {
+      "inst": "u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+      "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+      "x": 923.52,
+      "y": 1043.28,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 191.34
+    },
+    {
+      "inst": "u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+      "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+      "x": 1787.04,
+      "y": 1043.28,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 191.34
+    },
+    {
+      "inst": "u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+      "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+      "x": 2650.08,
+      "y": 1043.28,
+      "orient": "R0",
+      "width": 784.48,
+      "height": 191.34
+    }
+  ],
+  "io_ports": 73,
+  "config_mk_sha256": "e4ec04bab0deb3b16ae18fe5aa4708ed7824ccef2b758ab3d7c8aae3035f9631",
+  "failed_gates": [
+    "10"
+  ],
+  "physically_valid": false,
+  "readiness": "PRELIMINARY FLOORPLAN ONLY -- not fabrication-ready (no CTS, detailed routing, extraction, signoff STA, DRC/LVS, IR/EM signoff, DFT, package)."
+}

@@ -1,0 +1,34 @@
+# make -C /opt/eda/orfs/flow DESIGN_CONFIG=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/inputs/config.mk WORK_HOME=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs FLOW_VARIANT=base OPENROAD_EXE=/opt/eda/env/bin/openroad YOSYS_CMD=/opt/eda/env/bin/yosys KLAYOUT_CMD=/usr/bin/klayout do-3_1_place_gp_skip_io do-3_2_place_iop do-3_3_place_gp do-3_4_place_resized do-3_5_place_dp do-3_place do-3_place.sdc
+make: Entering directory '/opt/eda/orfs/flow'
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/global_place_skip_io.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/logs/ihp-sg13g2/silicaflux_v/base/3_1_place_gp_skip_io.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO GPL-0002] DBU: 1000
+[INFO GPL-0003] SiteSize: 480 3780
+[INFO GPL-0004] CoreAreaLxLy: 40320 41580
+[INFO GPL-0005] CoreAreaUxUy: 2778720 2782080
+[INFO GPL-0006] NumInstances: 79079
+[INFO GPL-0007] NumPlaceInstances: 76873
+[INFO GPL-0008] NumFixedInstances: 12
+[INFO GPL-0009] NumDummyInstances: 2194
+[INFO GPL-0010] NumNets: 82169
+[INFO GPL-0011] NumPins: 290040
+[INFO GPL-0012] DieAreaLxLy: 0 0
+[INFO GPL-0013] DieAreaUxUy: 2819040 2823660
+[INFO GPL-0014] CoreAreaLxLy: 40320 41580
+[INFO GPL-0015] CoreAreaUxUy: 2778720 2782080
+[INFO GPL-0016] CoreArea: 7504585200000
+[INFO GPL-0017] NonPlaceInstsArea: 5165099654400
+[INFO GPL-0018] PlaceInstsArea: 1538725507200
+[INFO GPL-0019] Util(%): 65.77
+[INFO GPL-0020] StdInstsArea: 1538725507200
+[INFO GPL-0021] MacroInstsArea: 0
+[ERROR GPL-0302] Use a higher -density or re-floorplan with a larger core area.
+Given target density: 0.60
+Suggested target density: 0.66
+Error: global_place_skip_io.tcl, 30 GPL-0302
+Command exited with non-zero status 1
+Elapsed time: 0:00.69[h:]min:sec. CPU time: user 0.56 sys 0.12 (98%). Peak memory: 320632KB.
+make: *** [Makefile:656: do-3_1_place_gp_skip_io] Error 1
+make: Leaving directory '/opt/eda/orfs/flow'

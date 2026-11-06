@@ -1,0 +1,17 @@
+# make -C /opt/eda/orfs/flow DESIGN_CONFIG=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/inputs/config.mk WORK_HOME=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs FLOW_VARIANT=base OPENROAD_EXE=/opt/eda/env/bin/openroad YOSYS_CMD=/opt/eda/env/bin/yosys KLAYOUT_CMD=/usr/bin/klayout do-2_6_floorplan_pdn do-2_floorplan
+make: Entering directory '/opt/eda/orfs/flow'
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/pdn.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+FLP-PDN: macro grid sram_grid for cells: RM_IHPSG13_1P_2048x64_c2_bm_bist RM_IHPSG13_1P_512x64_c2_bm_bist (connect Metal4 TopMetal1)
+[INFO PDN-0001] Inserting grid: grid
+[WARNING PDN-0178] Remaining channel (2496.0000, 56.4800) - (2531.5200, 261.0400) on Metal1 for nets: VSS
+[WARNING PDN-0178] Remaining channel (2496.0000, 956.1200) - (2531.5200, 1591.6000) on Metal1 for nets: VSS
+[WARNING PDN-0178] Remaining channel (2496.0000, 1666.7600) - (2531.5200, 2302.2400) on Metal1 for nets: VSS
+[ERROR PDN-0179] Unable to repair all channels.
+Error: pdn.tcl, 5 PDN-0179
+Command exited with non-zero status 1
+Elapsed time: 0:02.09[h:]min:sec. CPU time: user 1.65 sys 0.16 (86%). Peak memory: 264320KB.
+make: *** [Makefile:626: do-2_6_floorplan_pdn] Error 1
+make: Leaving directory '/opt/eda/orfs/flow'

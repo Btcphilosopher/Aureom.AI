@@ -41,6 +41,13 @@ def export_run(run) -> list[Finding]:
         out.append(Finding(13, "info", "IMAGES", f"rendered {', '.join(p.name for p in imgs)}"))
     except Exception as e:  # recorded
         out.append(Finding(13, "error", "RENDER_FAILED", f"floorplan rendering failed: {e}"))
+    # OpenROAD-rendered views of the same database (labelled by view in the file name)
+    ri = run.ctx.openroad(pipeline.SCRIPTS / "analysis" / "or_images.tcl", "flp_or_images",
+                          {"FLP_ODB": str(rd / odb), "FLP_OUT": str(exp)}, timeout=900, gui=True)
+    run.stage("or_images", ri)
+    shots = [p.name for p in exp.glob("or_*.png")]
+    out.append(Finding(13, "info" if shots else "warning", "OR_IMAGES",
+                       f"OpenROAD-rendered images: {', '.join(sorted(shots)) or 'none (see log)'}"))
     try:
         ex = twinlab.build_export(run, geo, run._lef())
         tl = exp / "twinlab_floorplan.json"

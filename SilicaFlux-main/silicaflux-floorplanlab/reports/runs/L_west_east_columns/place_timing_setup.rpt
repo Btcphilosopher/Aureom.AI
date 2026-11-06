@@ -1,0 +1,2163 @@
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/g_simple.u_eng/_3791_
+          (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/g_simple.u_eng/_3791_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/g_simple.u_eng/_3791_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/u_regs/_1071_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/u_regs/_1071_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/u_regs/_1071_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/g_simple.u_eng/_3676_
+          (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/g_simple.u_eng/_3676_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/g_simple.u_eng/_3676_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/g_simple.u_eng/_3672_
+          (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/g_simple.u_eng/_3672_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/g_simple.u_eng/_3672_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/g_simple.u_eng/_3783_
+          (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/g_simple.u_eng/_3783_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/g_simple.u_eng/_3783_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/u_regs/_1009_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/u_regs/_1009_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/u_regs/_1009_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/u_regs/_0991_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/u_regs/_0991_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/u_regs/_0991_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_dma/u_regs/_1062_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout8915/A (sg13g2_buf_1)
+     4    0.016    0.077    0.123    0.899 ^ fanout8915/X (sg13g2_buf_1)
+                   0.077    0.000    0.899 ^ fanout8914/A (sg13g2_buf_1)
+     5    0.018    0.080    0.122    1.022 ^ fanout8914/X (sg13g2_buf_1)
+                   0.080    0.000    1.022 ^ fanout8913/A (sg13g2_buf_1)
+     4    0.015    0.068    0.115    1.137 ^ fanout8913/X (sg13g2_buf_1)
+                   0.068    0.000    1.137 ^ fanout8912/A (sg13g2_buf_1)
+     4    0.016    0.074    0.115    1.252 ^ fanout8912/X (sg13g2_buf_1)
+                   0.074    0.000    1.252 ^ fanout8908/A (sg13g2_buf_4)
+     8    0.052    0.066    0.138    1.390 ^ fanout8908/X (sg13g2_buf_4)
+                   0.066    0.000    1.390 ^ fanout8907/A (sg13g2_buf_4)
+     8    0.055    0.069    0.136    1.526 ^ fanout8907/X (sg13g2_buf_4)
+                   0.069    0.000    1.526 ^ u_dma/u_regs/_1062_/RESET_B (sg13g2_dfrbp_1)
+                                     1.526   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_dma/u_regs/_1062_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.526   data arrival time
+---------------------------------------------------------------------------------
+                                    18.098   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_spi/_606_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout9016/A (sg13g2_buf_2)
+     5    0.024    0.059    0.121    0.897 ^ fanout9016/X (sg13g2_buf_2)
+                   0.059    0.000    0.897 ^ fanout8945/A (sg13g2_buf_2)
+     5    0.023    0.056    0.106    1.003 ^ fanout8945/X (sg13g2_buf_2)
+                   0.056    0.000    1.003 ^ fanout8940/A (sg13g2_buf_1)
+     4    0.016    0.075    0.110    1.113 ^ fanout8940/X (sg13g2_buf_1)
+                   0.075    0.000    1.113 ^ fanout8939/A (sg13g2_buf_2)
+     6    0.032    0.074    0.127    1.240 ^ fanout8939/X (sg13g2_buf_2)
+                   0.074    0.000    1.240 ^ fanout8936/A (sg13g2_buf_4)
+     8    0.053    0.067    0.138    1.379 ^ fanout8936/X (sg13g2_buf_4)
+                   0.067    0.000    1.379 ^ fanout8935/A (sg13g2_buf_4)
+     8    0.054    0.068    0.136    1.514 ^ fanout8935/X (sg13g2_buf_4)
+                   0.068    0.000    1.515 ^ u_spi/_606_/RESET_B (sg13g2_dfrbp_1)
+                                     1.515   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_spi/_606_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.515   data arrival time
+---------------------------------------------------------------------------------
+                                    18.110   slack (MET)
+
+
+Startpoint: _194_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_spi/_607_ (recovery check against rising-edge clock clk)
+Path Group: asynchronous
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ _194_/CLK (sg13g2_dfrbp_1)
+     1    0.004    0.031    0.259    0.259 ^ _194_/Q (sg13g2_dfrbp_1)
+                   0.031    0.000    0.259 ^ _040_/A0 (sg13g2_mux2_1)
+     2    0.014    0.070    0.118    0.377 ^ _040_/X (sg13g2_mux2_1)
+                   0.070    0.000    0.377 ^ fanout9044/A (sg13g2_buf_2)
+     4    0.031    0.072    0.123    0.500 ^ fanout9044/X (sg13g2_buf_2)
+                   0.072    0.001    0.501 ^ fanout9043/A (sg13g2_buf_2)
+     4    0.042    0.094    0.141    0.642 ^ fanout9043/X (sg13g2_buf_2)
+                   0.094    0.000    0.642 ^ fanout9017/A (sg13g2_buf_1)
+     4    0.019    0.086    0.134    0.776 ^ fanout9017/X (sg13g2_buf_1)
+                   0.086    0.000    0.776 ^ fanout9016/A (sg13g2_buf_2)
+     5    0.024    0.059    0.121    0.897 ^ fanout9016/X (sg13g2_buf_2)
+                   0.059    0.000    0.897 ^ fanout8945/A (sg13g2_buf_2)
+     5    0.023    0.056    0.106    1.003 ^ fanout8945/X (sg13g2_buf_2)
+                   0.056    0.000    1.003 ^ fanout8940/A (sg13g2_buf_1)
+     4    0.016    0.075    0.110    1.113 ^ fanout8940/X (sg13g2_buf_1)
+                   0.075    0.000    1.113 ^ fanout8939/A (sg13g2_buf_2)
+     6    0.032    0.074    0.127    1.240 ^ fanout8939/X (sg13g2_buf_2)
+                   0.074    0.000    1.240 ^ fanout8936/A (sg13g2_buf_4)
+     8    0.053    0.067    0.138    1.379 ^ fanout8936/X (sg13g2_buf_4)
+                   0.067    0.000    1.379 ^ fanout8935/A (sg13g2_buf_4)
+     8    0.054    0.068    0.136    1.514 ^ fanout8935/X (sg13g2_buf_4)
+                   0.068    0.000    1.515 ^ u_spi/_607_/RESET_B (sg13g2_dfrbp_1)
+                                     1.515   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_spi/_607_/CLK (sg13g2_dfrbp_1)
+                           -0.126   19.624   library recovery time
+                                    19.624   data required time
+---------------------------------------------------------------------------------
+                                    19.624   data required time
+                                    -1.515   data arrival time
+---------------------------------------------------------------------------------
+                                    18.110   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: cpu_sleep (output port clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13702_/B (sg13g2_nor3_2)
+     2    0.042    0.288    0.259    3.743 ^ u_cpu/_13702_/Y (sg13g2_nor3_2)
+                   0.288    0.005    3.747 ^ output15/A (sg13g2_buf_1)
+     1    0.021    0.095    0.190    3.938 ^ output15/X (sg13g2_buf_1)
+                   0.095    0.000    3.938 ^ cpu_sleep (out)
+                                     3.938   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                           -6.000   13.750   output external delay
+                                    13.750   data required time
+---------------------------------------------------------------------------------
+                                    13.750   data required time
+                                    -3.938   data arrival time
+---------------------------------------------------------------------------------
+                                     9.812   slack (MET)
+
+
+Startpoint: u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac
+            (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_tile/u_ve/_64100_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_CLK (RM_IHPSG13_1P_512x64_c2_bm_bist)
+     1    0.007    0.046    3.872    3.872 ^ u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DOUT[1] (RM_IHPSG13_1P_512x64_c2_bm_bist)
+                   0.034    0.000    3.872 ^ u_tile/g_bank[1].u_ram/u_macro/_22_/A0 (sg13g2_mux2_1)
+     1    0.013    0.068    0.116    3.989 ^ u_tile/g_bank[1].u_ram/u_macro/_22_/X (sg13g2_mux2_1)
+                   0.068    0.000    3.989 ^ fanout7998/A (sg13g2_buf_2)
+     5    0.029    0.068    0.119    4.108 ^ fanout7998/X (sg13g2_buf_2)
+                   0.068    0.001    4.109 ^ fanout7997/A (sg13g2_buf_1)
+     4    0.017    0.076    0.116    4.225 ^ fanout7997/X (sg13g2_buf_1)
+                   0.076    0.000    4.225 ^ fanout7996/A (sg13g2_buf_1)
+     5    0.016    0.074    0.118    4.343 ^ fanout7996/X (sg13g2_buf_1)
+                   0.074    0.000    4.343 ^ fanout7995/A (sg13g2_buf_2)
+     8    0.026    0.063    0.119    4.462 ^ fanout7995/X (sg13g2_buf_2)
+                   0.063    0.000    4.462 ^ u_tile/u_ve/_44631_/A1 (sg13g2_mux2_1)
+     3    0.013    0.069    0.118    4.579 ^ u_tile/u_ve/_44631_/X (sg13g2_mux2_1)
+                   0.069    0.000    4.580 ^ fanout4920/A (sg13g2_buf_1)
+     4    0.019    0.084    0.122    4.702 ^ fanout4920/X (sg13g2_buf_1)
+                   0.084    0.000    4.702 ^ fanout4917/A (sg13g2_buf_2)
+     8    0.037    0.084    0.140    4.842 ^ fanout4917/X (sg13g2_buf_2)
+                   0.084    0.000    4.842 ^ u_tile/u_ve/_45190_/B (sg13g2_nand2_2)
+     6    0.032    0.107    0.124    4.966 v u_tile/u_ve/_45190_/Y (sg13g2_nand2_2)
+                   0.107    0.000    4.966 v u_tile/u_ve/_45734_/C (sg13g2_nor3_2)
+     4    0.014    0.130    0.132    5.099 ^ u_tile/u_ve/_45734_/Y (sg13g2_nor3_2)
+                   0.130    0.000    5.099 ^ u_tile/u_ve/_45822_/A (sg13g2_and3_1)
+     2    0.006    0.045    0.147    5.245 ^ u_tile/u_ve/_45822_/X (sg13g2_and3_1)
+                   0.045    0.000    5.245 ^ u_tile/u_ve/_45840_/B (sg13g2_or3_1)
+     3    0.009    0.048    0.095    5.340 ^ u_tile/u_ve/_45840_/X (sg13g2_or3_1)
+                   0.048    0.000    5.340 ^ u_tile/u_ve/_45845_/A2 (sg13g2_a21oi_1)
+     2    0.006    0.068    0.075    5.415 v u_tile/u_ve/_45845_/Y (sg13g2_a21oi_1)
+                   0.068    0.000    5.415 v u_tile/u_ve/_45890_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.129    0.144    5.559 ^ u_tile/u_ve/_45890_/Y (sg13g2_o21ai_1)
+                   0.129    0.000    5.559 ^ u_tile/u_ve/_46086_/A1 (sg13g2_a21oi_1)
+     1    0.003    0.057    0.087    5.646 v u_tile/u_ve/_46086_/Y (sg13g2_a21oi_1)
+                   0.057    0.000    5.646 v u_tile/u_ve/_46088_/A2 (sg13g2_o21ai_1)
+     8    0.037    0.382    0.322    5.968 ^ u_tile/u_ve/_46088_/Y (sg13g2_o21ai_1)
+                   0.382    0.000    5.969 ^ u_tile/u_ve/_46284_/B (sg13g2_xnor2_1)
+     2    0.006    0.111    0.180    6.149 ^ u_tile/u_ve/_46284_/Y (sg13g2_xnor2_1)
+                   0.111    0.000    6.149 ^ u_tile/u_ve/_46288_/A2 (sg13g2_a22oi_1)
+     1    0.003    0.058    0.094    6.243 v u_tile/u_ve/_46288_/Y (sg13g2_a22oi_1)
+                   0.058    0.000    6.243 v u_tile/u_ve/_46289_/B1 (sg13g2_a21o_1)
+     1    0.003    0.028    0.111    6.355 v u_tile/u_ve/_46289_/X (sg13g2_a21o_1)
+                   0.028    0.000    6.355 v u_tile/u_ve/_46295_/A2 (sg13g2_a21oi_1)
+     3    0.009    0.110    0.107    6.462 ^ u_tile/u_ve/_46295_/Y (sg13g2_a21oi_1)
+                   0.110    0.000    6.462 ^ u_tile/u_ve/_46411_/B (sg13g2_nand2_1)
+     3    0.012    0.082    0.110    6.572 v u_tile/u_ve/_46411_/Y (sg13g2_nand2_1)
+                   0.082    0.000    6.572 v u_tile/u_ve/_46413_/B (sg13g2_xor2_1)
+     3    0.012    0.090    0.134    6.706 v u_tile/u_ve/_46413_/X (sg13g2_xor2_1)
+                   0.090    0.000    6.706 v u_tile/u_ve/_46822_/B2 (sg13g2_a22oi_1)
+     2    0.006    0.067    0.080    6.787 ^ u_tile/u_ve/_46822_/Y (sg13g2_a22oi_1)
+                   0.067    0.000    6.787 ^ u_tile/u_ve/_47136_/B (sg13g2_or3_1)
+     3    0.010    0.051    0.110    6.897 ^ u_tile/u_ve/_47136_/X (sg13g2_or3_1)
+                   0.051    0.000    6.897 ^ u_tile/u_ve/_47575_/A1 (sg13g2_a21oi_1)
+     2    0.010    0.076    0.088    6.985 v u_tile/u_ve/_47575_/Y (sg13g2_a21oi_1)
+                   0.076    0.000    6.985 v u_tile/u_ve/_47983_/A1 (sg13g2_o21ai_1)
+     2    0.007    0.106    0.130    7.115 ^ u_tile/u_ve/_47983_/Y (sg13g2_o21ai_1)
+                   0.106    0.000    7.116 ^ u_tile/u_ve/_48392_/A (sg13g2_nand3_1)
+     2    0.007    0.091    0.108    7.223 v u_tile/u_ve/_48392_/Y (sg13g2_nand3_1)
+                   0.091    0.000    7.223 v u_tile/u_ve/_48592_/A2 (sg13g2_a221oi_1)
+     2    0.007    0.153    0.200    7.423 ^ u_tile/u_ve/_48592_/Y (sg13g2_a221oi_1)
+                   0.153    0.000    7.423 ^ u_tile/u_ve/_49033_/B (sg13g2_or3_1)
+     1    0.003    0.029    0.125    7.548 ^ u_tile/u_ve/_49033_/X (sg13g2_or3_1)
+                   0.029    0.000    7.548 ^ u_tile/u_ve/_49034_/A2 (sg13g2_a21oi_1)
+     3    0.010    0.076    0.085    7.633 v u_tile/u_ve/_49034_/Y (sg13g2_a21oi_1)
+                   0.076    0.000    7.633 v u_tile/u_ve/_49772_/A2 (sg13g2_o21ai_1)
+     1    0.003    0.074    0.095    7.728 ^ u_tile/u_ve/_49772_/Y (sg13g2_o21ai_1)
+                   0.074    0.000    7.728 ^ u_tile/u_ve/_49774_/A2 (sg13g2_a21oi_1)
+     1    0.004    0.058    0.075    7.804 v u_tile/u_ve/_49774_/Y (sg13g2_a21oi_1)
+                   0.058    0.000    7.804 v u_tile/u_ve/_49775_/A2 (sg13g2_o21ai_1)
+     2    0.007    0.107    0.118    7.921 ^ u_tile/u_ve/_49775_/Y (sg13g2_o21ai_1)
+                   0.107    0.000    7.921 ^ u_tile/u_ve/_50056_/A2 (sg13g2_a21oi_1)
+     2    0.007    0.073    0.100    8.021 v u_tile/u_ve/_50056_/Y (sg13g2_a21oi_1)
+                   0.073    0.000    8.021 v u_tile/u_ve/_50288_/A2 (sg13g2_o21ai_1)
+     1    0.006    0.103    0.117    8.138 ^ u_tile/u_ve/_50288_/Y (sg13g2_o21ai_1)
+                   0.103    0.000    8.138 ^ u_tile/u_ve/_50290_/A2 (sg13g2_a21oi_2)
+     5    0.021    0.079    0.114    8.251 v u_tile/u_ve/_50290_/Y (sg13g2_a21oi_2)
+                   0.079    0.000    8.252 v u_tile/u_ve/_50597_/A1 (sg13g2_o21ai_1)
+     1    0.003    0.073    0.104    8.356 ^ u_tile/u_ve/_50597_/Y (sg13g2_o21ai_1)
+                   0.073    0.000    8.356 ^ u_tile/u_ve/_50598_/A2 (sg13g2_a21oi_1)
+     1    0.003    0.048    0.073    8.429 v u_tile/u_ve/_50598_/Y (sg13g2_a21oi_1)
+                   0.048    0.000    8.429 v u_tile/u_ve/_50599_/A2 (sg13g2_o21ai_1)
+     2    0.006    0.097    0.104    8.533 ^ u_tile/u_ve/_50599_/Y (sg13g2_o21ai_1)
+                   0.097    0.000    8.533 ^ u_tile/u_ve/_50778_/B (sg13g2_and3_1)
+     1    0.004    0.037    0.136    8.669 ^ u_tile/u_ve/_50778_/X (sg13g2_and3_1)
+                   0.037    0.000    8.669 ^ u_tile/u_ve/_50779_/A2 (sg13g2_o21ai_1)
+     1    0.005    0.055    0.060    8.729 v u_tile/u_ve/_50779_/Y (sg13g2_o21ai_1)
+                   0.055    0.000    8.729 v u_tile/u_ve/_50781_/A2 (sg13g2_a21oi_1)
+     1    0.002    0.046    0.072    8.801 ^ u_tile/u_ve/_50781_/Y (sg13g2_a21oi_1)
+                   0.046    0.000    8.801 ^ u_tile/u_ve/_64100_/D (sg13g2_dfrbp_1)
+                                     8.801   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_tile/u_ve/_64100_/CLK (sg13g2_dfrbp_1)
+                           -0.112   19.638   library setup time
+                                    19.638   data required time
+---------------------------------------------------------------------------------
+                                    19.638   data required time
+                                    -8.801   data arrival time
+---------------------------------------------------------------------------------
+                                    10.837   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_cpu/_22718_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13617_/A2 (sg13g2_a21oi_1)
+     3    0.011    0.116    0.128    3.612 ^ u_cpu/_13617_/Y (sg13g2_a21oi_1)
+                   0.116    0.000    3.613 ^ fanout2158/A (sg13g2_buf_2)
+     6    0.023    0.057    0.131    3.744 ^ fanout2158/X (sg13g2_buf_2)
+                   0.057    0.000    3.744 ^ fanout2157/A (sg13g2_buf_1)
+     5    0.019    0.086    0.119    3.863 ^ fanout2157/X (sg13g2_buf_1)
+                   0.086    0.000    3.863 ^ fanout2156/A (sg13g2_buf_1)
+     4    0.014    0.065    0.115    3.978 ^ fanout2156/X (sg13g2_buf_1)
+                   0.065    0.000    3.978 ^ fanout2155/A (sg13g2_buf_2)
+     8    0.040    0.091    0.136    4.114 ^ fanout2155/X (sg13g2_buf_2)
+                   0.091    0.000    4.114 ^ u_cpu/_13619_/A (sg13g2_inv_4)
+     1    0.003    0.021    0.032    4.147 v u_cpu/_13619_/Y (sg13g2_inv_4)
+                   0.021    0.000    4.147 v fanout2078/A (sg13g2_buf_2)
+     5    0.022    0.045    0.089    4.236 v fanout2078/X (sg13g2_buf_2)
+                   0.045    0.000    4.236 v fanout2072/A (sg13g2_buf_2)
+     7    0.023    0.047    0.102    4.338 v fanout2072/X (sg13g2_buf_2)
+                   0.047    0.000    4.338 v fanout2071/A (sg13g2_buf_2)
+     8    0.029    0.056    0.111    4.449 v fanout2071/X (sg13g2_buf_2)
+                   0.056    0.000    4.450 v u_cpu/_13670_/B (sg13g2_nor4_2)
+     3    0.012    0.173    0.186    4.635 ^ u_cpu/_13670_/Y (sg13g2_nor4_2)
+                   0.173    0.000    4.635 ^ u_cpu/_13671_/B (sg13g2_and2_1)
+     3    0.009    0.051    0.148    4.783 ^ u_cpu/_13671_/X (sg13g2_and2_1)
+                   0.051    0.000    4.783 ^ u_cpu/_13685_/A (sg13g2_nor2b_1)
+     3    0.009    0.040    0.050    4.833 v u_cpu/_13685_/Y (sg13g2_nor2b_1)
+                   0.040    0.000    4.833 v u_xbar/_1452_/A (sg13g2_inv_1)
+     3    0.011    0.054    0.056    4.889 ^ u_xbar/_1452_/Y (sg13g2_inv_1)
+                   0.054    0.000    4.889 ^ u_xbar/_1453_/B2 (sg13g2_a22oi_1)
+     3    0.011    0.088    0.087    4.976 v u_xbar/_1453_/Y (sg13g2_a22oi_1)
+                   0.088    0.000    4.976 v fanout1604/A (sg13g2_buf_1)
+     5    0.014    0.052    0.115    5.091 v fanout1604/X (sg13g2_buf_1)
+                   0.052    0.000    5.091 v u_xbar/_1673_/C (sg13g2_and4_1)
+     3    0.010    0.042    0.111    5.202 v u_xbar/_1673_/X (sg13g2_and4_1)
+                   0.042    0.000    5.202 v u_xbar/_1674_/B (sg13g2_or2_1)
+     2    0.006    0.037    0.110    5.313 v u_xbar/_1674_/X (sg13g2_or2_1)
+                   0.037    0.000    5.313 v u_xbar/_1682_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.131    0.133    5.445 ^ u_xbar/_1682_/Y (sg13g2_o21ai_1)
+                   0.131    0.000    5.445 ^ u_xbar/_1686_/B2 (sg13g2_a221oi_1)
+     2    0.011    0.118    0.131    5.576 v u_xbar/_1686_/Y (sg13g2_a221oi_1)
+                   0.118    0.000    5.576 v u_xbar/_2135_/B (sg13g2_xor2_1)
+     3    0.011    0.105    0.145    5.721 v u_xbar/_2135_/X (sg13g2_xor2_1)
+                   0.105    0.000    5.721 v u_xbar/_2136_/S (sg13g2_mux2_1)
+     2    0.006    0.047    0.170    5.891 ^ u_xbar/_2136_/X (sg13g2_mux2_1)
+                   0.047    0.000    5.891 ^ u_xbar/_2137_/B (sg13g2_nand2_1)
+     1    0.003    0.037    0.051    5.942 v u_xbar/_2137_/Y (sg13g2_nand2_1)
+                   0.037    0.000    5.942 v u_xbar/_2138_/B1 (sg13g2_o21ai_1)
+     3    0.011    0.149    0.070    6.013 ^ u_xbar/_2138_/Y (sg13g2_o21ai_1)
+                   0.149    0.000    6.013 ^ u_xbar/_2146_/A (sg13g2_nor2_1)
+     1    0.003    0.043    0.070    6.082 v u_xbar/_2146_/Y (sg13g2_nor2_1)
+                   0.043    0.000    6.082 v fanout654/A (sg13g2_buf_2)
+     4    0.022    0.045    0.099    6.182 v fanout654/X (sg13g2_buf_2)
+                   0.045    0.001    6.182 v fanout648/A (sg13g2_buf_2)
+     8    0.031    0.059    0.112    6.294 v fanout648/X (sg13g2_buf_2)
+                   0.059    0.000    6.295 v u_xbar/g_slv[5].u_mux/_343_/A (sg13g2_nand2_1)
+     1    0.003    0.034    0.041    6.335 ^ u_xbar/g_slv[5].u_mux/_343_/Y (sg13g2_nand2_1)
+                   0.034    0.000    6.335 ^ u_xbar/g_slv[5].u_mux/_344_/D (sg13g2_nand4_1)
+     6    0.034    0.387    0.345    6.680 v u_xbar/g_slv[5].u_mux/_344_/Y (sg13g2_nand4_1)
+                   0.387    0.001    6.682 v u_tile/_0798_/S0 (sg13g2_mux4_1)
+     1    0.012    0.073    0.328    7.010 ^ u_tile/_0798_/X (sg13g2_mux4_1)
+                   0.073    0.000    7.010 ^ u_tile/_0807_/B1 (sg13g2_a221oi_1)
+     3    0.016    0.142    0.129    7.139 v u_tile/_0807_/Y (sg13g2_a221oi_1)
+                   0.142    0.000    7.140 v u_tile/_0808_/A (sg13g2_inv_1)
+     1    0.003    0.042    0.053    7.193 ^ u_tile/_0808_/Y (sg13g2_inv_1)
+                   0.042    0.000    7.193 ^ g_v1[5].g_ad.u_ad/_081_/B_N (sg13g2_nor2b_1)
+     3    0.013    0.126    0.152    7.344 ^ g_v1[5].g_ad.u_ad/_081_/Y (sg13g2_nor2b_1)
+                   0.126    0.000    7.344 ^ u_xbar/_2329_/A (sg13g2_and2_1)
+     3    0.012    0.062    0.139    7.483 ^ u_xbar/_2329_/X (sg13g2_and2_1)
+                   0.062    0.000    7.483 ^ u_xbar/_2330_/B (sg13g2_and2_1)
+     2    0.006    0.038    0.102    7.585 ^ u_xbar/_2330_/X (sg13g2_and2_1)
+                   0.038    0.000    7.585 ^ u_xbar/_2404_/B (sg13g2_and3_1)
+     2    0.009    0.051    0.130    7.715 ^ u_xbar/_2404_/X (sg13g2_and3_1)
+                   0.051    0.000    7.715 ^ u_xbar/_2407_/C (sg13g2_or4_2)
+     5    0.016    0.048    0.111    7.826 ^ u_xbar/_2407_/X (sg13g2_or4_2)
+                   0.048    0.000    7.826 ^ u_cpu/_19856_/A (sg13g2_nand2_1)
+     2    0.006    0.051    0.061    7.887 v u_cpu/_19856_/Y (sg13g2_nand2_1)
+                   0.051    0.000    7.887 v u_cpu/_19857_/B1 (sg13g2_a21oi_1)
+     2    0.005    0.077    0.083    7.970 ^ u_cpu/_19857_/Y (sg13g2_a21oi_1)
+                   0.077    0.000    7.970 ^ fanout82/A (sg13g2_buf_1)
+     4    0.014    0.064    0.110    8.080 ^ fanout82/X (sg13g2_buf_1)
+                   0.064    0.000    8.080 ^ fanout81/A (sg13g2_buf_2)
+     8    0.036    0.082    0.129    8.209 ^ fanout81/X (sg13g2_buf_2)
+                   0.082    0.000    8.209 ^ fanout80/A (sg13g2_buf_2)
+     8    0.030    0.070    0.128    8.337 ^ fanout80/X (sg13g2_buf_2)
+                   0.070    0.000    8.337 ^ u_cpu/_20724_/B (sg13g2_nand3_1)
+     2    0.008    0.097    0.114    8.452 v u_cpu/_20724_/Y (sg13g2_nand3_1)
+                   0.097    0.000    8.452 v u_cpu/_20771_/S (sg13g2_mux2_1)
+     1    0.003    0.036    0.144    8.596 v u_cpu/_20771_/X (sg13g2_mux2_1)
+                   0.036    0.000    8.596 v u_cpu/_20772_/B2 (sg13g2_a22oi_1)
+     1    0.002    0.047    0.044    8.640 ^ u_cpu/_20772_/Y (sg13g2_a22oi_1)
+                   0.047    0.000    8.640 ^ u_cpu/_20773_/B_N (sg13g2_nor2b_1)
+     1    0.002    0.044    0.089    8.729 ^ u_cpu/_20773_/Y (sg13g2_nor2b_1)
+                   0.044    0.000    8.729 ^ u_cpu/_22718_/D (sg13g2_dfrbp_1)
+                                     8.729   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_cpu/_22718_/CLK (sg13g2_dfrbp_1)
+                           -0.111   19.639   library setup time
+                                    19.639   data required time
+---------------------------------------------------------------------------------
+                                    19.639   data required time
+                                    -8.729   data arrival time
+---------------------------------------------------------------------------------
+                                    10.910   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_cpu/_22707_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13617_/A2 (sg13g2_a21oi_1)
+     3    0.011    0.116    0.128    3.612 ^ u_cpu/_13617_/Y (sg13g2_a21oi_1)
+                   0.116    0.000    3.613 ^ fanout2158/A (sg13g2_buf_2)
+     6    0.023    0.057    0.131    3.744 ^ fanout2158/X (sg13g2_buf_2)
+                   0.057    0.000    3.744 ^ fanout2157/A (sg13g2_buf_1)
+     5    0.019    0.086    0.119    3.863 ^ fanout2157/X (sg13g2_buf_1)
+                   0.086    0.000    3.863 ^ fanout2156/A (sg13g2_buf_1)
+     4    0.014    0.065    0.115    3.978 ^ fanout2156/X (sg13g2_buf_1)
+                   0.065    0.000    3.978 ^ fanout2155/A (sg13g2_buf_2)
+     8    0.040    0.091    0.136    4.114 ^ fanout2155/X (sg13g2_buf_2)
+                   0.091    0.000    4.114 ^ u_cpu/_13619_/A (sg13g2_inv_4)
+     1    0.003    0.021    0.032    4.147 v u_cpu/_13619_/Y (sg13g2_inv_4)
+                   0.021    0.000    4.147 v fanout2078/A (sg13g2_buf_2)
+     5    0.022    0.045    0.089    4.236 v fanout2078/X (sg13g2_buf_2)
+                   0.045    0.000    4.236 v fanout2072/A (sg13g2_buf_2)
+     7    0.023    0.047    0.102    4.338 v fanout2072/X (sg13g2_buf_2)
+                   0.047    0.000    4.338 v fanout2071/A (sg13g2_buf_2)
+     8    0.029    0.056    0.111    4.449 v fanout2071/X (sg13g2_buf_2)
+                   0.056    0.000    4.450 v u_cpu/_13670_/B (sg13g2_nor4_2)
+     3    0.012    0.173    0.186    4.635 ^ u_cpu/_13670_/Y (sg13g2_nor4_2)
+                   0.173    0.000    4.635 ^ u_cpu/_13671_/B (sg13g2_and2_1)
+     3    0.009    0.051    0.148    4.783 ^ u_cpu/_13671_/X (sg13g2_and2_1)
+                   0.051    0.000    4.783 ^ u_cpu/_13685_/A (sg13g2_nor2b_1)
+     3    0.009    0.040    0.050    4.833 v u_cpu/_13685_/Y (sg13g2_nor2b_1)
+                   0.040    0.000    4.833 v u_xbar/_1452_/A (sg13g2_inv_1)
+     3    0.011    0.054    0.056    4.889 ^ u_xbar/_1452_/Y (sg13g2_inv_1)
+                   0.054    0.000    4.889 ^ u_xbar/_1453_/B2 (sg13g2_a22oi_1)
+     3    0.011    0.088    0.087    4.976 v u_xbar/_1453_/Y (sg13g2_a22oi_1)
+                   0.088    0.000    4.976 v fanout1604/A (sg13g2_buf_1)
+     5    0.014    0.052    0.115    5.091 v fanout1604/X (sg13g2_buf_1)
+                   0.052    0.000    5.091 v u_xbar/_1673_/C (sg13g2_and4_1)
+     3    0.010    0.042    0.111    5.202 v u_xbar/_1673_/X (sg13g2_and4_1)
+                   0.042    0.000    5.202 v u_xbar/_1674_/B (sg13g2_or2_1)
+     2    0.006    0.037    0.110    5.313 v u_xbar/_1674_/X (sg13g2_or2_1)
+                   0.037    0.000    5.313 v u_xbar/_1682_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.131    0.133    5.445 ^ u_xbar/_1682_/Y (sg13g2_o21ai_1)
+                   0.131    0.000    5.445 ^ u_xbar/_1686_/B2 (sg13g2_a221oi_1)
+     2    0.011    0.118    0.131    5.576 v u_xbar/_1686_/Y (sg13g2_a221oi_1)
+                   0.118    0.000    5.576 v u_xbar/_2135_/B (sg13g2_xor2_1)
+     3    0.011    0.105    0.145    5.721 v u_xbar/_2135_/X (sg13g2_xor2_1)
+                   0.105    0.000    5.721 v u_xbar/_2136_/S (sg13g2_mux2_1)
+     2    0.006    0.047    0.170    5.891 ^ u_xbar/_2136_/X (sg13g2_mux2_1)
+                   0.047    0.000    5.891 ^ u_xbar/_2137_/B (sg13g2_nand2_1)
+     1    0.003    0.037    0.051    5.942 v u_xbar/_2137_/Y (sg13g2_nand2_1)
+                   0.037    0.000    5.942 v u_xbar/_2138_/B1 (sg13g2_o21ai_1)
+     3    0.011    0.149    0.070    6.013 ^ u_xbar/_2138_/Y (sg13g2_o21ai_1)
+                   0.149    0.000    6.013 ^ u_xbar/_2146_/A (sg13g2_nor2_1)
+     1    0.003    0.043    0.070    6.082 v u_xbar/_2146_/Y (sg13g2_nor2_1)
+                   0.043    0.000    6.082 v fanout654/A (sg13g2_buf_2)
+     4    0.022    0.045    0.099    6.182 v fanout654/X (sg13g2_buf_2)
+                   0.045    0.001    6.182 v fanout648/A (sg13g2_buf_2)
+     8    0.031    0.059    0.112    6.294 v fanout648/X (sg13g2_buf_2)
+                   0.059    0.000    6.295 v u_xbar/g_slv[5].u_mux/_343_/A (sg13g2_nand2_1)
+     1    0.003    0.034    0.041    6.335 ^ u_xbar/g_slv[5].u_mux/_343_/Y (sg13g2_nand2_1)
+                   0.034    0.000    6.335 ^ u_xbar/g_slv[5].u_mux/_344_/D (sg13g2_nand4_1)
+     6    0.034    0.387    0.345    6.680 v u_xbar/g_slv[5].u_mux/_344_/Y (sg13g2_nand4_1)
+                   0.387    0.001    6.682 v u_tile/_0798_/S0 (sg13g2_mux4_1)
+     1    0.012    0.073    0.328    7.010 ^ u_tile/_0798_/X (sg13g2_mux4_1)
+                   0.073    0.000    7.010 ^ u_tile/_0807_/B1 (sg13g2_a221oi_1)
+     3    0.016    0.142    0.129    7.139 v u_tile/_0807_/Y (sg13g2_a221oi_1)
+                   0.142    0.000    7.140 v u_tile/_0808_/A (sg13g2_inv_1)
+     1    0.003    0.042    0.053    7.193 ^ u_tile/_0808_/Y (sg13g2_inv_1)
+                   0.042    0.000    7.193 ^ g_v1[5].g_ad.u_ad/_081_/B_N (sg13g2_nor2b_1)
+     3    0.013    0.126    0.152    7.344 ^ g_v1[5].g_ad.u_ad/_081_/Y (sg13g2_nor2b_1)
+                   0.126    0.000    7.344 ^ u_xbar/_2329_/A (sg13g2_and2_1)
+     3    0.012    0.062    0.139    7.483 ^ u_xbar/_2329_/X (sg13g2_and2_1)
+                   0.062    0.000    7.483 ^ u_xbar/_2330_/B (sg13g2_and2_1)
+     2    0.006    0.038    0.102    7.585 ^ u_xbar/_2330_/X (sg13g2_and2_1)
+                   0.038    0.000    7.585 ^ u_xbar/_2404_/B (sg13g2_and3_1)
+     2    0.009    0.051    0.130    7.715 ^ u_xbar/_2404_/X (sg13g2_and3_1)
+                   0.051    0.000    7.715 ^ u_xbar/_2407_/C (sg13g2_or4_2)
+     5    0.016    0.048    0.111    7.826 ^ u_xbar/_2407_/X (sg13g2_or4_2)
+                   0.048    0.000    7.826 ^ u_cpu/_19856_/A (sg13g2_nand2_1)
+     2    0.006    0.051    0.061    7.887 v u_cpu/_19856_/Y (sg13g2_nand2_1)
+                   0.051    0.000    7.887 v u_cpu/_19857_/B1 (sg13g2_a21oi_1)
+     2    0.005    0.077    0.083    7.970 ^ u_cpu/_19857_/Y (sg13g2_a21oi_1)
+                   0.077    0.000    7.970 ^ fanout82/A (sg13g2_buf_1)
+     4    0.014    0.064    0.110    8.080 ^ fanout82/X (sg13g2_buf_1)
+                   0.064    0.000    8.080 ^ fanout77/A (sg13g2_buf_2)
+     8    0.035    0.079    0.126    8.207 ^ fanout77/X (sg13g2_buf_2)
+                   0.079    0.000    8.207 ^ fanout76/A (sg13g2_buf_2)
+     8    0.033    0.076    0.131    8.338 ^ fanout76/X (sg13g2_buf_2)
+                   0.076    0.000    8.338 ^ u_cpu/_20406_/C (sg13g2_nand4_1)
+     1    0.005    0.099    0.130    8.469 v u_cpu/_20406_/Y (sg13g2_nand4_1)
+                   0.099    0.000    8.469 v u_cpu/_20407_/B (sg13g2_xor2_1)
+     1    0.003    0.057    0.091    8.560 ^ u_cpu/_20407_/X (sg13g2_xor2_1)
+                   0.057    0.000    8.560 ^ u_cpu/_20408_/B (sg13g2_nor2_1)
+     1    0.002    0.028    0.036    8.596 v u_cpu/_20408_/Y (sg13g2_nor2_1)
+                   0.028    0.000    8.596 v u_cpu/_20409_/D (sg13g2_or4_1)
+     1    0.002    0.039    0.148    8.744 v u_cpu/_20409_/X (sg13g2_or4_1)
+                   0.039    0.000    8.744 v u_cpu/_22707_/D (sg13g2_dfrbp_1)
+                                     8.744   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_cpu/_22707_/CLK (sg13g2_dfrbp_1)
+                           -0.093   19.657   library setup time
+                                    19.657   data required time
+---------------------------------------------------------------------------------
+                                    19.657   data required time
+                                    -8.744   data arrival time
+---------------------------------------------------------------------------------
+                                    10.913   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_cpu/_22704_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13617_/A2 (sg13g2_a21oi_1)
+     3    0.011    0.116    0.128    3.612 ^ u_cpu/_13617_/Y (sg13g2_a21oi_1)
+                   0.116    0.000    3.613 ^ fanout2158/A (sg13g2_buf_2)
+     6    0.023    0.057    0.131    3.744 ^ fanout2158/X (sg13g2_buf_2)
+                   0.057    0.000    3.744 ^ fanout2157/A (sg13g2_buf_1)
+     5    0.019    0.086    0.119    3.863 ^ fanout2157/X (sg13g2_buf_1)
+                   0.086    0.000    3.863 ^ fanout2156/A (sg13g2_buf_1)
+     4    0.014    0.065    0.115    3.978 ^ fanout2156/X (sg13g2_buf_1)
+                   0.065    0.000    3.978 ^ fanout2155/A (sg13g2_buf_2)
+     8    0.040    0.091    0.136    4.114 ^ fanout2155/X (sg13g2_buf_2)
+                   0.091    0.000    4.114 ^ u_cpu/_13619_/A (sg13g2_inv_4)
+     1    0.003    0.021    0.032    4.147 v u_cpu/_13619_/Y (sg13g2_inv_4)
+                   0.021    0.000    4.147 v fanout2078/A (sg13g2_buf_2)
+     5    0.022    0.045    0.089    4.236 v fanout2078/X (sg13g2_buf_2)
+                   0.045    0.000    4.236 v fanout2072/A (sg13g2_buf_2)
+     7    0.023    0.047    0.102    4.338 v fanout2072/X (sg13g2_buf_2)
+                   0.047    0.000    4.338 v fanout2071/A (sg13g2_buf_2)
+     8    0.029    0.056    0.111    4.449 v fanout2071/X (sg13g2_buf_2)
+                   0.056    0.000    4.450 v u_cpu/_13670_/B (sg13g2_nor4_2)
+     3    0.012    0.173    0.186    4.635 ^ u_cpu/_13670_/Y (sg13g2_nor4_2)
+                   0.173    0.000    4.635 ^ u_cpu/_13671_/B (sg13g2_and2_1)
+     3    0.009    0.051    0.148    4.783 ^ u_cpu/_13671_/X (sg13g2_and2_1)
+                   0.051    0.000    4.783 ^ u_cpu/_13685_/A (sg13g2_nor2b_1)
+     3    0.009    0.040    0.050    4.833 v u_cpu/_13685_/Y (sg13g2_nor2b_1)
+                   0.040    0.000    4.833 v u_xbar/_1452_/A (sg13g2_inv_1)
+     3    0.011    0.054    0.056    4.889 ^ u_xbar/_1452_/Y (sg13g2_inv_1)
+                   0.054    0.000    4.889 ^ u_xbar/_1453_/B2 (sg13g2_a22oi_1)
+     3    0.011    0.088    0.087    4.976 v u_xbar/_1453_/Y (sg13g2_a22oi_1)
+                   0.088    0.000    4.976 v fanout1604/A (sg13g2_buf_1)
+     5    0.014    0.052    0.115    5.091 v fanout1604/X (sg13g2_buf_1)
+                   0.052    0.000    5.091 v u_xbar/_1673_/C (sg13g2_and4_1)
+     3    0.010    0.042    0.111    5.202 v u_xbar/_1673_/X (sg13g2_and4_1)
+                   0.042    0.000    5.202 v u_xbar/_1674_/B (sg13g2_or2_1)
+     2    0.006    0.037    0.110    5.313 v u_xbar/_1674_/X (sg13g2_or2_1)
+                   0.037    0.000    5.313 v u_xbar/_1682_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.131    0.133    5.445 ^ u_xbar/_1682_/Y (sg13g2_o21ai_1)
+                   0.131    0.000    5.445 ^ u_xbar/_1686_/B2 (sg13g2_a221oi_1)
+     2    0.011    0.118    0.131    5.576 v u_xbar/_1686_/Y (sg13g2_a221oi_1)
+                   0.118    0.000    5.576 v u_xbar/_2135_/B (sg13g2_xor2_1)
+     3    0.011    0.105    0.145    5.721 v u_xbar/_2135_/X (sg13g2_xor2_1)
+                   0.105    0.000    5.721 v u_xbar/_2136_/S (sg13g2_mux2_1)
+     2    0.006    0.047    0.170    5.891 ^ u_xbar/_2136_/X (sg13g2_mux2_1)
+                   0.047    0.000    5.891 ^ u_xbar/_2137_/B (sg13g2_nand2_1)
+     1    0.003    0.037    0.051    5.942 v u_xbar/_2137_/Y (sg13g2_nand2_1)
+                   0.037    0.000    5.942 v u_xbar/_2138_/B1 (sg13g2_o21ai_1)
+     3    0.011    0.149    0.070    6.013 ^ u_xbar/_2138_/Y (sg13g2_o21ai_1)
+                   0.149    0.000    6.013 ^ u_xbar/_2146_/A (sg13g2_nor2_1)
+     1    0.003    0.043    0.070    6.082 v u_xbar/_2146_/Y (sg13g2_nor2_1)
+                   0.043    0.000    6.082 v fanout654/A (sg13g2_buf_2)
+     4    0.022    0.045    0.099    6.182 v fanout654/X (sg13g2_buf_2)
+                   0.045    0.001    6.182 v fanout648/A (sg13g2_buf_2)
+     8    0.031    0.059    0.112    6.294 v fanout648/X (sg13g2_buf_2)
+                   0.059    0.000    6.295 v u_xbar/g_slv[5].u_mux/_343_/A (sg13g2_nand2_1)
+     1    0.003    0.034    0.041    6.335 ^ u_xbar/g_slv[5].u_mux/_343_/Y (sg13g2_nand2_1)
+                   0.034    0.000    6.335 ^ u_xbar/g_slv[5].u_mux/_344_/D (sg13g2_nand4_1)
+     6    0.034    0.387    0.345    6.680 v u_xbar/g_slv[5].u_mux/_344_/Y (sg13g2_nand4_1)
+                   0.387    0.001    6.682 v u_tile/_0798_/S0 (sg13g2_mux4_1)
+     1    0.012    0.073    0.328    7.010 ^ u_tile/_0798_/X (sg13g2_mux4_1)
+                   0.073    0.000    7.010 ^ u_tile/_0807_/B1 (sg13g2_a221oi_1)
+     3    0.016    0.142    0.129    7.139 v u_tile/_0807_/Y (sg13g2_a221oi_1)
+                   0.142    0.000    7.140 v u_tile/_0808_/A (sg13g2_inv_1)
+     1    0.003    0.042    0.053    7.193 ^ u_tile/_0808_/Y (sg13g2_inv_1)
+                   0.042    0.000    7.193 ^ g_v1[5].g_ad.u_ad/_081_/B_N (sg13g2_nor2b_1)
+     3    0.013    0.126    0.152    7.344 ^ g_v1[5].g_ad.u_ad/_081_/Y (sg13g2_nor2b_1)
+                   0.126    0.000    7.344 ^ u_xbar/_2329_/A (sg13g2_and2_1)
+     3    0.012    0.062    0.139    7.483 ^ u_xbar/_2329_/X (sg13g2_and2_1)
+                   0.062    0.000    7.483 ^ u_xbar/_2330_/B (sg13g2_and2_1)
+     2    0.006    0.038    0.102    7.585 ^ u_xbar/_2330_/X (sg13g2_and2_1)
+                   0.038    0.000    7.585 ^ u_xbar/_2404_/B (sg13g2_and3_1)
+     2    0.009    0.051    0.130    7.715 ^ u_xbar/_2404_/X (sg13g2_and3_1)
+                   0.051    0.000    7.715 ^ u_xbar/_2407_/C (sg13g2_or4_2)
+     5    0.016    0.048    0.111    7.826 ^ u_xbar/_2407_/X (sg13g2_or4_2)
+                   0.048    0.000    7.826 ^ u_cpu/_19856_/A (sg13g2_nand2_1)
+     2    0.006    0.051    0.061    7.887 v u_cpu/_19856_/Y (sg13g2_nand2_1)
+                   0.051    0.000    7.887 v u_cpu/_19857_/B1 (sg13g2_a21oi_1)
+     2    0.005    0.077    0.083    7.970 ^ u_cpu/_19857_/Y (sg13g2_a21oi_1)
+                   0.077    0.000    7.970 ^ fanout82/A (sg13g2_buf_1)
+     4    0.014    0.064    0.110    8.080 ^ fanout82/X (sg13g2_buf_1)
+                   0.064    0.000    8.080 ^ fanout77/A (sg13g2_buf_2)
+     8    0.035    0.079    0.126    8.207 ^ fanout77/X (sg13g2_buf_2)
+                   0.079    0.000    8.207 ^ fanout76/A (sg13g2_buf_2)
+     8    0.033    0.076    0.131    8.338 ^ fanout76/X (sg13g2_buf_2)
+                   0.076    0.000    8.338 ^ u_cpu/_20273_/C (sg13g2_nand4_1)
+     1    0.005    0.100    0.130    8.469 v u_cpu/_20273_/Y (sg13g2_nand4_1)
+                   0.100    0.000    8.469 v u_cpu/_20274_/B (sg13g2_xnor2_1)
+     1    0.003    0.043    0.113    8.582 v u_cpu/_20274_/Y (sg13g2_xnor2_1)
+                   0.043    0.000    8.582 v u_cpu/_20311_/A2 (sg13g2_a21oi_1)
+     1    0.003    0.060    0.077    8.659 ^ u_cpu/_20311_/Y (sg13g2_a21oi_1)
+                   0.060    0.000    8.659 ^ u_cpu/_20312_/C (sg13g2_nand3_1)
+     1    0.002    0.050    0.077    8.736 v u_cpu/_20312_/Y (sg13g2_nand3_1)
+                   0.050    0.000    8.736 v u_cpu/_22704_/D (sg13g2_dfrbp_1)
+                                     8.736   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_cpu/_22704_/CLK (sg13g2_dfrbp_1)
+                           -0.097   19.653   library setup time
+                                    19.653   data required time
+---------------------------------------------------------------------------------
+                                    19.653   data required time
+                                    -8.736   data arrival time
+---------------------------------------------------------------------------------
+                                    10.917   slack (MET)
+
+
+Startpoint: u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac
+            (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_tile/u_ve/_64132_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_CLK (RM_IHPSG13_1P_512x64_c2_bm_bist)
+     1    0.011    0.053    3.879    3.879 ^ u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DOUT[5] (RM_IHPSG13_1P_512x64_c2_bm_bist)
+                   0.040    0.000    3.879 ^ u_tile/g_bank[2].u_ram/u_macro/_26_/A0 (sg13g2_mux2_1)
+     1    0.003    0.033    0.087    3.966 ^ u_tile/g_bank[2].u_ram/u_macro/_26_/X (sg13g2_mux2_1)
+                   0.033    0.000    3.966 ^ fanout7938/A (sg13g2_buf_2)
+     5    0.030    0.070    0.105    4.071 ^ fanout7938/X (sg13g2_buf_2)
+                   0.070    0.000    4.071 ^ fanout7937/A (sg13g2_buf_1)
+     4    0.015    0.068    0.111    4.182 ^ fanout7937/X (sg13g2_buf_1)
+                   0.068    0.000    4.182 ^ fanout7936/A (sg13g2_buf_2)
+     8    0.027    0.065    0.117    4.300 ^ fanout7936/X (sg13g2_buf_2)
+                   0.065    0.000    4.300 ^ fanout7935/A (sg13g2_buf_2)
+     8    0.024    0.059    0.111    4.411 ^ fanout7935/X (sg13g2_buf_2)
+                   0.059    0.000    4.411 ^ u_tile/u_ve/_51169_/A0 (sg13g2_mux2_1)
+     3    0.015    0.077    0.135    4.546 ^ u_tile/u_ve/_51169_/X (sg13g2_mux2_1)
+                   0.077    0.000    4.546 ^ fanout4791/A (sg13g2_buf_2)
+     7    0.027    0.065    0.122    4.667 ^ fanout4791/X (sg13g2_buf_2)
+                   0.065    0.000    4.667 ^ fanout4790/A (sg13g2_buf_1)
+     4    0.016    0.073    0.112    4.780 ^ fanout4790/X (sg13g2_buf_1)
+                   0.073    0.000    4.780 ^ fanout4789/A (sg13g2_buf_2)
+     8    0.030    0.070    0.124    4.903 ^ fanout4789/X (sg13g2_buf_2)
+                   0.070    0.000    4.904 ^ u_tile/u_ve/_53329_/D (sg13g2_nand4_1)
+     2    0.006    0.106    0.138    5.041 v u_tile/u_ve/_53329_/Y (sg13g2_nand4_1)
+                   0.106    0.000    5.041 v u_tile/u_ve/_53336_/B (sg13g2_nand2_1)
+     2    0.006    0.054    0.073    5.114 ^ u_tile/u_ve/_53336_/Y (sg13g2_nand2_1)
+                   0.054    0.000    5.114 ^ u_tile/u_ve/_53337_/D (sg13g2_nand4_1)
+     4    0.011    0.162    0.177    5.291 v u_tile/u_ve/_53337_/Y (sg13g2_nand4_1)
+                   0.162    0.000    5.291 v u_tile/u_ve/_53339_/C (sg13g2_and3_1)
+     2    0.005    0.032    0.142    5.433 v u_tile/u_ve/_53339_/X (sg13g2_and3_1)
+                   0.032    0.000    5.433 v u_tile/u_ve/_53342_/C (sg13g2_or4_1)
+     2    0.005    0.050    0.186    5.620 v u_tile/u_ve/_53342_/X (sg13g2_or4_1)
+                   0.050    0.000    5.620 v u_tile/u_ve/_53382_/B (sg13g2_and3_1)
+     3    0.010    0.041    0.101    5.721 v u_tile/u_ve/_53382_/X (sg13g2_and3_1)
+                   0.041    0.000    5.721 v u_tile/u_ve/_53390_/A2 (sg13g2_o21ai_1)
+     3    0.009    0.127    0.124    5.845 ^ u_tile/u_ve/_53390_/Y (sg13g2_o21ai_1)
+                   0.127    0.000    5.845 ^ u_tile/u_ve/_53640_/B1 (sg13g2_o21ai_1)
+     3    0.012    0.098    0.125    5.970 v u_tile/u_ve/_53640_/Y (sg13g2_o21ai_1)
+                   0.098    0.000    5.970 v u_tile/u_ve/_53658_/A (sg13g2_xor2_1)
+     2    0.010    0.090    0.142    6.112 v u_tile/u_ve/_53658_/X (sg13g2_xor2_1)
+                   0.090    0.000    6.112 v u_tile/u_ve/_53659_/B (sg13g2_xnor2_1)
+     2    0.009    0.080    0.133    6.245 v u_tile/u_ve/_53659_/Y (sg13g2_xnor2_1)
+                   0.080    0.000    6.245 v u_tile/u_ve/_53672_/A (sg13g2_xnor2_1)
+     3    0.011    0.087    0.141    6.386 v u_tile/u_ve/_53672_/Y (sg13g2_xnor2_1)
+                   0.087    0.000    6.386 v u_tile/u_ve/_53674_/B (sg13g2_xnor2_1)
+     2    0.009    0.078    0.132    6.518 v u_tile/u_ve/_53674_/Y (sg13g2_xnor2_1)
+                   0.078    0.000    6.518 v u_tile/u_ve/_53710_/D (sg13g2_nor4_1)
+     2    0.006    0.159    0.145    6.663 ^ u_tile/u_ve/_53710_/Y (sg13g2_nor4_1)
+                   0.159    0.000    6.663 ^ u_tile/u_ve/_53711_/B1 (sg13g2_o21ai_1)
+     3    0.012    0.101    0.134    6.797 v u_tile/u_ve/_53711_/Y (sg13g2_o21ai_1)
+                   0.101    0.000    6.797 v u_tile/u_ve/_54105_/A1 (sg13g2_a21o_1)
+     3    0.014    0.059    0.159    6.956 v u_tile/u_ve/_54105_/X (sg13g2_a21o_1)
+                   0.059    0.000    6.956 v u_tile/u_ve/_54490_/A1 (sg13g2_a22oi_1)
+     2    0.010    0.092    0.107    7.063 ^ u_tile/u_ve/_54490_/Y (sg13g2_a22oi_1)
+                   0.092    0.000    7.063 ^ u_tile/u_ve/_54869_/A1 (sg13g2_o21ai_1)
+     3    0.013    0.097    0.123    7.186 v u_tile/u_ve/_54869_/Y (sg13g2_o21ai_1)
+                   0.097    0.000    7.186 v u_tile/u_ve/_55121_/A2 (sg13g2_o21ai_1)
+     1    0.006    0.105    0.125    7.311 ^ u_tile/u_ve/_55121_/Y (sg13g2_o21ai_1)
+                   0.105    0.000    7.311 ^ u_tile/u_ve/_55123_/A2 (sg13g2_a21oi_2)
+     4    0.016    0.068    0.104    7.415 v u_tile/u_ve/_55123_/Y (sg13g2_a21oi_2)
+                   0.068    0.000    7.416 v u_tile/u_ve/_55604_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.128    0.143    7.558 ^ u_tile/u_ve/_55604_/Y (sg13g2_o21ai_1)
+                   0.128    0.000    7.558 ^ u_tile/u_ve/_56095_/B (sg13g2_nand3_1)
+     1    0.003    0.076    0.099    7.658 v u_tile/u_ve/_56095_/Y (sg13g2_nand3_1)
+                   0.076    0.000    7.658 v u_tile/u_ve/_56097_/A2 (sg13g2_a21oi_1)
+     1    0.004    0.064    0.093    7.750 ^ u_tile/u_ve/_56097_/Y (sg13g2_a21oi_1)
+                   0.064    0.000    7.750 ^ u_tile/u_ve/_56098_/A2 (sg13g2_o21ai_1)
+     3    0.009    0.077    0.090    7.840 v u_tile/u_ve/_56098_/Y (sg13g2_o21ai_1)
+                   0.077    0.000    7.840 v u_tile/u_ve/_56602_/A2 (sg13g2_a21oi_1)
+     1    0.003    0.066    0.090    7.930 ^ u_tile/u_ve/_56602_/Y (sg13g2_a21oi_1)
+                   0.066    0.000    7.930 ^ u_tile/u_ve/_56604_/A (sg13g2_nor2_1)
+     1    0.003    0.028    0.046    7.975 v u_tile/u_ve/_56604_/Y (sg13g2_nor2_1)
+                   0.028    0.000    7.975 v u_tile/u_ve/_56605_/B1 (sg13g2_a21oi_1)
+     1    0.004    0.059    0.063    8.038 ^ u_tile/u_ve/_56605_/Y (sg13g2_a21oi_1)
+                   0.059    0.000    8.038 ^ u_tile/u_ve/_56606_/A2 (sg13g2_o21ai_1)
+     3    0.013    0.096    0.101    8.139 v u_tile/u_ve/_56606_/Y (sg13g2_o21ai_1)
+                   0.096    0.000    8.139 v u_tile/u_ve/_57084_/B1 (sg13g2_o21ai_1)
+     1    0.003    0.076    0.060    8.200 ^ u_tile/u_ve/_57084_/Y (sg13g2_o21ai_1)
+                   0.076    0.000    8.200 ^ u_tile/u_ve/_57085_/A2 (sg13g2_a21oi_1)
+     1    0.002    0.040    0.070    8.270 v u_tile/u_ve/_57085_/Y (sg13g2_a21oi_1)
+                   0.040    0.000    8.270 v u_tile/u_ve/_57087_/A_N (sg13g2_nand2b_1)
+     2    0.009    0.066    0.107    8.377 v u_tile/u_ve/_57087_/Y (sg13g2_nand2b_1)
+                   0.066    0.000    8.377 v u_tile/u_ve/_57147_/B (sg13g2_nor2_1)
+     1    0.006    0.074    0.079    8.456 ^ u_tile/u_ve/_57147_/Y (sg13g2_nor2_1)
+                   0.074    0.000    8.456 ^ u_tile/u_ve/_57329_/A (sg13g2_xnor2_1)
+     1    0.004    0.067    0.103    8.558 ^ u_tile/u_ve/_57329_/Y (sg13g2_xnor2_1)
+                   0.067    0.000    8.558 ^ u_tile/u_ve/_57350_/A2 (sg13g2_a22oi_1)
+     1    0.004    0.056    0.083    8.641 v u_tile/u_ve/_57350_/Y (sg13g2_a22oi_1)
+                   0.056    0.000    8.641 v u_tile/u_ve/_57352_/A2 (sg13g2_a21oi_1)
+     1    0.002    0.046    0.074    8.715 ^ u_tile/u_ve/_57352_/Y (sg13g2_a21oi_1)
+                   0.046    0.000    8.715 ^ u_tile/u_ve/_64132_/D (sg13g2_dfrbp_1)
+                                     8.715   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_tile/u_ve/_64132_/CLK (sg13g2_dfrbp_1)
+                           -0.112   19.638   library setup time
+                                    19.638   data required time
+---------------------------------------------------------------------------------
+                                    19.638   data required time
+                                    -8.715   data arrival time
+---------------------------------------------------------------------------------
+                                    10.923   slack (MET)
+
+
+Startpoint: u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac
+            (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_tile/u_ve/_64131_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_CLK (RM_IHPSG13_1P_512x64_c2_bm_bist)
+     1    0.012    0.053    3.879    3.879 ^ u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DOUT[4] (RM_IHPSG13_1P_512x64_c2_bm_bist)
+                   0.040    0.000    3.879 ^ u_tile/g_bank[2].u_ram/u_macro/_25_/A0 (sg13g2_mux2_1)
+     1    0.003    0.034    0.088    3.967 ^ u_tile/g_bank[2].u_ram/u_macro/_25_/X (sg13g2_mux2_1)
+                   0.034    0.000    3.967 ^ fanout7942/A (sg13g2_buf_2)
+     4    0.024    0.058    0.095    4.063 ^ fanout7942/X (sg13g2_buf_2)
+                   0.058    0.000    4.063 ^ fanout7941/A (sg13g2_buf_1)
+     4    0.017    0.079    0.113    4.176 ^ fanout7941/X (sg13g2_buf_1)
+                   0.079    0.000    4.176 ^ fanout7940/A (sg13g2_buf_1)
+     4    0.017    0.079    0.122    4.299 ^ fanout7940/X (sg13g2_buf_1)
+                   0.079    0.000    4.299 ^ fanout7939/A (sg13g2_buf_2)
+     8    0.024    0.058    0.117    4.416 ^ fanout7939/X (sg13g2_buf_2)
+                   0.058    0.000    4.416 ^ u_tile/u_ve/_51182_/A1 (sg13g2_mux2_2)
+     3    0.018    0.057    0.106    4.522 ^ u_tile/u_ve/_51182_/X (sg13g2_mux2_2)
+                   0.057    0.000    4.522 ^ fanout4787/A (sg13g2_buf_2)
+     6    0.024    0.058    0.107    4.629 ^ fanout4787/X (sg13g2_buf_2)
+                   0.058    0.000    4.629 ^ fanout4785/A (sg13g2_buf_1)
+     5    0.016    0.074    0.110    4.739 ^ fanout4785/X (sg13g2_buf_1)
+                   0.074    0.000    4.739 ^ fanout4784/A (sg13g2_buf_2)
+     8    0.027    0.065    0.120    4.859 ^ fanout4784/X (sg13g2_buf_2)
+                   0.065    0.000    4.859 ^ u_tile/u_ve/_52866_/A (sg13g2_nand2_1)
+     3    0.012    0.083    0.093    4.952 v u_tile/u_ve/_52866_/Y (sg13g2_nand2_1)
+                   0.083    0.000    4.952 v u_tile/u_ve/_52870_/A (sg13g2_xor2_1)
+     1    0.005    0.057    0.123    5.075 v u_tile/u_ve/_52870_/X (sg13g2_xor2_1)
+                   0.057    0.000    5.075 v u_tile/u_ve/_52871_/B (sg13g2_xnor2_1)
+     3    0.011    0.086    0.130    5.204 v u_tile/u_ve/_52871_/Y (sg13g2_xnor2_1)
+                   0.086    0.000    5.204 v u_tile/u_ve/_52875_/A (sg13g2_or3_1)
+     2    0.006    0.043    0.172    5.376 v u_tile/u_ve/_52875_/X (sg13g2_or3_1)
+                   0.043    0.000    5.376 v u_tile/u_ve/_52882_/B2 (sg13g2_a221oi_1)
+     2    0.006    0.145    0.161    5.537 ^ u_tile/u_ve/_52882_/Y (sg13g2_a221oi_1)
+                   0.145    0.000    5.537 ^ u_tile/u_ve/_52888_/A_N (sg13g2_nand2b_1)
+     1    0.005    0.051    0.111    5.648 ^ u_tile/u_ve/_52888_/Y (sg13g2_nand2b_1)
+                   0.051    0.000    5.648 ^ u_tile/u_ve/_52889_/B (sg13g2_xnor2_1)
+     2    0.010    0.113    0.106    5.753 ^ u_tile/u_ve/_52889_/Y (sg13g2_xnor2_1)
+                   0.113    0.000    5.753 ^ u_tile/u_ve/_52911_/A (sg13g2_xor2_1)
+     1    0.005    0.073    0.136    5.890 ^ u_tile/u_ve/_52911_/X (sg13g2_xor2_1)
+                   0.073    0.000    5.890 ^ u_tile/u_ve/_52912_/B (sg13g2_xnor2_1)
+     3    0.012    0.135    0.123    6.013 ^ u_tile/u_ve/_52912_/Y (sg13g2_xnor2_1)
+                   0.135    0.000    6.013 ^ u_tile/u_ve/_52920_/A (sg13g2_xnor2_1)
+     4    0.014    0.101    0.145    6.157 v u_tile/u_ve/_52920_/Y (sg13g2_xnor2_1)
+                   0.101    0.000    6.157 v u_tile/u_ve/_53000_/B (sg13g2_and2_1)
+     1    0.003    0.023    0.103    6.261 v u_tile/u_ve/_53000_/X (sg13g2_and2_1)
+                   0.023    0.000    6.261 v u_tile/u_ve/_53002_/B2 (sg13g2_a221oi_1)
+     2    0.006    0.149    0.156    6.417 ^ u_tile/u_ve/_53002_/Y (sg13g2_a221oi_1)
+                   0.149    0.000    6.417 ^ u_tile/u_ve/_53118_/A2 (sg13g2_a22oi_1)
+     4    0.017    0.130    0.172    6.589 v u_tile/u_ve/_53118_/Y (sg13g2_a22oi_1)
+                   0.130    0.000    6.589 v u_tile/u_ve/_53711_/A2 (sg13g2_o21ai_1)
+     3    0.012    0.160    0.176    6.766 ^ u_tile/u_ve/_53711_/Y (sg13g2_o21ai_1)
+                   0.160    0.000    6.766 ^ u_tile/u_ve/_54105_/A1 (sg13g2_a21o_1)
+     3    0.015    0.074    0.180    6.946 ^ u_tile/u_ve/_54105_/X (sg13g2_a21o_1)
+                   0.074    0.000    6.946 ^ u_tile/u_ve/_54490_/A1 (sg13g2_a22oi_1)
+     2    0.010    0.087    0.110    7.056 v u_tile/u_ve/_54490_/Y (sg13g2_a22oi_1)
+                   0.087    0.000    7.057 v u_tile/u_ve/_54869_/A1 (sg13g2_o21ai_1)
+     3    0.013    0.161    0.178    7.234 ^ u_tile/u_ve/_54869_/Y (sg13g2_o21ai_1)
+                   0.161    0.000    7.234 ^ u_tile/u_ve/_55121_/A2 (sg13g2_o21ai_1)
+     1    0.006    0.065    0.100    7.334 v u_tile/u_ve/_55121_/Y (sg13g2_o21ai_1)
+                   0.065    0.000    7.334 v u_tile/u_ve/_55123_/A2 (sg13g2_a21oi_2)
+     4    0.017    0.093    0.114    7.448 ^ u_tile/u_ve/_55123_/Y (sg13g2_a21oi_2)
+                   0.093    0.000    7.448 ^ u_tile/u_ve/_55604_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.074    0.105    7.554 v u_tile/u_ve/_55604_/Y (sg13g2_o21ai_1)
+                   0.074    0.000    7.554 v u_tile/u_ve/_56095_/B (sg13g2_nand3_1)
+     1    0.003    0.047    0.056    7.610 ^ u_tile/u_ve/_56095_/Y (sg13g2_nand3_1)
+                   0.047    0.000    7.610 ^ u_tile/u_ve/_56097_/A2 (sg13g2_a21oi_1)
+     1    0.004    0.044    0.064    7.674 v u_tile/u_ve/_56097_/Y (sg13g2_a21oi_1)
+                   0.044    0.000    7.674 v u_tile/u_ve/_56098_/A2 (sg13g2_o21ai_1)
+     3    0.010    0.134    0.130    7.804 ^ u_tile/u_ve/_56098_/Y (sg13g2_o21ai_1)
+                   0.134    0.000    7.804 ^ u_tile/u_ve/_56602_/A2 (sg13g2_a21oi_1)
+     1    0.003    0.066    0.092    7.897 v u_tile/u_ve/_56602_/Y (sg13g2_a21oi_1)
+                   0.066    0.000    7.897 v u_tile/u_ve/_56604_/A (sg13g2_nor2_1)
+     1    0.003    0.048    0.068    7.965 ^ u_tile/u_ve/_56604_/Y (sg13g2_nor2_1)
+                   0.048    0.000    7.965 ^ u_tile/u_ve/_56605_/B1 (sg13g2_a21oi_1)
+     1    0.003    0.062    0.037    8.001 v u_tile/u_ve/_56605_/Y (sg13g2_a21oi_1)
+                   0.062    0.000    8.001 v u_tile/u_ve/_56606_/A2 (sg13g2_o21ai_1)
+     3    0.013    0.168    0.162    8.163 ^ u_tile/u_ve/_56606_/Y (sg13g2_o21ai_1)
+                   0.168    0.000    8.164 ^ u_tile/u_ve/_57084_/B1 (sg13g2_o21ai_1)
+     1    0.003    0.062    0.092    8.256 v u_tile/u_ve/_57084_/Y (sg13g2_o21ai_1)
+                   0.062    0.000    8.256 v u_tile/u_ve/_57085_/A2 (sg13g2_a21oi_1)
+     1    0.002    0.052    0.079    8.335 ^ u_tile/u_ve/_57085_/Y (sg13g2_a21oi_1)
+                   0.052    0.000    8.335 ^ u_tile/u_ve/_57087_/A_N (sg13g2_nand2b_1)
+     2    0.010    0.055    0.091    8.426 ^ u_tile/u_ve/_57087_/Y (sg13g2_nand2b_1)
+                   0.055    0.000    8.426 ^ u_tile/u_ve/_57089_/B (sg13g2_xor2_1)
+     1    0.004    0.064    0.106    8.531 ^ u_tile/u_ve/_57089_/X (sg13g2_xor2_1)
+                   0.064    0.000    8.531 ^ u_tile/u_ve/_57134_/A2 (sg13g2_a22oi_1)
+     1    0.008    0.076    0.099    8.630 v u_tile/u_ve/_57134_/Y (sg13g2_a22oi_1)
+                   0.076    0.000    8.631 v u_tile/u_ve/_57135_/B1 (sg13g2_a21oi_1)
+     1    0.002    0.051    0.069    8.700 ^ u_tile/u_ve/_57135_/Y (sg13g2_a21oi_1)
+                   0.051    0.000    8.700 ^ u_tile/u_ve/_64131_/D (sg13g2_dfrbp_1)
+                                     8.700   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_tile/u_ve/_64131_/CLK (sg13g2_dfrbp_1)
+                           -0.114   19.636   library setup time
+                                    19.636   data required time
+---------------------------------------------------------------------------------
+                                    19.636   data required time
+                                    -8.700   data arrival time
+---------------------------------------------------------------------------------
+                                    10.937   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_cpu/_22719_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13617_/A2 (sg13g2_a21oi_1)
+     3    0.011    0.116    0.128    3.612 ^ u_cpu/_13617_/Y (sg13g2_a21oi_1)
+                   0.116    0.000    3.613 ^ fanout2158/A (sg13g2_buf_2)
+     6    0.023    0.057    0.131    3.744 ^ fanout2158/X (sg13g2_buf_2)
+                   0.057    0.000    3.744 ^ fanout2157/A (sg13g2_buf_1)
+     5    0.019    0.086    0.119    3.863 ^ fanout2157/X (sg13g2_buf_1)
+                   0.086    0.000    3.863 ^ fanout2156/A (sg13g2_buf_1)
+     4    0.014    0.065    0.115    3.978 ^ fanout2156/X (sg13g2_buf_1)
+                   0.065    0.000    3.978 ^ fanout2155/A (sg13g2_buf_2)
+     8    0.040    0.091    0.136    4.114 ^ fanout2155/X (sg13g2_buf_2)
+                   0.091    0.000    4.114 ^ u_cpu/_13619_/A (sg13g2_inv_4)
+     1    0.003    0.021    0.032    4.147 v u_cpu/_13619_/Y (sg13g2_inv_4)
+                   0.021    0.000    4.147 v fanout2078/A (sg13g2_buf_2)
+     5    0.022    0.045    0.089    4.236 v fanout2078/X (sg13g2_buf_2)
+                   0.045    0.000    4.236 v fanout2072/A (sg13g2_buf_2)
+     7    0.023    0.047    0.102    4.338 v fanout2072/X (sg13g2_buf_2)
+                   0.047    0.000    4.338 v fanout2071/A (sg13g2_buf_2)
+     8    0.029    0.056    0.111    4.449 v fanout2071/X (sg13g2_buf_2)
+                   0.056    0.000    4.450 v u_cpu/_13670_/B (sg13g2_nor4_2)
+     3    0.012    0.173    0.186    4.635 ^ u_cpu/_13670_/Y (sg13g2_nor4_2)
+                   0.173    0.000    4.635 ^ u_cpu/_13671_/B (sg13g2_and2_1)
+     3    0.009    0.051    0.148    4.783 ^ u_cpu/_13671_/X (sg13g2_and2_1)
+                   0.051    0.000    4.783 ^ u_cpu/_13685_/A (sg13g2_nor2b_1)
+     3    0.009    0.040    0.050    4.833 v u_cpu/_13685_/Y (sg13g2_nor2b_1)
+                   0.040    0.000    4.833 v u_xbar/_1452_/A (sg13g2_inv_1)
+     3    0.011    0.054    0.056    4.889 ^ u_xbar/_1452_/Y (sg13g2_inv_1)
+                   0.054    0.000    4.889 ^ u_xbar/_1453_/B2 (sg13g2_a22oi_1)
+     3    0.011    0.088    0.087    4.976 v u_xbar/_1453_/Y (sg13g2_a22oi_1)
+                   0.088    0.000    4.976 v fanout1604/A (sg13g2_buf_1)
+     5    0.014    0.052    0.115    5.091 v fanout1604/X (sg13g2_buf_1)
+                   0.052    0.000    5.091 v u_xbar/_1673_/C (sg13g2_and4_1)
+     3    0.010    0.042    0.111    5.202 v u_xbar/_1673_/X (sg13g2_and4_1)
+                   0.042    0.000    5.202 v u_xbar/_1674_/B (sg13g2_or2_1)
+     2    0.006    0.037    0.110    5.313 v u_xbar/_1674_/X (sg13g2_or2_1)
+                   0.037    0.000    5.313 v u_xbar/_1682_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.131    0.133    5.445 ^ u_xbar/_1682_/Y (sg13g2_o21ai_1)
+                   0.131    0.000    5.445 ^ u_xbar/_1686_/B2 (sg13g2_a221oi_1)
+     2    0.011    0.118    0.131    5.576 v u_xbar/_1686_/Y (sg13g2_a221oi_1)
+                   0.118    0.000    5.576 v u_xbar/_2135_/B (sg13g2_xor2_1)
+     3    0.011    0.105    0.145    5.721 v u_xbar/_2135_/X (sg13g2_xor2_1)
+                   0.105    0.000    5.721 v u_xbar/_2136_/S (sg13g2_mux2_1)
+     2    0.006    0.047    0.170    5.891 ^ u_xbar/_2136_/X (sg13g2_mux2_1)
+                   0.047    0.000    5.891 ^ u_xbar/_2137_/B (sg13g2_nand2_1)
+     1    0.003    0.037    0.051    5.942 v u_xbar/_2137_/Y (sg13g2_nand2_1)
+                   0.037    0.000    5.942 v u_xbar/_2138_/B1 (sg13g2_o21ai_1)
+     3    0.011    0.149    0.070    6.013 ^ u_xbar/_2138_/Y (sg13g2_o21ai_1)
+                   0.149    0.000    6.013 ^ u_xbar/_2146_/A (sg13g2_nor2_1)
+     1    0.003    0.043    0.070    6.082 v u_xbar/_2146_/Y (sg13g2_nor2_1)
+                   0.043    0.000    6.082 v fanout654/A (sg13g2_buf_2)
+     4    0.022    0.045    0.099    6.182 v fanout654/X (sg13g2_buf_2)
+                   0.045    0.001    6.182 v fanout648/A (sg13g2_buf_2)
+     8    0.031    0.059    0.112    6.294 v fanout648/X (sg13g2_buf_2)
+                   0.059    0.000    6.295 v u_xbar/g_slv[5].u_mux/_343_/A (sg13g2_nand2_1)
+     1    0.003    0.034    0.041    6.335 ^ u_xbar/g_slv[5].u_mux/_343_/Y (sg13g2_nand2_1)
+                   0.034    0.000    6.335 ^ u_xbar/g_slv[5].u_mux/_344_/D (sg13g2_nand4_1)
+     6    0.034    0.387    0.345    6.680 v u_xbar/g_slv[5].u_mux/_344_/Y (sg13g2_nand4_1)
+                   0.387    0.001    6.682 v u_tile/_0798_/S0 (sg13g2_mux4_1)
+     1    0.012    0.073    0.328    7.010 ^ u_tile/_0798_/X (sg13g2_mux4_1)
+                   0.073    0.000    7.010 ^ u_tile/_0807_/B1 (sg13g2_a221oi_1)
+     3    0.016    0.142    0.129    7.139 v u_tile/_0807_/Y (sg13g2_a221oi_1)
+                   0.142    0.000    7.140 v u_tile/_0808_/A (sg13g2_inv_1)
+     1    0.003    0.042    0.053    7.193 ^ u_tile/_0808_/Y (sg13g2_inv_1)
+                   0.042    0.000    7.193 ^ g_v1[5].g_ad.u_ad/_081_/B_N (sg13g2_nor2b_1)
+     3    0.013    0.126    0.152    7.344 ^ g_v1[5].g_ad.u_ad/_081_/Y (sg13g2_nor2b_1)
+                   0.126    0.000    7.344 ^ u_xbar/_2329_/A (sg13g2_and2_1)
+     3    0.012    0.062    0.139    7.483 ^ u_xbar/_2329_/X (sg13g2_and2_1)
+                   0.062    0.000    7.483 ^ u_xbar/_2330_/B (sg13g2_and2_1)
+     2    0.006    0.038    0.102    7.585 ^ u_xbar/_2330_/X (sg13g2_and2_1)
+                   0.038    0.000    7.585 ^ u_xbar/_2404_/B (sg13g2_and3_1)
+     2    0.009    0.051    0.130    7.715 ^ u_xbar/_2404_/X (sg13g2_and3_1)
+                   0.051    0.000    7.715 ^ u_xbar/_2407_/C (sg13g2_or4_2)
+     5    0.016    0.048    0.111    7.826 ^ u_xbar/_2407_/X (sg13g2_or4_2)
+                   0.048    0.000    7.826 ^ u_cpu/_19856_/A (sg13g2_nand2_1)
+     2    0.006    0.051    0.061    7.887 v u_cpu/_19856_/Y (sg13g2_nand2_1)
+                   0.051    0.000    7.887 v u_cpu/_19857_/B1 (sg13g2_a21oi_1)
+     2    0.005    0.077    0.083    7.970 ^ u_cpu/_19857_/Y (sg13g2_a21oi_1)
+                   0.077    0.000    7.970 ^ fanout82/A (sg13g2_buf_1)
+     4    0.014    0.064    0.110    8.080 ^ fanout82/X (sg13g2_buf_1)
+                   0.064    0.000    8.080 ^ fanout81/A (sg13g2_buf_2)
+     8    0.036    0.082    0.129    8.209 ^ fanout81/X (sg13g2_buf_2)
+                   0.082    0.000    8.209 ^ fanout80/A (sg13g2_buf_2)
+     8    0.030    0.070    0.128    8.337 ^ fanout80/X (sg13g2_buf_2)
+                   0.070    0.000    8.337 ^ u_cpu/_20794_/C (sg13g2_nand4_1)
+     2    0.005    0.099    0.129    8.466 v u_cpu/_20794_/Y (sg13g2_nand4_1)
+                   0.099    0.000    8.466 v u_cpu/_20796_/C (sg13g2_or3_1)
+     1    0.003    0.034    0.146    8.612 v u_cpu/_20796_/X (sg13g2_or3_1)
+                   0.034    0.000    8.612 v u_cpu/_20797_/C (sg13g2_nand3b_1)
+     1    0.005    0.041    0.048    8.660 ^ u_cpu/_20797_/Y (sg13g2_nand3b_1)
+                   0.041    0.000    8.660 ^ u_cpu/_20800_/B1 (sg13g2_a22oi_1)
+     1    0.002    0.055    0.050    8.710 v u_cpu/_20800_/Y (sg13g2_a22oi_1)
+                   0.055    0.000    8.710 v u_cpu/_22719_/D (sg13g2_dfrbp_1)
+                                     8.710   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_cpu/_22719_/CLK (sg13g2_dfrbp_1)
+                           -0.099   19.651   library setup time
+                                    19.651   data required time
+---------------------------------------------------------------------------------
+                                    19.651   data required time
+                                    -8.710   data arrival time
+---------------------------------------------------------------------------------
+                                    10.941   slack (MET)
+
+
+Startpoint: u_cpu/_23047_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_cpu/_22716_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_cpu/_23047_/CLK (sg13g2_dfrbp_1)
+     1    0.002    0.021    0.246    0.246 v u_cpu/_23047_/Q (sg13g2_dfrbp_1)
+                   0.021    0.000    0.246 v fanout10043/A (sg13g2_buf_1)
+     4    0.016    0.059    0.092    0.338 v fanout10043/X (sg13g2_buf_1)
+                   0.059    0.000    0.338 v fanout10042/A (sg13g2_buf_2)
+     8    0.032    0.061    0.121    0.459 v fanout10042/X (sg13g2_buf_2)
+                   0.061    0.000    0.459 v fanout10041/A (sg13g2_buf_2)
+     7    0.029    0.056    0.117    0.576 v fanout10041/X (sg13g2_buf_2)
+                   0.056    0.000    0.576 v fanout10040/A (sg13g2_buf_1)
+     5    0.019    0.067    0.113    0.690 v fanout10040/X (sg13g2_buf_1)
+                   0.067    0.000    0.690 v u_cpu/_11573_/A (sg13g2_or4_2)
+     7    0.034    0.105    0.321    1.010 v u_cpu/_11573_/X (sg13g2_or4_2)
+                   0.105    0.000    1.010 v u_cpu/_11575_/B (sg13g2_nor2_1)
+     1    0.003    0.062    0.075    1.085 ^ u_cpu/_11575_/Y (sg13g2_nor2_1)
+                   0.062    0.000    1.085 ^ fanout6302/A (sg13g2_buf_2)
+     7    0.040    0.090    0.134    1.220 ^ fanout6302/X (sg13g2_buf_2)
+                   0.090    0.000    1.220 ^ fanout6301/A (sg13g2_buf_2)
+     8    0.036    0.082    0.141    1.361 ^ fanout6301/X (sg13g2_buf_2)
+                   0.082    0.001    1.361 ^ u_cpu/_12726_/A (sg13g2_nor2_1)
+     2    0.006    0.039    0.060    1.421 v u_cpu/_12726_/Y (sg13g2_nor2_1)
+                   0.039    0.000    1.421 v u_cpu/_12735_/B1 (sg13g2_a221oi_1)
+     7    0.036    0.498    0.413    1.834 ^ u_cpu/_12735_/Y (sg13g2_a221oi_1)
+                   0.498    0.001    1.835 ^ u_cpu/_12737_/B (sg13g2_xnor2_1)
+     1    0.003    0.092    0.187    2.022 ^ u_cpu/_12737_/Y (sg13g2_xnor2_1)
+                   0.092    0.000    2.022 ^ u_cpu/_12819_/B (sg13g2_nand4_1)
+     3    0.009    0.139    0.160    2.182 v u_cpu/_12819_/Y (sg13g2_nand4_1)
+                   0.139    0.000    2.182 v u_cpu/_13347_/A (sg13g2_or4_2)
+     3    0.013    0.067    0.294    2.476 v u_cpu/_13347_/X (sg13g2_or4_2)
+                   0.067    0.000    2.476 v u_cpu/_13557_/A (sg13g2_or4_1)
+     1    0.009    0.058    0.230    2.705 v u_cpu/_13557_/X (sg13g2_or4_1)
+                   0.058    0.000    2.706 v u_cpu/_13558_/S (sg13g2_mux2_2)
+     4    0.018    0.057    0.173    2.878 v u_cpu/_13558_/X (sg13g2_mux2_2)
+                   0.057    0.000    2.878 v u_cpu/_13564_/B (sg13g2_nor3_1)
+     2    0.007    0.125    0.133    3.011 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+                   0.125    0.000    3.011 ^ u_cpu/_13565_/C (sg13g2_nand3_1)
+     4    0.012    0.134    0.157    3.168 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+                   0.134    0.000    3.168 v u_cpu/_13598_/A (sg13g2_and2_1)
+     1    0.003    0.023    0.106    3.274 v u_cpu/_13598_/X (sg13g2_and2_1)
+                   0.023    0.000    3.274 v fanout2280/A (sg13g2_buf_1)
+     4    0.016    0.057    0.091    3.365 v fanout2280/X (sg13g2_buf_1)
+                   0.057    0.000    3.365 v fanout2278/A (sg13g2_buf_2)
+     8    0.032    0.060    0.119    3.484 v fanout2278/X (sg13g2_buf_2)
+                   0.060    0.000    3.484 v u_cpu/_13617_/A2 (sg13g2_a21oi_1)
+     3    0.011    0.116    0.128    3.612 ^ u_cpu/_13617_/Y (sg13g2_a21oi_1)
+                   0.116    0.000    3.613 ^ fanout2158/A (sg13g2_buf_2)
+     6    0.023    0.057    0.131    3.744 ^ fanout2158/X (sg13g2_buf_2)
+                   0.057    0.000    3.744 ^ fanout2157/A (sg13g2_buf_1)
+     5    0.019    0.086    0.119    3.863 ^ fanout2157/X (sg13g2_buf_1)
+                   0.086    0.000    3.863 ^ fanout2156/A (sg13g2_buf_1)
+     4    0.014    0.065    0.115    3.978 ^ fanout2156/X (sg13g2_buf_1)
+                   0.065    0.000    3.978 ^ fanout2155/A (sg13g2_buf_2)
+     8    0.040    0.091    0.136    4.114 ^ fanout2155/X (sg13g2_buf_2)
+                   0.091    0.000    4.114 ^ u_cpu/_13619_/A (sg13g2_inv_4)
+     1    0.003    0.021    0.032    4.147 v u_cpu/_13619_/Y (sg13g2_inv_4)
+                   0.021    0.000    4.147 v fanout2078/A (sg13g2_buf_2)
+     5    0.022    0.045    0.089    4.236 v fanout2078/X (sg13g2_buf_2)
+                   0.045    0.000    4.236 v fanout2072/A (sg13g2_buf_2)
+     7    0.023    0.047    0.102    4.338 v fanout2072/X (sg13g2_buf_2)
+                   0.047    0.000    4.338 v fanout2071/A (sg13g2_buf_2)
+     8    0.029    0.056    0.111    4.449 v fanout2071/X (sg13g2_buf_2)
+                   0.056    0.000    4.450 v u_cpu/_13670_/B (sg13g2_nor4_2)
+     3    0.012    0.173    0.186    4.635 ^ u_cpu/_13670_/Y (sg13g2_nor4_2)
+                   0.173    0.000    4.635 ^ u_cpu/_13671_/B (sg13g2_and2_1)
+     3    0.009    0.051    0.148    4.783 ^ u_cpu/_13671_/X (sg13g2_and2_1)
+                   0.051    0.000    4.783 ^ u_cpu/_13685_/A (sg13g2_nor2b_1)
+     3    0.009    0.040    0.050    4.833 v u_cpu/_13685_/Y (sg13g2_nor2b_1)
+                   0.040    0.000    4.833 v u_xbar/_1452_/A (sg13g2_inv_1)
+     3    0.011    0.054    0.056    4.889 ^ u_xbar/_1452_/Y (sg13g2_inv_1)
+                   0.054    0.000    4.889 ^ u_xbar/_1453_/B2 (sg13g2_a22oi_1)
+     3    0.011    0.088    0.087    4.976 v u_xbar/_1453_/Y (sg13g2_a22oi_1)
+                   0.088    0.000    4.976 v fanout1604/A (sg13g2_buf_1)
+     5    0.014    0.052    0.115    5.091 v fanout1604/X (sg13g2_buf_1)
+                   0.052    0.000    5.091 v u_xbar/_1673_/C (sg13g2_and4_1)
+     3    0.010    0.042    0.111    5.202 v u_xbar/_1673_/X (sg13g2_and4_1)
+                   0.042    0.000    5.202 v u_xbar/_1674_/B (sg13g2_or2_1)
+     2    0.006    0.037    0.110    5.313 v u_xbar/_1674_/X (sg13g2_or2_1)
+                   0.037    0.000    5.313 v u_xbar/_1682_/A1 (sg13g2_o21ai_1)
+     3    0.009    0.131    0.133    5.445 ^ u_xbar/_1682_/Y (sg13g2_o21ai_1)
+                   0.131    0.000    5.445 ^ u_xbar/_1686_/B2 (sg13g2_a221oi_1)
+     2    0.011    0.118    0.131    5.576 v u_xbar/_1686_/Y (sg13g2_a221oi_1)
+                   0.118    0.000    5.576 v u_xbar/_2135_/B (sg13g2_xor2_1)
+     3    0.011    0.105    0.145    5.721 v u_xbar/_2135_/X (sg13g2_xor2_1)
+                   0.105    0.000    5.721 v u_xbar/_2136_/S (sg13g2_mux2_1)
+     2    0.006    0.047    0.170    5.891 ^ u_xbar/_2136_/X (sg13g2_mux2_1)
+                   0.047    0.000    5.891 ^ u_xbar/_2137_/B (sg13g2_nand2_1)
+     1    0.003    0.037    0.051    5.942 v u_xbar/_2137_/Y (sg13g2_nand2_1)
+                   0.037    0.000    5.942 v u_xbar/_2138_/B1 (sg13g2_o21ai_1)
+     3    0.011    0.149    0.070    6.013 ^ u_xbar/_2138_/Y (sg13g2_o21ai_1)
+                   0.149    0.000    6.013 ^ u_xbar/_2146_/A (sg13g2_nor2_1)
+     1    0.003    0.043    0.070    6.082 v u_xbar/_2146_/Y (sg13g2_nor2_1)
+                   0.043    0.000    6.082 v fanout654/A (sg13g2_buf_2)
+     4    0.022    0.045    0.099    6.182 v fanout654/X (sg13g2_buf_2)
+                   0.045    0.001    6.182 v fanout648/A (sg13g2_buf_2)
+     8    0.031    0.059    0.112    6.294 v fanout648/X (sg13g2_buf_2)
+                   0.059    0.000    6.295 v u_xbar/g_slv[5].u_mux/_343_/A (sg13g2_nand2_1)
+     1    0.003    0.034    0.041    6.335 ^ u_xbar/g_slv[5].u_mux/_343_/Y (sg13g2_nand2_1)
+                   0.034    0.000    6.335 ^ u_xbar/g_slv[5].u_mux/_344_/D (sg13g2_nand4_1)
+     6    0.034    0.387    0.345    6.680 v u_xbar/g_slv[5].u_mux/_344_/Y (sg13g2_nand4_1)
+                   0.387    0.001    6.682 v u_tile/_0798_/S0 (sg13g2_mux4_1)
+     1    0.012    0.073    0.328    7.010 ^ u_tile/_0798_/X (sg13g2_mux4_1)
+                   0.073    0.000    7.010 ^ u_tile/_0807_/B1 (sg13g2_a221oi_1)
+     3    0.016    0.142    0.129    7.139 v u_tile/_0807_/Y (sg13g2_a221oi_1)
+                   0.142    0.000    7.140 v u_tile/_0808_/A (sg13g2_inv_1)
+     1    0.003    0.042    0.053    7.193 ^ u_tile/_0808_/Y (sg13g2_inv_1)
+                   0.042    0.000    7.193 ^ g_v1[5].g_ad.u_ad/_081_/B_N (sg13g2_nor2b_1)
+     3    0.013    0.126    0.152    7.344 ^ g_v1[5].g_ad.u_ad/_081_/Y (sg13g2_nor2b_1)
+                   0.126    0.000    7.344 ^ u_xbar/_2329_/A (sg13g2_and2_1)
+     3    0.012    0.062    0.139    7.483 ^ u_xbar/_2329_/X (sg13g2_and2_1)
+                   0.062    0.000    7.483 ^ u_xbar/_2330_/B (sg13g2_and2_1)
+     2    0.006    0.038    0.102    7.585 ^ u_xbar/_2330_/X (sg13g2_and2_1)
+                   0.038    0.000    7.585 ^ u_xbar/_2404_/B (sg13g2_and3_1)
+     2    0.009    0.051    0.130    7.715 ^ u_xbar/_2404_/X (sg13g2_and3_1)
+                   0.051    0.000    7.715 ^ u_xbar/_2407_/C (sg13g2_or4_2)
+     5    0.016    0.048    0.111    7.826 ^ u_xbar/_2407_/X (sg13g2_or4_2)
+                   0.048    0.000    7.826 ^ u_cpu/_19856_/A (sg13g2_nand2_1)
+     2    0.006    0.051    0.061    7.887 v u_cpu/_19856_/Y (sg13g2_nand2_1)
+                   0.051    0.000    7.887 v u_cpu/_19857_/B1 (sg13g2_a21oi_1)
+     2    0.005    0.077    0.083    7.970 ^ u_cpu/_19857_/Y (sg13g2_a21oi_1)
+                   0.077    0.000    7.970 ^ fanout82/A (sg13g2_buf_1)
+     4    0.014    0.064    0.110    8.080 ^ fanout82/X (sg13g2_buf_1)
+                   0.064    0.000    8.080 ^ fanout81/A (sg13g2_buf_2)
+     8    0.036    0.082    0.129    8.209 ^ fanout81/X (sg13g2_buf_2)
+                   0.082    0.000    8.209 ^ fanout80/A (sg13g2_buf_2)
+     8    0.030    0.070    0.128    8.337 ^ fanout80/X (sg13g2_buf_2)
+                   0.070    0.000    8.337 ^ u_cpu/_20672_/C (sg13g2_nand4_1)
+     1    0.005    0.098    0.128    8.465 v u_cpu/_20672_/Y (sg13g2_nand4_1)
+                   0.098    0.000    8.465 v u_cpu/_20673_/B (sg13g2_xnor2_1)
+     1    0.003    0.043    0.113    8.578 v u_cpu/_20673_/Y (sg13g2_xnor2_1)
+                   0.043    0.000    8.578 v u_cpu/_20711_/A2 (sg13g2_a21oi_1)
+     1    0.003    0.057    0.076    8.654 ^ u_cpu/_20711_/Y (sg13g2_a21oi_1)
+                   0.057    0.000    8.654 ^ u_cpu/_20714_/A (sg13g2_nand2_1)
+     1    0.002    0.031    0.045    8.699 v u_cpu/_20714_/Y (sg13g2_nand2_1)
+                   0.031    0.000    8.699 v u_cpu/_22716_/D (sg13g2_dfrbp_1)
+                                     8.699   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_cpu/_22716_/CLK (sg13g2_dfrbp_1)
+                           -0.090   19.660   library setup time
+                                    19.660   data required time
+---------------------------------------------------------------------------------
+                                    19.660   data required time
+                                    -8.699   data arrival time
+---------------------------------------------------------------------------------
+                                    10.962   slack (MET)
+
+
+Startpoint: u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac
+            (rising edge-triggered flip-flop clocked by clk)
+Endpoint: u_tile/u_ve/_64068_ (rising edge-triggered flip-flop clocked by clk)
+Path Group: clk
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.150    0.000    0.000   clock clk (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.150    0.000    0.000 ^ u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_CLK (RM_IHPSG13_1P_512x64_c2_bm_bist)
+     1    0.007    0.046    3.872    3.872 ^ u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac/A_DOUT[6] (RM_IHPSG13_1P_512x64_c2_bm_bist)
+                   0.035    0.000    3.873 ^ u_tile/g_bank[0].u_ram/u_macro/_27_/A0 (sg13g2_mux2_2)
+     3    0.035    0.090    0.149    4.022 ^ u_tile/g_bank[0].u_ram/u_macro/_27_/X (sg13g2_mux2_2)
+                   0.090    0.001    4.023 ^ fanout8021/A (sg13g2_buf_2)
+     5    0.026    0.063    0.125    4.148 ^ fanout8021/X (sg13g2_buf_2)
+                   0.063    0.000    4.148 ^ fanout8020/A (sg13g2_buf_1)
+     5    0.021    0.093    0.126    4.274 ^ fanout8020/X (sg13g2_buf_1)
+                   0.093    0.000    4.274 ^ fanout8019/A (sg13g2_buf_2)
+     8    0.026    0.062    0.126    4.401 ^ fanout8019/X (sg13g2_buf_2)
+                   0.062    0.000    4.401 ^ u_tile/u_ve/_37777_/A0 (sg13g2_mux2_1)
+     1    0.004    0.038    0.100    4.501 ^ u_tile/u_ve/_37777_/X (sg13g2_mux2_1)
+                   0.038    0.000    4.501 ^ fanout5303/A (sg13g2_buf_2)
+     4    0.026    0.061    0.101    4.602 ^ fanout5303/X (sg13g2_buf_2)
+                   0.061    0.000    4.602 ^ fanout5301/A (sg13g2_buf_2)
+     5    0.024    0.059    0.110    4.711 ^ fanout5301/X (sg13g2_buf_2)
+                   0.059    0.000    4.711 ^ fanout5300/A (sg13g2_buf_1)
+     4    0.012    0.060    0.099    4.810 ^ fanout5300/X (sg13g2_buf_1)
+                   0.060    0.000    4.810 ^ fanout5299/A (sg13g2_buf_1)
+     4    0.019    0.085    0.118    4.929 ^ fanout5299/X (sg13g2_buf_1)
+                   0.085    0.000    4.929 ^ fanout5298/A (sg13g2_buf_2)
+     8    0.029    0.068    0.128    5.057 ^ fanout5298/X (sg13g2_buf_2)
+                   0.068    0.000    5.057 ^ u_tile/u_ve/_39219_/B (sg13g2_and2_1)
+     3    0.009    0.049    0.115    5.171 ^ u_tile/u_ve/_39219_/X (sg13g2_and2_1)
+                   0.049    0.000    5.171 ^ u_tile/u_ve/_39541_/A (sg13g2_and2_1)
+     2    0.005    0.038    0.090    5.262 ^ u_tile/u_ve/_39541_/X (sg13g2_and2_1)
+                   0.038    0.000    5.262 ^ u_tile/u_ve/_39543_/B1 (sg13g2_a21oi_1)
+     3    0.012    0.091    0.054    5.316 v u_tile/u_ve/_39543_/Y (sg13g2_a21oi_1)
+                   0.091    0.000    5.316 v u_tile/u_ve/_39549_/A (sg13g2_xnor2_1)
+     1    0.005    0.058    0.121    5.437 v u_tile/u_ve/_39549_/Y (sg13g2_xnor2_1)
+                   0.058    0.000    5.437 v u_tile/u_ve/_39550_/B (sg13g2_xnor2_1)
+     3    0.011    0.088    0.130    5.566 v u_tile/u_ve/_39550_/Y (sg13g2_xnor2_1)
+                   0.088    0.000    5.566 v u_tile/u_ve/_39552_/B (sg13g2_xnor2_1)
+     1    0.005    0.054    0.117    5.684 v u_tile/u_ve/_39552_/Y (sg13g2_xnor2_1)
+                   0.054    0.000    5.684 v u_tile/u_ve/_39553_/B (sg13g2_xnor2_1)
+     6    0.021    0.205    0.182    5.866 ^ u_tile/u_ve/_39553_/Y (sg13g2_xnor2_1)
+                   0.205    0.000    5.866 ^ u_tile/u_ve/_39574_/A (sg13g2_xnor2_1)
+     2    0.009    0.112    0.158    6.024 ^ u_tile/u_ve/_39574_/Y (sg13g2_xnor2_1)
+                   0.112    0.000    6.024 ^ u_tile/u_ve/_39575_/A (sg13g2_inv_2)
+     2    0.009    0.033    0.050    6.074 v u_tile/u_ve/_39575_/Y (sg13g2_inv_2)
+                   0.033    0.000    6.074 v u_tile/u_ve/_39580_/A (sg13g2_xnor2_1)
+     4    0.012    0.134    0.124    6.198 ^ u_tile/u_ve/_39580_/Y (sg13g2_xnor2_1)
+                   0.134    0.000    6.198 ^ u_tile/u_ve/_40075_/C (sg13g2_nand3b_1)
+     2    0.006    0.083    0.130    6.328 v u_tile/u_ve/_40075_/Y (sg13g2_nand3b_1)
+                   0.083    0.000    6.328 v u_tile/u_ve/_40077_/B_N (sg13g2_nor2b_1)
+     1    0.002    0.027    0.090    6.418 v u_tile/u_ve/_40077_/Y (sg13g2_nor2b_1)
+                   0.027    0.000    6.418 v u_tile/u_ve/_40078_/C (sg13g2_or3_1)
+     3    0.011    0.058    0.149    6.567 v u_tile/u_ve/_40078_/X (sg13g2_or3_1)
+                   0.058    0.000    6.567 v u_tile/u_ve/_40288_/A2 (sg13g2_a221oi_1)
+     1    0.003    0.110    0.153    6.720 ^ u_tile/u_ve/_40288_/Y (sg13g2_a221oi_1)
+                   0.110    0.000    6.720 ^ u_tile/u_ve/_40289_/C (sg13g2_nand3_1)
+     2    0.006    0.098    0.119    6.839 v u_tile/u_ve/_40289_/Y (sg13g2_nand3_1)
+                   0.098    0.000    6.839 v u_tile/u_ve/_40681_/A (sg13g2_nand3_1)
+     1    0.007    0.057    0.070    6.909 ^ u_tile/u_ve/_40681_/Y (sg13g2_nand3_1)
+                   0.057    0.000    6.909 ^ u_tile/u_ve/_40683_/A2 (sg13g2_a21oi_2)
+     3    0.014    0.061    0.082    6.991 v u_tile/u_ve/_40683_/Y (sg13g2_a21oi_2)
+                   0.061    0.000    6.991 v u_tile/u_ve/_41574_/B (sg13g2_nor4_1)
+     2    0.008    0.192    0.211    7.202 ^ u_tile/u_ve/_41574_/Y (sg13g2_nor4_1)
+                   0.192    0.000    7.202 ^ u_tile/u_ve/_41744_/A1 (sg13g2_o21ai_1)
+     4    0.015    0.115    0.164    7.366 v u_tile/u_ve/_41744_/Y (sg13g2_o21ai_1)
+                   0.115    0.000    7.366 v u_tile/u_ve/_42417_/A1 (sg13g2_a22oi_1)
+     2    0.009    0.086    0.120    7.486 ^ u_tile/u_ve/_42417_/Y (sg13g2_a22oi_1)
+                   0.086    0.000    7.486 ^ u_tile/u_ve/_42683_/A2 (sg13g2_o21ai_1)
+     1    0.003    0.044    0.068    7.555 v u_tile/u_ve/_42683_/Y (sg13g2_o21ai_1)
+                   0.044    0.000    7.555 v u_tile/u_ve/_42684_/B1 (sg13g2_o21ai_1)
+     2    0.008    0.114    0.059    7.613 ^ u_tile/u_ve/_42684_/Y (sg13g2_o21ai_1)
+                   0.114    0.000    7.613 ^ u_tile/u_ve/_42939_/B1 (sg13g2_o21ai_1)
+     1    0.003    0.053    0.079    7.693 v u_tile/u_ve/_42939_/Y (sg13g2_o21ai_1)
+                   0.053    0.000    7.693 v u_tile/u_ve/_42940_/B (sg13g2_nand2_1)
+     2    0.015    0.077    0.081    7.774 ^ u_tile/u_ve/_42940_/Y (sg13g2_nand2_1)
+                   0.077    0.000    7.774 ^ u_tile/u_ve/_42941_/A (sg13g2_inv_4)
+     2    0.006    0.021    0.032    7.806 v u_tile/u_ve/_42941_/Y (sg13g2_inv_4)
+                   0.021    0.000    7.806 v u_tile/u_ve/_43462_/A2 (sg13g2_o21ai_1)
+     1    0.003    0.073    0.075    7.881 ^ u_tile/u_ve/_43462_/Y (sg13g2_o21ai_1)
+                   0.073    0.000    7.881 ^ u_tile/u_ve/_43463_/B1 (sg13g2_o21ai_1)
+     1    0.006    0.063    0.080    7.962 v u_tile/u_ve/_43463_/Y (sg13g2_o21ai_1)
+                   0.063    0.000    7.962 v u_tile/u_ve/_43464_/A2 (sg13g2_a21oi_2)
+     3    0.016    0.093    0.111    8.073 ^ u_tile/u_ve/_43464_/Y (sg13g2_a21oi_2)
+                   0.093    0.000    8.073 ^ u_tile/u_ve/_43466_/B (sg13g2_nand2_1)
+     2    0.009    0.078    0.092    8.165 v u_tile/u_ve/_43466_/Y (sg13g2_nand2_1)
+                   0.078    0.000    8.165 v u_tile/u_ve/_43994_/A2 (sg13g2_a21oi_1)
+     1    0.004    0.060    0.092    8.257 ^ u_tile/u_ve/_43994_/Y (sg13g2_a21oi_1)
+                   0.060    0.000    8.257 ^ u_tile/u_ve/_43995_/A2 (sg13g2_o21ai_1)
+     1    0.006    0.065    0.071    8.328 v u_tile/u_ve/_43995_/Y (sg13g2_o21ai_1)
+                   0.065    0.000    8.328 v u_tile/u_ve/_44167_/A (sg13g2_xnor2_1)
+     1    0.014    0.100    0.148    8.476 v u_tile/u_ve/_44167_/Y (sg13g2_xnor2_1)
+                   0.100    0.001    8.477 v u_tile/u_ve/_44197_/A2 (sg13g2_a221oi_1)
+     1    0.003    0.110    0.168    8.645 ^ u_tile/u_ve/_44197_/Y (sg13g2_a221oi_1)
+                   0.110    0.000    8.645 ^ u_tile/u_ve/_44198_/B1 (sg13g2_a21oi_1)
+     1    0.002    0.040    0.050    8.694 v u_tile/u_ve/_44198_/Y (sg13g2_a21oi_1)
+                   0.040    0.000    8.694 v u_tile/u_ve/_64068_/D (sg13g2_dfrbp_1)
+                                     8.694   data arrival time
+
+                   0.150   20.000   20.000   clock clk (rise edge)
+                            0.000   20.000   clock network delay (ideal)
+                           -0.250   19.750   clock uncertainty
+                            0.000   19.750   clock reconvergence pessimism
+                                    19.750 ^ u_tile/u_ve/_64068_/CLK (sg13g2_dfrbp_1)
+                           -0.093   19.657   library setup time
+                                    19.657   data required time
+---------------------------------------------------------------------------------
+                                    19.657   data required time
+                                    -8.694   data arrival time
+---------------------------------------------------------------------------------
+                                    10.962   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_139_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: tdo (output port clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_139_/CLK (sg13g2_dfrbp_1)
+     1    0.038    0.158    0.283   50.283 ^ u_dbg/u_tap/_139_/Q (sg13g2_dfrbp_1)
+                   0.158    0.004   50.287 ^ output35/A (sg13g2_buf_1)
+     1    0.021    0.094    0.160   50.447 ^ output35/X (sg13g2_buf_1)
+                   0.094    0.000   50.448 ^ tdo (out)
+                                    50.448   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                          -20.000   80.000   output external delay
+                                    80.000   data required time
+---------------------------------------------------------------------------------
+                                    80.000   data required time
+                                   -50.448   data arrival time
+---------------------------------------------------------------------------------
+                                    29.552   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_140_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: tdo_oe (output port clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_140_/CLK (sg13g2_dfrbp_1)
+     1    0.037    0.157    0.282   50.282 ^ u_dbg/u_tap/_140_/Q (sg13g2_dfrbp_1)
+                   0.157    0.004   50.286 ^ output36/A (sg13g2_buf_1)
+     1    0.021    0.094    0.160   50.446 ^ output36/X (sg13g2_buf_1)
+                   0.094    0.000   50.446 ^ tdo_oe (out)
+                                    50.446   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                          -20.000   80.000   output external delay
+                                    80.000   data required time
+---------------------------------------------------------------------------------
+                                    80.000   data required time
+                                   -50.446   data arrival time
+---------------------------------------------------------------------------------
+                                    29.554   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_145_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1334_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_145_/CLK (sg13g2_dfrbp_1)
+     4    0.013    0.065    0.217   50.217 ^ u_dbg/u_tap/_145_/Q (sg13g2_dfrbp_1)
+                   0.065    0.000   50.217 ^ u_dbg/_0713_/B_N (sg13g2_nor2b_2)
+     6    0.024    0.115    0.166   50.383 ^ u_dbg/_0713_/Y (sg13g2_nor2b_2)
+                   0.115    0.000   50.383 ^ u_dbg/_1067_/C (sg13g2_nand4_1)
+     8    0.051    0.571    0.506   50.889 v u_dbg/_1067_/Y (sg13g2_nand4_1)
+                   0.571    0.003   50.892 v u_dbg/_1073_/S (sg13g2_mux2_1)
+     1    0.004    0.043    0.246   51.138 v u_dbg/_1073_/X (sg13g2_mux2_1)
+                   0.043    0.000   51.138 v u_dbg/_1074_/A1 (sg13g2_mux2_1)
+     1    0.002    0.033    0.110   51.248 v u_dbg/_1074_/X (sg13g2_mux2_1)
+                   0.033    0.000   51.248 v u_dbg/_1334_/D (sg13g2_dfrbp_1)
+                                    51.248   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1334_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.248   data arrival time
+---------------------------------------------------------------------------------
+                                    48.622   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_145_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1335_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_145_/CLK (sg13g2_dfrbp_1)
+     4    0.013    0.065    0.217   50.217 ^ u_dbg/u_tap/_145_/Q (sg13g2_dfrbp_1)
+                   0.065    0.000   50.217 ^ u_dbg/_0713_/B_N (sg13g2_nor2b_2)
+     6    0.024    0.115    0.166   50.383 ^ u_dbg/_0713_/Y (sg13g2_nor2b_2)
+                   0.115    0.000   50.383 ^ u_dbg/_1067_/C (sg13g2_nand4_1)
+     8    0.051    0.571    0.506   50.889 v u_dbg/_1067_/Y (sg13g2_nand4_1)
+                   0.571    0.003   50.892 v u_dbg/_1075_/S (sg13g2_mux2_1)
+     1    0.004    0.043    0.246   51.138 v u_dbg/_1075_/X (sg13g2_mux2_1)
+                   0.043    0.000   51.138 v u_dbg/_1076_/A1 (sg13g2_mux2_1)
+     1    0.002    0.033    0.110   51.248 v u_dbg/_1076_/X (sg13g2_mux2_1)
+                   0.033    0.000   51.248 v u_dbg/_1335_/D (sg13g2_dfrbp_1)
+                                    51.248   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1335_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.248   data arrival time
+---------------------------------------------------------------------------------
+                                    48.622   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_145_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1333_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_145_/CLK (sg13g2_dfrbp_1)
+     4    0.013    0.065    0.217   50.217 ^ u_dbg/u_tap/_145_/Q (sg13g2_dfrbp_1)
+                   0.065    0.000   50.217 ^ u_dbg/_0713_/B_N (sg13g2_nor2b_2)
+     6    0.024    0.115    0.166   50.383 ^ u_dbg/_0713_/Y (sg13g2_nor2b_2)
+                   0.115    0.000   50.383 ^ u_dbg/_1067_/C (sg13g2_nand4_1)
+     8    0.051    0.571    0.506   50.889 v u_dbg/_1067_/Y (sg13g2_nand4_1)
+                   0.571    0.003   50.892 v u_dbg/_1071_/S (sg13g2_mux2_1)
+     1    0.004    0.043    0.246   51.138 v u_dbg/_1071_/X (sg13g2_mux2_1)
+                   0.043    0.000   51.138 v u_dbg/_1072_/A1 (sg13g2_mux2_1)
+     1    0.002    0.033    0.110   51.247 v u_dbg/_1072_/X (sg13g2_mux2_1)
+                   0.033    0.000   51.247 v u_dbg/_1333_/D (sg13g2_dfrbp_1)
+                                    51.247   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1333_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.247   data arrival time
+---------------------------------------------------------------------------------
+                                    48.623   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_145_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1332_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_145_/CLK (sg13g2_dfrbp_1)
+     4    0.013    0.065    0.217   50.217 ^ u_dbg/u_tap/_145_/Q (sg13g2_dfrbp_1)
+                   0.065    0.000   50.217 ^ u_dbg/_0713_/B_N (sg13g2_nor2b_2)
+     6    0.024    0.115    0.166   50.383 ^ u_dbg/_0713_/Y (sg13g2_nor2b_2)
+                   0.115    0.000   50.383 ^ u_dbg/_1067_/C (sg13g2_nand4_1)
+     8    0.051    0.571    0.506   50.889 v u_dbg/_1067_/Y (sg13g2_nand4_1)
+                   0.571    0.003   50.892 v u_dbg/_1069_/S (sg13g2_mux2_1)
+     1    0.004    0.043    0.246   51.138 v u_dbg/_1069_/X (sg13g2_mux2_1)
+                   0.043    0.000   51.138 v u_dbg/_1070_/A1 (sg13g2_mux2_1)
+     1    0.002    0.032    0.109   51.247 v u_dbg/_1070_/X (sg13g2_mux2_1)
+                   0.032    0.000   51.247 v u_dbg/_1332_/D (sg13g2_dfrbp_1)
+                                    51.247   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1332_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.247   data arrival time
+---------------------------------------------------------------------------------
+                                    48.623   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_141_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1321_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_141_/CLK (sg13g2_dfrbp_1)
+     8    0.026    0.108    0.231   50.231 v u_dbg/u_tap/_141_/Q_N (sg13g2_dfrbp_1)
+                   0.108    0.000   50.231 v u_dbg/_0715_/A (sg13g2_nor3_2)
+     3    0.015    0.125    0.159   50.389 ^ u_dbg/_0715_/Y (sg13g2_nor3_2)
+                   0.125    0.000   50.390 ^ u_dbg/_0882_/C (sg13g2_and3_1)
+     2    0.009    0.056    0.166   50.556 ^ u_dbg/_0882_/X (sg13g2_and3_1)
+                   0.056    0.000   50.556 ^ fanout4240/A (sg13g2_buf_1)
+     4    0.018    0.081    0.114   50.670 ^ fanout4240/X (sg13g2_buf_1)
+                   0.081    0.000   50.670 ^ fanout4237/A (sg13g2_buf_2)
+     6    0.029    0.068    0.125   50.795 ^ fanout4237/X (sg13g2_buf_2)
+                   0.068    0.000   50.795 ^ fanout4236/A (sg13g2_buf_1)
+     4    0.022    0.098    0.131   50.926 ^ fanout4236/X (sg13g2_buf_1)
+                   0.098    0.000   50.926 ^ u_dbg/_1042_/S (sg13g2_mux2_1)
+     1    0.004    0.038    0.181   51.107 v u_dbg/_1042_/X (sg13g2_mux2_1)
+                   0.038    0.000   51.107 v u_dbg/_1043_/A1 (sg13g2_mux2_1)
+     1    0.002    0.033    0.108   51.216 v u_dbg/_1043_/X (sg13g2_mux2_1)
+                   0.033    0.000   51.216 v u_dbg/_1321_/D (sg13g2_dfrbp_1)
+                                    51.216   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1321_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.216   data arrival time
+---------------------------------------------------------------------------------
+                                    48.654   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_141_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1322_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_141_/CLK (sg13g2_dfrbp_1)
+     8    0.026    0.108    0.231   50.231 v u_dbg/u_tap/_141_/Q_N (sg13g2_dfrbp_1)
+                   0.108    0.000   50.231 v u_dbg/_0715_/A (sg13g2_nor3_2)
+     3    0.015    0.125    0.159   50.389 ^ u_dbg/_0715_/Y (sg13g2_nor3_2)
+                   0.125    0.000   50.390 ^ u_dbg/_0882_/C (sg13g2_and3_1)
+     2    0.009    0.056    0.166   50.556 ^ u_dbg/_0882_/X (sg13g2_and3_1)
+                   0.056    0.000   50.556 ^ fanout4240/A (sg13g2_buf_1)
+     4    0.018    0.081    0.114   50.670 ^ fanout4240/X (sg13g2_buf_1)
+                   0.081    0.000   50.670 ^ fanout4237/A (sg13g2_buf_2)
+     6    0.029    0.068    0.125   50.795 ^ fanout4237/X (sg13g2_buf_2)
+                   0.068    0.000   50.795 ^ fanout4236/A (sg13g2_buf_1)
+     4    0.022    0.098    0.131   50.926 ^ fanout4236/X (sg13g2_buf_1)
+                   0.098    0.000   50.926 ^ u_dbg/_1044_/S (sg13g2_mux2_1)
+     1    0.004    0.038    0.182   51.108 v u_dbg/_1044_/X (sg13g2_mux2_1)
+                   0.038    0.000   51.108 v u_dbg/_1045_/A1 (sg13g2_mux2_1)
+     1    0.002    0.032    0.108   51.216 v u_dbg/_1045_/X (sg13g2_mux2_1)
+                   0.032    0.000   51.216 v u_dbg/_1322_/D (sg13g2_dfrbp_1)
+                                    51.216   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1322_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.216   data arrival time
+---------------------------------------------------------------------------------
+                                    48.654   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_141_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1320_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_141_/CLK (sg13g2_dfrbp_1)
+     8    0.026    0.108    0.231   50.231 v u_dbg/u_tap/_141_/Q_N (sg13g2_dfrbp_1)
+                   0.108    0.000   50.231 v u_dbg/_0715_/A (sg13g2_nor3_2)
+     3    0.015    0.125    0.159   50.389 ^ u_dbg/_0715_/Y (sg13g2_nor3_2)
+                   0.125    0.000   50.390 ^ u_dbg/_0882_/C (sg13g2_and3_1)
+     2    0.009    0.056    0.166   50.556 ^ u_dbg/_0882_/X (sg13g2_and3_1)
+                   0.056    0.000   50.556 ^ fanout4240/A (sg13g2_buf_1)
+     4    0.018    0.081    0.114   50.670 ^ fanout4240/X (sg13g2_buf_1)
+                   0.081    0.000   50.670 ^ fanout4237/A (sg13g2_buf_2)
+     6    0.029    0.068    0.125   50.795 ^ fanout4237/X (sg13g2_buf_2)
+                   0.068    0.000   50.795 ^ fanout4236/A (sg13g2_buf_1)
+     4    0.022    0.098    0.131   50.926 ^ fanout4236/X (sg13g2_buf_1)
+                   0.098    0.000   50.926 ^ u_dbg/_1040_/S (sg13g2_mux2_1)
+     1    0.004    0.038    0.182   51.108 v u_dbg/_1040_/X (sg13g2_mux2_1)
+                   0.038    0.000   51.108 v u_dbg/_1041_/A1 (sg13g2_mux2_1)
+     1    0.002    0.033    0.108   51.216 v u_dbg/_1041_/X (sg13g2_mux2_1)
+                   0.033    0.000   51.216 v u_dbg/_1320_/D (sg13g2_dfrbp_1)
+                                    51.216   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1320_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.216   data arrival time
+---------------------------------------------------------------------------------
+                                    48.654   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_141_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: u_dbg/_1327_ (rising edge-triggered flip-flop clocked by tck)
+Path Group: tck
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000   50.000   50.000   clock tck' (rise edge)
+                            0.000   50.000   clock network delay (ideal)
+                   0.000    0.000   50.000 ^ u_dbg/u_tap/_141_/CLK (sg13g2_dfrbp_1)
+     8    0.026    0.108    0.231   50.231 v u_dbg/u_tap/_141_/Q_N (sg13g2_dfrbp_1)
+                   0.108    0.000   50.231 v u_dbg/_0715_/A (sg13g2_nor3_2)
+     3    0.015    0.125    0.159   50.389 ^ u_dbg/_0715_/Y (sg13g2_nor3_2)
+                   0.125    0.000   50.390 ^ u_dbg/_0882_/C (sg13g2_and3_1)
+     2    0.009    0.056    0.166   50.556 ^ u_dbg/_0882_/X (sg13g2_and3_1)
+                   0.056    0.000   50.556 ^ fanout4240/A (sg13g2_buf_1)
+     4    0.018    0.081    0.114   50.670 ^ fanout4240/X (sg13g2_buf_1)
+                   0.081    0.000   50.670 ^ fanout4237/A (sg13g2_buf_2)
+     6    0.029    0.068    0.125   50.795 ^ fanout4237/X (sg13g2_buf_2)
+                   0.068    0.000   50.795 ^ fanout4236/A (sg13g2_buf_1)
+     4    0.022    0.098    0.131   50.926 ^ fanout4236/X (sg13g2_buf_1)
+                   0.098    0.000   50.926 ^ u_dbg/_1055_/S (sg13g2_mux2_1)
+     1    0.004    0.038    0.182   51.108 v u_dbg/_1055_/X (sg13g2_mux2_1)
+                   0.038    0.000   51.108 v u_dbg/_1056_/A1 (sg13g2_mux2_1)
+     1    0.002    0.032    0.108   51.215 v u_dbg/_1056_/X (sg13g2_mux2_1)
+                   0.032    0.000   51.215 v u_dbg/_1327_/D (sg13g2_dfrbp_1)
+                                    51.215   data arrival time
+
+                   0.000  100.000  100.000   clock tck (rise edge)
+                            0.000  100.000   clock network delay (ideal)
+                            0.000  100.000   clock reconvergence pessimism
+                                   100.000 ^ u_dbg/_1327_/CLK (sg13g2_dfrbp_1)
+                           -0.130   99.870   library setup time
+                                    99.870   data required time
+---------------------------------------------------------------------------------
+                                    99.870   data required time
+                                   -51.215   data arrival time
+---------------------------------------------------------------------------------
+                                    48.655   slack (MET)
+
+

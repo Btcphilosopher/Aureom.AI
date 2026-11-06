@@ -1,0 +1,192 @@
+{
+  "run_id": "S_sky130_baseline",
+  "created": "2026-11-06T09:21:42+00:00",
+  "spec": {
+    "id": "S_sky130_baseline",
+    "description": "SKY130 hd + OpenRAM: Mode B util 0.5, automatic macro placement (portability check)",
+    "design": "silicaflux_v",
+    "platform": "sky130hd",
+    "seed": 1,
+    "clock_period_ns": null,
+    "floorplan": {
+      "mode": "B",
+      "die_area": null,
+      "core_area": null,
+      "target_util": 0.5,
+      "aspect_ratio": 1.0,
+      "core_margin_um": 30.0,
+      "logic_growth": 1.0,
+      "corridor_um": 0.0,
+      "pdn_overhead": 0.0
+    },
+    "macros": {
+      "mode": "physical",
+      "placement": "auto",
+      "arrangement": null,
+      "positions": null,
+      "halo_um": 20.0,
+      "channel_um": 40.0,
+      "auto_style": "corner_max_wl"
+    },
+    "pins": {
+      "mode": "plan",
+      "min_distance_tracks": 2,
+      "corner_avoidance_um": 50.0,
+      "edge_overrides": {}
+    },
+    "pdn": {
+      "params": {},
+      "check_power_grid": true,
+      "ir_drop": true
+    },
+    "place": {
+      "density": null,
+      "density_lb_addon": 0.2,
+      "timing_driven": true,
+      "routability_driven": true,
+      "pad_global": 2,
+      "pad_detail": 1
+    },
+    "route_estimate": {
+      "enabled": true,
+      "congestion_iterations": 50,
+      "allow_congestion": true
+    },
+    "tags": [
+      "portability"
+    ]
+  },
+  "design": {
+    "name": "silicaflux_v",
+    "top": "sfv_soc_df",
+    "description": "SilicaFlux-V + DataFabric (sfv_soc_df, PERF=0, ARB_MODE=1, DMA_ENGINE=0, SRAM_IMPL=0)"
+  },
+  "platform": {
+    "name": "sky130hd",
+    "status": "enabled",
+    "orfs_platform": "sky130hd",
+    "process": "SkyWater SKY130 130 nm CMOS, 5 metal (li1, met1-met5), open PDK",
+    "provenance": {
+      "orfs_revision": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621"
+    }
+  },
+  "stages": {},
+  "gates": {
+    "1": {
+      "name": "RTL inputs valid",
+      "status": "PASS",
+      "findings": []
+    },
+    "2": {
+      "name": "Synthesis succeeds",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "3": {
+      "name": "No unexpected unresolved black boxes",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "4": {
+      "name": "Required technology inputs present",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "ss_100C_1v60: only the tt corner std-cell lib is in ORFS ab2aaf0f sky130hd"
+        },
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "ff_n40C_1v95: only the tt corner std-cell lib is in ORFS ab2aaf0f sky130hd"
+        }
+      ]
+    },
+    "5": {
+      "name": "Die/core geometry valid",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "6": {
+      "name": "Macros legally placed",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "7": {
+      "name": "I/O placement passes geometry checks",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "8": {
+      "name": "Tapcell/endcap stage completed",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "9": {
+      "name": "PDN generation and connectivity checks pass",
+      "status": "NOT_RUN",
+      "findings": [],
+      "prechecks": [
+        {
+          "gate": 9,
+          "severity": "error",
+          "code": "PDN_MACRO_PIN_COVERAGE",
+          "message": "sky130_sram_1rw1r_128x256_8.vdd: longest met3 stripe 0.49 um < met4 pitch+width 28.74 um -- the pin is not guaranteed any PDN via"
+        },
+        {
+          "gate": 9,
+          "severity": "error",
+          "code": "PDN_MACRO_PIN_COVERAGE",
+          "message": "sky130_sram_1rw1r_128x256_8.gnd: longest met3 stripe 0.49 um < met4 pitch+width 28.74 um -- the pin is not guaranteed any PDN via"
+        }
+      ]
+    },
+    "10": {
+      "name": "Placement legality checks pass",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "11": {
+      "name": "Timing analysis completes with valid constraints",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "12": {
+      "name": "Preliminary routing/congestion analysis completes",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "13": {
+      "name": "Results exported successfully",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "14": {
+      "name": "Experiment is reproducible",
+      "status": "NOT_RUN",
+      "findings": []
+    },
+    "15": {
+      "name": "No fabricated metrics or undeclared substitutions",
+      "status": "NOT_RUN",
+      "findings": []
+    }
+  },
+  "metrics": {},
+  "status": "failed",
+  "failure_reason": "input validation failed: sky130_sram_1rw1r_128x256_8.vdd: longest met3 stripe 0.49 um < met4 pitch+width 28.74 um -- the pin is not guaranteed any PDN via; sky130_sram_1rw1r_128x256_8.gnd: longest met3 stripe 0.49 um < met4 pitch+width 28.74 um -- the pin is not guaranteed any PDN via",
+  "scripts_sha256": "b2da6e4f403f20297661dc01de8ead20d10ac2217df275e234a3c39c32134885",
+  "vendored_sources_check": "checked 66 vendored files: OK",
+  "tools": {
+    "openroad": "2.0-12331-g6011bbe77",
+    "yosys": "Yosys 0.38+92",
+    "orfs": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+    "klayout": "KLayout 0.28.16",
+    "python": "Python 3.13.18"
+  },
+  "git_revision": "fb7244d6554ecc20d6f17f052adf5dc05b48ebf8+dirty",
+  "updated": "2026-11-06T09:21:47+00:00"
+}

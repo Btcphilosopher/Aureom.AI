@@ -43,4 +43,6 @@ def analyse(conn_path: Path, geo: dict) -> dict:
         if k:
             focus[f"{a}<->{b}"] = {x: k[x] for x in ("nets", "hpwl_um", "mean_hpwl_um", "centroid_manhattan_um")}
     return {"inter_group_hpwl_um": round(total, 1), "pairs_top": pairs[:25], "focus_pairs": focus,
-            "label": "placement-based HPWL of nets crossing logical-group boundaries (not routed length)"}
+            "label": "placement-based HPWL of nets crossing logical-group boundaries (not routed length)",
+            "caveat": "group 'top' = top-level glue PLUS buffers/resized cells inserted by repair_design, which carry "
+                      "no hierarchical prefix; pairs with 'top' therefore include buffered segments of inter-block nets"}

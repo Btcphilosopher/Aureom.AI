@@ -1,0 +1,7 @@
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[ERROR ORD-0007] /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/D_logic_consolidated/orfs/results/ihp-sg13g2/silicaflux_v/base/2_floorplan.odb does not exist.
+Error: global_place_skip_io.tcl, 2 ORD-0007
+Command exited with non-zero status 1
+Elapsed time: 0:00.11[h:]min:sec. CPU time: user 0.10 sys 0.00 (97%). Peak memory: 100276KB.

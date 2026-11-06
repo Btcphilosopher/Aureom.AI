@@ -1,0 +1,407 @@
+# make -C /opt/eda/orfs/flow DESIGN_CONFIG=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/inputs/config.mk WORK_HOME=/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs FLOW_VARIANT=base OPENROAD_EXE=/opt/eda/env/bin/openroad YOSYS_CMD=/opt/eda/env/bin/yosys KLAYOUT_CMD=/usr/bin/klayout do-2_6_floorplan_pdn do-2_floorplan
+make: Entering directory '/opt/eda/orfs/flow'
+(trap 'mv /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.tmp.log /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.log' EXIT; /usr/bin/time -f 'Elapsed time: %E[h:]min:sec. CPU time: user %U sys %S (%P). Peak memory: %MKB.' /opt/eda/env/bin/openroad -exit -no_init  /opt/eda/orfs/flow/scripts/pdn.tcl -metrics /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.json) 2>&1 | tee /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/logs/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.tmp.log
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+FLP-PDN: macro grid sram_grid for cells: RM_IHPSG13_1P_2048x64_c2_bm_bist RM_IHPSG13_1P_512x64_c2_bm_bist (connect Metal4 TopMetal1)
+[INFO PDN-0001] Inserting grid: grid
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[0\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[0\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[1\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[1\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[2\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[2\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[3\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - g_sram\[3\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - u_tile/g_bank\[0\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - u_tile/g_bank\[1\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - u_tile/g_bank\[2\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+[INFO PDN-0001] Inserting grid: sram_grid - u_tile/g_bank\[3\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (128.4200, 1234.8600) - (130.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (204.0200, 1234.8600) - (206.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (279.6200, 1234.8600) - (281.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (355.2200, 1234.8600) - (357.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (430.8200, 1234.8600) - (433.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (506.4200, 1234.8600) - (508.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (582.0200, 1234.8600) - (584.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (657.6200, 1234.8600) - (659.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (733.2200, 1234.8600) - (735.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (808.8200, 1234.8600) - (811.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (960.0200, 1234.8600) - (962.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1035.6200, 1234.8600) - (1037.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1111.2200, 1234.8600) - (1113.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1186.8200, 1234.8600) - (1189.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1262.4200, 1234.8600) - (1264.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1338.0200, 1234.8600) - (1340.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1413.6200, 1234.8600) - (1415.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1489.2200, 1234.8600) - (1491.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1564.8200, 1234.8600) - (1567.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1640.4200, 1234.8600) - (1642.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1791.6200, 1234.8600) - (1793.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1867.2200, 1234.8600) - (1869.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (1942.8200, 1234.8600) - (1945.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2018.4200, 1234.8600) - (2020.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2094.0200, 1234.8600) - (2096.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2169.6200, 1234.8600) - (2171.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2245.2200, 1234.8600) - (2247.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2320.8200, 1234.8600) - (2323.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2396.4200, 1234.8600) - (2398.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2472.0200, 1234.8600) - (2474.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2547.6200, 1234.8600) - (2549.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2698.8200, 1234.8600) - (2701.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2774.4200, 1234.8600) - (2776.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2850.0200, 1234.8600) - (2852.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (2925.6200, 1234.8600) - (2927.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3001.2200, 1234.8600) - (3003.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3076.8200, 1234.8600) - (3079.0200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3152.4200, 1234.8600) - (3154.6200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3228.0200, 1234.8600) - (3230.2200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3303.6200, 1234.8600) - (3305.8200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal5 and TopMetal1 at (3379.2200, 1234.8600) - (3381.4200, 1235.4100) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (70.3600, 1233.6100) - (73.1700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (81.6000, 1233.6100) - (84.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (104.0800, 1233.6100) - (106.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (115.3200, 1233.6100) - (118.1300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (137.8000, 1233.6100) - (140.6100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (149.0400, 1233.6100) - (151.8500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (160.2800, 1233.6100) - (163.0900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (171.5200, 1233.6100) - (174.3300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (182.7600, 1233.6100) - (185.5700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (194.0000, 1233.6100) - (196.8100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (216.4800, 1233.6100) - (219.2900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (227.7200, 1233.6100) - (230.5300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (250.2000, 1233.6100) - (253.0100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (261.4400, 1233.6100) - (264.2500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (272.6800, 1233.6100) - (275.4900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (283.9200, 1233.6100) - (286.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (295.1600, 1233.6100) - (297.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (306.4000, 1233.6100) - (309.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (328.8800, 1233.6100) - (331.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (340.1200, 1233.6100) - (342.9300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (351.3600, 1233.6100) - (354.1700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (362.6000, 1233.6100) - (365.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (373.8400, 1233.6100) - (376.6500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (385.0800, 1233.6100) - (387.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (396.3200, 1233.6100) - (399.1300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (407.5600, 1233.6100) - (410.3700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (418.8000, 1233.6100) - (421.6100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (433.2900, 1233.6100) - (436.1000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (443.5900, 1233.6100) - (446.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (459.0400, 1233.6100) - (461.8500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (483.8300, 1233.6100) - (486.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (495.0700, 1233.6100) - (497.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (517.5500, 1233.6100) - (520.3600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (528.7900, 1233.6100) - (531.6000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (540.0300, 1233.6100) - (542.8400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (551.2700, 1233.6100) - (554.0800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (562.5100, 1233.6100) - (565.3200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (573.7500, 1233.6100) - (576.5600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (584.9900, 1233.6100) - (587.8000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (596.2300, 1233.6100) - (599.0400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (607.4700, 1233.6100) - (610.2800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (629.9500, 1233.6100) - (632.7600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (641.1900, 1233.6100) - (644.0000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (652.4300, 1233.6100) - (655.2400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (663.6700, 1233.6100) - (666.4800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (674.9100, 1233.6100) - (677.7200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (686.1500, 1233.6100) - (688.9600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (708.6300, 1233.6100) - (711.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (719.8700, 1233.6100) - (722.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (742.3500, 1233.6100) - (745.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (753.5900, 1233.6100) - (756.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (764.8300, 1233.6100) - (767.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (776.0700, 1233.6100) - (778.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (787.3100, 1233.6100) - (790.1200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (798.5500, 1233.6100) - (801.3600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (821.0300, 1233.6100) - (823.8400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (832.2700, 1233.6100) - (835.0800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (933.4000, 1233.6100) - (936.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (944.6400, 1233.6100) - (947.4500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (955.8800, 1233.6100) - (958.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (967.1200, 1233.6100) - (969.9300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (978.3600, 1233.6100) - (981.1700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (989.6000, 1233.6100) - (992.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1000.8400, 1233.6100) - (1003.6500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1012.0800, 1233.6100) - (1014.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1023.3200, 1233.6100) - (1026.1300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1045.8000, 1233.6100) - (1048.6100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1057.0400, 1233.6100) - (1059.8500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1068.2800, 1233.6100) - (1071.0900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1079.5200, 1233.6100) - (1082.3300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1090.7600, 1233.6100) - (1093.5700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1102.0000, 1233.6100) - (1104.8100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1124.4800, 1233.6100) - (1127.2900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1135.7200, 1233.6100) - (1138.5300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1158.2000, 1233.6100) - (1161.0100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1169.4400, 1233.6100) - (1172.2500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1180.6800, 1233.6100) - (1183.4900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1191.9200, 1233.6100) - (1194.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1203.1600, 1233.6100) - (1205.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1214.4000, 1233.6100) - (1217.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1236.8800, 1233.6100) - (1239.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1248.1200, 1233.6100) - (1250.9300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1259.3600, 1233.6100) - (1262.1700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1270.6000, 1233.6100) - (1273.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1281.8400, 1233.6100) - (1284.6500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1296.3300, 1233.6100) - (1299.1400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1306.6300, 1233.6100) - (1309.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1322.0800, 1233.6100) - (1324.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1332.3800, 1233.6100) - (1335.1900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1346.8700, 1233.6100) - (1349.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1358.1100, 1233.6100) - (1360.9200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1369.3500, 1233.6100) - (1372.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1380.5900, 1233.6100) - (1383.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1391.8300, 1233.6100) - (1394.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1403.0700, 1233.6100) - (1405.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1425.5500, 1233.6100) - (1428.3600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1436.7900, 1233.6100) - (1439.6000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1448.0300, 1233.6100) - (1450.8400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1459.2700, 1233.6100) - (1462.0800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1470.5100, 1233.6100) - (1473.3200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1481.7500, 1233.6100) - (1484.5600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1492.9900, 1233.6100) - (1495.8000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1504.2300, 1233.6100) - (1507.0400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1515.4700, 1233.6100) - (1518.2800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1537.9500, 1233.6100) - (1540.7600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1549.1900, 1233.6100) - (1552.0000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1560.4300, 1233.6100) - (1563.2400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1571.6700, 1233.6100) - (1574.4800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1582.9100, 1233.6100) - (1585.7200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1594.1500, 1233.6100) - (1596.9600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1605.3900, 1233.6100) - (1608.2000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1616.6300, 1233.6100) - (1619.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1627.8700, 1233.6100) - (1630.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1650.3500, 1233.6100) - (1653.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1661.5900, 1233.6100) - (1664.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1672.8300, 1233.6100) - (1675.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1684.0700, 1233.6100) - (1686.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1695.3100, 1233.6100) - (1698.1200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1796.9200, 1233.6100) - (1799.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1808.1600, 1233.6100) - (1810.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1819.4000, 1233.6100) - (1822.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1841.8800, 1233.6100) - (1844.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1853.1200, 1233.6100) - (1855.9300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1875.6000, 1233.6100) - (1878.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1886.8400, 1233.6100) - (1889.6500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1898.0800, 1233.6100) - (1900.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1909.3200, 1233.6100) - (1912.1300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1920.5600, 1233.6100) - (1923.3700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1931.8000, 1233.6100) - (1934.6100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1954.2800, 1233.6100) - (1957.0900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1965.5200, 1233.6100) - (1968.3300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1976.7600, 1233.6100) - (1979.5700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1988.0000, 1233.6100) - (1990.8100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (1999.2400, 1233.6100) - (2002.0500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2010.4800, 1233.6100) - (2013.2900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2021.7200, 1233.6100) - (2024.5300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2032.9600, 1233.6100) - (2035.7700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2044.2000, 1233.6100) - (2047.0100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2066.6800, 1233.6100) - (2069.4900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2077.9200, 1233.6100) - (2080.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2089.1600, 1233.6100) - (2091.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2100.4000, 1233.6100) - (2103.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2111.6400, 1233.6100) - (2114.4500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2122.8800, 1233.6100) - (2125.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2145.3600, 1233.6100) - (2148.1700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2159.8500, 1233.6100) - (2162.6600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2185.6000, 1233.6100) - (2188.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2195.9000, 1233.6100) - (2198.7100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2210.3900, 1233.6100) - (2213.2000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2221.6300, 1233.6100) - (2224.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2232.8700, 1233.6100) - (2235.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2255.3500, 1233.6100) - (2258.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2266.5900, 1233.6100) - (2269.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2277.8300, 1233.6100) - (2280.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2289.0700, 1233.6100) - (2291.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2300.3100, 1233.6100) - (2303.1200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2311.5500, 1233.6100) - (2314.3600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2334.0300, 1233.6100) - (2336.8400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2345.2700, 1233.6100) - (2348.0800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2367.7500, 1233.6100) - (2370.5600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2378.9900, 1233.6100) - (2381.8000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2390.2300, 1233.6100) - (2393.0400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2401.4700, 1233.6100) - (2404.2800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2412.7100, 1233.6100) - (2415.5200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2423.9500, 1233.6100) - (2426.7600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2446.4300, 1233.6100) - (2449.2400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2457.6700, 1233.6100) - (2460.4800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2468.9100, 1233.6100) - (2471.7200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2480.1500, 1233.6100) - (2482.9600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2491.3900, 1233.6100) - (2494.2000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2502.6300, 1233.6100) - (2505.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2513.8700, 1233.6100) - (2516.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2525.1100, 1233.6100) - (2527.9200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2536.3500, 1233.6100) - (2539.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2558.8300, 1233.6100) - (2561.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2671.2000, 1233.6100) - (2674.0100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2682.4400, 1233.6100) - (2685.2500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2693.6800, 1233.6100) - (2696.4900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2704.9200, 1233.6100) - (2707.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2716.1600, 1233.6100) - (2718.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2727.4000, 1233.6100) - (2730.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2749.8800, 1233.6100) - (2752.6900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2761.1200, 1233.6100) - (2763.9300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2783.6000, 1233.6100) - (2786.4100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2794.8400, 1233.6100) - (2797.6500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2806.0800, 1233.6100) - (2808.8900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2817.3200, 1233.6100) - (2820.1300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2828.5600, 1233.6100) - (2831.3700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2839.8000, 1233.6100) - (2842.6100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2862.2800, 1233.6100) - (2865.0900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2873.5200, 1233.6100) - (2876.3300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2884.7600, 1233.6100) - (2887.5700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2896.0000, 1233.6100) - (2898.8100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2907.2400, 1233.6100) - (2910.0500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2918.4800, 1233.6100) - (2921.2900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2929.7200, 1233.6100) - (2932.5300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2940.9600, 1233.6100) - (2943.7700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2952.2000, 1233.6100) - (2955.0100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2974.6800, 1233.6100) - (2977.4900, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2985.9200, 1233.6100) - (2988.7300, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (2997.1600, 1233.6100) - (2999.9700, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3008.4000, 1233.6100) - (3011.2100, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3022.8900, 1233.6100) - (3025.7000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3033.1900, 1233.6100) - (3036.0000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3048.6400, 1233.6100) - (3051.4500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3058.9400, 1233.6100) - (3061.7500, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3073.4300, 1233.6100) - (3076.2400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3084.6700, 1233.6100) - (3087.4800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3095.9100, 1233.6100) - (3098.7200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3107.1500, 1233.6100) - (3109.9600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3118.3900, 1233.6100) - (3121.2000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3129.6300, 1233.6100) - (3132.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3140.8700, 1233.6100) - (3143.6800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3163.3500, 1233.6100) - (3166.1600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3174.5900, 1233.6100) - (3177.4000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3185.8300, 1233.6100) - (3188.6400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3197.0700, 1233.6100) - (3199.8800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3208.3100, 1233.6100) - (3211.1200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3219.5500, 1233.6100) - (3222.3600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3230.7900, 1233.6100) - (3233.6000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3242.0300, 1233.6100) - (3244.8400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3253.2700, 1233.6100) - (3256.0800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3275.7500, 1233.6100) - (3278.5600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3286.9900, 1233.6100) - (3289.8000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3298.2300, 1233.6100) - (3301.0400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3309.4700, 1233.6100) - (3312.2800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3320.7100, 1233.6100) - (3323.5200, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3331.9500, 1233.6100) - (3334.7600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3354.4300, 1233.6100) - (3357.2400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3365.6700, 1233.6100) - (3368.4800, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3388.1500, 1233.6100) - (3390.9600, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3399.3900, 1233.6100) - (3402.2000, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3410.6300, 1233.6100) - (3413.4400, 1234.6200) on VSS
+[WARNING PDN-0110] No via inserted between Metal4 and TopMetal1 at (3421.8700, 1233.6100) - (3424.6800, 1234.6200) on VSS
+[WARNING PSM-0016] Voltage pad location (VSRC) file not specified, defaulting pad location to checkerboard pattern on core area.
+[WARNING PSM-0017] X direction bump pitch is not specified, defaulting to 140um.
+[WARNING PSM-0018] Y direction bump pitch is not specified, defaulting to 140um.
+[WARNING PSM-0065] VSRC location not specified, using default checkerboard pattern with one VDD every size bumps in x-direction and one in two bumps in the y-direction
+[INFO PSM-0076] Setting metal node density to be standard cell height times 5.
+[WARNING PSM-0030] VSRC location at (137.440um, 159.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (139.205um, 145.870um).
+[WARNING PSM-0030] VSRC location at (977.440um, 159.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (979.765um, 145.870um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 159.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1820.805um, 145.870um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 159.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2661.365um, 145.870um).
+[WARNING PSM-0030] VSRC location at (697.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (698.795um, 448.270um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1539.355um, 448.270um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2380.395um, 448.270um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3220.955um, 448.270um).
+[WARNING PSM-0030] VSRC location at (137.440um, 579.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (139.205um, 569.230um).
+[WARNING PSM-0030] VSRC location at (977.440um, 579.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (979.765um, 569.230um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 579.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1820.805um, 569.230um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 579.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2661.365um, 569.230um).
+[WARNING PSM-0030] VSRC location at (417.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (431.920um, 720.430um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1263.520um, 720.430um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2926.720um, 720.430um).
+[WARNING PSM-0030] VSRC location at (697.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (734.320um, 871.630um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1565.920um, 871.630um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2397.520um, 871.630um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3229.120um, 871.630um).
+[WARNING PSM-0030] VSRC location at (137.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (129.520um, 992.590um).
+[WARNING PSM-0030] VSRC location at (977.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (961.120um, 992.590um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1792.720um, 992.590um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2624.320um, 992.590um).
+[WARNING PSM-0030] VSRC location at (697.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (734.320um, 1264.750um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1565.920um, 1264.750um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2397.520um, 1264.750um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3229.120um, 1264.750um).
+[WARNING PSM-0030] VSRC location at (137.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (129.520um, 1415.950um).
+[WARNING PSM-0030] VSRC location at (977.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (961.120um, 1415.950um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1792.720um, 1415.950um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2624.320um, 1415.950um).
+[WARNING PSM-0030] VSRC location at (417.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (431.920um, 1567.150um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1263.520um, 1567.150um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2095.120um, 1567.150um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2926.720um, 1567.150um).
+[WARNING PSM-0030] VSRC location at (697.440um, 1699.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (698.795um, 1688.110um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 1699.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1539.355um, 1688.110um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 1699.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2380.395um, 1688.110um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 1699.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3220.955um, 1688.110um).
+[WARNING PSM-0030] VSRC location at (417.440um, 1979.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (420.205um, 1990.510um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 1979.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1260.765um, 1990.510um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 1979.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2101.805um, 1990.510um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 1979.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2942.365um, 1990.510um).
+[WARNING PSM-0030] VSRC location at (697.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (698.795um, 2111.470um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1539.355um, 2111.470um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2380.395um, 2111.470um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3220.955um, 2111.470um).
+[INFO PSM-0031] Number of PDN nodes on net VSS = 88451.
+[INFO PSM-0064] Number of voltage sources = 60.
+[INFO PSM-0040] All PDN stripes on net VSS are connected.
+FLP-PDN: check_power_grid -net VSS -> rc=0 result=true unconnected_lines=0
+[WARNING PSM-0016] Voltage pad location (VSRC) file not specified, defaulting pad location to checkerboard pattern on core area.
+[WARNING PSM-0017] X direction bump pitch is not specified, defaulting to 140um.
+[WARNING PSM-0018] Y direction bump pitch is not specified, defaulting to 140um.
+[WARNING PSM-0065] VSRC location not specified, using default checkerboard pattern with one VDD every size bumps in x-direction and one in two bumps in the y-direction
+[INFO PSM-0076] Setting metal node density to be standard cell height times 5.
+[WARNING PSM-0030] VSRC location at (417.440um, 299.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (414.585um, 312.190um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 299.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1255.145um, 312.190um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 299.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2096.185um, 312.190um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 299.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2936.745um, 312.190um).
+[WARNING PSM-0030] VSRC location at (697.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (693.175um, 433.150um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1533.735um, 433.150um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2374.775um, 433.150um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 439.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3215.335um, 433.150um).
+[WARNING PSM-0030] VSRC location at (417.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (394.120um, 705.310um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1225.720um, 705.310um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2096.185um, 675.070um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 719.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2964.520um, 705.310um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1528.120um, 856.510um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2359.720um, 856.510um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 859.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3191.320um, 856.510um).
+[WARNING PSM-0030] VSRC location at (137.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (167.320um, 1007.710um).
+[WARNING PSM-0030] VSRC location at (977.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (998.920um, 1007.710um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1830.520um, 1007.710um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 999.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2662.120um, 1007.710um).
+[WARNING PSM-0030] VSRC location at (417.440um, 1139.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (414.585um, 1128.670um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 1139.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1255.145um, 1128.670um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 1139.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2096.185um, 1128.670um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 1139.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2936.745um, 1128.670um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1528.120um, 1279.870um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2359.720um, 1279.870um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 1279.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3191.320um, 1279.870um).
+[WARNING PSM-0030] VSRC location at (137.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (167.320um, 1431.070um).
+[WARNING PSM-0030] VSRC location at (977.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (998.920um, 1431.070um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1830.520um, 1431.070um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 1419.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2662.120um, 1431.070um).
+[WARNING PSM-0030] VSRC location at (417.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (394.120um, 1552.030um).
+[WARNING PSM-0030] VSRC location at (1257.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1225.720um, 1552.030um).
+[WARNING PSM-0030] VSRC location at (2097.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2132.920um, 1552.030um).
+[WARNING PSM-0030] VSRC location at (2937.440um, 1559.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2964.520um, 1552.030um).
+[WARNING PSM-0030] VSRC location at (137.440um, 1839.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (133.585um, 1854.430um).
+[WARNING PSM-0030] VSRC location at (977.440um, 1839.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (974.145um, 1854.430um).
+[WARNING PSM-0030] VSRC location at (1817.440um, 1839.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1815.185um, 1854.430um).
+[WARNING PSM-0030] VSRC location at (2657.440um, 1839.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2655.745um, 1854.430um).
+[WARNING PSM-0030] VSRC location at (697.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (693.175um, 2126.590um).
+[WARNING PSM-0030] VSRC location at (1537.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (1533.735um, 2126.590um).
+[WARNING PSM-0030] VSRC location at (2377.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (2374.775um, 2126.590um).
+[WARNING PSM-0030] VSRC location at (3217.440um, 2119.670um) and size 10.000um, is not located on an existing power stripe node. Moving to closest node at (3215.335um, 2126.590um).
+[INFO PSM-0031] Number of PDN nodes on net VDD = 87234.
+[INFO PSM-0064] Number of voltage sources = 60.
+[INFO PSM-0040] All PDN stripes on net VDD are connected.
+FLP-PDN: check_power_grid -net VDD -> rc=0 result=true unconnected_lines=0
+FLP-PDN: macro PG pins without any via: 0
+FLP-PDN: macro PG connection errors: 0
+Elapsed time: 0:56.99[h:]min:sec. CPU time: user 34.12 sys 0.39 (60%). Peak memory: 357136KB.
+cp /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/results/ihp-sg13g2/silicaflux_v/base/2_6_floorplan_pdn.odb /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/L_periphery_rows/orfs/results/ihp-sg13g2/silicaflux_v/base/2_floorplan.odb
+make: Leaving directory '/opt/eda/orfs/flow'

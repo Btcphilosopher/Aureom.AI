@@ -1,0 +1,36 @@
+violation type: Unconnected instance
+  srcs: inst:g_sram\[0\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+    bbox = (60.48, 1857.66) - (844.96, 2484.36) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[0\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+    bbox = (60.48, 1191.12) - (844.96, 1817.82) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[1\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+    bbox = (884.94, 1191.12) - (1669.42, 1817.82) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[1\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+    bbox = (1709.4, 61.74) - (2493.88, 688.44) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[2\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+    bbox = (884.94, 1857.66) - (1669.42, 2484.36) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[2\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+    bbox = (884.94, 61.74) - (1669.42, 688.44) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[3\].g_sfv.u_bank/u_ram/u_macro/g_m\[0\].g2k.u_mac
+    bbox = (60.48, 61.74) - (844.96, 688.44) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:g_sram\[3\].g_sfv.u_bank/u_ram/u_macro/g_m\[1\].g2k.u_mac
+    bbox = (1709.4, 728.28) - (2493.88, 1354.98) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:u_tile/g_bank\[0\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+    bbox = (884.94, 728.28) - (1669.42, 919.62) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:u_tile/g_bank\[1\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+    bbox = (60.48, 728.28) - (844.96, 919.62) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:u_tile/g_bank\[2\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+    bbox = (884.94, 959.7) - (1669.42, 1151.04) on Layer Metal1
+violation type: Unconnected instance
+  srcs: inst:u_tile/g_bank\[3\].u_ram/u_macro/g_m\[0\].genblk1.genblk1.g512.u_mac
+    bbox = (60.48, 959.7) - (844.96, 1151.04) on Layer Metal1

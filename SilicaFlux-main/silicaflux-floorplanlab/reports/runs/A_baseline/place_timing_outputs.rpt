@@ -1,0 +1,165 @@
+Startpoint: u_cpu/_21829_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: cpu_sleep (output port clocked by clk)
+Path Group: clk
+Path Type: max
+
+   Delay     Time   Description
+-----------------------------------------------------------
+   0.000    0.000   clock clk (rise edge)
+   0.000    0.000   clock network delay (ideal)
+   0.000    0.000 ^ u_cpu/_21829_/CLK (sg13g2_dfrbp_1)
+   0.280    0.280 v u_cpu/_21829_/Q (sg13g2_dfrbp_1)
+   0.111    0.391 v fanout10186/X (sg13g2_buf_2)
+   0.115    0.506 v fanout10183/X (sg13g2_buf_2)
+   0.128    0.635 v fanout10182/X (sg13g2_buf_2)
+   0.033    0.667 ^ u_cpu/_11987_/Y (sg13g2_inv_2)
+   0.102    0.770 ^ fanout8542/X (sg13g2_buf_1)
+   0.143    0.913 ^ fanout8541/X (sg13g2_buf_2)
+   0.151    1.064 ^ fanout8540/X (sg13g2_buf_4)
+   0.229    1.293 v u_cpu/_13201_/X (sg13g2_mux4_1)
+   0.085    1.378 v u_cpu/_13202_/X (sg13g2_and3_1)
+   0.069    1.447 ^ u_cpu/_13203_/Y (sg13g2_a21oi_1)
+   0.117    1.563 ^ fanout3016/X (sg13g2_buf_2)
+   0.111    1.674 ^ fanout3015/X (sg13g2_buf_1)
+   0.118    1.792 ^ fanout3014/X (sg13g2_buf_2)
+   0.064    1.857 v u_cpu/_13205_/Y (sg13g2_xnor2_1)
+   0.163    2.020 ^ u_cpu/_13250_/Y (sg13g2_nor3_1)
+   0.170    2.190 ^ u_cpu/_13328_/X (sg13g2_and3_1)
+   0.105    2.295 v u_cpu/_13501_/Y (sg13g2_nand4_1)
+   0.234    2.529 v u_cpu/_13557_/X (sg13g2_or4_1)
+   0.161    2.689 v u_cpu/_13558_/X (sg13g2_mux2_1)
+   0.135    2.824 ^ u_cpu/_13564_/Y (sg13g2_nor3_1)
+   0.157    2.981 v u_cpu/_13565_/Y (sg13g2_nand3_1)
+   0.106    3.087 v u_cpu/_13598_/X (sg13g2_and2_1)
+   0.101    3.188 v fanout2256/X (sg13g2_buf_2)
+   0.105    3.293 v fanout2255/X (sg13g2_buf_1)
+   0.225    3.518 ^ u_cpu/_13702_/Y (sg13g2_nor3_2)
+   0.183    3.701 ^ output15/X (sg13g2_buf_1)
+   0.000    3.701 ^ cpu_sleep (out)
+            3.701   data arrival time
+
+  20.000   20.000   clock clk (rise edge)
+   0.000   20.000   clock network delay (ideal)
+  -0.250   19.750   clock uncertainty
+   0.000   19.750   clock reconvergence pessimism
+  -6.000   13.750   output external delay
+           13.750   data required time
+-----------------------------------------------------------
+           13.750   data required time
+           -3.701   data arrival time
+-----------------------------------------------------------
+           10.049   slack (MET)
+
+
+Startpoint: u_sysctrl/_1211_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: test_pass (output port clocked by clk)
+Path Group: clk
+Path Type: max
+
+   Delay     Time   Description
+-----------------------------------------------------------
+   0.000    0.000   clock clk (rise edge)
+   0.000    0.000   clock network delay (ideal)
+   0.000    0.000 ^ u_sysctrl/_1211_/CLK (sg13g2_dfrbp_1)
+   0.379    0.379 ^ u_sysctrl/_1211_/Q (sg13g2_dfrbp_1)
+   0.246    0.625 ^ u_sysctrl/_0629_/Y (sg13g2_nor2b_2)
+   0.160    0.786 ^ output38/X (sg13g2_buf_1)
+   0.000    0.786 ^ test_pass (out)
+            0.786   data arrival time
+
+  20.000   20.000   clock clk (rise edge)
+   0.000   20.000   clock network delay (ideal)
+  -0.250   19.750   clock uncertainty
+   0.000   19.750   clock reconvergence pessimism
+  -6.000   13.750   output external delay
+           13.750   data required time
+-----------------------------------------------------------
+           13.750   data required time
+           -0.786   data arrival time
+-----------------------------------------------------------
+           12.964   slack (MET)
+
+
+Startpoint: u_sysctrl/_1212_ (rising edge-triggered flip-flop clocked by clk)
+Endpoint: test_fail (output port clocked by clk)
+Path Group: clk
+Path Type: max
+
+   Delay     Time   Description
+-----------------------------------------------------------
+   0.000    0.000   clock clk (rise edge)
+   0.000    0.000   clock network delay (ideal)
+   0.000    0.000 ^ u_sysctrl/_1212_/CLK (sg13g2_dfrbp_1)
+   0.376    0.376 ^ u_sysctrl/_1212_/Q (sg13g2_dfrbp_1)
+   0.245    0.622 ^ u_sysctrl/_0630_/Y (sg13g2_nor2b_2)
+   0.161    0.783 ^ output37/X (sg13g2_buf_1)
+   0.000    0.783 ^ test_fail (out)
+            0.783   data arrival time
+
+  20.000   20.000   clock clk (rise edge)
+   0.000   20.000   clock network delay (ideal)
+  -0.250   19.750   clock uncertainty
+   0.000   19.750   clock reconvergence pessimism
+  -6.000   13.750   output external delay
+           13.750   data required time
+-----------------------------------------------------------
+           13.750   data required time
+           -0.783   data arrival time
+-----------------------------------------------------------
+           12.967   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_139_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: tdo (output port clocked by tck)
+Path Group: tck
+Path Type: max
+
+   Delay     Time   Description
+-----------------------------------------------------------
+  50.000   50.000   clock tck' (rise edge)
+   0.000   50.000   clock network delay (ideal)
+   0.000   50.000 ^ u_dbg/u_tap/_139_/CLK (sg13g2_dfrbp_1)
+   0.260   50.260 ^ u_dbg/u_tap/_139_/Q (sg13g2_dfrbp_1)
+   0.152   50.411 ^ output35/X (sg13g2_buf_1)
+   0.000   50.411 ^ tdo (out)
+           50.411   data arrival time
+
+ 100.000  100.000   clock tck (rise edge)
+   0.000  100.000   clock network delay (ideal)
+   0.000  100.000   clock reconvergence pessimism
+ -20.000   80.000   output external delay
+           80.000   data required time
+-----------------------------------------------------------
+           80.000   data required time
+          -50.411   data arrival time
+-----------------------------------------------------------
+           29.589   slack (MET)
+
+
+Startpoint: u_dbg/u_tap/_140_ (rising edge-triggered flip-flop clocked by tck')
+Endpoint: tdo_oe (output port clocked by tck)
+Path Group: tck
+Path Type: max
+
+   Delay     Time   Description
+-----------------------------------------------------------
+  50.000   50.000   clock tck' (rise edge)
+   0.000   50.000   clock network delay (ideal)
+   0.000   50.000 ^ u_dbg/u_tap/_140_/CLK (sg13g2_dfrbp_1)
+   0.259   50.259 ^ u_dbg/u_tap/_140_/Q (sg13g2_dfrbp_1)
+   0.151   50.411 ^ output36/X (sg13g2_buf_1)
+   0.000   50.411 ^ tdo_oe (out)
+           50.411   data arrival time
+
+ 100.000  100.000   clock tck (rise edge)
+   0.000  100.000   clock network delay (ideal)
+   0.000  100.000   clock reconvergence pessimism
+ -20.000   80.000   output external delay
+           80.000   data required time
+-----------------------------------------------------------
+           80.000   data required time
+          -50.411   data arrival time
+-----------------------------------------------------------
+           29.589   slack (MET)
+
+

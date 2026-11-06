@@ -1,0 +1,1813 @@
+{
+  "run_id": "A_baseline",
+  "created": "2026-11-06T09:00:58+00:00",
+  "spec": {
+    "id": "A_baseline",
+    "description": "Baseline: Mode B (util 0.50, AR 1.0), automatic macro placement, platform PDN",
+    "design": "silicaflux_v",
+    "platform": "ihp_sg13g2",
+    "seed": 1,
+    "clock_period_ns": null,
+    "floorplan": {
+      "mode": "B",
+      "die_area": null,
+      "core_area": null,
+      "target_util": 0.5,
+      "aspect_ratio": 1.0,
+      "core_margin_um": 40.0,
+      "logic_growth": 1.0,
+      "corridor_um": 0.0,
+      "pdn_overhead": 0.0
+    },
+    "macros": {
+      "mode": "physical",
+      "placement": "auto",
+      "arrangement": null,
+      "positions": null,
+      "halo_um": 20.0,
+      "channel_um": 40.0,
+      "auto_style": "corner_max_wl"
+    },
+    "pins": {
+      "mode": "plan",
+      "min_distance_tracks": 2,
+      "corner_avoidance_um": 50.0,
+      "edge_overrides": {}
+    },
+    "pdn": {
+      "params": {},
+      "check_power_grid": true,
+      "ir_drop": true
+    },
+    "place": {
+      "density": null,
+      "density_lb_addon": 0.2,
+      "timing_driven": true,
+      "routability_driven": true,
+      "pad_global": 2,
+      "pad_detail": 1
+    },
+    "route_estimate": {
+      "enabled": true,
+      "congestion_iterations": 50,
+      "allow_congestion": true
+    },
+    "tags": [
+      "experiment",
+      "baseline"
+    ]
+  },
+  "design": {
+    "name": "silicaflux_v",
+    "top": "sfv_soc_df",
+    "description": "SilicaFlux-V + DataFabric (sfv_soc_df, PERF=0, ARB_MODE=1, DMA_ENGINE=0, SRAM_IMPL=0)"
+  },
+  "platform": {
+    "name": "ihp_sg13g2",
+    "status": "enabled",
+    "orfs_platform": "ihp-sg13g2",
+    "process": "IHP SG13G2 130 nm SiGe:C BiCMOS, 7 metal (Metal1-5, TopMetal1-2), open PDK",
+    "provenance": {
+      "orfs_revision": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+      "sram_collateral_revision": "d0e5b3c13e4bb9bdbd33493d5e87656dcae66384"
+    }
+  },
+  "stages": {
+    "synth": {
+      "rc": 0,
+      "shared": true,
+      "reused": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec"
+    },
+    "floorplan": {
+      "rc": 0,
+      "seconds": 108.2,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/2_floorplan.log",
+      "target": "do-2_1_floorplan do-2_2_floorplan_io do-2_3_floorplan_tdms do-2_4_floorplan_macro do-2_5_floorplan_tapcell",
+      "finished": "2026-11-06T09:02:48+00:00"
+    },
+    "metrics_floorplan": {
+      "rc": 0,
+      "seconds": 9.4,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/flp_floorplan_metrics.log",
+      "target": "stage_metrics.tcl",
+      "finished": "2026-11-06T09:02:59+00:00"
+    },
+    "pdn": {
+      "rc": 0,
+      "seconds": 36.9,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/2_6_pdn.log",
+      "target": "do-2_6_floorplan_pdn do-2_floorplan",
+      "finished": "2026-11-06T09:03:36+00:00"
+    },
+    "metrics_pdn": {
+      "rc": 0,
+      "seconds": 10.3,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/flp_pdn_metrics.log",
+      "target": "stage_metrics.tcl",
+      "finished": "2026-11-06T09:03:47+00:00"
+    },
+    "place": {
+      "rc": 0,
+      "seconds": 371.5,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/3_place.log",
+      "target": "do-3_1_place_gp_skip_io do-3_2_place_iop do-3_3_place_gp do-3_4_place_resized do-3_5_place_dp do-3_place do-3_place.sdc",
+      "finished": "2026-11-06T09:09:58+00:00"
+    },
+    "metrics_place": {
+      "rc": 0,
+      "seconds": 30.3,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/flp_place_metrics.log",
+      "target": "stage_metrics.tcl",
+      "finished": "2026-11-06T09:10:29+00:00"
+    },
+    "route_estimate": {
+      "rc": 1,
+      "seconds": 361.2,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/flp_route_estimate.log",
+      "target": "route_estimate.tcl",
+      "finished": "2026-11-06T09:16:32+00:00"
+    },
+    "export_geometry": {
+      "rc": 0,
+      "seconds": 20.3,
+      "log": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/flp_logs/flp_export_geometry.log",
+      "target": "export_geometry.tcl",
+      "finished": "2026-11-06T09:16:54+00:00"
+    }
+  },
+  "gates": {
+    "1": {
+      "name": "RTL inputs valid",
+      "status": "PASS",
+      "findings": []
+    },
+    "2": {
+      "name": "Synthesis succeeds",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 2,
+          "severity": "info",
+          "code": "YOSYS_WARNING",
+          "message": "1x Replacing memory \\dout with list of registers. See sfv_sram_macro_bank.sv:0"
+        },
+        {
+          "gate": 2,
+          "severity": "info",
+          "code": "YOSYS_WARNING",
+          "message": "1x Found unsupported expression 'SCE*SCD+SCE'*D' in pin attribute of cell 'sg13g2_sdfbbp_1' - skipping."
+        }
+      ]
+    },
+    "3": {
+      "name": "No unexpected unresolved black boxes",
+      "status": "PASS",
+      "findings": []
+    },
+    "4": {
+      "name": "Required technology inputs present",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "slow_1p08V_125C: sg13g2_stdcell_slow_1p08V_125C.lib not in ORFS ab2aaf0f"
+        },
+        {
+          "gate": 4,
+          "severity": "warning",
+          "code": "CORNER_UNAVAILABLE",
+          "message": "fast_1p32V_m40C: sg13g2_stdcell_fast_1p32V_m40C.lib not in ORFS ab2aaf0f"
+        }
+      ]
+    },
+    "5": {
+      "name": "Die/core geometry valid",
+      "status": "PASS",
+      "findings": []
+    },
+    "6": {
+      "name": "Macros legally placed",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 6,
+          "severity": "info",
+          "code": "AUTO_MACRO",
+          "message": "automatic placement (OpenROAD macro_placement): halo/channel clearances were requested from the tool; legality checked for overlap/containment/orientation/pin-side"
+        }
+      ]
+    },
+    "7": {
+      "name": "I/O placement passes geometry checks",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 7,
+          "severity": "info",
+          "code": "PINS_OK",
+          "message": "73 pins placed on the boundary, no overlaps, edge constraints met"
+        }
+      ],
+      "prechecks": []
+    },
+    "8": {
+      "name": "Tapcell/endcap stage completed",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 8,
+          "severity": "info",
+          "code": "TAPCELL_RESULT",
+          "message": "method=cut_rows tapcells=0 endcaps=0; The initial 725 rows (4136125 sites) were cut with 12 shapes for a total of 2276 rows (1586669 sites)."
+        }
+      ],
+      "note": "SG13G2 std-cell library has no well-tie or endcap cells (ORFS config.mk comment); the platform tapcell stage only cuts rows around macros (cut_rows). No arbitrary tap spacing is applied."
+    },
+    "9": {
+      "name": "PDN generation and connectivity checks pass",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "PDN_CONNECTED",
+          "message": "check_power_grid VSS: connected"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "PDN_CONNECTED",
+          "message": "check_power_grid VDD: connected"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "MACRO_PG_VIAS",
+          "message": "all 36 macro PG pins have PDN vias (min 88 per pin)"
+        },
+        {
+          "gate": 9,
+          "severity": "info",
+          "code": "MACRO_PG_OK",
+          "message": "36 macro PG pins on the expected nets"
+        },
+        {
+          "gate": 9,
+          "severity": "warning",
+          "code": "PDN_WARNINGS",
+          "message": "pdngen warnings: PDN-0110 x535 (PDN-0110 = no via where parallel/non-overlapping shapes meet)"
+        }
+      ]
+    },
+    "10": {
+      "name": "Placement legality checks pass",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 10,
+          "severity": "info",
+          "code": "LEGAL",
+          "message": "check_placement passed; all instances placed"
+        }
+      ]
+    },
+    "11": {
+      "name": "Timing analysis completes with valid constraints",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 11,
+          "severity": "info",
+          "code": "PRE_ROUTE",
+          "message": "PRE-ROUTE TIMING (placement parasitics, ideal clocks, corner typ): WNS 10.049 ns, TNS 0.0 ns, WHS -0.3449 ns"
+        }
+      ]
+    },
+    "12": {
+      "name": "Preliminary routing/congestion analysis completes",
+      "status": "FAIL",
+      "findings": [
+        {
+          "gate": 12,
+          "severity": "error",
+          "code": "GRT_FAILED",
+          "message": "global routing did not complete (rc 1): "
+        }
+      ]
+    },
+    "13": {
+      "name": "Results exported successfully",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 13,
+          "severity": "info",
+          "code": "IMAGES",
+          "message": "rendered floorplan.png, floorplan.svg"
+        },
+        {
+          "gate": 13,
+          "severity": "info",
+          "code": "TWINLAB_EXPORT",
+          "message": "twinlab_floorplan.json written and validated (schema 1.0.0)"
+        }
+      ]
+    },
+    "14": {
+      "name": "Experiment is reproducible",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 14,
+          "severity": "warning",
+          "code": "DIRTY_TREE",
+          "message": "FloorplanLab sources had uncommitted changes when the run started"
+        },
+        {
+          "gate": 14,
+          "severity": "info",
+          "code": "REPRO_METADATA_ONLY",
+          "message": "metadata complete; bit-exact re-run not performed for this run"
+        }
+      ]
+    },
+    "15": {
+      "name": "No fabricated metrics or undeclared substitutions",
+      "status": "PASS",
+      "findings": [
+        {
+          "gate": 15,
+          "severity": "info",
+          "code": "PROVENANCE",
+          "message": "all metrics in run.json are parsed from Yosys/OpenROAD/OpenSTA outputs listed in 'stages'"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "std_cell_area_synth_um2": 1168347.991,
+    "macro_inventory": {
+      "RM_IHPSG13_1P_2048x64_c2_bm_bist": 8,
+      "RM_IHPSG13_1P_512x64_c2_bm_bist": 4
+    },
+    "floorplan": {
+      "die_um": [
+        0.0,
+        0.0,
+        2819.04,
+        2823.66
+      ],
+      "core_um": [
+        40.32,
+        41.58,
+        2778.72,
+        2782.08
+      ],
+      "die_area_mm2": 7.96,
+      "core_area_mm2": 7.5046,
+      "std_cell_area_um2": 980812.0,
+      "macro_area_um2": 4533478.5,
+      "instances": {
+        "macro": 12,
+        "std": 76827,
+        "tie": 46
+      },
+      "placement_rows": 2276,
+      "row_area_um2": 2878852.234,
+      "std_cell_util_of_rows": 0.3407,
+      "core_util_incl_macros": 0.7348,
+      "hpwl_um": 5187418.7,
+      "std_cell_area_by_group_um2": {
+        "cpu": 171183.197,
+        "debug": 17703.101,
+        "dma": 47121.782,
+        "fabric": 74145.456,
+        "mbist": 6199.805,
+        "periph": 56768.947,
+        "rom": 29549.318,
+        "sram_ctrl": 11002.522,
+        "tensor": 293595.322,
+        "tile": 13715.05,
+        "top": 2930.256,
+        "vector": 256563.418
+      },
+      "placement_status": {
+        "LOCKED": 12,
+        "PLACED": 76873
+      },
+      "io_pins_total": 73,
+      "io_pins_placed": 73,
+      "high_fanout_nets": [
+        {
+          "net": "clk",
+          "fanout": 2915
+        },
+        {
+          "net": "sys_rst_n",
+          "fanout": 2441
+        },
+        {
+          "net": "u_cpu/_11515_",
+          "fanout": 1133
+        },
+        {
+          "net": "u_tile/gclk_te",
+          "fanout": 857
+        },
+        {
+          "net": "u_tile/u_te/first_q",
+          "fanout": 648
+        },
+        {
+          "net": "u_tile/u_ve/bsc_q",
+          "fanout": 563
+        },
+        {
+          "net": "u_tile/gclk_ve",
+          "fanout": 555
+        },
+        {
+          "net": "u_tile/u_te/mac",
+          "fanout": 539
+        },
+        {
+          "net": "u_tile/u_te/u_mac/_02395_",
+          "fanout": 474
+        },
+        {
+          "net": "u_tile/u_te/_00039_",
+          "fanout": 413
+        }
+      ],
+      "macros": [
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            2135.28,
+            1669.42,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            728.28,
+            844.96,
+            1354.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            2135.28,
+            844.96,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            2135.28,
+            2493.88,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            1468.74,
+            2493.88,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            1468.74,
+            1669.42,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            61.74,
+            844.96,
+            688.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            1468.74,
+            844.96,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[0\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            61.74,
+            1669.42,
+            253.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[1\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            292.74,
+            1669.42,
+            484.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[2\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            524.16,
+            1669.42,
+            715.5
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[3\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            61.74,
+            2493.88,
+            253.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        }
+      ]
+    },
+    "pdn": {
+      "nets": [
+        {
+          "net": "VSS",
+          "type": "GROUND",
+          "special": 1,
+          "iterms": 76885,
+          "vias": 53519,
+          "layers": {
+            "Metal1": {
+              "shapes": 1134,
+              "length_um": 392617.3
+            },
+            "Metal5": {
+              "shapes": 175,
+              "length_um": 48517.9
+            },
+            "TopMetal1": {
+              "shapes": 93,
+              "length_um": 256438.2
+            }
+          }
+        },
+        {
+          "net": "VDD",
+          "type": "POWER",
+          "special": 1,
+          "iterms": 76897,
+          "vias": 51216,
+          "layers": {
+            "Metal1": {
+              "shapes": 1131,
+              "length_um": 400259.3
+            },
+            "Metal5": {
+              "shapes": 158,
+              "length_um": 46814.3
+            },
+            "TopMetal1": {
+              "shapes": 92,
+              "length_um": 254968.8
+            }
+          }
+        }
+      ]
+    },
+    "place": {
+      "die_um": [
+        0.0,
+        0.0,
+        2819.04,
+        2823.66
+      ],
+      "core_um": [
+        40.32,
+        41.58,
+        2778.72,
+        2782.08
+      ],
+      "die_area_mm2": 7.96,
+      "core_area_mm2": 7.5046,
+      "std_cell_area_um2": 1107780.1,
+      "macro_area_um2": 4533478.5,
+      "instances": {
+        "macro": 12,
+        "std": 87269,
+        "tie": 3725
+      },
+      "placement_rows": 2276,
+      "row_area_um2": 2878852.234,
+      "std_cell_util_of_rows": 0.3848,
+      "core_util_incl_macros": 0.7517,
+      "hpwl_um": 6791955.7,
+      "std_cell_area_by_group_um2": {
+        "cpu": 171774.691,
+        "debug": 17650.483,
+        "dma": 47216.131,
+        "fabric": 73947.686,
+        "mbist": 6225.206,
+        "periph": 56977.603,
+        "rom": 29787.005,
+        "sram_ctrl": 11430.72,
+        "tensor": 296037.504,
+        "tile": 14165.021,
+        "top": 97299.014,
+        "vector": 258234.48
+      },
+      "placement_status": {
+        "LOCKED": 12,
+        "PLACED": 90994
+      },
+      "io_pins_total": 73,
+      "io_pins_placed": 73,
+      "high_fanout_nets": [
+        {
+          "net": "clk",
+          "fanout": 2915
+        },
+        {
+          "net": "u_tile/gclk_te",
+          "fanout": 857
+        },
+        {
+          "net": "u_tile/gclk_ve",
+          "fanout": 555
+        },
+        {
+          "net": "tck",
+          "fanout": 195
+        }
+      ],
+      "macros": [
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            2135.28,
+            1669.42,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[0\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            728.28,
+            844.96,
+            1354.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            2135.28,
+            844.96,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[1\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            2135.28,
+            2493.88,
+            2761.98
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            1468.74,
+            2493.88,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[2\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            1468.74,
+            1669.42,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[0\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            61.74,
+            844.96,
+            688.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac",
+          "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist",
+          "bbox": [
+            60.48,
+            1468.74,
+            844.96,
+            2095.44
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[0\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            61.74,
+            1669.42,
+            253.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[1\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            292.74,
+            1669.42,
+            484.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[2\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            884.94,
+            524.16,
+            1669.42,
+            715.5
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        },
+        {
+          "name": "u_tile/g_bank\\[3\\].u_ram/u_macro/g_m\\[0\\].genblk1.genblk1.g512.u_mac",
+          "master": "RM_IHPSG13_1P_512x64_c2_bm_bist",
+          "bbox": [
+            1709.4,
+            61.74,
+            2493.88,
+            253.08
+          ],
+          "orient": "R0",
+          "status": "LOCKED"
+        }
+      ]
+    },
+    "timing_preroute": {
+      "label": "PRE-ROUTE TIMING (placement parasitics, ideal clocks, corner typ)",
+      "wns_ns": 10.049,
+      "tns_ns": 0.0,
+      "whs_ns": -0.3449,
+      "ths_ns": -118.7264,
+      "clock_period_ns": 20.0,
+      "clk_group_worst_slack_ns": null,
+      "clk_critical_path_delay_ns": null,
+      "critical_paths": [
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_timer/_2245_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_spi/_583_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_spi/_584_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_spi/_594_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_spi/_595_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_timer/_2306_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_timer/_2308_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_timer/_2323_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.098,
+          "arrival_ns": 1.526
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_pbr/_634_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.177,
+          "arrival_ns": 1.447
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_tile/u_ve/_63887_ (recovery check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 18.177,
+          "arrival_ns": 1.447
+        }
+      ],
+      "critical_path_points": [
+        {
+          "pin": "_194_/CLK",
+          "cell": "sg13g2_dfrbp_1"
+        },
+        {
+          "pin": "_194_/Q",
+          "cell": "sg13g2_dfrbp_1"
+        },
+        {
+          "pin": "_040_/A0",
+          "cell": "sg13g2_mux2_1"
+        },
+        {
+          "pin": "_040_/X",
+          "cell": "sg13g2_mux2_1"
+        },
+        {
+          "pin": "fanout8902/A",
+          "cell": "sg13g2_buf_2"
+        },
+        {
+          "pin": "fanout8902/X",
+          "cell": "sg13g2_buf_2"
+        },
+        {
+          "pin": "fanout8901/A",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "fanout8901/X",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "fanout8843/A",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8843/X",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8842/A",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8842/X",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8841/A",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8841/X",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8834/A",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8834/X",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8833/A",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8833/X",
+          "cell": "sg13g2_buf_1"
+        },
+        {
+          "pin": "fanout8832/A",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "fanout8832/X",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "fanout8831/A",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "fanout8831/X",
+          "cell": "sg13g2_buf_4"
+        },
+        {
+          "pin": "u_timer/_2245_/RESET_B",
+          "cell": "sg13g2_dfrbp_1"
+        }
+      ],
+      "hold_paths": [
+        {
+          "startpoint": "u_dbg/_1179_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "_193_ (removal check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 0.203
+        },
+        {
+          "startpoint": "u_dbg/_1179_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "_194_ (removal check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 0.203
+        },
+        {
+          "startpoint": "u_dbg/_1181_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "_196_ (removal check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 0.243
+        },
+        {
+          "startpoint": "u_dbg/_1181_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "_195_ (removal check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 0.243
+        },
+        {
+          "startpoint": "_194_ (rising edge-triggered flip-flop clocked by clk)",
+          "endpoint": "u_spi/_639_ (removal check against rising-edge clock clk)",
+          "group": "asynchronous",
+          "slack_ns": 0.361
+        }
+      ],
+      "drv_violations_reported": true,
+      "note": "Pre-route, pre-CTS (ideal clocks). Not an achieved frequency."
+    },
+    "power_vectorless": {
+      "label": "VECTORLESS ESTIMATE -- no switching activity (VCD/SAIF) available; OpenSTA default propagation from input activity 0.1; ideal clocks. NOT used for ranking.",
+      "groups": {
+        "sequential": {
+          "internal_w": 0.00774,
+          "switching_w": 1.26e-05,
+          "leakage_w": 2.12e-06,
+          "total_w": 0.00776
+        },
+        "combinational": {
+          "internal_w": 0.000456,
+          "switching_w": 0.0001,
+          "leakage_w": 2.59e-05,
+          "total_w": 0.000581
+        },
+        "clock": {
+          "internal_w": 1.64e-06,
+          "switching_w": 2.93e-07,
+          "leakage_w": 9.37e-10,
+          "total_w": 1.93e-06
+        },
+        "macro": {
+          "internal_w": 0.0,
+          "switching_w": 0.0,
+          "leakage_w": 0.0,
+          "total_w": 0.0
+        },
+        "pad": {
+          "internal_w": 0.0,
+          "switching_w": 0.0,
+          "leakage_w": 0.0,
+          "total_w": 0.0
+        },
+        "total": {
+          "internal_w": 0.0082,
+          "switching_w": 0.000113,
+          "leakage_w": 2.8e-05,
+          "total_w": 0.00834
+        }
+      },
+      "macro_liberty_has_power_data": {
+        "RM_IHPSG13_1P_2048x64_c2_bm_bist": true,
+        "RM_IHPSG13_1P_1024x64_c2_bm_bist": true,
+        "RM_IHPSG13_1P_512x64_c2_bm_bist": true,
+        "RM_IHPSG13_1P_256x64_c2_bm_bist": true
+      }
+    },
+    "logs": {
+      "2_1_floorplan": {
+        "elapsed": "0:11.99",
+        "peak_mem_mb": 425.1
+      },
+      "2_2_floorplan_io": {
+        "elapsed": "0:00.52",
+        "peak_mem_mb": 221.1
+      },
+      "2_3_floorplan_tdms": {
+        "elapsed": "1:30.63",
+        "peak_mem_mb": 381.9,
+        "gpl_final_overflow": 0.110426
+      },
+      "2_4_floorplan_macro": {
+        "elapsed": "0:03.99",
+        "peak_mem_mb": 456.3,
+        "warnings": {
+          "MPL-0061": 5
+        }
+      },
+      "2_5_floorplan_tapcell": {
+        "elapsed": "0:00.42",
+        "peak_mem_mb": 175.9
+      },
+      "2_6_floorplan_pdn": {
+        "elapsed": "0:36.25",
+        "peak_mem_mb": 355.0,
+        "warnings": {
+          "PDN-0110": 535,
+          "PSM-0016": 2,
+          "PSM-0017": 2,
+          "PSM-0018": 2,
+          "PSM-0065": 2,
+          "PSM-0030": 110
+        }
+      },
+      "3_1_place_gp_skip_io": {
+        "elapsed": "0:32.23",
+        "peak_mem_mb": 368.9,
+        "gpl_final_overflow": 0.104165
+      },
+      "3_2_place_iop": {
+        "elapsed": "0:00.58",
+        "peak_mem_mb": 225.8
+      },
+      "3_3_place_gp": {
+        "elapsed": "4:04.27",
+        "peak_mem_mb": 1106.6,
+        "gpl_final_overflow": 0.0995379
+      },
+      "3_4_place_resized": {
+        "elapsed": "0:43.82",
+        "peak_mem_mb": 484.8,
+        "buffers_inserted": 10371,
+        "instances_resized": 10570
+      },
+      "3_5_place_dp": {
+        "elapsed": "0:49.80",
+        "peak_mem_mb": 616.1,
+        "warnings": {
+          "DPL-0038": 1
+        }
+      }
+    },
+    "route": {
+      "label": "PRELIMINARY GLOBAL ROUTE (pre-CTS, no detailed routing)",
+      "completed": 1,
+      "message": "",
+      "seconds": 352,
+      "congestion_report": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/analysis/grt_congestion.rpt",
+      "wirelength_report": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/analysis/grt_wirelength.rpt",
+      "timing": {
+        "label": "PRE-CTS TIMING with global-route parasitics (ideal clocks)",
+        "wns_ns": 1.1235,
+        "tns_ns": 0.0,
+        "whs_ns": -0.0463
+      },
+      "layers": {
+        "Metal1": {
+          "resource": 0,
+          "demand": 785,
+          "usage_pct": 0.0,
+          "overflow_h": 0,
+          "overflow_v": 11,
+          "overflow_total": 785
+        },
+        "Metal2": {
+          "resource": 1037422,
+          "demand": 465543,
+          "usage_pct": 44.87,
+          "overflow_h": 6,
+          "overflow_v": 0,
+          "overflow_total": 1413
+        },
+        "Metal3": {
+          "resource": 908743,
+          "demand": 443373,
+          "usage_pct": 48.79,
+          "overflow_h": 0,
+          "overflow_v": 7,
+          "overflow_total": 139
+        },
+        "Metal4": {
+          "resource": 1043355,
+          "demand": 106867,
+          "usage_pct": 10.24,
+          "overflow_h": 0,
+          "overflow_v": 1,
+          "overflow_total": 1
+        },
+        "Metal5": {
+          "resource": 63809,
+          "demand": 7428,
+          "usage_pct": 11.64,
+          "overflow_h": 0,
+          "overflow_v": 1,
+          "overflow_total": 1
+        }
+      },
+      "total": {
+        "resource": 3053329,
+        "demand": 1023996,
+        "usage_pct": 33.54,
+        "overflow_h": 6,
+        "overflow_v": 20,
+        "overflow_total": 2339
+      },
+      "routed_wirelength_um": 9356925.0,
+      "grt_warnings": [
+        "[WARNING GRT-0115] Global routing finished with overflow.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_12670/L_HI.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11866/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11850/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11843/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11837/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11831/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11828/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11827/L_LO.",
+        "[WARNING GRT-0026] Missing route to pin g_sram\\[3\\].g_sfv.u_bank/u_ram/u_macro/g_m\\[1\\].g2k.u_mac_11816/L_LO."
+      ],
+      "congestion_report_lines": 6824
+    },
+    "connectivity": {
+      "inter_group_hpwl_um": 5095820.6,
+      "pairs_top": [
+        {
+          "a": "sram_ctrl",
+          "b": "sram_main",
+          "nets": 1872,
+          "hpwl_um": 1003883.4,
+          "mean_hpwl_um": 536.3,
+          "centroid_manhattan_um": 657.6
+        },
+        {
+          "a": "tensor",
+          "b": "top",
+          "nets": 3588,
+          "hpwl_um": 744101.6,
+          "mean_hpwl_um": 207.4,
+          "centroid_manhattan_um": 737.8
+        },
+        {
+          "a": "top",
+          "b": "vector",
+          "nets": 3175,
+          "hpwl_um": 596794.4,
+          "mean_hpwl_um": 188.0,
+          "centroid_manhattan_um": 326.2
+        },
+        {
+          "a": "cpu",
+          "b": "top",
+          "nets": 2049,
+          "hpwl_um": 343500.5,
+          "mean_hpwl_um": 167.6,
+          "centroid_manhattan_um": 870.3
+        },
+        {
+          "a": "sram_tspm",
+          "b": "tile",
+          "nets": 1031,
+          "hpwl_um": 331673.1,
+          "mean_hpwl_um": 321.7,
+          "centroid_manhattan_um": 428.8
+        },
+        {
+          "a": "periph",
+          "b": "top",
+          "nets": 648,
+          "hpwl_um": 243883.1,
+          "mean_hpwl_um": 376.4,
+          "centroid_manhattan_um": 864.5
+        },
+        {
+          "a": "fabric",
+          "b": "top",
+          "nets": 1285,
+          "hpwl_um": 240792.1,
+          "mean_hpwl_um": 187.4,
+          "centroid_manhattan_um": 477.3
+        },
+        {
+          "a": "tile",
+          "b": "top",
+          "nets": 384,
+          "hpwl_um": 188739.0,
+          "mean_hpwl_um": 491.5,
+          "centroid_manhattan_um": 813.8
+        },
+        {
+          "a": "rom",
+          "b": "top",
+          "nets": 908,
+          "hpwl_um": 177504.8,
+          "mean_hpwl_um": 195.5,
+          "centroid_manhattan_um": 1578.2
+        },
+        {
+          "a": "sram_ctrl",
+          "b": "top",
+          "nets": 311,
+          "hpwl_um": 157156.9,
+          "mean_hpwl_um": 505.3,
+          "centroid_manhattan_um": 958.9
+        },
+        {
+          "a": "tensor",
+          "b": "tile",
+          "nets": 236,
+          "hpwl_um": 148679.5,
+          "mean_hpwl_um": 630.0,
+          "centroid_manhattan_um": 1216.2
+        },
+        {
+          "a": "tensor",
+          "b": "vector",
+          "nets": 183,
+          "hpwl_um": 134220.0,
+          "mean_hpwl_um": 733.4,
+          "centroid_manhattan_um": 728.6
+        },
+        {
+          "a": "dma",
+          "b": "top",
+          "nets": 783,
+          "hpwl_um": 124631.9,
+          "mean_hpwl_um": 159.2,
+          "centroid_manhattan_um": 257.1
+        },
+        {
+          "a": "tile",
+          "b": "vector",
+          "nets": 234,
+          "hpwl_um": 119332.3,
+          "mean_hpwl_um": 510.0,
+          "centroid_manhattan_um": 487.6
+        },
+        {
+          "a": "cpu",
+          "b": "fabric",
+          "nets": 182,
+          "hpwl_um": 75701.3,
+          "mean_hpwl_um": 415.9,
+          "centroid_manhattan_um": 606.8
+        },
+        {
+          "a": "fabric",
+          "b": "periph",
+          "nets": 185,
+          "hpwl_um": 73490.0,
+          "mean_hpwl_um": 397.2,
+          "centroid_manhattan_um": 1126.6
+        },
+        {
+          "a": "periph",
+          "b": "tensor",
+          "nets": 111,
+          "hpwl_um": 58472.8,
+          "mean_hpwl_um": 526.8,
+          "centroid_manhattan_um": 929.2
+        },
+        {
+          "a": "fabric",
+          "b": "tile",
+          "nets": 86,
+          "hpwl_um": 44600.9,
+          "mean_hpwl_um": 518.6,
+          "centroid_manhattan_um": 794.5
+        },
+        {
+          "a": "dma",
+          "b": "periph",
+          "nets": 81,
+          "hpwl_um": 39084.7,
+          "mean_hpwl_um": 482.5,
+          "centroid_manhattan_um": 607.4
+        },
+        {
+          "a": "periph",
+          "b": "vector",
+          "nets": 53,
+          "hpwl_um": 36267.1,
+          "mean_hpwl_um": 684.3,
+          "centroid_manhattan_um": 1190.7
+        },
+        {
+          "a": "debug",
+          "b": "top",
+          "nets": 196,
+          "hpwl_um": 34988.3,
+          "mean_hpwl_um": 178.5,
+          "centroid_manhattan_um": 625.9
+        },
+        {
+          "a": "dma",
+          "b": "fabric",
+          "nets": 154,
+          "hpwl_um": 28602.8,
+          "mean_hpwl_um": 185.7,
+          "centroid_manhattan_um": 519.2
+        },
+        {
+          "a": "dma",
+          "b": "vector",
+          "nets": 24,
+          "hpwl_um": 19511.0,
+          "mean_hpwl_um": 813.0,
+          "centroid_manhattan_um": 583.3
+        },
+        {
+          "a": "debug",
+          "b": "fabric",
+          "nets": 119,
+          "hpwl_um": 16642.9,
+          "mean_hpwl_um": 139.9,
+          "centroid_manhattan_um": 148.6
+        },
+        {
+          "a": "sram_main",
+          "b": "top",
+          "nets": 36,
+          "hpwl_um": 16470.4,
+          "mean_hpwl_um": 457.5,
+          "centroid_manhattan_um": 1616.5
+        }
+      ],
+      "focus_pairs": {
+        "cpu<->fabric": {
+          "nets": 182,
+          "hpwl_um": 75701.3,
+          "mean_hpwl_um": 415.9,
+          "centroid_manhattan_um": 606.8
+        },
+        "dma<->fabric": {
+          "nets": 154,
+          "hpwl_um": 28602.8,
+          "mean_hpwl_um": 185.7,
+          "centroid_manhattan_um": 519.2
+        },
+        "tile<->sram_tspm": {
+          "nets": 1031,
+          "hpwl_um": 331673.1,
+          "mean_hpwl_um": 321.7,
+          "centroid_manhattan_um": 428.8
+        },
+        "fabric<->tile": {
+          "nets": 86,
+          "hpwl_um": 44600.9,
+          "mean_hpwl_um": 518.6,
+          "centroid_manhattan_um": 794.5
+        },
+        "sram_ctrl<->sram_main": {
+          "nets": 1872,
+          "hpwl_um": 1003883.4,
+          "mean_hpwl_um": 536.3,
+          "centroid_manhattan_um": 657.6
+        },
+        "vector<->tensor": {
+          "nets": 183,
+          "hpwl_um": 134220.0,
+          "mean_hpwl_um": 733.4,
+          "centroid_manhattan_um": 728.6
+        }
+      },
+      "label": "placement-based HPWL of nets crossing logical-group boundaries (not routed length)"
+    }
+  },
+  "status": "completed_with_gate_failures",
+  "failure_reason": null,
+  "updated": "2026-11-06T09:16:57+00:00",
+  "vendored_sources_check": "checked 66 vendored files: OK",
+  "tools": {
+    "openroad": "2.0-12331-g6011bbe77",
+    "yosys": "Yosys 0.38+92",
+    "orfs": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+    "klayout": "KLayout 0.28.16",
+    "python": "Python 3.13.18"
+  },
+  "git_revision": "fb7244d6554ecc20d6f17f052adf5dc05b48ebf8+dirty",
+  "synthesis": {
+    "netlist": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/results/ihp-sg13g2/silicaflux_v/base/1_synth.v",
+    "total_cells": 95096,
+    "std_cells": 95084,
+    "sequential_cells": 4512,
+    "latch_cells": 0,
+    "latch_cell_types": {},
+    "icg_cells": 2,
+    "async_reset_flops": 4512,
+    "combinational_cells": 90570,
+    "tie_cells": 46,
+    "buffer_inverter_cells": 20322,
+    "chip_area_incl_macros_um2": 5701826.5314,
+    "macro_area_um2": 4533478.541,
+    "std_cell_area_um2": 1168347.991,
+    "sequential_area_um2": 200727.072,
+    "macros": {
+      "RM_IHPSG13_1P_2048x64_c2_bm_bist": 8,
+      "RM_IHPSG13_1P_512x64_c2_bm_bist": 4
+    },
+    "macro_instances": [
+      {
+        "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+        "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      },
+      {
+        "name": "u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+        "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+      }
+    ],
+    "unknown_cell_types": {},
+    "unresolved_modules": [],
+    "check_problems": 0,
+    "warnings": [
+      {
+        "message": "Replacing memory \\dout with list of registers. See sfv_sram_macro_bank.sv:0",
+        "count": 1
+      },
+      {
+        "message": "Found unsupported expression 'SCE*SCD+SCE'*D' in pin attribute of cell 'sg13g2_sdfbbp_1' - skipping.",
+        "count": 1
+      }
+    ],
+    "area_by_instance": [
+      {
+        "instance": "u_tile",
+        "module": "$paramod$e1e19d502aed204329de22e3343ebff334944d0d\\sfv_tile",
+        "std_cell_area_um2": 700039.1,
+        "macro_area_um2": 600409.6
+      },
+      {
+        "instance": "u_cpu",
+        "module": "$paramod\\sfv_cpu\\BOOT_ADDR=32'00000000000000000000000000000000",
+        "std_cell_area_um2": 190759.7,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_xbar",
+        "module": "$paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\\sfb_crossbar",
+        "std_cell_area_um2": 55390.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_dma",
+        "module": "$paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\\silicaflux_dma",
+        "std_cell_area_um2": 51073.4,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_rom",
+        "module": "$paramod\\sfv_bootrom\\WORDS=s32'00000000000000000000010000000000",
+        "std_cell_area_um2": 37782.9,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_dbg",
+        "module": "sfv_jtag_dbg",
+        "std_cell_area_um2": 18525.0,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_timer",
+        "module": "sfv_timer",
+        "std_cell_area_um2": 17747.8,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_uart",
+        "module": "$paramod\\sfv_uart\\BAUD_RESET=16'0000000011011001",
+        "std_cell_area_um2": 16290.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_sysctrl",
+        "module": "sfv_sysctrl",
+        "std_cell_area_um2": 13021.7,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_pbr",
+        "module": "$paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\\sfv_periph_bridge",
+        "std_cell_area_um2": 7172.2,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_mbist",
+        "module": "$paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\\sfv_mbist",
+        "std_cell_area_um2": 6941.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_spi",
+        "module": "sfv_spi",
+        "std_cell_area_um2": 5920.1,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "u_gpio",
+        "module": "$paramod\\sfv_gpio\\N=s32'00000000000000000000000000001000",
+        "std_cell_area_um2": 5278.1,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[0].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[1].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[2].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[3].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[4].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[5].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_v1[6].g_ad.u_ad",
+        "module": "sfb_v1_slave_adapter",
+        "std_cell_area_um2": 3483.6,
+        "macro_area_um2": 0.0
+      },
+      {
+        "instance": "g_sram[0].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[1].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[2].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "g_sram[3].g_sfv.u_bank",
+        "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+        "std_cell_area_um2": 3327.6,
+        "macro_area_um2": 983267.2
+      },
+      {
+        "instance": "u_intc",
+        "module": "$paramod\\sfv_intc\\N=s32'00000000000000000000000000001001",
+        "std_cell_area_um2": 1425.9,
+        "macro_area_um2": 0.0
+      }
+    ],
+    "top_glue_area_um2": 3284.0,
+    "clock_reset_observations": {
+      "icg_instances": 2,
+      "flops_with_async_reset": 4512,
+      "flops_total": 4512,
+      "note": "single functional clock clk + JTAG tck (SDC); resets async-assert/sync-deassert via sfv_rst_sync (u_rs_por/u_rs_sys/u_rs_cpu); the reset tree is unbuffered after synthesis (repair_design buffers it; balanced tree only at CTS)"
+    },
+    "stat_report": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/reports/ihp-sg13g2/silicaflux_v/base/synth_stat.txt"
+  },
+  "netlist_sha256": "14a43bb27555e29cdc70e873c7b87b9ef1ed0b43717c1e94470441b9b627fd08",
+  "synth_key": "silicaflux_v__ihp_sg13g2__b8f5a2cee7ec",
+  "failed_gates": [
+    "12"
+  ],
+  "physically_valid": false,
+  "readiness": "PRELIMINARY FLOORPLAN ONLY -- not fabrication-ready (no CTS, detailed routing, extraction, signoff STA, DRC/LVS, IR/EM signoff, DFT, package).",
+  "geometry": {
+    "mode": "B",
+    "die_area_um": [
+      0.0,
+      0.0,
+      2819.04,
+      2823.66
+    ],
+    "core_area_um": [
+      40.32,
+      41.58,
+      2778.72,
+      2782.08
+    ],
+    "die_w_um": 2819.04,
+    "die_h_um": 2823.66,
+    "core_w_um": 2738.4,
+    "core_h_um": 2740.5,
+    "die_area_mm2": 7.96001,
+    "core_area_mm2": 7.504585,
+    "breakdown": {
+      "std_cell_area_mapped_um2": 1168347.991,
+      "logic_growth": 1.0,
+      "target_util": 0.5,
+      "std_cell_region_required_um2": 2336695.982,
+      "macro_area_um2": 4533478.5408,
+      "macro_halo_area_um2": 626908.8,
+      "routing_corridor_area_um2": 0.0,
+      "pdn_overhead_area_um2": 0.0,
+      "core_area_required_um2": 7497083.3228,
+      "core_area_um2": 7504585.2,
+      "std_cell_region_available_um2": 2344197.8592,
+      "implied_std_cell_util": 0.4984,
+      "grown_to_arrangement_envelope": false,
+      "envelope_um": null,
+      "core_margin_um": [
+        40.32,
+        41.58
+      ],
+      "io_ring": "not included (logical pins only)"
+    }
+  },
+  "io_ports": 73,
+  "config_mk_sha256": "460bb58ca06397f207bb90d247dc7686f4d6dbc31d2d421116ca0a4cc51e0f60",
+  "exports": {
+    "odb": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/orfs/results/ihp-sg13g2/silicaflux_v/base/3_place.odb",
+    "def": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/3_place.def.gz",
+    "geometry": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/geometry.json",
+    "connectivity": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/connectivity.json",
+    "cells": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/cells.csv.gz",
+    "twinlab": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/twinlab_floorplan.json",
+    "images": [
+      "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/floorplan.svg",
+      "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/A_baseline/export/floorplan.png"
+    ]
+  }
+}

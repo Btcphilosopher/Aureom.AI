@@ -1,0 +1,48 @@
+# /opt/eda/env/bin/openroad -no_init -exit /home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/scripts/analysis/route_estimate.tcl
+OpenROAD 2.0-12331-g6011bbe77 
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO ORD-0030] Using 4 thread(s).
+[INFO GRT-0020] Min routing layer: Metal2
+[INFO GRT-0021] Max routing layer: Metal5
+[INFO GRT-0022] Global adjustment: 0%
+[INFO GRT-0023] Grid origin: (0, 0)
+[INFO GRT-0043] No OR_DEFAULT vias defined.
+[INFO GRT-0088] Layer Metal1  Track-Pitch = 0.4800  line-2-Via Pitch: 0.3650
+[INFO GRT-0088] Layer Metal2  Track-Pitch = 0.4200  line-2-Via Pitch: 0.4100
+[INFO GRT-0088] Layer Metal3  Track-Pitch = 0.4800  line-2-Via Pitch: 0.4100
+[INFO GRT-0088] Layer Metal4  Track-Pitch = 0.4200  line-2-Via Pitch: 0.4100
+[INFO GRT-0088] Layer Metal5  Track-Pitch = 3.4800  line-2-Via Pitch: 0.4100
+[INFO GRT-0019] Found 5 clock nets.
+[INFO GRT-0001] Minimum degree: 2
+[INFO GRT-0002] Maximum degree: 2916
+[INFO GRT-0003] Macros: 12
+[INFO GRT-0004] Blockages: 36810
+
+[INFO GRT-0053] Routing resources analysis:
+          Routing      Original      Derated      Resource
+Layer     Direction    Resources     Resources    Reduction (%)
+---------------------------------------------------------------
+Metal1     Vertical            0             0          0.00%
+Metal2     Horizontal    2947776       1357196          53.96%
+Metal3     Vertical      2596672       1191142          54.13%
+Metal4     Horizontal    2947776       1363163          53.76%
+Metal5     Vertical       346112         83272          75.94%
+---------------------------------------------------------------
+
+[INFO GRT-0101] Running extra iterations to remove overflow.
+Signal 11 received
+Stack trace:
+ 0# 0x0000000000BD7CCB in /opt/eda/env/bin/openroad
+ 1# 0x00007F425F245330 in /lib/x86_64-linux-gnu/libc.so.6
+ 2# 0x00007F425F6D98DD in /opt/eda/env/bin/../lib/libstdc++.so.6
+ 3# std::_Rb_tree_insert_and_rebalance(bool, std::_Rb_tree_node_base*, std::_Rb_tree_node_base*, std::_Rb_tree_node_base&) in /opt/eda/env/bin/../lib/libstdc++.so.6
+ 4# sta::Network::drivers(sta::Net const*) in /opt/eda/env/bin/openroad
+ 5# sta::GraphDelayCalc::findMultiDrvrNet(sta::Vertex*) in /opt/eda/env/bin/openroad
+ 6# sta::GraphDelayCalc::findDriverDelays(sta::Vertex*, sta::ArcDelayCalc*) in /opt/eda/env/bin/openroad
+ 7# sta::GraphDelayCalc::findVertexDelay(sta::Vertex*, sta::ArcDelayCalc*, bool) in /opt/eda/env/bin/openroad
+ 8# 0x0000000000F8AEAA in /opt/eda/env/bin/openroad
+ 9# sta::DispatchQueue::dispatch_thread_handler(unsigned long) in /opt/eda/env/bin/openroad
+10# 0x00007F425F6EA0E6 in /opt/eda/env/bin/../lib/libstdc++.so.6
+11# 0x00007F425F29CB84 in /lib/x86_64-linux-gnu/libc.so.6
+12# 0x00007F425F329ECC in /lib/x86_64-linux-gnu/libc.so.6

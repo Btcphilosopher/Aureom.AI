@@ -17,7 +17,7 @@ import pandas as pd
 from .optimiser import pareto_front
 from .orfs import RESULTS
 
-OBJECTIVES = [("die_area_mm2", "min"), ("clk_path_delay_ns", "min"), ("grt_overflow", "min"),
+OBJECTIVES = [("die_area_mm2", "min"), ("reg2reg_delay_ns", "min"), ("grt_overflow", "min"),
               ("grt_wirelength_mm", "min")]
 
 
@@ -69,6 +69,11 @@ def flatten(r: dict) -> dict:
         "wns_ns": t.get("wns_ns"), "tns_ns": t.get("tns_ns"), "whs_ns": t.get("whs_ns"),
         "clk_worst_slack_ns": t.get("clk_group_worst_slack_ns"),
         "clk_path_delay_ns": t.get("clk_critical_path_delay_ns"),
+        "reg2reg_slack_ns": t.get("reg2reg_worst_slack_ns"),
+        "reg2reg_delay_ns": t.get("reg2reg_path_delay_ns"),
+        "reg2reg_start": ((t.get("reg2reg_critical_paths") or [{}])[0].get("startpoint") or "")[:40],
+        "reg2reg_end": ((t.get("reg2reg_critical_paths") or [{}])[0].get("endpoint") or "")[:40],
+        "grt_hotspot_near_macro_frac": ((rt.get("hotspots") or {}).get("near_macro_fraction")),
         "grt_completed": rt.get("completed"),
         "grt_overflow": tot.get("overflow_total"),
         "grt_wirelength_mm": round(rt["routed_wirelength_um"] / 1000, 2) if rt.get("routed_wirelength_um") else None,
@@ -100,8 +105,8 @@ def compare(df: pd.DataFrame, baseline: str) -> dict:
     df = df.copy()
     df["comparable"] = [all(row[k] == ref[k] for k in keys) if ref is not None else False for _, row in df.iterrows()]
     deltas = []
-    metrics = ["die_area_mm2", "core_area_mm2", "std_cell_area_placed_um2", "placed_hpwl_mm", "wns_ns", "tns_ns",
-               "clk_path_delay_ns", "grt_overflow", "grt_wirelength_mm", "inter_group_hpwl_mm"]
+    metrics = ["die_area_mm2", "core_area_mm2", "std_cell_area_placed_um2", "placed_hpwl_mm", "wns_ns",
+               "reg2reg_delay_ns", "grt_overflow", "grt_wirelength_mm", "grt_wns_ns", "inter_group_hpwl_mm"]
     for _, row in df.iterrows():
         d = {"run_id": row.run_id}
         for m in metrics:
@@ -116,4 +121,4 @@ def compare(df: pd.DataFrame, baseline: str) -> dict:
     return {"baseline": baseline, "objectives": OBJECTIVES, "pareto": pf, "eligible": list(eligible.run_id),
             "invalid_runs": invalid, "deltas": deltas, "notes": notes,
             "rule": "only physically valid, comparable runs with a completed global route are ranked; "
-                    "Pareto over die area, clk critical-path delay (pre-route), GRT overflow, GRT wirelength"}
+                    "Pareto over die area, register-to-register critical-path delay (pre-route), GRT overflow, GRT wirelength"}
