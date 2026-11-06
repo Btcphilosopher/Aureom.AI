@@ -266,17 +266,17 @@ def _html(df: pd.DataFrame, cmp: dict, out: Path) -> None:
     for sel, name, color, sym in ((df.run_id.isin(par), "Pareto (non-dominated)", BLUE, "circle"),
                                   (df.physically_valid & ~df.run_id.isin(par), "valid, dominated", GREY, "circle"),
                                   (~df.physically_valid, "invalid (gate failure) - not ranked", CRIT, "x-open")):
-        d = df[sel & df.die_area_mm2.notna() & df.reg2reg_delay_ns.notna()]
+        d = df[sel & df.die_area_mm2.notna() & df.grt_wns_ns.notna()]
         if d.empty:
             continue
-        f.add_trace(go.Scatter(x=d.die_area_mm2, y=d.reg2reg_delay_ns, mode="markers+text", name=name, text=d.run_id,
+        f.add_trace(go.Scatter(x=d.die_area_mm2, y=d.grt_overflow, mode="markers+text", name=name, text=d.run_id,
                                textposition="top center", marker=dict(size=11, color=color, symbol=sym,
                                                                       line=dict(width=2, color=SURF)),
-                               hovertemplate="%{text}<br>die %{x:.3f} mm2<br>reg-to-reg path %{y:.3f} ns<extra></extra>"))
-    f.update_layout(title="Die area vs pre-route register-to-register path delay (lower-left is better)",
-                    xaxis_title="die area (mm2)", yaxis_title="reg-to-reg critical-path delay, pre-route (ns)")
+                               hovertemplate="%{text}<br>die %{x:.3f} mm2<br>GRT overflow %{y}<extra></extra>"))
+    f.update_layout(title="Die area vs global-route overflow (lower-left is better; Pareto also uses GRT WNS and wirelength)",
+                    xaxis_title="die area (mm2)", yaxis_title="global-route overflow (GCell overflow sum)")
     figs.append(f)
-    for metric, title in (("grt_overflow", "Global-route overflow (preliminary)"),
+    for metric, title in (("grt_wns_ns", "WNS with global-route parasitics (ns, pre-CTS)"),
                           ("grt_wirelength_mm", "Global-route wirelength (mm)"),
                           ("inter_group_hpwl_mm", "Inter-group HPWL after placement (mm)"),
                           ("wns_ns", "Pre-route WNS (ns)")):

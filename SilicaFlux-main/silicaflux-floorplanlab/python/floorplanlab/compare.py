@@ -17,7 +17,10 @@ import pandas as pd
 from .optimiser import pareto_front
 from .orfs import RESULTS
 
-OBJECTIVES = [("die_area_mm2", "min"), ("reg2reg_delay_ns", "min"), ("grt_overflow", "min"),
+# Timing objective = WNS with global-route parasitics (routing-aware, still pre-CTS):
+# the placement-parasitic reg-to-reg slacks of all IHP runs lie within ~0.6 ns of
+# each other, so hundredth-of-a-ns differences there are noise, not a ranking.
+OBJECTIVES = [("die_area_mm2", "min"), ("grt_wns_ns", "max"), ("grt_overflow", "min"),
               ("grt_wirelength_mm", "min")]
 
 
@@ -121,4 +124,4 @@ def compare(df: pd.DataFrame, baseline: str) -> dict:
     return {"baseline": baseline, "objectives": OBJECTIVES, "pareto": pf, "eligible": list(eligible.run_id),
             "invalid_runs": invalid, "deltas": deltas, "notes": notes,
             "rule": "only physically valid, comparable runs with a completed global route are ranked; "
-                    "Pareto over die area, register-to-register critical-path delay (pre-route), GRT overflow, GRT wirelength"}
+                    "Pareto over die area (min), WNS with global-route parasitics (max), GRT overflow (min), GRT wirelength (min)"}
