@@ -1,0 +1,30 @@
+# TEMPLATE -- commercial 65 nm logic process (foundry not selected).
+# NO FOUNDRY DATA IS SUPPLIED.  FloorplanLab refuses to run this profile until
+# every ${FOUNDRY_KIT} path below exists and status is changed to "enabled" by
+# an engineer who has the NDA kit.  Values are NOT scaled from an open PDK.
+name: commercial_65
+status: template
+orfs_platform: commercial_65          # an ORFS platform directory must be created from the foundry kit
+process: "Commercial 65 nm CMOS (placeholder)"
+tech_lef: ${FOUNDRY_KIT}/<stdcell_lib>/lef/<tech>.lef
+sc_lefs: [${FOUNDRY_KIT}/<stdcell_lib>/lef/<stdcells>.lef]
+corners:
+  typ:  {liberty: [${FOUNDRY_KIT}/<stdcell_lib>/liberty/<lib>_tt_1p00v_25c.lib], voltage: 1.00, temperature_c: 25}
+  slow: {liberty: [${FOUNDRY_KIT}/<stdcell_lib>/liberty/<lib>_ss_0p90v_125c.lib], voltage: 0.90, temperature_c: 125}
+  fast: {liberty: [${FOUNDRY_KIT}/<stdcell_lib>/liberty/<lib>_ff_1p10v_m40c.lib], voltage: 1.10, temperature_c: -40}
+place_site: <core_site>
+routing: {min_layer: <M2>, max_layer: <M5>, io_h_layer: <M3>, io_v_layer: <M2>}
+tapcell: {method: <foundry rule>, tapcell_master: <TAP_CELL>, endcap_master: <ENDCAP_CELL>, distance_um: <from DRM>}
+tie_cells: {hi: [<TIEHI>, <PORT>], lo: [<TIELO>, <PORT>]}
+rc: {set_rc_tcl: ${FOUNDRY_KIT}/<openroad_rc>.tcl}
+macros:
+  sram_sp_8192x32: {lef: "${FOUNDRY_KIT}/<sram_compiler_out>/sram_sp_8192x32.lef", liberty: {typ: "${FOUNDRY_KIT}/<sram_compiler_out>/sram_sp_8192x32_tt.lib"}}
+  sram_sp_1024x32: {lef: "${FOUNDRY_KIT}/<sram_compiler_out>/sram_sp_1024x32.lef", liberty: {typ: "${FOUNDRY_KIT}/<sram_compiler_out>/sram_sp_1024x32_tt.lib"}}
+rtl_tech_files:
+  sfv_clkgate: ${PROJECT}/platforms/commercial_65/tech/sfv_clkgate.sv              # to be written for the foundry ICG
+  sfv_sram_macro_bank: ${PROJECT}/platforms/commercial_65/tech/sfv_sram_macro_bank.sv
+missing:
+  - "Foundry PDK (tech LEF, std-cell LEF/Liberty for tt/ss/ff, RC tables or RCX rules, DRC/LVS decks)"
+  - "SRAM compiler outputs: 4x 8192x32 + 4x 1024x32 single-port with byte write enables"
+  - "Foundry ICG cell and SilicaFlux-V tech wrappers (sfv_clkgate.sv, sfv_sram_macro_bank.sv)"
+  - "I/O pad library, ESD, seal ring, packaging rules"

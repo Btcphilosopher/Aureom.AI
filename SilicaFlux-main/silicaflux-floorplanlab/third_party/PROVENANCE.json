@@ -1,0 +1,404 @@
+{
+  "archives": {
+    "SilicaFlux-main/silicaflux-v-release1.zip": "424816e9eaedee999a711617ceb2f517d55684301f7dc260c24f73af9c045b16",
+    "SilicaFlux-main/silicaflux-datafabric.zip": "9f1f37357c8e25e00c214227894bca37c45e18ae9d7a993f87039a7679b665fb"
+  },
+  "files": [
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/files.f",
+      "vendored_as": "third_party/silicaflux-v/rtl/files.f",
+      "sha256": "be2ec1c31ebce63de45479f5a3f29f6790c0f10026b9fd772b1a3ccbf6d12926"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/pkg/sfv_pkg.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/pkg/sfv_pkg.sv",
+      "sha256": "8212c584c8b566478a0fbb3613a90ac25ac86ab0dddfd931e334793bea6ab778"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/common/sfv_common.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/common/sfv_common.sv",
+      "sha256": "4c79395516527ef31bab858a3211965466dcd7c7b9d80d5e6d0a87be0bbc290f"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/common/sfv_clkgate.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/common/sfv_clkgate.sv",
+      "sha256": "08286a9b7820dada6753dd21052c5bf10c65fce519480e2bbab2a3577aca04f2"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/cpu/sfv_cpu.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/cpu/sfv_cpu.sv",
+      "sha256": "b1c47ad6a12ede4e34ff53263e5dab6b48d877a0b7267d06778f7e1c89d02e83"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/bus/sfv_xbar.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/bus/sfv_xbar.sv",
+      "sha256": "67744001aabd449f49f6948a48586a9617446a1242e5cce163251f09f2f26a88"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/bus/sfv_periph_bridge.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/bus/sfv_periph_bridge.sv",
+      "sha256": "b3470055ca0200d2f0aec548d7b2490f8f2db388f67817403d3ca853947d6d69"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/mem/sfv_sram_sp.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/mem/sfv_sram_sp.sv",
+      "sha256": "d3bcfeb3925627d1986f8d4ba39625adbe30fcd7166e1938950328a7ec2d1ede"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/mem/sfv_mem_slaves.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/mem/sfv_mem_slaves.sv",
+      "sha256": "2d5e8c50b3e8481a18676315265c97b4855aef7bec069397f2d04a772ad0c5e0"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/mem/sfv_mbist.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/mem/sfv_mbist.sv",
+      "sha256": "1f279facfb705f44742418b73067751ac48aa53fb8dee071a2942dc1b49e12ea"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/periph/sfv_uart.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/periph/sfv_uart.sv",
+      "sha256": "fb5825fde85f620679e69790177a63c3ce8dcd3144fb76052edabae7d3ec7298"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/periph/sfv_spi.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/periph/sfv_spi.sv",
+      "sha256": "761884f1b06d3b9614fa1a5745e6c2dfcf7f5bf4e9b20556ed920579e0be9923"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/periph/sfv_periph_misc.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/periph/sfv_periph_misc.sv",
+      "sha256": "c3276617f55e7d091dcb5ca1faf1f70348df777f4f0a40885aa5e0d9d3b7258a"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/periph/sfv_sysctrl.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/periph/sfv_sysctrl.sv",
+      "sha256": "b00284fab6c7348e26a24e849e4432151b4ba888c463cf183bac00356bb3ee2a"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/accel/sfv_vec_engine.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/accel/sfv_vec_engine.sv",
+      "sha256": "5425281145fe981d80fd6ee07983f73f8b45427c0e6d1ad13ff21239207209b2"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+      "sha256": "fc1f708a7d9fa53509399a96045374a234b890c5378499320662a91f623b10c2"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/accel/sfv_tile.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/accel/sfv_tile.sv",
+      "sha256": "1b95a3ed68e9c2abffcb405bcc83edfcb158c4dffc1df21a0ce805122ca3ab5f"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/debug/sfv_jtag.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/debug/sfv_jtag.sv",
+      "sha256": "edf9a62a73f3875e8a6a17fbb7cd9443641c7048541f1474ca891d4fc0db412c"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/rtl/top/sfv_soc.sv",
+      "vendored_as": "third_party/silicaflux-v/rtl/top/sfv_soc.sv",
+      "sha256": "96797cd871a650b52a820f7085a62bb458631691b99c3a48acc94412a3d7af5c"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/tech/ihp_sg13g2/sfv_clkgate.sv",
+      "vendored_as": "third_party/silicaflux-v/asic/tech/ihp_sg13g2/sfv_clkgate.sv",
+      "sha256": "631e897aa0f3eabbda8956a31b8ebf5e4ff7534e083b5ff3cc563862282be39e"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/tech/ihp_sg13g2/sfv_sram_macro_bank.sv",
+      "vendored_as": "third_party/silicaflux-v/asic/tech/ihp_sg13g2/sfv_sram_macro_bank.sv",
+      "sha256": "e52290a7ff550e772ae2f106238b33952b5844499be932e5184a29c892161eb3"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/tech/sky130/sfv_clkgate.sv",
+      "vendored_as": "third_party/silicaflux-v/asic/tech/sky130/sfv_clkgate.sv",
+      "sha256": "712fb2ee3af73b9b54bc71681f2ba7c71eeba9504a02461c2ae38ce12e1a73d5"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/tech/sky130/sfv_sram_macro_bank.sv",
+      "vendored_as": "third_party/silicaflux-v/asic/tech/sky130/sfv_sram_macro_bank.sv",
+      "sha256": "d0829f617ed571cbf42802aca1c12aab9c4022a551e3b604aee38a4b98cc1a3c"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/constraints/sfv_soc.sdc",
+      "vendored_as": "third_party/silicaflux-v/asic/constraints/sfv_soc.sdc",
+      "sha256": "0e1ccd4ac418c9ff847f1f4b227069d2cad5aa11c4be791691e0bb2458c63ce7"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/configs/sky130hd.cfg",
+      "vendored_as": "third_party/silicaflux-v/asic/configs/sky130hd.cfg",
+      "sha256": "22cbe1094f36a6bd36ada84cfd2be1fffcf5d2eae922bd6640a7b86244759f40"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/configs/ihp_sg13g2.cfg",
+      "vendored_as": "third_party/silicaflux-v/asic/configs/ihp_sg13g2.cfg",
+      "sha256": "6997457bcc047bbb8ebff2a0a7274ae379cce486550c4db8d71baa44af56be83"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/configs/commercial_130nm.cfg.template",
+      "vendored_as": "third_party/silicaflux-v/asic/configs/commercial_130nm.cfg.template",
+      "sha256": "b99f2ba96a5301afca8f4813ccfc53e31d445c6f23dddf7ae89d859b0dea7e54"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/asic/configs/commercial_65nm.cfg.template",
+      "vendored_as": "third_party/silicaflux-v/asic/configs/commercial_65nm.cfg.template",
+      "sha256": "e968e383a5a9fe440440ee7e5df93aca4596e40612a8ffb84815e72f8e9b79f1"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/reports/firmware/sfv_bootrom_image.sv",
+      "vendored_as": "third_party/silicaflux-v/reports/firmware/sfv_bootrom_image.sv",
+      "sha256": "cffdcd2d4891d817daaef7e41c66163c24012ddbb5a1450710b704f7c903d8ad"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/reports/firmware/sizes.txt",
+      "vendored_as": "third_party/silicaflux-v/reports/firmware/sizes.txt",
+      "sha256": "eb56036b871623595da3e440ab6968c9b361e64d79dfb0653518e4454d37d610"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/reports/synth/ihp_sg13g2/summary.json",
+      "vendored_as": "third_party/silicaflux-v/reports/synth/ihp_sg13g2/summary.json",
+      "sha256": "5aa522de3ee02c4b6364f2f02943860f341a3b221b7ed3a07432f236a717bb25"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/reports/synth/sky130hd/summary.json",
+      "vendored_as": "third_party/silicaflux-v/reports/synth/sky130hd/summary.json",
+      "sha256": "7c65e5bad937aa99392997783473d0f78409b79ef67cb776390d19adb455abd2"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/docs/ASIC_FLOW.md",
+      "vendored_as": "third_party/silicaflux-v/docs/ASIC_FLOW.md",
+      "sha256": "b877d9727be0656324abcff8008fdce9f81a83ca04fb00fa62e54b7fc1c81382"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/docs/ARCHITECTURE.md",
+      "vendored_as": "third_party/silicaflux-v/docs/ARCHITECTURE.md",
+      "sha256": "d1238d7ebf0c64c59b1016aa2e42b666f19c0a6700184b72ec8a8d93dc751feb"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/docs/CLOCK_RESET.md",
+      "vendored_as": "third_party/silicaflux-v/docs/CLOCK_RESET.md",
+      "sha256": "df93a447fd120845eac3715087f31117322079d7a82eaccc29c1c61886e99e03"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/docs/TOOL_VERSIONS.md",
+      "vendored_as": "third_party/silicaflux-v/docs/TOOL_VERSIONS.md",
+      "sha256": "59319ddd8991ab6b900b03c8600844091cec7f7baadfd27d295e5a955ca17d09"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-v-release1.zip",
+      "member": "silicaflux-v/README.md",
+      "vendored_as": "third_party/silicaflux-v/README.md",
+      "sha256": "c705c010349d56e4ef53324e9af131af4d66b83af307b72ee877d941738f92b2"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/generated/sfb_memmap_pkg.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/generated/sfb_memmap_pkg.sv",
+      "sha256": "80d73331a44beba404c60135d074c0b885d62edd487522e023bdd1c15c3e5e19"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/memmap/silicaflux_v_datafabric.yaml",
+      "vendored_as": "third_party/silicaflux-datafabric/memmap/silicaflux_v_datafabric.yaml",
+      "sha256": "65850f38a898e9fe5b4e7b47fcd2325db256c382616dc04bb7d218174788b886"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_perf_defs.svh",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_perf_defs.svh",
+      "sha256": "071018f1a6dec474e101a06b66293824812aad0428020aa64a2dfea6a091e5c4"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_defs.svh",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_defs.svh",
+      "sha256": "64a7eba594d40975a482d30a95b4f52f373725b1bded46fc490635d3dea42033"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_arbiter.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_arbiter.sv",
+      "sha256": "5d9e5fb78900557735667ce94b8b6c1f5b26a44f400eacc854e3acf957ba1f3f"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_addr_decoder.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_addr_decoder.sv",
+      "sha256": "b88807f6422322518ee5a5be6faf535a37b950a8a4d4c2e5e87dd359116b6c6c"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_req_mux.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_req_mux.sv",
+      "sha256": "f3305e23b7c97a1b55908342d2ebab4e436d022f9aaed7cb3d52fc41ebb9b7ce"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_rsp_router.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_rsp_router.sv",
+      "sha256": "1fa6337417a2c42e2826182647dcfaa3b3a650a376778558ef3a7186259f74ef"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_error_slave.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_error_slave.sv",
+      "sha256": "21a7dfa1cba6f7d3659e39181f11f50e465f235b65e1fc43aa60ac2457d03821"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_skid_buffer.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_skid_buffer.sv",
+      "sha256": "a0bfc9e27959aa63367c4b8b399838659326de126aeccfaec129537f0657db0e"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_reg_slice.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_reg_slice.sv",
+      "sha256": "b4700e9736b1c913fa046b96cf45d0cf1c793eb0dfe856572275173daf9bad27"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_v1_slave_adapter.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_v1_slave_adapter.sv",
+      "sha256": "8630b7dd302192e557627b62ee12b5318886ff0be5729b0011e3f480690bb340"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_crossbar.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_crossbar.sv",
+      "sha256": "1c44d2cf846a3f9f4ad1cb16be7960184b29cb2cb52637050fc591bbd90803d0"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_shared_bus.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_shared_bus.sv",
+      "sha256": "3d3c95c597cd71ebb33877c629c68a9e901b394c9cb48bca7e3bf2b284ff2de8"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/interconnect/sfb_perf_counters.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/interconnect/sfb_perf_counters.sv",
+      "sha256": "730aa474f122b7dc6ab13170ade9807adcaf31a7fe457e9ba7a7a725b6a3a449"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_validate.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_validate.sv",
+      "sha256": "75531d49e39a632cd5f04a442b976bdf4e1d6314cac4e028ee40069d97d907e1"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_fifo.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_fifo.sv",
+      "sha256": "ada85a9465e410db1b9e204619291e38e7a664da3f16c0792d4c2f601c75bda8"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_transfer_engine.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_transfer_engine.sv",
+      "sha256": "82a7dd249f98be35ca1c0d46547c2c2ca999a614d607a33aca7ba2cc13af5480"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_burst_engine.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_burst_engine.sv",
+      "sha256": "4767b4092b641ee98ebbb67cfb6d163ca115f1f83393efc5531a270d36bc82e7"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_irq.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_irq.sv",
+      "sha256": "a17912aa04d4678875191c498867bc81b95f012e68c9d1e5da585d6d9e1c9c5a"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/dma_control_regs.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/dma_control_regs.sv",
+      "sha256": "0ac92cac569bb87478aba6d2f2ad1963882840b4c45f184d8cf314b9c85f2de1"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/dma/silicaflux_dma.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/dma/silicaflux_dma.sv",
+      "sha256": "b06a1411f0f0718decf0b9cc0b40d48cc611d06151ab05ada45ac09c85251712"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/mem/sfb_sram_slave.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/mem/sfb_sram_slave.sv",
+      "sha256": "48a51356af65afc372bbd4b6c25f1187c1877b63d9e1b4e436e435f67b63a2e6"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/mem/sfb_sram_1r1w_slave.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/mem/sfb_sram_1r1w_slave.sv",
+      "sha256": "3fe3ba2c07b15f7e251c5d504d664f1242883251dd3d181e588d157af53e4405"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/rtl/soc/sfv_soc_df.sv",
+      "vendored_as": "third_party/silicaflux-datafabric/rtl/soc/sfv_soc_df.sv",
+      "sha256": "d5a2a743d73b229fbc39f44afbb66826a8706d5b4842606c658bc64acf9c693d"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/README.md",
+      "vendored_as": "third_party/silicaflux-datafabric/README.md",
+      "sha256": "5f10c94e9c06cabc259813eb2d99c320ccdad912b1ee57108e68756de952ba80"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/docs/datafabric/ARCHITECTURE.md",
+      "vendored_as": "third_party/silicaflux-datafabric/docs/datafabric/ARCHITECTURE.md",
+      "sha256": "82a43b105a5fe070b289ee2fecc0a9c87c889297d134e8bff9c8e4729a31b4d5"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/docs/datafabric/AUDIT.md",
+      "vendored_as": "third_party/silicaflux-datafabric/docs/datafabric/AUDIT.md",
+      "sha256": "2a52a57816dd6c75ff97800a1528169d37db3c6f59e82c006321f2cbd0bbb6ec"
+    },
+    {
+      "archive": "SilicaFlux-main/silicaflux-datafabric.zip",
+      "member": "silicaflux-datafabric/docs/datafabric/PPA.md",
+      "vendored_as": "third_party/silicaflux-datafabric/docs/datafabric/PPA.md",
+      "sha256": "10e5dc000c3c32812176776c1ca7912e174466b39229d4d2d4c19b427af55863"
+    }
+  ]
+}

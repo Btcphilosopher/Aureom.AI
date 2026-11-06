@@ -1,0 +1,111 @@
+# IHP SG13G2 (130 nm SiGe BiCMOS, open PDK) -- PRIMARY FloorplanLab platform.
+# Every value is taken from ORFS ab2aaf0f flow/platforms/ihp-sg13g2 (config.mk,
+# pdn.tcl, tapcell.tcl, fastroute.tcl, setRC.tcl, make_tracks.tcl, the tech LEF
+# and liberty) or from the SRAM collateral of ORFS d0e5b3c (env/tools.lock.yaml).
+name: ihp_sg13g2
+status: enabled
+orfs_platform: ihp-sg13g2
+process: "IHP SG13G2 130 nm SiGe:C BiCMOS, 7 metal (Metal1-5, TopMetal1-2), open PDK"
+provenance:
+  orfs_revision: ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621
+  sram_collateral_revision: d0e5b3c13e4bb9bdbd33493d5e87656dcae66384
+tech_lef: ${ORFS_FLOW}/platforms/ihp-sg13g2/lef/sg13g2_tech.lef
+sc_lefs: [${ORFS_FLOW}/platforms/ihp-sg13g2/lef/sg13g2_stdcell.lef]
+sc_gds: [${ORFS_FLOW}/platforms/ihp-sg13g2/gds/sg13g2_stdcell.gds]
+corners:
+  typ: {liberty: [${ORFS_FLOW}/platforms/ihp-sg13g2/lib/sg13g2_stdcell_typ_1p20V_25C.lib], voltage: 1.20, temperature_c: 25, process: typical}
+# ORFS ab2aaf0f ships only the typical std-cell corner for SG13G2.  The slow /
+# fast SRAM libs exist, but without matching std-cell libs multi-corner STA is
+# impossible here -> recorded, not faked.
+missing_corners:
+  - {corner: slow_1p08V_125C, missing: "sg13g2_stdcell_slow_1p08V_125C.lib not in ORFS ab2aaf0f"}
+  - {corner: fast_1p32V_m40C, missing: "sg13g2_stdcell_fast_1p32V_m40C.lib not in ORFS ab2aaf0f"}
+analysis_corner: typ
+place_site: CoreSite
+row_height_um: 3.78          # cross-checked against SITE CoreSite in the tech LEF by validate.py
+site_width_um: 0.48
+routing:
+  min_layer: Metal2
+  max_layer: Metal5
+  io_h_layer: Metal2         # ORFS IO_PLACER_H
+  io_v_layer: Metal3         # ORFS IO_PLACER_V
+  fastroute_tcl: ${ORFS_FLOW}/platforms/ihp-sg13g2/fastroute.tcl   # layer adjustment 0.05
+  make_tracks_tcl: ${ORFS_FLOW}/platforms/ihp-sg13g2/make_tracks.tcl
+  pdn_layers: [Metal1, Metal5, TopMetal1, TopMetal2]
+rc:
+  set_rc_tcl: ${ORFS_FLOW}/platforms/ihp-sg13g2/setRC.tcl
+  rcx_rules: ${ORFS_FLOW}/platforms/ihp-sg13g2/rcx_patterns.rules
+  assumption: "Pre-route parasitics = OpenROAD estimate_parasitics -placement / -global_routing using the per-layer R/C of setRC.tcl. Not extracted (no OpenRCX run; no detailed routing)."
+tapcell:
+  method: cut_rows
+  script: ${ORFS_FLOW}/platforms/ihp-sg13g2/tapcell.tcl
+  note: "SG13G2 std-cell library has no well-tie or endcap cells (ORFS config.mk comment); the platform tapcell stage only cuts rows around macros (cut_rows). No arbitrary tap spacing is applied."
+tie_cells: {hi: [sg13g2_tiehi, L_HI], lo: [sg13g2_tielo, L_LO]}
+fill_cells: [sg13g2_fill_1, sg13g2_fill_2, sg13g2_fill_4, sg13g2_fill_8]
+dont_use: [sg13g2_antennanp, sg13g2_lgcp_1, sg13g2_sighold, sg13g2_slgcp_1, sg13g2_dfrbp_2]
+power:
+  power_net: VDD
+  ground_net: VSS
+  supply_voltage: 1.20
+pdn:
+  tcl: ${PROJECT}/platforms/ihp_sg13g2/pdn.tcl
+  # defaults; experiments may override strap pitch / width (validated against
+  # the tech LEF minimum width of each layer)
+  params: {ring: 1, ring_layers: [Metal5, TopMetal1], ring_width: 5.0, ring_spacing: 2.0, ring_offset: 4.5,
+           rail_layer: Metal1, rail_width: 0.44, rail_pitch: 7.56,
+           strap1_layer: Metal5, strap1_width: 2.2, strap1_pitch: 75.6, strap1_offset: 13.6,
+           strap2_layer: TopMetal1, strap2_width: 1.8, strap2_pitch: 30.24, strap2_offset: 13.57,
+           macro_connect: [Metal4, TopMetal1], macro_halo: 0}
+  # strap2 (TopMetal1) pitch 30.24 instead of the platform 75.6: 64 of the 68
+  # SRAM VDD! stripes are 38.83 um periphery stripes; pitch + width <= 38.83
+  # lands a VDD via on every one of them (validate.py PDN_MACRO_*_COVERAGE),
+  # not only on the 4 full-height VDD! stripes.
+  # TopMetal1 is above MAX_ROUTING_LAYER (Metal5): no signal resources consumed.
+macro_pg_pins: {"VDD!": VDD, "VDDARRAY!": VDD, "VSS!": VSS}
+macro_pg_assumption: "VDDARRAY! (SRAM array supply) is tied to the core VDD (single 1.2 V domain); no retention / separate array supply is modelled."
+macro_allowed_orients: [R0, MX, MY, R180]      # R90 legal per LEF SYMMETRY but excluded: PG straps would turn
+macros:
+  RM_IHPSG13_1P_2048x64_c2_bm_bist:
+    lef: ${IHP_SRAM}/lef/RM_IHPSG13_1P_2048x64_c2_bm_bist.lef
+    liberty: {typ: ${IHP_SRAM}/lib/RM_IHPSG13_1P_2048x64_c2_bm_bist_typ_1p20V_25C.lib,
+              slow: ${IHP_SRAM}/lib/RM_IHPSG13_1P_2048x64_c2_bm_bist_slow_1p08V_125C.lib,
+              fast: ${IHP_SRAM}/lib/RM_IHPSG13_1P_2048x64_c2_bm_bist_fast_1p32V_m55C.lib}
+    gds: ${IHP_SRAM}/gds/RM_IHPSG13_1P_2048x64_c2_bm_bist.gds
+    verilog: ${IHP_SRAM}/verilog/RM_IHPSG13_1P_2048x64_c2_bm_bist.v
+    words: 2048
+    bits: 64
+    ports: 1RW (single port, bit-write mask, BIST mux port)
+  RM_IHPSG13_1P_1024x64_c2_bm_bist:
+    lef: ${IHP_SRAM}/lef/RM_IHPSG13_1P_1024x64_c2_bm_bist.lef
+    liberty: {typ: ${IHP_SRAM}/lib/RM_IHPSG13_1P_1024x64_c2_bm_bist_typ_1p20V_25C.lib}
+    gds: ${IHP_SRAM}/gds/RM_IHPSG13_1P_1024x64_c2_bm_bist.gds
+    verilog: ${IHP_SRAM}/verilog/RM_IHPSG13_1P_1024x64_c2_bm_bist.v
+    words: 1024
+    bits: 64
+    ports: 1RW
+  RM_IHPSG13_1P_512x64_c2_bm_bist:
+    lef: ${IHP_SRAM}/lef/RM_IHPSG13_1P_512x64_c2_bm_bist.lef
+    liberty: {typ: ${IHP_SRAM}/lib/RM_IHPSG13_1P_512x64_c2_bm_bist_typ_1p20V_25C.lib,
+              slow: ${IHP_SRAM}/lib/RM_IHPSG13_1P_512x64_c2_bm_bist_slow_1p08V_125C.lib,
+              fast: ${IHP_SRAM}/lib/RM_IHPSG13_1P_512x64_c2_bm_bist_fast_1p32V_m55C.lib}
+    gds: ${IHP_SRAM}/gds/RM_IHPSG13_1P_512x64_c2_bm_bist.gds
+    verilog: ${IHP_SRAM}/verilog/RM_IHPSG13_1P_512x64_c2_bm_bist.v
+    words: 512
+    bits: 64
+    ports: 1RW
+  RM_IHPSG13_1P_256x64_c2_bm_bist:
+    lef: ${IHP_SRAM}/lef/RM_IHPSG13_1P_256x64_c2_bm_bist.lef
+    liberty: {typ: ${IHP_SRAM}/lib/RM_IHPSG13_1P_256x64_c2_bm_bist_typ_1p20V_25C.lib}
+    gds: ${IHP_SRAM}/gds/RM_IHPSG13_1P_256x64_c2_bm_bist.gds
+    verilog: ${IHP_SRAM}/verilog/RM_IHPSG13_1P_256x64_c2_bm_bist.v
+    words: 256
+    bits: 64
+    ports: 1RW
+rtl_tech_files:
+  sfv_clkgate: ${PROJECT}/third_party/silicaflux-v/asic/tech/ihp_sg13g2/sfv_clkgate.sv
+  sfv_sram_macro_bank: ${PROJECT}/third_party/silicaflux-v/asic/tech/ihp_sg13g2/sfv_sram_macro_bank.sv
+physical_verification:
+  drc: {tool: KLayout, deck: "${ORFS_FLOW}/platforms/ihp-sg13g2/drc/sg13g2.lydrc", status: "available, not run (no detailed routing / GDS in FloorplanLab scope)"}
+  lvs: {tool: KLayout, deck: "${ORFS_FLOW}/platforms/ihp-sg13g2/lvs/ihp-sg13g2.lylvs", status: "available, not run"}
+  sram_lvs_netlists: "CDL for the RM_IHPSG13 macros exists in ORFS d0e5b3c (not vendored)"
+io_pads: "sg13g2_io pad library exists in later ORFS revisions; not in ab2aaf0f -> FloorplanLab places logical I/O pins only"

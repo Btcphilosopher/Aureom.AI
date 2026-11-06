@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FloorplanLab Viewer</title>
+<!-- Standalone viewer for FloorplanLab TwinLab exports (schema 1.0.0,
+     docs/twinlab_floorplan.schema.json).  Renders ONLY what the file contains:
+     die/core, OpenROAD macro boxes, std-cell density grid, I/O pins, PDN
+     straps, and logical-group extents (labelled as annotations). -->
+<style>
+:root { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#8a8984; --macro:#d9d8d3;
+        --vdd:#eb6834; --vss:#1baf7a; --crit:#d03b3b; --line:#e3e2dc; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#8f8e88; --macro:#4a4a46;
+  --vdd:#d95926; --vss:#199e70; --crit:#e66767; --line:#383835; } }
+:root[data-theme="dark"] { --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#8f8e88; --macro:#4a4a46;
+  --vdd:#d95926; --vss:#199e70; --crit:#e66767; --line:#383835; }
+body { background:var(--surface); color:var(--ink); font:14px/1.45 system-ui,sans-serif; margin:0 auto; max-width:1100px; padding:16px; }
+.row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:8px 0; }
+label { color:var(--ink2); }
+svg { width:100%; height:auto; border:1px solid var(--line); background:var(--surface); }
+#info { color:var(--ink2); font-size:13px; }
+#tip { position:fixed; pointer-events:none; background:var(--surface); color:var(--ink); border:1px solid var(--line);
+       padding:4px 8px; font-size:12px; display:none; max-width:420px; }
+table { border-collapse:collapse; display:block; overflow-x:auto; } td,th { border-bottom:1px solid var(--line); padding:3px 8px; text-align:left; white-space:nowrap; }
+</style>
+</head>
+<body>
+<h1>FloorplanLab floorplan viewer</h1>
+<div class="row">
+  <input type="file" id="file" accept=".json" aria-label="FloorplanLab TwinLab export JSON">
+  <label><input type="checkbox" id="showDensity" checked> std-cell density</label>
+  <label><input type="checkbox" id="showPdn"> PDN straps</label>
+  <label><input type="checkbox" id="showGroups" checked> logical groups (annotation)</label>
+  <label><input type="checkbox" id="showPins" checked> I/O pins</label>
+</div>
+<div id="info">Load results/&lt;run&gt;/export/twinlab_floorplan.json (or reports/runs/&lt;run&gt;/twinlab_floorplan.json).</div>
+<svg id="svg" viewBox="0 0 100 100" role="img" aria-label="floorplan"></svg>
+<div id="tables"></div>
+<div id="tip"></div>
+<script>
+let data = null;
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const SEQ = ["#fcfcfb","#cde2fb","#9ec5f4","#6da7ec","#3987e5","#256abf","#184f95","#0d366b"];
+function seq(v) { v = Math.max(0, Math.min(1, v)); return SEQ[Math.min(SEQ.length - 1, Math.round(v * (SEQ.length - 1)))]; }
+function el(tag, attrs, parent) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function tip(e, text) {
+  e.addEventListener("mousemove", (ev) => { const t = $("tip"); t.textContent = text; t.style.display = "block";
+    t.style.left = (ev.clientX + 12) + "px"; t.style.top = (ev.clientY + 12) + "px"; });
+  e.addEventListener("mouseleave", () => { $("tip").style.display = "none"; });
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function render() {
+  if (!data) return;
+  const svg = $("svg"); svg.innerHTML = "";
+  const [dx0, dy0, dx1, dy1] = data.die_um, pad = 20;
+  const W = dx1 - dx0, H = dy1 - dy0;
+  svg.setAttribute("viewBox", `${dx0 - pad} ${-(dy1 + pad)} ${W + 2 * pad} ${H + 2 * pad}`);
+  const g = el("g", {transform: "scale(1,-1)"}, svg);          // y up, like the layout
+  el("rect", {x: dx0, y: dy0, width: W, height: H, fill: "none", stroke: css("--ink"), "stroke-width": 2}, g);
+  const [cx0, cy0, cx1, cy1] = data.core_um;
+  el("rect", {x: cx0, y: cy0, width: cx1 - cx0, height: cy1 - cy0, fill: "none", stroke: css("--ink2"),
+              "stroke-dasharray": "8 6", "stroke-width": 1}, g);
+  if ($("showDensity").checked && data.density_grid) {
+    const d = data.density_grid;
+    d.utilisation.forEach((row, iy) => row.forEach((v, ix) => {
+      if (v <= 0) return;
+      const r = el("rect", {x: d.origin_um[0] + ix * d.bin_w_um, y: d.origin_um[1] + iy * d.bin_h_um,
+                            width: d.bin_w_um, height: d.bin_h_um, fill: seq(v)}, g);
+      tip(r, `std-cell density ${v.toFixed(2)}`);
+    }));
+  }
+  if ($("showPdn").checked) {
+    for (const s of data.power_grid.stripes) {
+      const b = s.bbox_um;
+      el("rect", {x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1],
+                  fill: s.net === "VDD" ? css("--vdd") : css("--vss"), opacity: 0.6}, g);
+    }
+  }
+  for (const m of data.macros) {
+    const b = m.bbox_um;
+    const r = el("rect", {x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: css("--macro"),
+                          stroke: css("--ink"), "stroke-width": 1.5}, g);
+    tip(r, `${m.name}\n${m.master} ${m.orient} ${m.status}; pins on ${m.signal_pin_edge} edge; ${m.words}x${m.bits}`);
+    const py = m.signal_pin_edge === "top" ? b[3] : b[1];
+    el("line", {x1: b[0], y1: py, x2: b[2], y2: py, stroke: css("--ink"), "stroke-width": 6}, g);
+  }
+  if ($("showGroups").checked) {
+    for (const gr of data.std_cell_groups) {
+      if (gr.name === "top" || gr.cells < 50) continue;
+      const c = gr.centroid_um;
+      const ci = el("circle", {cx: c[0], cy: c[1], r: 14, fill: css("--surface"), stroke: css("--ink"), "stroke-width": 3}, g);
+      tip(ci, `${gr.label}: ${gr.cells} cells, ${(gr.area_um2 / 1e6).toFixed(3)} mm2 (centroid; annotation only)`);
+      const t = el("text", {x: c[0], y: -c[1] - 22, "text-anchor": "middle", "font-size": Math.max(24, W / 90),
+                            fill: css("--ink"), transform: "scale(1,-1)"}, g);
+      t.textContent = gr.name;
+    }
+  }
+  if ($("showPins").checked) {
+    for (const p of data.io_pins) {
+      const b = p.bbox_um, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const r = el("rect", {x: cx - 6, y: cy - 6, width: 12, height: 12, fill: css("--ink")}, g);
+      tip(r, `${p.name} (${p.dir}) ${p.layer} ${p.edge}`);
+    }
+  }
+  const p = data.provenance, t = data.timing || {}, a = data.area || {}, rt = data.routing || {};
+  $("info").innerHTML = `<b>${esc(p.run_id)}</b> &middot; ${esc(p.design)} (${esc(p.top)}) on ${esc(p.platform)} &middot; ` +
+    `die ${W.toFixed(0)} x ${H.toFixed(0)} um &middot; ${esc(p.label)}<br>` +
+    `pre-route WNS ${t.wns_ns ?? "n/a"} ns, TNS ${t.tns_ns ?? "n/a"} ns &middot; GRT overflow ${rt.overflow_total ?? "n/a"} &middot; ` +
+    `std-cell util of rows ${a.std_cell_util_of_rows ?? "n/a"} &middot; ${esc(data.integration_status)}`;
+  const rows = data.twinlab_blocks.map((b) => `<tr><td>${esc(b.id)}</td><td>${esc(b.type)}</td><td>${b.x.toFixed(1)}</td><td>${b.y.toFixed(1)}</td>` +
+    `<td>${b.width.toFixed(1)}</td><td>${b.height.toFixed(1)}</td><td>${b.cellCount}</td><td>${b.dynamicPowerMw ?? "not established"}</td><td>${esc(b.provenanceNote)}</td></tr>`).join("");
+  $("tables").innerHTML = `<h2>TwinLab blocks (SemiconductorBlock-shaped)</h2><table><tr><th>id</th><th>type</th><th>x</th><th>y</th><th>w</th><th>h</th><th>cells</th><th>power</th><th>provenance</th></tr>${rows}</table>`;
+}
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (d.schema_version !== "1.0.0" || !d.die_um || !d.macros) throw new Error("not a FloorplanLab export (schema 1.0.0)");
+    data = d; render();
+  } catch (err) { $("info").textContent = "Cannot load: " + err.message; }
+});
+for (const id of ["showDensity", "showPdn", "showGroups", "showPins"]) $(id).addEventListener("change", render);
+</script>
+</body>
+</html>

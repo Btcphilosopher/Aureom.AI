@@ -1,0 +1,244 @@
+{
+ "netlist": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/results/ihp-sg13g2/silicaflux_v/base/1_synth.v",
+ "total_cells": 95096,
+ "std_cells": 95084,
+ "sequential_cells": 4512,
+ "latch_cells": 0,
+ "latch_cell_types": {},
+ "icg_cells": 2,
+ "async_reset_flops": 4512,
+ "combinational_cells": 90570,
+ "tie_cells": 46,
+ "buffer_inverter_cells": 20322,
+ "chip_area_incl_macros_um2": 5701826.5314,
+ "macro_area_um2": 4533478.541,
+ "std_cell_area_um2": 1168347.991,
+ "sequential_area_um2": 200727.072,
+ "macros": {
+  "RM_IHPSG13_1P_2048x64_c2_bm_bist": 8,
+  "RM_IHPSG13_1P_512x64_c2_bm_bist": 4
+ },
+ "macro_instances": [
+  {
+   "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[0].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[1].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[2].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[0].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "g_sram[3].g_sfv.u_bank/u_ram/u_macro/g_m[1].g2k.u_mac",
+   "master": "RM_IHPSG13_1P_2048x64_c2_bm_bist"
+  },
+  {
+   "name": "u_tile/g_bank[0].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+   "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+  },
+  {
+   "name": "u_tile/g_bank[1].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+   "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+  },
+  {
+   "name": "u_tile/g_bank[2].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+   "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+  },
+  {
+   "name": "u_tile/g_bank[3].u_ram/u_macro/g_m[0].genblk1.genblk1.g512.u_mac",
+   "master": "RM_IHPSG13_1P_512x64_c2_bm_bist"
+  }
+ ],
+ "unknown_cell_types": {},
+ "unresolved_modules": [],
+ "check_problems": 0,
+ "warnings": [
+  {
+   "message": "Replacing memory \\dout with list of registers. See sfv_sram_macro_bank.sv:0",
+   "count": 1
+  },
+  {
+   "message": "Found unsupported expression 'SCE*SCD+SCE'*D' in pin attribute of cell 'sg13g2_sdfbbp_1' - skipping.",
+   "count": 1
+  }
+ ],
+ "area_by_instance": [
+  {
+   "instance": "u_tile",
+   "module": "$paramod$e1e19d502aed204329de22e3343ebff334944d0d\\sfv_tile",
+   "std_cell_area_um2": 700039.1,
+   "macro_area_um2": 600409.6
+  },
+  {
+   "instance": "u_cpu",
+   "module": "$paramod\\sfv_cpu\\BOOT_ADDR=32'00000000000000000000000000000000",
+   "std_cell_area_um2": 190759.7,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_xbar",
+   "module": "$paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\\sfb_crossbar",
+   "std_cell_area_um2": 55390.2,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_dma",
+   "module": "$paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\\silicaflux_dma",
+   "std_cell_area_um2": 51073.4,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_rom",
+   "module": "$paramod\\sfv_bootrom\\WORDS=s32'00000000000000000000010000000000",
+   "std_cell_area_um2": 37782.9,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_dbg",
+   "module": "sfv_jtag_dbg",
+   "std_cell_area_um2": 18525.0,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_timer",
+   "module": "sfv_timer",
+   "std_cell_area_um2": 17747.8,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_uart",
+   "module": "$paramod\\sfv_uart\\BAUD_RESET=16'0000000011011001",
+   "std_cell_area_um2": 16290.2,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_sysctrl",
+   "module": "sfv_sysctrl",
+   "std_cell_area_um2": 13021.7,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_pbr",
+   "module": "$paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\\sfv_periph_bridge",
+   "std_cell_area_um2": 7172.2,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_mbist",
+   "module": "$paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\\sfv_mbist",
+   "std_cell_area_um2": 6941.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_spi",
+   "module": "sfv_spi",
+   "std_cell_area_um2": 5920.1,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "u_gpio",
+   "module": "$paramod\\sfv_gpio\\N=s32'00000000000000000000000000001000",
+   "std_cell_area_um2": 5278.1,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[0].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[1].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[2].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[3].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[4].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[5].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_v1[6].g_ad.u_ad",
+   "module": "sfb_v1_slave_adapter",
+   "std_cell_area_um2": 3483.6,
+   "macro_area_um2": 0.0
+  },
+  {
+   "instance": "g_sram[0].g_sfv.u_bank",
+   "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+   "std_cell_area_um2": 3327.6,
+   "macro_area_um2": 983267.2
+  },
+  {
+   "instance": "g_sram[1].g_sfv.u_bank",
+   "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+   "std_cell_area_um2": 3327.6,
+   "macro_area_um2": 983267.2
+  },
+  {
+   "instance": "g_sram[2].g_sfv.u_bank",
+   "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+   "std_cell_area_um2": 3327.6,
+   "macro_area_um2": 983267.2
+  },
+  {
+   "instance": "g_sram[3].g_sfv.u_bank",
+   "module": "$paramod\\sfv_sram_slave\\DEPTH=s32'00000000000000000010000000000000",
+   "std_cell_area_um2": 3327.6,
+   "macro_area_um2": 983267.2
+  },
+  {
+   "instance": "u_intc",
+   "module": "$paramod\\sfv_intc\\N=s32'00000000000000000000000000001001",
+   "std_cell_area_um2": 1425.9,
+   "macro_area_um2": 0.0
+  }
+ ],
+ "top_glue_area_um2": 3284.0,
+ "clock_reset_observations": {
+  "icg_instances": 2,
+  "flops_with_async_reset": 4512,
+  "flops_total": 4512,
+  "note": "single functional clock clk + JTAG tck (SDC); resets async-assert/sync-deassert via sfv_rst_sync (u_rs_por/u_rs_sys/u_rs_cpu); the reset tree is unbuffered after synthesis (repair_design buffers it; balanced tree only at CTS)"
+ },
+ "stat_report": "/home/user/Aureom.AI/SilicaFlux-main/silicaflux-floorplanlab/results/synth/silicaflux_v__ihp_sg13g2__b8f5a2cee7ec/reports/ihp-sg13g2/silicaflux_v/base/synth_stat.txt"
+}

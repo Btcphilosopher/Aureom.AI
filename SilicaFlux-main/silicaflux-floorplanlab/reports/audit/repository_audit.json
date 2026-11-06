@@ -1,0 +1,2293 @@
+{
+ "root": "SilicaFlux-main",
+ "files_scanned": 5469,
+ "by_extension": {
+  ".rpt": 1589,
+  ".sv": 664,
+  ".py": 532,
+  ".json": 427,
+  ".log": 390,
+  ".md": 233,
+  ".ys": 197,
+  ".png": 185,
+  ".txt": 138,
+  ".tsv": 111,
+  ".sf": 90,
+  ".csv": 78,
+  ".svg": 65,
+  ".ts": 61,
+  ".hex": 55,
+  ".constr": 55,
+  ".kt": 40,
+  ".svh": 39,
+  ".out": 39,
+  ".sh": 36,
+  ".html": 35,
+  ".yaml": 34,
+  "": 30,
+  ".tcl": 26,
+  ".stdout": 26,
+  ".pdf": 23,
+  ".stat": 21,
+  ".sfx": 20,
+  ".toml": 19,
+  ".r": 19,
+  ".gitignore": 12,
+  ".tsx": 11,
+  ".sdc": 10,
+  ".aig": 10,
+  ".h": 10,
+  ".c": 10,
+  ".xml": 10,
+  ".template": 9,
+  ".cir": 9,
+  ".f": 8
+ },
+ "hdl_files": 705,
+ "sf_files": 90,
+ "sf_format": {
+  "systemverilog": 90
+ },
+ "physical_collateral": [
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/dft/sdc/testcore_dft.sdc",
+   "size": 2938
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/constraints/block.sdc",
+   "size": 3287
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/constraints/silicaflux_top.sdc",
+   "size": 6750
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/synth/silicaflux.sdc",
+   "size": 4001
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/constraints/block_generic.sdc",
+   "size": 860
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/constraints/silicaflux_top.sdc",
+   "size": 5560
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/constraints/tensor_unit.sdc",
+   "size": 1211
+  },
+  {
+   "path": "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/synth/silicaflux.sdc",
+   "size": 4001
+  },
+  {
+   "path": "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/constraints/sfv_soc.sdc",
+   "size": 1200
+  },
+  {
+   "path": "SilicaFlux-main/silicaflux.zip!silicaflux/synth/silicaflux.sdc",
+   "size": 4001
+  }
+ ],
+ "eda_scripts": [
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/dft/sdc/testcore_dft.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/constraints/block.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/constraints/silicaflux_top.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/flow/openroad/pnr.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/flow/sta/sta.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/flow/sta/tl_report.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/fetch_unit/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/forwarding_unit/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/memory_controller/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/noc_interconnect/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/register_bank/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/register_bank_25/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/sf_alu/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/sf_alu_mulcsa/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/sf_decoder/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/tensor_unit/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/vector_engine/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/vector_engine_ex2/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/audit/vector_engine_pipe/audit.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_alu/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_alu_mulcsa/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_decoder/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine_ex2/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/sf_alu/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/sf_alu_mulcsa/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/sf_decoder/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/vector_engine/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/vector_engine_ex2/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/vector_engine_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/fetch_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/forwarding_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/memory_controller/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/noc_interconnect/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/register_bank/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/register_bank_25/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/sf_alu/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/sf_alu_mulcsa/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/sf_decoder/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_ex2/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/scripts/install_tools.sh",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/synth/vivado/synth.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/synth/quartus/synth.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/synth/silicaflux.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/constraints/silicaflux_top.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/constraints/tl_common.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/flow/openroad/pnr.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/flow/sta/sta.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/flow/sta/tl_report.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/gf180mcu/control_core/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/gf180mcu/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/gf180mcu/tensor_unit_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine_pipe_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/control_core/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/tensor_unit_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/vector_engine_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/ihp-sg13g2/vector_engine_pipe_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/compute_tile/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/compute_tile_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/control_core/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/decoder/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/memory_controller/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/noc_router/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/register_bank/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/scheduler/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/sfx_mac/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/sfx_systolic_4x4/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/silicaflux_top/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/tensor_unit/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/tensor_unit_pipe/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/tile_interface/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_l8_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_pipe_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/reports/runs/sky130hd/vector_engine_pipe_l8_ctx/synth.ys",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/scripts/install_tools.sh",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/synth/quartus/synth.tcl",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/synth/silicaflux.sdc",
+  "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/synth/vivado/synth.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/openroad/pdn_silicaflux_v_generic.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/openroad/pdn_silicaflux_v_gf180mcu.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/openroad/pdn_silicaflux_v_sky130.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/openroad/pdn_silicaflux_x_generic.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/results/silicaflux_v/openroad/pdn_silicaflux_v_generic.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/results/silicaflux_v/openroad/pdn_silicaflux_v_gf180mcu.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/results/silicaflux_v/openroad/pdn_silicaflux_v_sky130.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/results/silicaflux_x_future/openroad/pdn_silicaflux_x_generic.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/scripts/openroad_stub_check.tcl",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/scripts/run_all.sh",
+  "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/scripts/synth_rtl.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/pdk/fetch_open_pdks.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/scripts/collect_reports.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/scripts/regress.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/scripts/lint.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/scripts/repo_intake.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/reports/synth/sky130hd_mini32k/synth.ys",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/reports/synth/sky130hd/synth.ys",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/reports/synth/ihp_sg13g2/synth.ys",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/constraints/sfv_soc.sdc",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/scripts/or_place.tcl",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/scripts/run_asic.sh",
+  "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/scripts/run_place.sh",
+  "SilicaFlux-main/silicaflux.zip!silicaflux/synth/vivado/synth.tcl",
+  "SilicaFlux-main/silicaflux.zip!silicaflux/synth/quartus/synth.tcl",
+  "SilicaFlux-main/silicaflux.zip!silicaflux/synth/silicaflux.sdc"
+ ],
+ "modules_declared": 506,
+ "module_index": {
+  "ActionSelector": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "ActionValueTable": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "ConstraintEngine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "FeatureEngine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "LearningEngine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "OutputModel": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "Predictor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "RM_IHPSG13_1P_1024x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_1024x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_1024x64_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_1024x8_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_2048x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_2048x64_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_256x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_256x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_256x48_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_256x64_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_256x8_c3_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_4096x16_c3_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_4096x8_c3_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_512x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_512x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_512x64_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_512x8_c3_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_1P_64x64_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_1024x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_1024x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_256x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_256x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_256x8_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_512x16_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_512x32_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_512x8_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RM_IHPSG13_2P_64x22_c2_bm_bist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "RewardEngine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "SafetyWatchdog": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "WeightUpdater": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!dsl/silicaflux_ml.sf"
+  ],
+  "action_selector": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/action_selector.sv"
+  ],
+  "action_value_table": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/action_selector.sv"
+  ],
+  "alu": [
+   "SilicaFlux-main/RISC-V CPU.zip!alu.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_alu.zip!silicaflux/rtl/alu.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/alu.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/alu.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_alu.zip!silicaflux/rtl/alu.sf",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/alu.sv"
+  ],
+  "alu_control": [
+   "SilicaFlux-main/RISC-V CPU.zip!alu_control.sv"
+  ],
+  "array_multiplier": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/multipliers/array_multiplier.sv"
+  ],
+  "async_fifo": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/async_fifo.sv"
+  ],
+  "axi_lite_slave": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/axi_lite/axi_lite_slave.sv"
+  ],
+  "axi_lite_tb": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/tb/axi_lite_tb.sv"
+  ],
+  "barrel_shifter": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/shifters/barrel_shifter.sv"
+  ],
+  "boot_rom": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/memory/boot_rom.sv"
+  ],
+  "carry_lookahead_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/adders/carry_lookahead_adder.sv"
+  ],
+  "carry_select_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/adders/carry_select_adder.sv"
+  ],
+  "cla_block": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/adders/carry_lookahead_adder.sv"
+  ],
+  "comparator": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/comparators/comparator.sv"
+  ],
+  "compute_tile": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/compute_tile.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/compute_tile.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/compute_tile.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/compute_tile.sv"
+  ],
+  "constraint_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/constraint_engine.sv"
+  ],
+  "control": [
+   "SilicaFlux-main/RISC-V CPU.zip!control.sv"
+  ],
+  "control_core": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/control_core.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/control_core.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/control_core.sv"
+  ],
+  "cpu_bfm": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/tb/models/cpu_bfm.sv"
+  ],
+  "cpu_core": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/cpu_core.sv"
+  ],
+  "cpu_if_adapter": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/cpu/cpu_if_adapter.sv"
+  ],
+  "cpu_scoreboard": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/tb/cpu_scoreboard.sv"
+  ],
+  "cpu_tb": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/tb/cpu_tb.sv"
+  ],
+  "cpu_top": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/cpu_top.sv",
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/cpu_top.sv"
+  ],
+  "data_mem": [
+   "SilicaFlux-main/RISC-V CPU.zip!data_mem.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/data_mem.sv"
+  ],
+  "data_memory": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/memories.sv"
+  ],
+  "deadlock_formal_props": [
+   "SilicaFlux-main/formal verification.zip!deadlock_formal_props.sv"
+  ],
+  "deadlock_tb": [
+   "SilicaFlux-main/formal verification.zip!deadlock_bug_tb.sv"
+  ],
+  "decoder": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip!silicaflux/rtl/decoder.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/decoder.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/decoder.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip!silicaflux/rtl/decoder.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/decoder.sv"
+  ],
+  "demux": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/mux/demux.sv"
+  ],
+  "direct_mapped_cache": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/direct_mapped_cache.sv"
+  ],
+  "dma_burst_engine": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_burst_engine.sv"
+  ],
+  "dma_control_regs": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_control_regs.sv"
+  ],
+  "dma_fifo": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_fifo.sv"
+  ],
+  "dma_irq": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_irq.sv"
+  ],
+  "dma_transfer_engine": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_transfer_engine.sv"
+  ],
+  "dma_validate": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_validate.sv"
+  ],
+  "dp_ram": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/dp_ram.sv"
+  ],
+  "elevator_ctrl": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/elevator/elevator_ctrl.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!elevator_ctrl.sv"
+  ],
+  "ex_mem_reg": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/pipeline_regs.sv"
+  ],
+  "ex_stage": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/ex_stage.sv"
+  ],
+  "feature_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/feature_engine.sv"
+  ],
+  "fetch_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip!silicaflux/rtl/fetch_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/silicaflux_rtl.zip!silicaflux/rtl/fetch_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/fetch_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/fetch_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/fetch_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl.zip!silicaflux/rtl/fetch_unit.sf"
+  ],
+  "fft_butterfly_r2": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/fft_butterfly_r2.sv"
+  ],
+  "fifo_bug_tb": [
+   "SilicaFlux-main/formal verification.zip!fifo_bug_tb.sv"
+  ],
+  "fifo_count_tb": [
+   "SilicaFlux-main/formal verification.zip!fifo_bug_tb.sv"
+  ],
+  "fifo_flag_tb": [
+   "SilicaFlux-main/formal verification.zip!fifo_bug_tb.sv"
+  ],
+  "fifo_formal_props": [
+   "SilicaFlux-main/formal verification.zip!fifo_formal_props.sv"
+  ],
+  "fifo_sva": [
+   "SilicaFlux-main/UVM_Inspired_Architecture.zip!fifo_sva.sv"
+  ],
+  "fifo_tb_top": [
+   "SilicaFlux-main/UVM_Inspired_Architecture.zip!fifo_tb_top.sv"
+  ],
+  "fifo_underflow_tb": [
+   "SilicaFlux-main/formal verification.zip!fifo_bug_tb.sv"
+  ],
+  "fir_filter": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/fir_filter.sv"
+  ],
+  "forward_unit": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/forward_unit.sv"
+  ],
+  "forwarding_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.zip!forwarding_unit/forwarding_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.zip!forwarding_unit/forwarding_unit.sf"
+  ],
+  "full_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/primitives/full_adder.sv"
+  ],
+  "fv_alu_bmc": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_alu_bmc.sv"
+  ],
+  "fv_bank_ctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_bank_ctrl.sv"
+  ],
+  "fv_cpu_bus": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_cpu_bus.sv"
+  ],
+  "fv_csa": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_csa_bad": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_dma_engine": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_dma_engine.sv"
+  ],
+  "fv_fifo": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_fifo.sv"
+  ],
+  "fv_mul_lo": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_mul_lo_bad": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_reduce": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_reduce_bad": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_datapath.sv"
+  ],
+  "fv_sfb_arbiter": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_sfb_arbiter.sv"
+  ],
+  "fv_sfb_skid": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_sfb_skid.sv"
+  ],
+  "fv_sfb_xbar": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_sfb_xbar.sv"
+  ],
+  "fv_sram_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_1r1w.sv"
+  ],
+  "fv_sram_sp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_sp.sv"
+  ],
+  "fv_sram_tdp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_tdp.sv"
+  ],
+  "fv_tap": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_tap.sv"
+  ],
+  "fv_vector_bmc": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_vector_bmc.sv"
+  ],
+  "fv_xbar": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_xbar.sv"
+  ],
+  "gf180mcu_fd_ip_sram__sram128x8m8wm1": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "gf180mcu_fd_ip_sram__sram256x8m8wm1": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "gf180mcu_fd_ip_sram__sram512x8m8wm1": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "gf180mcu_fd_ip_sram__sram64x8m8wm1": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "half_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/primitives/half_adder.sv"
+  ],
+  "handshake_controller": [
+   "SilicaFlux-main/formal verification.zip!handshake_controller.sv"
+  ],
+  "handshake_formal_props": [
+   "SilicaFlux-main/formal verification.zip!handshake_formal_props.sv"
+  ],
+  "hash_core": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/hash_core.sv"
+  ],
+  "hash_core_array": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/hash_core_array.sv"
+  ],
+  "hazard_unit": [
+   "SilicaFlux-main/RISC-V CPU.zip!hazard_unit.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/hazard_unit.sv",
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/hazard_unit.sv"
+  ],
+  "hs_both_bugs_tb": [
+   "SilicaFlux-main/formal verification.zip!handshake_bug_tb.sv"
+  ],
+  "hs_data_change_tb": [
+   "SilicaFlux-main/formal verification.zip!handshake_bug_tb.sv"
+  ],
+  "hs_valid_drop_tb": [
+   "SilicaFlux-main/formal verification.zip!handshake_bug_tb.sv"
+  ],
+  "i2c_controller": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/i2c/i2c_controller.sv"
+  ],
+  "i2c_tb": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/tb/i2c_tb.sv"
+  ],
+  "id_ex_reg": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/pipeline_regs.sv"
+  ],
+  "id_stage": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/id_stage.sv"
+  ],
+  "if_id_reg": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/pipeline_regs.sv"
+  ],
+  "if_stage": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/if_stage.sv"
+  ],
+  "imm_gen": [
+   "SilicaFlux-main/RISC-V CPU.zip!imm_gen.sv"
+  ],
+  "instr_gen": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/tb/instr_gen.sv"
+  ],
+  "instr_mem": [
+   "SilicaFlux-main/RISC-V CPU.zip!instr_mem.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/instr_mem.sv"
+  ],
+  "instruction_memory": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/memories.sv"
+  ],
+  "learning_fsm": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/learning_fsm.sv"
+  ],
+  "learning_memory": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/learning_memory.sv"
+  ],
+  "lfsr_prng": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/action_selector.sv"
+  ],
+  "mac_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/predictor.sv",
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/mac_unit.sv"
+  ],
+  "mem_stage": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/mem_stage.sv"
+  ],
+  "mem_wb_reg": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/pipeline_regs.sv"
+  ],
+  "memory_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/memory_controller.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/integration/silicaflux25/memory_controller_sramlib.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/memory_controller.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/memory_controller.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/memory_controller.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/memory_controller.sv"
+  ],
+  "miner_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/control/miner_controller.sv"
+  ],
+  "miner_protocol_checker": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/formal/sha256_properties.sv"
+  ],
+  "miner_top": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/miner_top.sv"
+  ],
+  "mux": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/mux/mux.sv"
+  ],
+  "nbits_expand": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/target/target_compare.sv"
+  ],
+  "noc_interconnect": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/noc_interconnect.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_interconnect.sv"
+  ],
+  "noc_router": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_router.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/noc_router.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_router.sv"
+  ],
+  "nonce_allocator": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/nonce/nonce_allocator.sv"
+  ],
+  "output_model": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/predictor.sv"
+  ],
+  "pe_telemetry_bus": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/telemetry_engine.sv"
+  ],
+  "predictor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/predictor.sv"
+  ],
+  "priority_arbiter": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/arbitration/priority_arbiter.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!priority_arbiter.sv"
+  ],
+  "priority_encoder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/encoders/priority_encoder.sv"
+  ],
+  "regfile": [
+   "SilicaFlux-main/RISC-V CPU.zip!regfile.sv"
+  ],
+  "register_bank": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/register_bank.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/register_bank (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/register_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/register_bank.sv",
+   "SilicaFlux-main/register_bank (1).sf"
+  ],
+  "register_file": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/register_file.sv",
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/register_file.sv"
+  ],
+  "resource_allocator": [
+   "SilicaFlux-main/formal verification.zip!resource_allocator.sv"
+  ],
+  "reward_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/reward_engine.sv"
+  ],
+  "ring_channel": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/feature_engine.sv"
+  ],
+  "ripple_carry_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/adders/ripple_carry_adder.sv"
+  ],
+  "round_robin_arbiter": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/arbitration/round_robin_arbiter.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!round_robin_arbiter.sv"
+  ],
+  "rv32i_core": [
+   "SilicaFlux-main/RISC-V CPU.zip!rv32i_core.sv"
+  ],
+  "rv32i_tb": [
+   "SilicaFlux-main/RISC-V CPU.zip!rv32i_tb.sv"
+  ],
+  "safe_tb": [
+   "SilicaFlux-main/formal verification.zip!deadlock_bug_tb.sv"
+  ],
+  "safety_watchdog": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/constraint_engine.sv"
+  ],
+  "sat_abs": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "sat_add": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "sat_mul": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "sat_neg": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "sat_shift": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "sat_sub": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/rtl/sat_arith.sv"
+  ],
+  "scheduler": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/scheduler.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/scheduler.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/scheduler.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/scheduler.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/scheduler.sv"
+  ],
+  "seq_det_1010": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/sequence_detector/seq_det_generic.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!seq_det_generic.sv"
+  ],
+  "seq_det_1011_mealy": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/sequence_detector/seq_det_1011_mealy.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!seq_det_1011_mealy.sv"
+  ],
+  "seq_det_1011_moore": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/sequence_detector/seq_det_1011_moore.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!seq_det_1011_moore.sv"
+  ],
+  "seq_det_110": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/sequence_detector/seq_det_generic.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!seq_det_generic.sv"
+  ],
+  "seq_det_generic": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/sequence_detector/seq_det_generic.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!seq_det_generic.sv"
+  ],
+  "set_assoc_cache": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/set_assoc_cache.sv"
+  ],
+  "sf_alu": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/alu (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/alu (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/alu.sf",
+   "SilicaFlux-main/alu.sf"
+  ],
+  "sf_alu_mulcsa": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_alu_mulcsa.sv"
+  ],
+  "sf_clk_ctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/constraints/silicaflux_top/stub.v"
+  ],
+  "sf_compute_tile_pipe": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_compute_tile_pipe.sv"
+  ],
+  "sf_csa_tree": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_csa_tree.sv"
+  ],
+  "sf_ctrl_regs": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/top/sf_ctrl_regs.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/top/sf_ctrl_regs.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/top/sf_ctrl_regs.sv"
+  ],
+  "sf_decoder": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/decoder.sf",
+   "SilicaFlux-main/decoder.sf"
+  ],
+  "sf_dma": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv"
+  ],
+  "sf_dma_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv"
+  ],
+  "sf_ecc_secded_dec": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_dec.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_dec.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_dec.sv"
+  ],
+  "sf_ecc_secded_enc": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_enc.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_enc.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/ecc/sf_ecc_secded_enc.sv"
+  ],
+  "sf_extmem_model": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/common/sf_extmem_model.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/common/sf_extmem_model.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/common/sf_extmem_model.sv"
+  ],
+  "sf_fifo": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/common/sf_fifo.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_fifo.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_fifo.sv"
+  ],
+  "sf_macro_1rw_leaf": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf_bb.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf_bb.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/macro_stubs/sf_macro_1rw_leaf_bb.sv"
+  ],
+  "sf_mbist_march": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/mbist/sf_mbist_march.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/mbist/sf_mbist_march.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/mbist/sf_mbist_march.sv"
+  ],
+  "sf_mc25_vport_bridge": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/bridge/sf_mc25_vport_bridge.sv"
+  ],
+  "sf_mem_router": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/interconnect/sf_mem_router.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/interconnect/sf_mem_router.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/interconnect/sf_mem_router.sv"
+  ],
+  "sf_memflow_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/top/sf_memflow_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/top/sf_memflow_top.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/top/sf_memflow_top.sv"
+  ],
+  "sf_mul_lo_csa": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_mul_lo_csa.sv"
+  ],
+  "sf_mul_lo_pp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_mul_lo_pipe.sv"
+  ],
+  "sf_mul_lo_sum": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_mul_lo_pipe.sv"
+  ],
+  "sf_pg_filter": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/sf_sync.sv"
+  ],
+  "sf_pwr_seq": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/sf_pwr_seq.sv"
+  ],
+  "sf_reduce_tree": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_reduce_tree.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_reduce_tree.sv"
+  ],
+  "sf_reuse_buffer": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/accel/sf_reuse_buffer.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_reuse_buffer.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_reuse_buffer.sv"
+  ],
+  "sf_rr_arbiter": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/common/sf_rr_arbiter.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_rr_arbiter.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_rr_arbiter.sv"
+  ],
+  "sf_rst_clk_ctrl": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/sf_rst_clk_ctrl.sv"
+  ],
+  "sf_rst_sync": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/sf_sync.sv"
+  ],
+  "sf_skid_buffer": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/common/sf_skid_buffer.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_skid_buffer.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/common/sf_skid_buffer.sv"
+  ],
+  "sf_spm_banked": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/spm/sf_spm_banked.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/spm/sf_spm_banked.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/spm/sf_spm_banked.sv"
+  ],
+  "sf_sram_1r1w_inferred": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1r1w_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1r1w_inferred.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1r1w_inferred.sv"
+  ],
+  "sf_sram_1rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw.sv"
+  ],
+  "sf_sram_1rw_inferred": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw_inferred.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw_inferred.sv"
+  ],
+  "sf_sram_2rw_inferred": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_2rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_2rw_inferred.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_2rw_inferred.sv"
+  ],
+  "sf_sram_bank": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_bank.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_bank.sv"
+  ],
+  "sf_sram_bank_decode": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/sram-decoder.sf"
+  ],
+  "sf_sync2": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/sf_sync.sv"
+  ],
+  "sf_tensor_array": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv"
+  ],
+  "sf_tensor_unit_pipe": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_tensor_unit_pipe.sv"
+  ],
+  "sf_vec_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv"
+  ],
+  "sf_vector_engine_pipe": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_vector_engine_pipe.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_vector_engine_pipe.sv"
+  ],
+  "sfb_addr_decoder": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_addr_decoder.sv"
+  ],
+  "sfb_arbiter": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_arbiter.sv"
+  ],
+  "sfb_crossbar": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_crossbar.sv"
+  ],
+  "sfb_error_slave": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_error_slave.sv"
+  ],
+  "sfb_perf_counters": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_perf_counters.sv"
+  ],
+  "sfb_protocol_checker": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/common/sfb_protocol_checker.sv"
+  ],
+  "sfb_reg_slice": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_reg_slice.sv"
+  ],
+  "sfb_req_mux": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_req_mux.sv"
+  ],
+  "sfb_rsp_router": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_rsp_router.sv"
+  ],
+  "sfb_shared_bus": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_shared_bus.sv"
+  ],
+  "sfb_skid_buffer": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_skid_buffer.sv"
+  ],
+  "sfb_sram_1r1w_slave": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/mem/sfb_sram_1r1w_slave.sv"
+  ],
+  "sfb_sram_slave": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/mem/sfb_sram_slave.sv"
+  ],
+  "sfb_trace_monitor": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/common/sfb_trace_monitor.sv"
+  ],
+  "sfb_v1_slave_adapter": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_v1_slave_adapter.sv"
+  ],
+  "sfv_bootrom": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/mem/sfv_mem_slaves.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/mem/sfv_mem_slaves.sv"
+  ],
+  "sfv_bootrom_image": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/reports/firmware/sfv_bootrom_image.sv"
+  ],
+  "sfv_clkgate": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/common/sfv_clkgate.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/common/sfv_clkgate.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/tech/sky130/sfv_clkgate.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/tech/ihp_sg13g2/sfv_clkgate.sv"
+  ],
+  "sfv_cpu": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/cpu/sfv_cpu.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/cpu/sfv_cpu.sv"
+  ],
+  "sfv_fifo": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/common/sfv_common.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/common/sfv_common.sv"
+  ],
+  "sfv_gpio": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_periph_misc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_periph_misc.sv"
+  ],
+  "sfv_intc": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_periph_misc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_periph_misc.sv"
+  ],
+  "sfv_jtag_dbg": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/debug/sfv_jtag.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/debug/sfv_jtag.sv"
+  ],
+  "sfv_jtag_tap": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/debug/sfv_jtag.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/debug/sfv_jtag.sv"
+  ],
+  "sfv_mac_array": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_tensor_engine.sv"
+  ],
+  "sfv_mbist": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/mem/sfv_mbist.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/mem/sfv_mbist.sv"
+  ],
+  "sfv_memory_subsystem_example": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/examples/sfv_memory_subsystem_example.sv"
+  ],
+  "sfv_periph_bridge": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/bus/sfv_periph_bridge.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/bus/sfv_periph_bridge.sv"
+  ],
+  "sfv_rst_sync": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/common/sfv_common.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/common/sfv_common.sv"
+  ],
+  "sfv_soc": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/top/sfv_soc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/top/sfv_soc.sv"
+  ],
+  "sfv_soc_df": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/soc/sfv_soc_df.sv"
+  ],
+  "sfv_spi": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_spi.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_spi.sv"
+  ],
+  "sfv_sram_macro_bank": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/tech/sky130/sfv_sram_macro_bank.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/tech/ihp_sg13g2/sfv_sram_macro_bank.sv"
+  ],
+  "sfv_sram_slave": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/mem/sfv_mem_slaves.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/mem/sfv_mem_slaves.sv"
+  ],
+  "sfv_sram_sp": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/mem/sfv_sram_sp.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/mem/sfv_sram_sp.sv"
+  ],
+  "sfv_sync": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/common/sfv_common.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/common/sfv_common.sv"
+  ],
+  "sfv_sysctrl": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_sysctrl.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_sysctrl.sv"
+  ],
+  "sfv_tensor_engine": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_tensor_engine.sv"
+  ],
+  "sfv_tile": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_tile.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_tile.sv"
+  ],
+  "sfv_timer": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_periph_misc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_periph_misc.sv"
+  ],
+  "sfv_uart": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/periph/sfv_uart.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/periph/sfv_uart.sv"
+  ],
+  "sfv_ulx3s_top": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/fpga/ulx3s/sfv_ulx3s_top.sv"
+  ],
+  "sfv_vec_engine": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_vec_engine.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_vec_engine.sv"
+  ],
+  "sfv_xbar": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/bus/sfv_xbar.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/bus/sfv_xbar.sv"
+  ],
+  "sfx_accumulator": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/arithmetic/sfx_accumulator.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/arithmetic/sfx_accumulator.sv"
+  ],
+  "sfx_dma": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/dma/sfx_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/dma/sfx_dma.sv"
+  ],
+  "sfx_fifo": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/common/sfx_fifo.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/common/sfx_fifo.sv"
+  ],
+  "sfx_gemm_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/gemm/sfx_gemm_controller.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/gemm/sfx_gemm_controller.sv"
+  ],
+  "sfx_mac": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/arithmetic/sfx_mac.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/arithmetic/sfx_mac.sv"
+  ],
+  "sfx_pe": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/tensor/sfx_pe.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/tensor/sfx_pe.sv"
+  ],
+  "sfx_pipeline_reg": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/common/sfx_pipeline_reg.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/common/sfx_pipeline_reg.sv"
+  ],
+  "sfx_register": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/common/sfx_register.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/common/sfx_register.sv"
+  ],
+  "sfx_saturate": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/arithmetic/sfx_saturate.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/arithmetic/sfx_saturate.sv"
+  ],
+  "sfx_skid_buffer": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/common/sfx_skid_buffer.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/common/sfx_skid_buffer.sv"
+  ],
+  "sfx_sram_interface": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/memory/sfx_sram_interface.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/memory/sfx_sram_interface.sv"
+  ],
+  "sfx_systolic_array": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/tensor/sfx_systolic_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/tensor/sfx_systolic_array.sv"
+  ],
+  "sha256_big_sigma0": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_sigma.sv"
+  ],
+  "sha256_big_sigma1": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_sigma.sv"
+  ],
+  "sha256_ch": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_ch.sv"
+  ],
+  "sha256_compressor": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_compressor.sv"
+  ],
+  "sha256_double_hash": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_double_hash.sv"
+  ],
+  "sha256_maj": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_maj.sv"
+  ],
+  "sha256_message_schedule": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_message_schedule.sv"
+  ],
+  "sha256_pipeline": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/pipeline/sha256_pipeline.sv"
+  ],
+  "sha256_round": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_round.sv"
+  ],
+  "sha256_schedule_step": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_schedule_step.sv"
+  ],
+  "sha256_small_sigma0": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_sigma.sv"
+  ],
+  "sha256_small_sigma1": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/sha256/sha256_sigma.sv"
+  ],
+  "silicaflux_dma": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/silicaflux_dma.sv"
+  ],
+  "silicaflux_ml_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/silicaflux_ml_top.sv"
+  ],
+  "silicaflux_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/constraints/silicaflux_top/stub.v",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip!silicaflux/rtl/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/silicaflux_rtl.zip!silicaflux/rtl/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/silicaflux_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv"
+  ],
+  "sky130_sram_1kbyte_1rw1r_32x256_8": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "sky130_sram_1kbyte_1rw1r_8x1024_8": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "sky130_sram_1rw1r_128x256_8": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/asic/tech/sky130/models/sky130_sram_1rw1r_128x256_8.v"
+  ],
+  "sky130_sram_2kbyte_1rw1r_32x512_8": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv"
+  ],
+  "soc_fabric": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/bus/soc_fabric.sv"
+  ],
+  "soc_gpio": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/peripherals/soc_gpio.sv"
+  ],
+  "soc_irq_ctrl": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/peripherals/soc_irq_ctrl.sv"
+  ],
+  "soc_sram": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/memory/soc_sram.sv"
+  ],
+  "soc_timer": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/peripherals/soc_timer.sv"
+  ],
+  "soc_top": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/soc_top.sv"
+  ],
+  "soc_uart": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/peripherals/soc_uart.sv"
+  ],
+  "sp_ram": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/sp_ram.sv"
+  ],
+  "spi_master": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/spi/spi_master.sv"
+  ],
+  "spi_slave": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/spi/spi_slave.sv"
+  ],
+  "spi_tb": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/tb/spi_tb.sv"
+  ],
+  "spi_top": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/spi/spi_top.sv"
+  ],
+  "sram_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_1r1w.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_1r1w.sv"
+  ],
+  "sram_asic_array": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_asic_array.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_asic_array.sv"
+  ],
+  "sram_backend_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_1r1w.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_backend_1r1w.sv"
+  ],
+  "sram_backend_1rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_1rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_backend_1rw.sv"
+  ],
+  "sram_backend_2rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_2rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_backend_2rw.sv"
+  ],
+  "sram_bank_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_bank_controller.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_bank_controller.sv"
+  ],
+  "sram_fpga_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1r1w.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1r1w.sv"
+  ],
+  "sram_fpga_1rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1rw.sv"
+  ],
+  "sram_fpga_2rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_2rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_2rw.sv"
+  ],
+  "sram_fpga_selftest_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/fpga/sram_fpga_selftest_top.sv"
+  ],
+  "sram_generic_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1r1w.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1r1w.sv"
+  ],
+  "sram_generic_1rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1rw.sv"
+  ],
+  "sram_generic_2rw": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_2rw.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_2rw.sv"
+  ],
+  "sram_leaf_gf180": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_gf180.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_gf180.sv"
+  ],
+  "sram_leaf_ihp1p": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp1p.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp1p.sv"
+  ],
+  "sram_leaf_ihp2p": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp2p.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp2p.sv"
+  ],
+  "sram_leaf_sky130": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_sky130.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_sky130.sv"
+  ],
+  "sram_mbist_adapter": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_mbist_adapter.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_mbist_adapter.sv"
+  ],
+  "sram_mbist_march": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_mbist_march.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_mbist_march.sv"
+  ],
+  "sram_rsp_path": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_rsp_path.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_rsp_path.sv"
+  ],
+  "sram_sp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_sp.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_sp.sv"
+  ],
+  "sram_sp_if": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/intf/sram_if.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/intf/sram_if.sv"
+  ],
+  "sram_tdp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_tdp.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/sram_tdp.sv"
+  ],
+  "sram_uart_tx": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/fpga/sram_uart_tx.sv"
+  ],
+  "stub_violator": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/system/tb_formal_checker_selftest.sv"
+  ],
+  "sva_gray_check": [
+   "SilicaFlux-main/formal verification.zip!sva_assertion_lib.sv"
+  ],
+  "sva_handshake_check": [
+   "SilicaFlux-main/formal verification.zip!sva_assertion_lib.sv"
+  ],
+  "syn_dma": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_ecc64": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_memflow_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_router2": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_spm_256k": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_tensor_8x8": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "syn_vec4x16": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv"
+  ],
+  "sync_fifo": [
+   "SilicaFlux-main/UVM_Inspired_Architecture.zip!sync_fifo.sv",
+   "SilicaFlux-main/formal verification.zip!sync_fifo.sv",
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/rtl/sync_fifo.sv"
+  ],
+  "target_compare": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/target/target_compare.sv"
+  ],
+  "tb_accel": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_accel.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_accel.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_accel.sv"
+  ],
+  "tb_arbitration": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/tb/tb_arbitration.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!tb_arbitration.sv"
+  ],
+  "tb_array_multiplier": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_array_multiplier.sv"
+  ],
+  "tb_async_fifo": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_async_fifo.sv"
+  ],
+  "tb_barrel_shifter": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_barrel_shifter.sv"
+  ],
+  "tb_bug_load_use": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/bugs/tb_bug_load_use.sv"
+  ],
+  "tb_bug_noc_dup": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/bugs/tb_bug_noc_dup.sv"
+  ],
+  "tb_bug_store_data": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/bugs/tb_bug_store_data.sv"
+  ],
+  "tb_bug_tif_rx": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/bugs/tb_bug_tif_rx.sv"
+  ],
+  "tb_carry_lookahead_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_carry_lookahead_adder.sv"
+  ],
+  "tb_carry_select_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_carry_select_adder.sv"
+  ],
+  "tb_comparator": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_comparator.sv"
+  ],
+  "tb_compute_tile": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_compute_tile.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_compute_tile.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tb_compute_tile.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_compute_tile.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_compute_tile.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_compute_tile.sv"
+  ],
+  "tb_cpu": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/cpu/tb_cpu.sv"
+  ],
+  "tb_cpu_top": [
+   "SilicaFlux-main/cpu_core.zip!cpu_core/tb/tb_cpu_top.sv"
+  ],
+  "tb_deadlock": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/system/tb_deadlock.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_deadlock.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_deadlock.sv"
+  ],
+  "tb_debug": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_debug.sv"
+  ],
+  "tb_demux": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_demux.sv"
+  ],
+  "tb_dft_iso": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_dft_iso.sv"
+  ],
+  "tb_direct_mapped_cache": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_direct_mapped_cache.sv"
+  ],
+  "tb_dma": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/dma/tb_dma.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv"
+  ],
+  "tb_dp_ram": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_dp_ram.sv"
+  ],
+  "tb_ecc": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_ecc.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_ecc.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_ecc.sv"
+  ],
+  "tb_elevator": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/tb/tb_elevator.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!tb_elevator.sv"
+  ],
+  "tb_eq_alu": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/tb/equiv/tb_eq_alu.sv"
+  ],
+  "tb_eq_tensor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/equiv/tb_eq_tensor.sv"
+  ],
+  "tb_eq_tile": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/equiv/tb_eq_tile.sv"
+  ],
+  "tb_eq_vector": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/tb/equiv/tb_eq_vector.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/equiv/tb_eq_vector.sv"
+  ],
+  "tb_fft_butterfly": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/tb/tb_fft_butterfly.sv"
+  ],
+  "tb_fir_filter": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/tb/tb_fir_filter.sv"
+  ],
+  "tb_fixed_point": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/tb/tb_fixed_point.sv"
+  ],
+  "tb_formal_checker_selftest": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/system/tb_formal_checker_selftest.sv"
+  ],
+  "tb_forwarding_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.zip!forwarding_unit/verif/tb_forwarding_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/forwarding_unit.zip!forwarding_unit/verif/tb_forwarding_unit.sv"
+  ],
+  "tb_hash_core": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/integration/tb_hash_core.sv"
+  ],
+  "tb_hash_core_array": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/system/tb_hash_core_array.sv"
+  ],
+  "tb_mac_unit": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/tb/tb_mac_unit.sv"
+  ],
+  "tb_mbist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_mbist.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_mbist.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_mbist.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_mbist.sv"
+  ],
+  "tb_memory_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_memory_controller.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_memory_controller.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_memory_controller.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_memory_controller.sf",
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_memory_controller.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_memory_controller.sv"
+  ],
+  "tb_memorylab_bank_trace": [
+   "SilicaFlux-main/silicaflux-memorylab.zip!silicaflux-memorylab/rtl_harness/tb_memorylab_bank_trace.sv"
+  ],
+  "tb_memorylab_tile_latency": [
+   "SilicaFlux-main/silicaflux-memorylab.zip!silicaflux-memorylab/rtl_harness/tb_memorylab_tile_latency.sv"
+  ],
+  "tb_miner_top": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/system/tb_miner_top.sv"
+  ],
+  "tb_mode_sec": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_mode_sec.sv"
+  ],
+  "tb_mux": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_mux.sv"
+  ],
+  "tb_noc_interconnect": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tb_noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_noc_interconnect.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_noc_interconnect.sv"
+  ],
+  "tb_nonce_allocator": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_nonce_allocator.sv"
+  ],
+  "tb_param_smoke": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/system/tb_param_smoke.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_param_smoke.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_param_smoke.sv"
+  ],
+  "tb_periph_wrap": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/unit/tb_periph_wrap.sv"
+  ],
+  "tb_priority_encoder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_priority_encoder.sv"
+  ],
+  "tb_ripple_carry_adder": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_ripple_carry_adder.sv"
+  ],
+  "tb_router": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_router.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_router.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_router.sv"
+  ],
+  "tb_rst_clk": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_rst_clk.sv"
+  ],
+  "tb_sat_arith": [
+   "SilicaFlux-main/dsp_arithmetic.zip!dsp_arithmetic/tb/tb_sat_arith.sv"
+  ],
+  "tb_scheduler": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_scheduler.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_scheduler.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_scheduler.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_scheduler.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_scheduler.sv"
+  ],
+  "tb_sequence_detectors": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/tb/tb_sequence_detectors.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!tb_sequence_detectors.sv"
+  ],
+  "tb_set_assoc_cache": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_set_assoc_cache.sv"
+  ],
+  "tb_sf1_memctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf1_memctrl.sv"
+  ],
+  "tb_sf1_tensor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf1_tensor.sv"
+  ],
+  "tb_sf25_dma_bridge": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf25_dma_bridge.sv"
+  ],
+  "tb_sf25_memctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf25_memctrl.sv"
+  ],
+  "tb_sf25_tensor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf25_tensor.sv"
+  ],
+  "tb_sf_pwr_seq": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/tb/tb_sf_pwr_seq.sv"
+  ],
+  "tb_sf_rst_clk_ctrl": [
+   "SilicaFlux-main/silicaflux-powerlink.zip!silicaflux-powerlink/rtl/tb/tb_sf_rst_clk_ctrl.sv"
+  ],
+  "tb_sfb_reg_slice": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/interconnect/tb_sfb_reg_slice.sv"
+  ],
+  "tb_sfb_xbar": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/interconnect/tb_sfb_xbar.sv"
+  ],
+  "tb_sfx_accumulator": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_accumulator.sv"
+  ],
+  "tb_sfx_dma": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_dma.sv"
+  ],
+  "tb_sfx_fifo": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_fifo.sv"
+  ],
+  "tb_sfx_fifo_combinational": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_fifo_combinational.sv"
+  ],
+  "tb_sfx_fifo_registered": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_fifo_registered.sv"
+  ],
+  "tb_sfx_gemm_controller": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/integration/tb_sfx_gemm_controller.sv"
+  ],
+  "tb_sfx_gemm_vectors": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/integration/tb_sfx_gemm_vectors.sv"
+  ],
+  "tb_sfx_mac": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_mac.sv"
+  ],
+  "tb_sfx_pe": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_pe.sv"
+  ],
+  "tb_sfx_pipeline_reg": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_pipeline_reg.sv"
+  ],
+  "tb_sfx_register": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_register.sv"
+  ],
+  "tb_sfx_saturate": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_saturate.sv"
+  ],
+  "tb_sfx_skid_buffer": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_skid_buffer.sv"
+  ],
+  "tb_sfx_sram_interface": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_sram_interface.sv"
+  ],
+  "tb_sfx_systolic_array": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array.sv"
+  ],
+  "tb_sfx_systolic_array_16x16": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array_16x16.sv"
+  ],
+  "tb_sfx_systolic_array_4x4": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array_4x4.sv"
+  ],
+  "tb_sha256_ch_maj": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_sha256_ch_maj.sv"
+  ],
+  "tb_sha256_compressor": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/integration/tb_sha256_compressor.sv"
+  ],
+  "tb_sha256_double_hash": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/integration/tb_sha256_double_hash.sv"
+  ],
+  "tb_sha256_message_schedule": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_sha256_message_schedule.sv"
+  ],
+  "tb_sha256_pipeline": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/integration/tb_sha256_pipeline.sv"
+  ],
+  "tb_sha256_round": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_sha256_round.sv"
+  ],
+  "tb_sha256_schedule_step": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_sha256_schedule_step.sv"
+  ],
+  "tb_sha256_sigma": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_sha256_sigma.sv"
+  ],
+  "tb_silicaflux_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_silicaflux_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_silicaflux_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_silicaflux_top.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_silicaflux_top.sv"
+  ],
+  "tb_soc": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/tb/soc/tb_soc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/soc/tb_soc.sv"
+  ],
+  "tb_soc_df": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/soc/tb_soc_df.sv"
+  ],
+  "tb_soc_top": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/tb/tb_soc_top.sv"
+  ],
+  "tb_sp_ram": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_sp_ram.sv"
+  ],
+  "tb_spm": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_spm.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_spm.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_spm.sv"
+  ],
+  "tb_sram_1r1w": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_1r1w.sv"
+  ],
+  "tb_sram_bank": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_bank.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_bank.sv"
+  ],
+  "tb_sram_banking": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_banking.sv"
+  ],
+  "tb_sram_fpga_selftest": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_fpga_selftest.sv"
+  ],
+  "tb_sram_mbist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_mbist.sv"
+  ],
+  "tb_sram_prims": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_sram_prims.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_prims.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_prims.sv"
+  ],
+  "tb_sram_sp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_sp.sv"
+  ],
+  "tb_sram_tdp": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_tdp.sv"
+  ],
+  "tb_sync_fifo": [
+   "SilicaFlux-main/memory_cache_repo.zip!memory_cache_repo/tb/tb_sync_fifo.sv"
+  ],
+  "tb_system": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/system/tb_system.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_system.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/system/tb_system.sv"
+  ],
+  "tb_tap_bsr": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_tap_bsr.sv"
+  ],
+  "tb_tap_fsm": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_tap_fsm.sv"
+  ],
+  "tb_target_compare": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/unit/tb_target_compare.sv"
+  ],
+  "tb_tensor_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tb_tensor_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/tb_tensor_unit.sf"
+  ],
+  "tb_traffic_light": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/tb/tb_traffic_light.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!tb_traffic_light.sv"
+  ],
+  "tb_vector_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_vector_engine.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_vector_engine.sv"
+  ],
+  "tb_vector_replay": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_vector_replay.sv"
+  ],
+  "tb_vending_machine": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/tb/tb_vending_machine.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!tb_vending_machine.sv"
+  ],
+  "tb_wallace_tree_multiplier": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/tb/tb_wallace_tree_multiplier.sv"
+  ],
+  "tb_xbar_wrap": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/interconnect/v1compat/tb_xbar_wrap.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/unit/tb_xbar_wrap.sv"
+  ],
+  "tc_bsr": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_bsr.sv"
+  ],
+  "tc_clk_ctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_clk_ctrl.sv"
+  ],
+  "tc_clk_mux2": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_cells.sv"
+  ],
+  "tc_core_model": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/models/tc_core_model.sv"
+  ],
+  "tc_demo_soc": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/models/tc_demo_soc.sv"
+  ],
+  "tc_dft_mux2": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_cells.sv"
+  ],
+  "tc_icg": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_cells.sv"
+  ],
+  "tc_lbist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_lbist.sv"
+  ],
+  "tc_lbist_demo_alu": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/demo/tc_lbist_demo_alu.sv"
+  ],
+  "tc_mbist": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_mbist.sv"
+  ],
+  "tc_mbist_collar": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_mbist_collar.sv"
+  ],
+  "tc_mode_ctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_mode_ctrl.sv"
+  ],
+  "tc_reg_bridge": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_reg_bridge.sv"
+  ],
+  "tc_regbus": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_regbus.sv"
+  ],
+  "tc_regs": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_regs.sv"
+  ],
+  "tc_rst_ctrl": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_rst_ctrl.sv"
+  ],
+  "tc_rst_sync": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_cells.sv"
+  ],
+  "tc_sram_model": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/models/tc_sram_model.sv"
+  ],
+  "tc_sync": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_cells.sv"
+  ],
+  "tc_tap": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_tap.sv"
+  ],
+  "tc_test_pinmux": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_test_pinmux.sv"
+  ],
+  "tc_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_top.sv"
+  ],
+  "tc_trace": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/rtl/tc_trace.sv"
+  ],
+  "telemetry": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/telemetry/telemetry.sv"
+  ],
+  "telemetry_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/telemetry_engine.sv"
+  ],
+  "tensor_unit": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tensor_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/tensor_unit.sf"
+  ],
+  "tensor_unit_mcp_formal": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/formal/tensor_unit_mcp.sv"
+  ],
+  "tile_interface": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tile_interface.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tile_interface.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/tile_interface.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tile_interface.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tile_interface.sv"
+  ],
+  "tl_binary": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_encodings.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_encodings.sv"
+  ],
+  "tl_gray": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_encodings.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_encodings.sv"
+  ],
+  "tl_onehot": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_encodings.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_encodings.sv"
+  ],
+  "tl_vec_ctx": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/harness/tl_vec_ctx.sv"
+  ],
+  "tl_wrap": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_alu/src/zz_tl_wrap.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_alu_mulcsa/src/zz_tl_wrap.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/sf_decoder/src/zz_tl_wrap.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/tensor_unit/src/zz_tl_wrap.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine/src/zz_tl_wrap.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/runs/gf180mcu/vector_engine_ex2/src/zz_tl_wrap.sv"
+  ],
+  "traffic_light_encodings": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_encodings.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_encodings.sv"
+  ],
+  "traffic_light_mealy": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_mealy.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_mealy.sv"
+  ],
+  "traffic_light_moore": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/traffic_light/traffic_light_moore.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!traffic_light_moore.sv"
+  ],
+  "uart_mon": [
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/tb/models/uart_mon.sv"
+  ],
+  "uart_rx": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/uart/uart_rx.sv"
+  ],
+  "uart_tb": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/tb/uart_tb.sv"
+  ],
+  "uart_top": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/uart/uart_top.sv"
+  ],
+  "uart_tx": [
+   "SilicaFlux-main/comm_protocols.zip!comm_protocols/rtl/uart/uart_tx.sv"
+  ],
+  "vector_engine": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/vector_engine (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/vector_engine.sf",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/vector_engine.sv"
+  ],
+  "vending_machine_mealy": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/vending_machine/vending_machine_mealy.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!vending_machine_mealy.sv"
+  ],
+  "vending_machine_moore": [
+   "SilicaFlux-main/Finite State Machines Library.zip!fsm_library.tar.gz!fsm_library/rtl/vending_machine/vending_machine_moore.sv",
+   "SilicaFlux-main/Finite State Machines Library.zip!vending_machine_moore.sv"
+  ],
+  "wallace_tree_multiplier": [
+   "SilicaFlux-main/digital_lib.zip!digital_lib/rtl/multipliers/wallace_tree_multiplier.sv"
+  ],
+  "wb_stage": [
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/wb_stage.sv"
+  ],
+  "weight_updater": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/weight_updater.sv"
+  ]
+ },
+ "component_hits": {
+  "interconnect": [
+   "SilicaFlux-main/FABTWIN-main.zip!FABTWIN-main/FABTWIN.zip!FABTWIN/fabtwin/twin/calibration.py",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/memoryflow/silicaflux/inventory.py",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/reports/data/silicaflux_inventory.json",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/reports/inventory.md",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_router.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tb_noc_interconnect.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/bugs/tb_bug_noc_dup.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/noc_router.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_noc_interconnect.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_noc_interconnect.sf",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_sfb_xbar.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/interconnect/sfb_crossbar.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/scripts/datafabric/synth.py",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/interconnect/tb_sfb_xbar.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/interconnect/v1compat/tb_xbar_wrap.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/bus/sfv_xbar.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_xbar.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/bus/sfv_xbar.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/unit/tb_xbar_wrap.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_interconnect.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/noc_router.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_noc_interconnect.sv",
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/bus/soc_fabric.sv",
+   "SilicaFlux-main/tb_noc_interconnect.sf"
+  ],
+  "cpu": [
+   "SilicaFlux-main/RISC-V CPU.zip!rv32i_core.sv",
+   "SilicaFlux-main/RISC-V CPU.zip!rv32i_tb.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/models/tc_core_model.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/control_core.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/control_core.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/hash_core.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/hash_core_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/integration/tb_hash_core.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/tb/system/tb_hash_core_array.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/cpu_core.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/rtl/cpu_top.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/tb/cpu_scoreboard.sv",
+   "SilicaFlux-main/cpu_core.zip!cpu_core/tb/tb_cpu_top.sv",
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/rtl/cpu_top.sv",
+   "SilicaFlux-main/pipelined_cpu.zip!pipelined_cpu/tb/cpu_tb.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/cpu/sfv_cpu.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/formal/fv_cpu_bus.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/cpu/sfv_cpu.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/cpu/run_riscv_tests.sh",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/tb/cpu/tb_cpu.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/control_core.sv",
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/rtl/cpu/cpu_if_adapter.sv",
+   "SilicaFlux-main/soc_integration.tar.gz!soc_integration/tb/models/cpu_bfm.sv"
+  ],
+  "sram_wrapper": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/memoryflow/silicaflux/inventory.py",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/reports/data/silicaflux_inventory.json",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/reports/inventory.md",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1r1w_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_2rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/sram/sf_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_sram_prims.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1r1w_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_1rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_2rw_inferred.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/sram/sf_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_bank.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_sram_prims.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_sp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/formal/mem/fv_sram_tdp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/reports/mem/regression.json",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_asic_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_gf180.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp1p.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_ihp2p.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/sram_leaf_sky130.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/asic/stubs/sram_macro_blackboxes.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/fpga/sram_fpga_2rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/backends/generic/sram_generic_2rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/fpga/sram_fpga_selftest_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/fpga/sram_uart_tx.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/intf/sram_if.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_1rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_backend_2rw.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_bank_controller.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_mbist_adapter.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_mbist_march.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_rsp_path.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_sp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/rtl/mem/sram_tdp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_1r1w.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_banking.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_fpga_selftest.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_mbist.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_sp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramlib.zip!silicaflux-sramlib/tb/mem/tb_sram_tdp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/models/tc_sram_model.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/memory/sfx_sram_interface.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/sram-decoder.sf",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/memory/sfx_sram_interface.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_sram_interface.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/mem/sfb_sram_1r1w_slave.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/mem/sfb_sram_slave.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-sramlib/rtl/mem/backends/asic/sram_asic_array.sv"
+  ],
+  "tensor": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf1_tensor.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf25_tensor.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tb_tensor_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/tensor_unit.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/formal/tensor_unit_mcp.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_tensor_unit_pipe.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/equiv/tb_eq_tensor.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/tensor/sfx_systolic_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/tensor/sfx_systolic_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array_16x16.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_systolic_array_4x4.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_tensor_array.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-twinlab.zip!src/app/components/rtl-explorer/rtl-explorer.ts",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_tensor_engine.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/tensor_unit.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_tensor_unit.sv",
+   "SilicaFlux-main/tb_tensor_unit.sf",
+   "SilicaFlux-main/tensor_unit.sf"
+  ],
+  "vector": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-testcore.zip!silicaflux-testcore/tb/tb_vector_replay.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/formal/fv_vector_bmc.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/rtl/opt/sf_vector_engine_pipe.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/tb/equiv/tb_eq_vector.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/vector_engine (1).sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/harness/tl_vec_ctx.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/rtl/opt/sf_vector_engine_pipe.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/tb/equiv/tb_eq_vector.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/tb/tb_vector_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/tb_vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/vector_engine.sf",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/integration/tb_sfx_gemm_vectors.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/accel/sfv_vec_engine.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/accel/sf_vec_unit.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/accel/sfv_vec_engine.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/rtl/vector_engine.sv",
+   "SilicaFlux-main/silicaflux.zip!silicaflux/tb/tb_vector_engine.sv",
+   "SilicaFlux-main/vector_engine (1).sf"
+  ],
+  "dma": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/silicaflux/tb_sf25_dma_bridge.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow-v2.0.0.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux-ai/rtl/dma/sfx_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/rtl/dma/sfx_dma.sv",
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxai.zip!silicaflux-ai/tb/unit/tb_sfx_dma.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/formal/datafabric/fv_dma_engine.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_burst_engine.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_control_regs.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_fifo.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_irq.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_transfer_engine.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/dma_validate.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/dma/silicaflux_dma.sv",
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/tb/dma/tb_dma.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/rtl/dma/sf_dma_engine.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/syn/syn_wrappers.sv",
+   "SilicaFlux-main/silicaflux-memoryflow.zip!silicaflux-memoryflow/tb/unit/tb_dma.sv"
+  ]
+ },
+ "mcu_i_found": false,
+ "top_candidates": {
+  "sfv_soc": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/third_party/silicaflux-v/rtl/top/sfv_soc.sv",
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/rtl/top/sfv_soc.sv"
+  ],
+  "sfv_soc_df": [
+   "SilicaFlux-main/silicaflux-datafabric.zip!silicaflux-datafabric/rtl/soc/sfv_soc_df.sv"
+  ],
+  "silicaflux_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/reports/constraints/silicaflux_top/stub.v",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_rtl2.zip!silicaflux/rtl/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/SilicaFlux2.0/silicaflux_rtl.zip!silicaflux/rtl/silicaflux_top.sf",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab (1).zip!silicaflux-timinglab/upstream/SilicaFlux-main/silicaflux.zip!silicaflux/rtl/silicaflux_top.sv",
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-timinglab.zip!silicaflux-timinglab/upstream/silicaflux/rtl/silicaflux_top.sv"
+  ],
+  "sfv_ulx3s_top": [
+   "SilicaFlux-main/silicaflux-v-release1.zip!silicaflux-v/fpga/ulx3s/sfv_ulx3s_top.sv"
+  ],
+  "silicaflux_ml_top": [
+   "SilicaFlux-main/SilicaFlux2.0/SilicaFluxML.zip!rtl/silicaflux_ml_top.sv"
+  ],
+  "miner_top": [
+   "SilicaFlux-main/SilicaFlux2.0/silicafluxbitcoinasic.zip!silicaflux-bitcoin-asic/rtl/top/miner_top.sv"
+  ]
+ },
+ "toolchain": {
+  "openroad": "2.0-12331-g6011bbe77",
+  "yosys": "Yosys 0.38+92",
+  "orfs": "ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621",
+  "klayout": "KLayout 0.28.16",
+  "python": "Python 3.13.18"
+ }
+}

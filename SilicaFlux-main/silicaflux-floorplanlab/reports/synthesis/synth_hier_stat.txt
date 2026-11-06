@@ -1,0 +1,1601 @@
+
+56. Printing statistics.
+
+=== $paramod$06f1363ea5af936eca348e1cb453d5c8bf83fef0\sfb_addr_decoder ===
+
+   Number of wires:                145
+   Number of wire bits:            184
+   Number of public wires:           5
+   Number of public wire bits:      44
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 30
+     sg13g2_a21oi_1                  2
+     sg13g2_a22oi_1                  2
+     sg13g2_buf_1                    1
+     sg13g2_buf_4                    1
+     sg13g2_inv_1                    1
+     sg13g2_nand2_1                  1
+     sg13g2_nand2b_1                 3
+     sg13g2_nand3_1                  1
+     sg13g2_nand4_1                  2
+     sg13g2_nor2_1                   2
+     sg13g2_nor3_1                   4
+     sg13g2_nor4_1                   1
+     sg13g2_nor4_2                   5
+     sg13g2_o21ai_1                  1
+     sg13g2_or2_1                    3
+
+   Chip area for module '$paramod$06f1363ea5af936eca348e1cb453d5c8bf83fef0\sfb_addr_decoder': 339.217200
+     of which used for sequential elements: 0.000000 (0.00%)
+
+=== $paramod$3ea2e8e6426ad75d0eb00b16d973718606304232\sfb_arbiter ===
+
+   Number of wires:                135
+   Number of wire bits:            144
+   Number of public wires:          12
+   Number of public wire bits:      21
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 65
+     sg13g2_a21o_1                   1
+     sg13g2_a21o_2                   1
+     sg13g2_a21oi_1                  1
+     sg13g2_a221oi_1                 2
+     sg13g2_a22oi_1                  2
+     sg13g2_and2_1                   3
+     sg13g2_and3_1                   2
+     sg13g2_and4_1                   1
+     sg13g2_buf_2                    1
+     sg13g2_buf_8                    2
+     sg13g2_dfrbp_1                  5
+     sg13g2_inv_1                    5
+     sg13g2_inv_2                    1
+     sg13g2_mux2_1                   3
+     sg13g2_mux4_1                   1
+     sg13g2_nand2_1                  7
+     sg13g2_nand2b_1                 2
+     sg13g2_nand3_1                  3
+     sg13g2_nand4_1                  1
+     sg13g2_nor2_1                   5
+     sg13g2_nor2b_1                  3
+     sg13g2_nor3_1                   4
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                   3
+     sg13g2_o21ai_1                  3
+     sg13g2_or2_1                    1
+     sg13g2_xnor2_1                  1
+
+   Chip area for module '$paramod$3ea2e8e6426ad75d0eb00b16d973718606304232\sfb_arbiter': 879.908400
+     of which used for sequential elements: 235.872000 (26.81%)
+
+=== $paramod$425c949b03f50736b1552886a361c957c7588c41\dma_control_regs ===
+
+   Number of wires:               1358
+   Number of wire bits:           1686
+   Number of public wires:          31
+   Number of public wire bits:     359
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                550
+     dma_irq                         1
+     sg13g2_a21o_1                   3
+     sg13g2_a21oi_1                 91
+     sg13g2_a221oi_1                 7
+     sg13g2_a22oi_1                  7
+     sg13g2_and2_1                  35
+     sg13g2_and3_1                  12
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                   21
+     sg13g2_buf_2                    6
+     sg13g2_buf_4                   10
+     sg13g2_buf_8                    6
+     sg13g2_dfrbp_1                101
+     sg13g2_inv_1                    7
+     sg13g2_mux2_1                 119
+     sg13g2_nand2_1                 27
+     sg13g2_nand2_2                  2
+     sg13g2_nand2b_1                 6
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                 20
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                  8
+     sg13g2_nor2_1                  10
+     sg13g2_nor2_2                   1
+     sg13g2_nor2b_1                  7
+     sg13g2_nor3_1                   4
+     sg13g2_nor3_2                   3
+     sg13g2_nor4_1                   5
+     sg13g2_nor4_2                   7
+     sg13g2_o21ai_1                 15
+     sg13g2_or2_1                    2
+     sg13g2_or4_1                    4
+
+   Area for cell type \dma_irq is unknown!
+
+   Chip area for module '$paramod$425c949b03f50736b1552886a361c957c7588c41\dma_control_regs': 10200.292200
+     of which used for sequential elements: 5000.486400 (49.02%)
+
+=== $paramod$46ed8da08192c62c810a8c6c0b76c3fdd3661f86\sfb_req_mux ===
+
+   Number of wires:               1080
+   Number of wire bits:           1420
+   Number of public wires:           9
+   Number of public wire bits:     349
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                377
+     sg13g2_buf_16                   4
+     sg13g2_buf_2                   20
+     sg13g2_buf_4                    1
+     sg13g2_buf_8                    7
+     sg13g2_nand2_1                266
+     sg13g2_nand2_2                 10
+     sg13g2_nand4_1                 69
+
+   Chip area for module '$paramod$46ed8da08192c62c810a8c6c0b76c3fdd3661f86\sfb_req_mux': 3333.052800
+     of which used for sequential elements: 5000.486400 (150.03%)
+
+=== $paramod$4a49ecc287cfa93f28befb4ead8a068b20ad2ad1\sfb_addr_decoder ===
+
+   Number of wires:                173
+   Number of wire bits:            212
+   Number of public wires:           5
+   Number of public wire bits:      44
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 43
+     sg13g2_a21oi_1                  3
+     sg13g2_a21oi_2                  1
+     sg13g2_a22oi_1                  1
+     sg13g2_and2_2                   1
+     sg13g2_and3_1                   1
+     sg13g2_and4_1                   2
+     sg13g2_inv_1                    4
+     sg13g2_nand2_1                  5
+     sg13g2_nand2b_1                 4
+     sg13g2_nand4_1                  2
+     sg13g2_nor2_1                   4
+     sg13g2_nor3_1                   7
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_2                   3
+     sg13g2_o21ai_1                  3
+     sg13g2_xnor2_1                  1
+
+   Chip area for module '$paramod$4a49ecc287cfa93f28befb4ead8a068b20ad2ad1\sfb_addr_decoder': 437.232600
+     of which used for sequential elements: 5000.486400 (1143.67%)
+
+=== $paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\sfv_mbist ===
+
+   Number of wires:               1252
+   Number of wire bits:           1622
+   Number of public wires:          26
+   Number of public wire bits:     364
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                484
+     sg13g2_a21o_1                   5
+     sg13g2_a21oi_1                 34
+     sg13g2_a21oi_2                  1
+     sg13g2_a221oi_1                 1
+     sg13g2_a22oi_1                  8
+     sg13g2_and2_1                  28
+     sg13g2_and3_1                   2
+     sg13g2_and4_1                   2
+     sg13g2_buf_1                   20
+     sg13g2_buf_16                   1
+     sg13g2_buf_2                    3
+     sg13g2_buf_4                    2
+     sg13g2_buf_8                    6
+     sg13g2_dfrbp_1                 41
+     sg13g2_inv_1                   22
+     sg13g2_mux2_1                  25
+     sg13g2_nand2_1                 30
+     sg13g2_nand2b_1                 6
+     sg13g2_nand3_1                  6
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                 47
+     sg13g2_nor2_1                  36
+     sg13g2_nor2b_1                  6
+     sg13g2_nor3_1                  16
+     sg13g2_nor4_1                  41
+     sg13g2_nor4_2                   1
+     sg13g2_o21ai_1                 40
+     sg13g2_or2_1                    9
+     sg13g2_or3_1                    2
+     sg13g2_or4_1                    6
+     sg13g2_xnor2_1                 26
+     sg13g2_xor2_1                  10
+
+   Chip area for module '$paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\sfv_mbist': 6551.496000
+     of which used for sequential elements: 6934.636800 (105.85%)
+
+=== $paramod$8c7cca9b3fbb2cad1035c144906471bf5dc082a5\sfb_rsp_router ===
+
+   Number of wires:               3420
+   Number of wire bits:           3836
+   Number of public wires:          12
+   Number of public wire bits:     428
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1398
+     sg13g2_a21o_1                   3
+     sg13g2_a21oi_1                147
+     sg13g2_a221oi_1               134
+     sg13g2_a22oi_1                204
+     sg13g2_and2_1                  76
+     sg13g2_and2_2                  30
+     sg13g2_and3_1                   6
+     sg13g2_and3_2                  12
+     sg13g2_buf_1                   58
+     sg13g2_buf_16                   8
+     sg13g2_buf_2                   80
+     sg13g2_buf_4                   25
+     sg13g2_buf_8                   16
+     sg13g2_inv_1                    5
+     sg13g2_nand2_1                  7
+     sg13g2_nand2b_1                 4
+     sg13g2_nand3_1                 90
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                  9
+     sg13g2_nor2_1                 259
+     sg13g2_nor2_2                   4
+     sg13g2_nor2b_1                 14
+     sg13g2_nor3_1                   4
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                   1
+     sg13g2_o21ai_1                136
+     sg13g2_or3_1                   64
+
+   Chip area for module '$paramod$8c7cca9b3fbb2cad1035c144906471bf5dc082a5\sfb_rsp_router': 14226.256800
+     of which used for sequential elements: 6934.636800 (48.75%)
+
+=== $paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\sfv_periph_bridge ===
+
+   Number of wires:               3727
+   Number of wire bits:           4985
+   Number of public wires:          18
+   Number of public wire bits:    1245
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                506
+     sg13g2_a21oi_1                 68
+     sg13g2_a21oi_2                 29
+     sg13g2_a221oi_1                32
+     sg13g2_a22oi_1                  1
+     sg13g2_and2_1                   1
+     sg13g2_and3_1                   1
+     sg13g2_buf_1                   13
+     sg13g2_buf_16                   1
+     sg13g2_buf_2                   25
+     sg13g2_buf_4                    4
+     sg13g2_buf_8                   10
+     sg13g2_dfrbp_1                 34
+     sg13g2_inv_1                    1
+     sg13g2_inv_2                    1
+     sg13g2_mux2_1                  34
+     sg13g2_mux4_1                  34
+     sg13g2_nand2_1                 99
+     sg13g2_nand2_2                  1
+     sg13g2_nand2b_1                67
+     sg13g2_nand3_1                  1
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                  1
+     sg13g2_nor2_1                  39
+     sg13g2_nor2_2                   1
+     sg13g2_nor3_1                   1
+     sg13g2_nor4_2                   2
+     sg13g2_o21ai_1                  1
+     sg13g2_or2_1                    2
+     sg13g2_or3_1                    1
+
+   Chip area for module '$paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\sfv_periph_bridge': 7480.733400
+     of which used for sequential elements: 8538.566400 (114.14%)
+
+=== $paramod$9e34d52547afa8fbbdb3403e58d5ac34ed42b3b7\sfv_mac_array ===
+
+   Number of wires:              32658
+   Number of wire bits:          34479
+   Number of public wires:          58
+   Number of public wire bits:    1383
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              17999
+     sg13g2_a21o_1                 483
+     sg13g2_a21o_2                   1
+     sg13g2_a21oi_1               1758
+     sg13g2_a21oi_2                 38
+     sg13g2_a221oi_1               156
+     sg13g2_a22oi_1                561
+     sg13g2_and2_1                 427
+     sg13g2_and3_1                 168
+     sg13g2_and4_1                  74
+     sg13g2_buf_1                 1474
+     sg13g2_buf_16                  26
+     sg13g2_buf_2                  515
+     sg13g2_buf_4                  236
+     sg13g2_buf_8                  219
+     sg13g2_dfrbp_1                512
+     sg13g2_inv_1                  496
+     sg13g2_inv_2                   10
+     sg13g2_mux2_1                 169
+     sg13g2_nand2_1               2585
+     sg13g2_nand2_2                 35
+     sg13g2_nand2b_1               326
+     sg13g2_nand2b_2                 3
+     sg13g2_nand3_1                672
+     sg13g2_nand3b_1               163
+     sg13g2_nand4_1                170
+     sg13g2_nor2_1                1462
+     sg13g2_nor2_2                  22
+     sg13g2_nor2b_1                337
+     sg13g2_nor2b_2                  4
+     sg13g2_nor3_1                 406
+     sg13g2_nor3_2                  13
+     sg13g2_nor4_1                  99
+     sg13g2_nor4_2                   7
+     sg13g2_o21ai_1               1745
+     sg13g2_or2_1                  329
+     sg13g2_or3_1                  158
+     sg13g2_or4_1                   43
+     sg13g2_xnor2_1               1481
+     sg13g2_xor2_1                 616
+
+   Chip area for module '$paramod$9e34d52547afa8fbbdb3403e58d5ac34ed42b3b7\sfv_mac_array': 196342.234200
+     of which used for sequential elements: 32691.859200 (16.65%)
+
+=== $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_transfer_engine ===
+
+   Number of wires:               3739
+   Number of wire bits:           4304
+   Number of public wires:          31
+   Number of public wire bits:     385
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1882
+     $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_validate      1
+     sg13g2_a21o_1                  50
+     sg13g2_a21oi_1                287
+     sg13g2_a21oi_2                  2
+     sg13g2_a221oi_1                15
+     sg13g2_a22oi_1                 57
+     sg13g2_and2_1                  49
+     sg13g2_and3_1                  14
+     sg13g2_and4_1                   6
+     sg13g2_buf_1                  179
+     sg13g2_buf_2                   37
+     sg13g2_buf_4                   12
+     sg13g2_buf_8                    6
+     sg13g2_dfrbp_1                238
+     sg13g2_inv_1                   75
+     sg13g2_inv_2                    2
+     sg13g2_mux2_1                  44
+     sg13g2_nand2_1                160
+     sg13g2_nand2b_1                34
+     sg13g2_nand3_1                 52
+     sg13g2_nand3b_1                14
+     sg13g2_nand4_1                 24
+     sg13g2_nor2_1                 167
+     sg13g2_nor2_2                   1
+     sg13g2_nor2b_1                 23
+     sg13g2_nor3_1                  27
+     sg13g2_nor3_2                   4
+     sg13g2_nor4_1                  22
+     sg13g2_nor4_2                  10
+     sg13g2_o21ai_1                207
+     sg13g2_or2_1                   20
+     sg13g2_or3_1                    8
+     sg13g2_or3_2                    1
+     sg13g2_or4_1                    3
+     sg13g2_xnor2_1                 21
+     sg13g2_xor2_1                  10
+
+   Area for cell type $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_validate is unknown!
+
+   Chip area for module '$paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_transfer_engine': 26460.869400
+     of which used for sequential elements: 43919.366400 (165.98%)
+
+=== $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_validate ===
+
+   Number of wires:               2403
+   Number of wire bits:           2499
+   Number of public wires:           4
+   Number of public wire bits:     100
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1391
+     sg13g2_a21o_1                  40
+     sg13g2_a21oi_1                102
+     sg13g2_a21oi_2                  4
+     sg13g2_a221oi_1                36
+     sg13g2_a22oi_1                 79
+     sg13g2_and2_1                  38
+     sg13g2_and3_1                   8
+     sg13g2_and4_1                  11
+     sg13g2_buf_1                   75
+     sg13g2_buf_16                   1
+     sg13g2_buf_2                   46
+     sg13g2_buf_4                   11
+     sg13g2_buf_8                    6
+     sg13g2_inv_1                   75
+     sg13g2_inv_2                    1
+     sg13g2_mux2_1                  16
+     sg13g2_mux4_1                   1
+     sg13g2_nand2_1                111
+     sg13g2_nand2_2                  1
+     sg13g2_nand2b_1                29
+     sg13g2_nand3_1                 72
+     sg13g2_nand3b_1                10
+     sg13g2_nand4_1                 40
+     sg13g2_nor2_1                 109
+     sg13g2_nor2_2                   3
+     sg13g2_nor2b_1                 12
+     sg13g2_nor3_1                  57
+     sg13g2_nor3_2                   2
+     sg13g2_nor4_1                  23
+     sg13g2_nor4_2                   6
+     sg13g2_o21ai_1                144
+     sg13g2_or2_1                   25
+     sg13g2_or3_1                   17
+     sg13g2_or4_1                   17
+     sg13g2_xnor2_1                120
+     sg13g2_xor2_1                  43
+
+   Chip area for module '$paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_validate': 14049.541800
+     of which used for sequential elements: 43919.366400 (312.60%)
+
+=== $paramod$c76342faba2795bb9f7122edda48f204b1464422\sfv_fifo ===
+
+   Number of wires:                301
+   Number of wire bits:            353
+   Number of public wires:          16
+   Number of public wire bits:      64
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                152
+     sg13g2_a21o_1                   1
+     sg13g2_a21oi_1                  5
+     sg13g2_a221oi_1                 1
+     sg13g2_a22oi_1                  2
+     sg13g2_and3_1                   1
+     sg13g2_buf_1                    3
+     sg13g2_buf_2                    2
+     sg13g2_buf_4                    1
+     sg13g2_buf_8                    3
+     sg13g2_dfrbp_1                 38
+     sg13g2_inv_1                    7
+     sg13g2_inv_2                    1
+     sg13g2_mux2_1                  32
+     sg13g2_mux4_1                   8
+     sg13g2_nand2_1                  6
+     sg13g2_nand2b_1                 1
+     sg13g2_nand3_1                  8
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                  7
+     sg13g2_nor2_1                   3
+     sg13g2_nor2_2                   1
+     sg13g2_nor2b_1                  5
+     sg13g2_nor3_1                   5
+     sg13g2_nor4_1                   1
+     sg13g2_o21ai_1                  1
+     sg13g2_or2_1                    1
+     sg13g2_xnor2_1                  5
+     sg13g2_xor2_1                   2
+
+   Chip area for module '$paramod$c76342faba2795bb9f7122edda48f204b1464422\sfv_fifo': 3423.697200
+     of which used for sequential elements: 45711.993600 (1335.16%)
+
+=== $paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\sfb_crossbar ===
+
+   Number of wires:               1162
+   Number of wire bits:           2627
+   Number of public wires:          67
+   Number of public wire bits:    1526
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                468
+     $paramod$06f1363ea5af936eca348e1cb453d5c8bf83fef0\sfb_addr_decoder      2
+     $paramod$3ea2e8e6426ad75d0eb00b16d973718606304232\sfb_arbiter      7
+     $paramod$46ed8da08192c62c810a8c6c0b76c3fdd3661f86\sfb_req_mux      7
+     $paramod$4a49ecc287cfa93f28befb4ead8a068b20ad2ad1\sfb_addr_decoder      2
+     $paramod$8c7cca9b3fbb2cad1035c144906471bf5dc082a5\sfb_rsp_router      1
+     $paramod\sfb_error_slave\DW=s32'00000000000000000000000000100000      4
+     sg13g2_a21o_1                   3
+     sg13g2_a21oi_1                 17
+     sg13g2_a21oi_2                  6
+     sg13g2_a221oi_1                35
+     sg13g2_a22oi_1                 20
+     sg13g2_and2_1                  38
+     sg13g2_and2_2                   1
+     sg13g2_and3_1                   3
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                    8
+     sg13g2_buf_2                   10
+     sg13g2_buf_4                    9
+     sg13g2_buf_8                    1
+     sg13g2_dfrbp_1                 39
+     sg13g2_inv_1                   21
+     sg13g2_mux2_1                  25
+     sg13g2_nand2_1                 67
+     sg13g2_nand2_2                  6
+     sg13g2_nand2b_1                 8
+     sg13g2_nand3_1                  8
+     sg13g2_nand3b_1                15
+     sg13g2_nand4_1                  5
+     sg13g2_nor2_1                   7
+     sg13g2_nor2b_1                 21
+     sg13g2_nor4_1                   1
+     sg13g2_o21ai_1                 70
+
+   Area for cell type $paramod$8c7cca9b3fbb2cad1035c144906471bf5dc082a5\sfb_rsp_router is unknown!
+   Area for cell type $paramod$06f1363ea5af936eca348e1cb453d5c8bf83fef0\sfb_addr_decoder is unknown!
+   Area for cell type $paramod\sfb_error_slave\DW=s32'00000000000000000000000000100000 is unknown!
+   Area for cell type $paramod$46ed8da08192c62c810a8c6c0b76c3fdd3661f86\sfb_req_mux is unknown!
+   Area for cell type $paramod$3ea2e8e6426ad75d0eb00b16d973718606304232\sfb_arbiter is unknown!
+   Area for cell type $paramod$4a49ecc287cfa93f28befb4ead8a068b20ad2ad1\sfb_addr_decoder is unknown!
+
+   Chip area for module '$paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\sfb_crossbar': 5952.290400
+     of which used for sequential elements: 47551.795200 (798.88%)
+
+=== $paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\silicaflux_dma ===
+
+   Number of wires:                 34
+   Number of wire bits:            370
+   Number of public wires:          34
+   Number of public wire bits:     370
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  2
+     $paramod$425c949b03f50736b1552886a361c957c7588c41\dma_control_regs      1
+     $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_transfer_engine      1
+
+   Area for cell type $paramod$425c949b03f50736b1552886a361c957c7588c41\dma_control_regs is unknown!
+   Area for cell type $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_transfer_engine is unknown!
+
+=== $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_tile ===
+
+   Number of wires:               2156
+   Number of wire bits:           3171
+   Number of public wires:          74
+   Number of public wire bits:    1089
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1013
+     $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_vec_engine      1
+     $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000000010000000000      4
+     $paramod\sfv_tensor_engine\TSPM_WORDS=s32'00000000000000000001000000000000      1
+     sfv_clkgate                     2
+     sg13g2_a21o_1                   2
+     sg13g2_a21oi_1                169
+     sg13g2_a21oi_2                  1
+     sg13g2_a221oi_1                 1
+     sg13g2_a22oi_1                  4
+     sg13g2_and2_1                 171
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                   37
+     sg13g2_buf_16                   7
+     sg13g2_buf_2                   30
+     sg13g2_buf_4                    7
+     sg13g2_buf_8                   18
+     sg13g2_dfrbp_1                  6
+     sg13g2_inv_1                   51
+     sg13g2_inv_8                    1
+     sg13g2_mux2_1                 172
+     sg13g2_mux4_1                  33
+     sg13g2_nand2_1                 51
+     sg13g2_nand2_2                  2
+     sg13g2_nand2b_1                 8
+     sg13g2_nand3_1                  4
+     sg13g2_nand3b_1                 1
+     sg13g2_nor2_1                  14
+     sg13g2_nor2b_1                 33
+     sg13g2_nor2b_2                  1
+     sg13g2_nor3_1                   2
+     sg13g2_o21ai_1                176
+     sg13g2_or3_1                    2
+
+   Area for cell type $paramod\sfv_tensor_engine\TSPM_WORDS=s32'00000000000000000001000000000000 is unknown!
+   Area for cell type \sfv_clkgate is unknown!
+   Area for cell type $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_vec_engine is unknown!
+   Area for cell type $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000000010000000000 is unknown!
+
+   Chip area for module '$paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_tile': 12105.525600
+     of which used for sequential elements: 47834.841600 (395.15%)
+
+=== $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_vec_engine ===
+
+   Number of wires:              56260
+   Number of wire bits:          57740
+   Number of public wires:          63
+   Number of public wire bits:    1415
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              32381
+     sg13g2_a21o_1                 871
+     sg13g2_a21o_2                   4
+     sg13g2_a21oi_1               2297
+     sg13g2_a21oi_2                 17
+     sg13g2_a221oi_1               363
+     sg13g2_a22oi_1                884
+     sg13g2_and2_1                 574
+     sg13g2_and3_1                 150
+     sg13g2_and3_2                  63
+     sg13g2_and4_1                  56
+     sg13g2_and4_2                   2
+     sg13g2_buf_1                 5689
+     sg13g2_buf_16                  35
+     sg13g2_buf_2                 2185
+     sg13g2_buf_4                 1138
+     sg13g2_buf_8                  270
+     sg13g2_dfrbp_1                554
+     sg13g2_dlygate4sd1_1            1
+     sg13g2_inv_1                  538
+     sg13g2_inv_2                   10
+     sg13g2_mux2_1                 808
+     sg13g2_mux2_2                   4
+     sg13g2_mux4_1                   7
+     sg13g2_nand2_1               4390
+     sg13g2_nand2_2                  7
+     sg13g2_nand2b_1               399
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                508
+     sg13g2_nand3b_1                81
+     sg13g2_nand4_1                179
+     sg13g2_nor2_1                2284
+     sg13g2_nor2_2                  13
+     sg13g2_nor2b_1                354
+     sg13g2_nor2b_2                  2
+     sg13g2_nor3_1                 342
+     sg13g2_nor3_2                  24
+     sg13g2_nor4_1                 107
+     sg13g2_nor4_2                  15
+     sg13g2_o21ai_1               2516
+     sg13g2_or2_1                  193
+     sg13g2_or3_1                   87
+     sg13g2_or4_1                   38
+     sg13g2_xnor2_1               3528
+     sg13g2_xor2_1                 793
+
+   Chip area for module '$paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_vec_engine': 342616.024800
+     of which used for sequential elements: 73969.459200 (21.59%)
+
+=== $paramod\sfb_error_slave\DW=s32'00000000000000000000000000100000 ===
+
+   Number of wires:                 16
+   Number of wire bits:             47
+   Number of public wires:           9
+   Number of public wire bits:      40
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  3
+     sg13g2_dfrbp_1                  1
+     sg13g2_nand2b_2                 2
+
+   Chip area for module '$paramod\sfb_error_slave\DW=s32'00000000000000000000000000100000': 76.204800
+     of which used for sequential elements: 74016.633600 (97128.57%)
+
+=== $paramod\sfv_bootrom\WORDS=s32'00000000000000000000010000000000 ===
+
+   Number of wires:                153
+   Number of wire bits:            289
+   Number of public wires:          15
+   Number of public wire bits:     151
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 66
+     sfv_bootrom_image               1
+     sg13g2_and2_1                  33
+     sg13g2_and2_2                   1
+     sg13g2_buf_2                    3
+     sg13g2_buf_8                    1
+     sg13g2_dfrbp_1                 14
+     sg13g2_mux2_1                  11
+     sg13g2_nor2_1                   1
+     sg13g2_nor2b_2                  1
+
+   Area for cell type \sfv_bootrom_image is unknown!
+
+   Chip area for module '$paramod\sfv_bootrom\WORDS=s32'00000000000000000000010000000000': 1241.049600
+     of which used for sequential elements: 74677.075200 (6017.25%)
+
+=== $paramod\sfv_cpu\BOOT_ADDR=32'00000000000000000000000000000000 ===
+
+   Number of wires:              22608
+   Number of wire bits:          25295
+   Number of public wires:         131
+   Number of public wire bits:    2525
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              11581
+     sg13g2_a21o_1                 162
+     sg13g2_a21oi_1                797
+     sg13g2_a21oi_2                 11
+     sg13g2_a221oi_1               207
+     sg13g2_a22oi_1                542
+     sg13g2_and2_1                 289
+     sg13g2_and3_1                  40
+     sg13g2_and3_2                   3
+     sg13g2_and4_1                  32
+     sg13g2_and4_2                   1
+     sg13g2_buf_1                  831
+     sg13g2_buf_16                  33
+     sg13g2_buf_2                  488
+     sg13g2_buf_4                  191
+     sg13g2_buf_8                  122
+     sg13g2_dfrbp_1               1468
+     sg13g2_inv_1                  187
+     sg13g2_inv_2                    4
+     sg13g2_mux2_1                1236
+     sg13g2_mux4_1                 407
+     sg13g2_nand2_1               1007
+     sg13g2_nand2_2                  9
+     sg13g2_nand2b_1               140
+     sg13g2_nand3_1                247
+     sg13g2_nand3b_1                25
+     sg13g2_nand4_1                108
+     sg13g2_nor2_1                 984
+     sg13g2_nor2_2                   4
+     sg13g2_nor2b_1                185
+     sg13g2_nor3_1                 139
+     sg13g2_nor3_2                  10
+     sg13g2_nor4_1                  63
+     sg13g2_nor4_2                  13
+     sg13g2_o21ai_1                951
+     sg13g2_or2_1                   99
+     sg13g2_or3_1                   33
+     sg13g2_or4_1                   21
+     sg13g2_xnor2_1                331
+     sg13g2_xor2_1                 161
+
+   Chip area for module '$paramod\sfv_cpu\BOOT_ADDR=32'00000000000000000000000000000000': 188876.696400
+     of which used for sequential elements: 143929.094400 (76.20%)
+
+=== $paramod\sfv_gpio\N=s32'00000000000000000000000000001000 ===
+
+   Number of wires:                528
+   Number of wire bits:            664
+   Number of public wires:          17
+   Number of public wire bits:     146
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                214
+     sfv_sync                        8
+     sg13g2_a21o_1                  16
+     sg13g2_and2_1                   1
+     sg13g2_and3_1                   2
+     sg13g2_and4_1                   1
+     sg13g2_and4_2                   1
+     sg13g2_buf_1                    4
+     sg13g2_buf_2                    2
+     sg13g2_buf_4                    5
+     sg13g2_dfrbp_1                 48
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                  44
+     sg13g2_mux4_1                   4
+     sg13g2_nand2_1                 19
+     sg13g2_nand3_1                 15
+     sg13g2_nand3b_1                 8
+     sg13g2_nand4_1                 11
+     sg13g2_nor2_1                   3
+     sg13g2_nor2b_1                  6
+     sg13g2_nor3_1                   2
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                   3
+     sg13g2_nor4_2                   1
+     sg13g2_o21ai_1                  8
+
+   Area for cell type \sfv_sync is unknown!
+
+   Chip area for module '$paramod\sfv_gpio\N=s32'00000000000000000000000000001000': 4341.859200
+     of which used for sequential elements: 146193.465600 (3367.07%)
+
+=== $paramod\sfv_intc\N=s32'00000000000000000000000000001001 ===
+
+   Number of wires:                252
+   Number of wire bits:            348
+   Number of public wires:          12
+   Number of public wire bits:     108
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 85
+     sg13g2_a21o_1                   1
+     sg13g2_a21oi_1                  4
+     sg13g2_a221oi_1                 3
+     sg13g2_a22oi_1                  5
+     sg13g2_and2_1                   4
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                    3
+     sg13g2_buf_4                    1
+     sg13g2_dfrbp_1                  9
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                  12
+     sg13g2_nand2_1                 21
+     sg13g2_nand2b_1                 4
+     sg13g2_nand3_1                  1
+     sg13g2_nand3b_1                 1
+     sg13g2_nand4_1                  3
+     sg13g2_nor2_1                   2
+     sg13g2_nor2b_1                  2
+     sg13g2_nor4_2                   2
+     sg13g2_o21ai_1                  4
+     sg13g2_or4_1                    1
+
+   Chip area for module '$paramod\sfv_intc\N=s32'00000000000000000000000000001001': 1251.747000
+     of which used for sequential elements: 146618.035200 (11713.07%)
+
+=== $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000000010000000000 ===
+
+   Number of wires:                139
+   Number of wire bits:            404
+   Number of public wires:          15
+   Number of public wire bits:     217
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 49
+     RM_IHPSG13_1P_512x64_c2_bm_bist      1
+     sg13g2_and2_1                   4
+     sg13g2_buf_16                   4
+     sg13g2_dfrbp_1                  1
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                  33
+     sg13g2_nand2b_1                 1
+     sg13g2_nor2b_1                  4
+
+   Chip area for module '$paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000000010000000000': 151016.860800
+     of which used for sequential elements: 146665.209600 (97.12%)
+
+=== $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000010000000000000 ===
+
+   Number of wires:                282
+   Number of wire bits:            555
+   Number of public wires:          17
+   Number of public wire bits:     290
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 58
+     RM_IHPSG13_1P_2048x64_c2_bm_bist      2
+     sg13g2_and2_1                   5
+     sg13g2_buf_16                   4
+     sg13g2_buf_4                    4
+     sg13g2_dfrbp_1                  2
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                   2
+     sg13g2_mux4_1                  32
+     sg13g2_nand2b_1                 1
+     sg13g2_nor2b_1                  5
+
+   Chip area for module '$paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000010000000000000': 984961.881600
+     of which used for sequential elements: 146759.558400 (14.90%)
+
+=== $paramod\sfv_sram_slave\DEPTH=s32'00000000000000000010000000000000 ===
+
+   Number of wires:                256
+   Number of wire bits:            503
+   Number of public wires:          24
+   Number of public wire bits:     271
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 99
+     $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000010000000000000      1
+     sg13g2_a21o_1                   1
+     sg13g2_and2_1                  32
+     sg13g2_buf_16                   6
+     sg13g2_buf_2                    4
+     sg13g2_dfrbp_1                  2
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                  46
+     sg13g2_nor2b_1                  1
+     sg13g2_nor2b_2                  1
+     sg13g2_or2_1                    4
+
+   Area for cell type $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000010000000000000 is unknown!
+
+   Chip area for module '$paramod\sfv_sram_slave\DEPTH=s32'00000000000000000010000000000000': 1603.929600
+     of which used for sequential elements: 146853.907200 (9155.88%)
+
+=== $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000000010000000000 ===
+
+   Number of wires:                  7
+   Number of wire bits:             81
+   Number of public wires:           7
+   Number of public wire bits:      81
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  1
+     $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000000010000000000      1
+
+   Area for cell type $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000000010000000000 is unknown!
+
+=== $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000010000000000000 ===
+
+   Number of wires:                  7
+   Number of wire bits:             84
+   Number of public wires:           7
+   Number of public wire bits:      84
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  1
+     $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000010000000000000      1
+
+   Area for cell type $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000010000000000000 is unknown!
+
+=== $paramod\sfv_sync\STAGES=s32'00000000000000000000000000000010\RESET_VAL=1'1 ===
+
+   Number of wires:                 19
+   Number of wire bits:             20
+   Number of public wires:           5
+   Number of public wire bits:       6
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  4
+     sg13g2_dfrbp_1                  2
+     sg13g2_inv_2                    2
+
+   Chip area for module '$paramod\sfv_sync\STAGES=s32'00000000000000000000000000000010\RESET_VAL=1'1': 108.864000
+     of which used for sequential elements: 146948.256000 (134983.33%)
+
+=== $paramod\sfv_tensor_engine\TSPM_WORDS=s32'00000000000000000001000000000000 ===
+
+   Number of wires:              20536
+   Number of wire bits:          21987
+   Number of public wires:          51
+   Number of public wire bits:    1331
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              11533
+     $paramod$9e34d52547afa8fbbdb3403e58d5ac34ed42b3b7\sfv_mac_array      1
+     sg13g2_a21o_1                 300
+     sg13g2_a21o_2                   1
+     sg13g2_a21oi_1                970
+     sg13g2_a21oi_2                 14
+     sg13g2_a221oi_1               219
+     sg13g2_a22oi_1                469
+     sg13g2_and2_1                 289
+     sg13g2_and2_2                   1
+     sg13g2_and3_1                  89
+     sg13g2_and3_2                   2
+     sg13g2_and4_1                  43
+     sg13g2_buf_1                 1080
+     sg13g2_buf_16                  17
+     sg13g2_buf_2                  334
+     sg13g2_buf_4                  164
+     sg13g2_buf_8                  124
+     sg13g2_dfrbp_1                344
+     sg13g2_inv_1                  309
+     sg13g2_inv_2                    6
+     sg13g2_mux2_1                 290
+     sg13g2_mux4_1                 353
+     sg13g2_nand2_1               1080
+     sg13g2_nand2_2                  5
+     sg13g2_nand2b_1               226
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                528
+     sg13g2_nand3b_1                49
+     sg13g2_nand4_1                171
+     sg13g2_nor2_1                 827
+     sg13g2_nor2_2                   8
+     sg13g2_nor2b_1                221
+     sg13g2_nor3_1                 344
+     sg13g2_nor3_2                   9
+     sg13g2_nor4_1                 134
+     sg13g2_nor4_2                   9
+     sg13g2_o21ai_1               1105
+     sg13g2_or2_1                  146
+     sg13g2_or3_1                   66
+     sg13g2_or4_1                   26
+     sg13g2_xnor2_1                832
+     sg13g2_xor2_1                 327
+
+   Area for cell type $paramod$9e34d52547afa8fbbdb3403e58d5ac34ed42b3b7\sfv_mac_array is unknown!
+
+   Chip area for module '$paramod\sfv_tensor_engine\TSPM_WORDS=s32'00000000000000000001000000000000': 138753.027000
+     of which used for sequential elements: 163176.249600 (117.60%)
+
+=== $paramod\sfv_uart\BAUD_RESET=16'0000000011011001 ===
+
+   Number of wires:               1299
+   Number of wire bits:           1498
+   Number of public wires:          38
+   Number of public wire bits:     194
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                579
+     $paramod$c76342faba2795bb9f7122edda48f204b1464422\sfv_fifo      2
+     $paramod\sfv_sync\STAGES=s32'00000000000000000000000000000010\RESET_VAL=1'1      1
+     sg13g2_a21o_1                  13
+     sg13g2_a21oi_1                 31
+     sg13g2_a221oi_1                 5
+     sg13g2_a22oi_1                 34
+     sg13g2_and2_1                  17
+     sg13g2_and3_1                   2
+     sg13g2_and4_1                   5
+     sg13g2_buf_1                   29
+     sg13g2_buf_2                    6
+     sg13g2_buf_4                    5
+     sg13g2_buf_8                    4
+     sg13g2_dfrbp_1                 83
+     sg13g2_inv_1                   20
+     sg13g2_inv_2                    1
+     sg13g2_mux2_1                  42
+     sg13g2_nand2_1                 36
+     sg13g2_nand2_2                  1
+     sg13g2_nand2b_1                11
+     sg13g2_nand3_1                 22
+     sg13g2_nand3b_1                 5
+     sg13g2_nand4_1                 10
+     sg13g2_nor2_1                  41
+     sg13g2_nor2b_1                 19
+     sg13g2_nor3_1                  11
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                  20
+     sg13g2_nor4_2                   5
+     sg13g2_o21ai_1                 43
+     sg13g2_or2_1                    8
+     sg13g2_or3_1                    5
+     sg13g2_or4_1                    4
+     sg13g2_xnor2_1                 22
+     sg13g2_xor2_1                  15
+
+   Area for cell type $paramod$c76342faba2795bb9f7122edda48f204b1464422\sfv_fifo is unknown!
+   Area for cell type $paramod\sfv_sync\STAGES=s32'00000000000000000000000000000010\RESET_VAL=1'1 is unknown!
+
+   Chip area for module '$paramod\sfv_uart\BAUD_RESET=16'0000000011011001': 9143.290800
+     of which used for sequential elements: 167091.724800 (1827.48%)
+
+=== dma_irq ===
+
+   Number of wires:                 33
+   Number of wire bits:             37
+   Number of public wires:           9
+   Number of public wire bits:      12
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  8
+     sg13g2_a21o_1                   3
+     sg13g2_and2_1                   1
+     sg13g2_dfrbp_1                  2
+     sg13g2_nand2_1                  2
+
+   Chip area for module '\dma_irq': 156.038400
+     of which used for sequential elements: 167186.073600 (107144.19%)
+
+=== sfb_v1_slave_adapter ===
+
+   Number of wires:                246
+   Number of wire bits:            469
+   Number of public wires:          24
+   Number of public wire bits:     247
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                113
+     sg13g2_buf_1                    3
+     sg13g2_buf_8                    4
+     sg13g2_dfrbp_1                 34
+     sg13g2_inv_1                    1
+     sg13g2_mux2_1                  66
+     sg13g2_nor2b_1                  3
+     sg13g2_nor3_2                   1
+     sg13g2_or2_1                    1
+
+   Chip area for module '\sfb_v1_slave_adapter': 2975.616000
+     of which used for sequential elements: 168790.003200 (5672.44%)
+
+=== sfv_bootrom_image ===
+
+   Number of wires:               6084
+   Number of wire bits:           6124
+   Number of public wires:           2
+   Number of public wire bits:      42
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               3523
+     sg13g2_a21o_1                  45
+     sg13g2_a21oi_1                453
+     sg13g2_a21oi_2                  3
+     sg13g2_a221oi_1                83
+     sg13g2_a22oi_1                403
+     sg13g2_and2_1                  21
+     sg13g2_and3_1                   6
+     sg13g2_and3_2                   1
+     sg13g2_and4_1                   4
+     sg13g2_buf_1                   60
+     sg13g2_buf_16                   6
+     sg13g2_buf_2                  252
+     sg13g2_buf_4                  167
+     sg13g2_buf_8                   92
+     sg13g2_inv_1                    9
+     sg13g2_inv_2                    3
+     sg13g2_inv_4                    4
+     sg13g2_mux2_1                   1
+     sg13g2_nand2_1                364
+     sg13g2_nand2_2                 24
+     sg13g2_nand2b_1                49
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                158
+     sg13g2_nand3b_1                17
+     sg13g2_nand4_1                 52
+     sg13g2_nor2_1                 315
+     sg13g2_nor2_2                  46
+     sg13g2_nor2b_1                 29
+     sg13g2_nor2b_2                  2
+     sg13g2_nor3_1                  94
+     sg13g2_nor3_2                   2
+     sg13g2_nor4_1                  72
+     sg13g2_o21ai_1                615
+     sg13g2_or2_1                   26
+     sg13g2_or3_1                   16
+     sg13g2_or4_1                   11
+     sg13g2_xnor2_1                 12
+     sg13g2_xor2_1                   5
+
+   Chip area for module '\sfv_bootrom_image': 35106.107400
+     of which used for sequential elements: 168790.003200 (480.80%)
+
+=== sfv_clkgate ===
+
+   Number of wires:                  4
+   Number of wire bits:              4
+   Number of public wires:           4
+   Number of public wire bits:       4
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  1
+     sg13g2_slgcp_1                  1
+
+   Chip area for module '\sfv_clkgate': 30.844800
+     of which used for sequential elements: 168790.003200 (547223.53%)
+
+=== sfv_jtag_dbg ===
+
+   Number of wires:               1269
+   Number of wire bits:           1679
+   Number of public wires:          49
+   Number of public wire bits:     356
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                693
+     sfv_jtag_tap                    1
+     sfv_sync                       10
+     sg13g2_a21oi_1                 60
+     sg13g2_a22oi_1                  1
+     sg13g2_and2_1                   1
+     sg13g2_and3_1                   1
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                   22
+     sg13g2_buf_2                    9
+     sg13g2_buf_4                    4
+     sg13g2_buf_8                    9
+     sg13g2_dfrbp_1                215
+     sg13g2_inv_1                    8
+     sg13g2_mux2_1                 191
+     sg13g2_nand2_1                116
+     sg13g2_nand2b_1                 8
+     sg13g2_nand3_1                  1
+     sg13g2_nand4_1                  4
+     sg13g2_nor2_1                   3
+     sg13g2_nor2b_1                  4
+     sg13g2_nor3_1                   4
+     sg13g2_nor4_2                   3
+     sg13g2_o21ai_1                  2
+     sg13g2_or2_1                   12
+     sg13g2_or3_1                    1
+     sg13g2_xnor2_1                  1
+     sg13g2_xor2_1                   1
+
+   Area for cell type \sfv_sync is unknown!
+   Area for cell type \sfv_jtag_tap is unknown!
+
+   Chip area for module '\sfv_jtag_dbg': 16050.144600
+     of which used for sequential elements: 178932.499200 (1114.83%)
+
+=== sfv_jtag_tap ===
+
+   Number of wires:                238
+   Number of wire bits:            306
+   Number of public wires:          15
+   Number of public wire bits:      32
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 85
+     sg13g2_a21o_1                   1
+     sg13g2_a21oi_1                  6
+     sg13g2_a22oi_1                  1
+     sg13g2_and2_2                   1
+     sg13g2_and4_2                   1
+     sg13g2_buf_4                    3
+     sg13g2_buf_8                    1
+     sg13g2_dfrbp_1                 16
+     sg13g2_inv_1                   12
+     sg13g2_mux2_1                   1
+     sg13g2_nand2_1                 19
+     sg13g2_nand2b_1                 2
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                  1
+     sg13g2_nand3b_1                 1
+     sg13g2_nor2_1                   2
+     sg13g2_nor3_1                   4
+     sg13g2_nor3_2                   2
+     sg13g2_nor4_2                   1
+     sg13g2_o21ai_1                  8
+     sg13g2_or2_1                    1
+
+   Chip area for module '\sfv_jtag_tap': 1389.792600
+     of which used for sequential elements: 179687.289600 (12929.07%)
+
+=== sfv_rst_sync ===
+
+   Number of wires:                 12
+   Number of wire bits:             13
+   Number of public wires:           6
+   Number of public wire bits:       7
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  3
+     sg13g2_dfrbp_1                  2
+     sg13g2_mux2_1                   1
+
+   Chip area for module '\sfv_rst_sync': 112.492800
+     of which used for sequential elements: 179781.638400 (159816.13%)
+
+=== sfv_soc_df ===
+
+   Number of wires:                536
+   Number of wire bits:           3689
+   Number of public wires:         109
+   Number of public wire bits:    3262
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                181
+     $paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\sfv_mbist      1
+     $paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\sfv_periph_bridge      1
+     $paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\sfb_crossbar      1
+     $paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\silicaflux_dma      1
+     $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_tile      1
+     $paramod\sfv_bootrom\WORDS=s32'00000000000000000000010000000000      1
+     $paramod\sfv_cpu\BOOT_ADDR=32'00000000000000000000000000000000      1
+     $paramod\sfv_gpio\N=s32'00000000000000000000000000001000      1
+     $paramod\sfv_intc\N=s32'00000000000000000000000000001001      1
+     $paramod\sfv_sram_slave\DEPTH=s32'00000000000000000010000000000000      4
+     $paramod\sfv_uart\BAUD_RESET=16'0000000011011001      1
+     sfb_v1_slave_adapter            7
+     sfv_jtag_dbg                    1
+     sfv_rst_sync                    3
+     sfv_spi                         1
+     sfv_sync                        2
+     sfv_sysctrl                     1
+     sfv_timer                       1
+     sg13g2_and2_1                   1
+     sg13g2_buf_16                   1
+     sg13g2_buf_4                    4
+     sg13g2_buf_8                   10
+     sg13g2_inv_1                    2
+     sg13g2_mux2_1                 130
+     sg13g2_nor2b_1                  2
+     sg13g2_nor3_1                   1
+
+   Area for cell type \sfv_rst_sync is unknown!
+   Area for cell type \sfv_jtag_dbg is unknown!
+   Area for cell type \sfv_sync is unknown!
+   Area for cell type \sfv_sysctrl is unknown!
+   Area for cell type \sfv_timer is unknown!
+   Area for cell type \sfv_spi is unknown!
+   Area for cell type \sfb_v1_slave_adapter is unknown!
+   Area for cell type $paramod\sfv_sram_slave\DEPTH=s32'00000000000000000010000000000000 is unknown!
+   Area for cell type $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_tile is unknown!
+   Area for cell type $paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\silicaflux_dma is unknown!
+   Area for cell type $paramod\sfv_gpio\N=s32'00000000000000000000000000001000 is unknown!
+   Area for cell type $paramod\sfv_uart\BAUD_RESET=16'0000000011011001 is unknown!
+   Area for cell type $paramod\sfv_intc\N=s32'00000000000000000000000000001001 is unknown!
+   Area for cell type $paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\sfv_periph_bridge is unknown!
+   Area for cell type $paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\sfv_mbist is unknown!
+   Area for cell type $paramod\sfv_bootrom\WORDS=s32'00000000000000000000010000000000 is unknown!
+   Area for cell type $paramod\sfv_cpu\BOOT_ADDR=32'00000000000000000000000000000000 is unknown!
+   Area for cell type $paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\sfb_crossbar is unknown!
+
+   Chip area for module '\sfv_soc_df': 2745.187200
+     of which used for sequential elements: 179781.638400 (6548.98%)
+
+=== sfv_spi ===
+
+   Number of wires:                716
+   Number of wire bits:            861
+   Number of public wires:          24
+   Number of public wire bits:     144
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                322
+     sg13g2_a21o_1                   2
+     sg13g2_a21oi_1                 28
+     sg13g2_a21oi_2                  1
+     sg13g2_a22oi_1                  7
+     sg13g2_and2_1                  17
+     sg13g2_and3_1                   3
+     sg13g2_and3_2                   1
+     sg13g2_and4_1                   1
+     sg13g2_buf_1                    5
+     sg13g2_buf_2                    4
+     sg13g2_buf_4                    5
+     sg13g2_buf_8                    2
+     sg13g2_dfrbp_1                 59
+     sg13g2_inv_1                   12
+     sg13g2_mux2_1                  44
+     sg13g2_mux4_1                   2
+     sg13g2_nand2_1                 29
+     sg13g2_nand2b_1                 3
+     sg13g2_nand3_1                 11
+     sg13g2_nand4_1                  5
+     sg13g2_nor2_1                  23
+     sg13g2_nor2_2                   2
+     sg13g2_nor2b_1                  5
+     sg13g2_nor2b_2                  1
+     sg13g2_nor3_1                   5
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                   3
+     sg13g2_nor4_2                   5
+     sg13g2_o21ai_1                 28
+     sg13g2_or2_1                    1
+     sg13g2_or4_1                    1
+     sg13g2_xnor2_1                  2
+     sg13g2_xor2_1                   4
+
+   Chip area for module '\sfv_spi': 5711.466600
+     of which used for sequential elements: 182564.928000 (3196.46%)
+
+=== sfv_sync ===
+
+   Number of wires:                  7
+   Number of wire bits:              8
+   Number of public wires:           5
+   Number of public wire bits:       6
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  2
+     sg13g2_dfrbp_1                  2
+
+   Chip area for module '\sfv_sync': 94.348800
+     of which used for sequential elements: 182659.276800 (193600.00%)
+
+=== sfv_sysctrl ===
+
+   Number of wires:               1566
+   Number of wire bits:           1858
+   Number of public wires:          50
+   Number of public wire bits:     337
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                667
+     sg13g2_a21o_1                   6
+     sg13g2_a21oi_1                 20
+     sg13g2_a22oi_1                  8
+     sg13g2_and2_1                  24
+     sg13g2_and3_1                   5
+     sg13g2_and4_1                   2
+     sg13g2_buf_1                   20
+     sg13g2_buf_16                   3
+     sg13g2_buf_2                    9
+     sg13g2_buf_4                    5
+     sg13g2_buf_8                    7
+     sg13g2_dfrbp_1                147
+     sg13g2_inv_1                    5
+     sg13g2_mux2_1                 153
+     sg13g2_mux4_1                   1
+     sg13g2_nand2_1                108
+     sg13g2_nand2_2                  3
+     sg13g2_nand2b_1                29
+     sg13g2_nand2b_2                 1
+     sg13g2_nand3_1                 24
+     sg13g2_nand3b_1                 3
+     sg13g2_nand4_1                 15
+     sg13g2_nor2_1                  10
+     sg13g2_nor2_2                   2
+     sg13g2_nor2b_1                 14
+     sg13g2_nor2b_2                  1
+     sg13g2_nor3_1                   4
+     sg13g2_nor3_2                   5
+     sg13g2_nor4_1                   6
+     sg13g2_nor4_2                   2
+     sg13g2_o21ai_1                 20
+     sg13g2_or2_1                    3
+     sg13g2_or4_1                    1
+     sg13g2_xnor2_1                  1
+
+   Chip area for module '\sfv_sysctrl': 13243.003200
+     of which used for sequential elements: 189593.913600 (1431.65%)
+
+=== sfv_timer ===
+
+   Number of wires:               2733
+   Number of wire bits:           3040
+   Number of public wires:          15
+   Number of public wire bits:     244
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1152
+     sg13g2_a21o_1                   1
+     sg13g2_a21oi_1                 53
+     sg13g2_a221oi_1                19
+     sg13g2_a22oi_1                 12
+     sg13g2_and2_1                  25
+     sg13g2_and2_2                   1
+     sg13g2_and3_1                   6
+     sg13g2_and4_1                  10
+     sg13g2_buf_1                   75
+     sg13g2_buf_2                   12
+     sg13g2_buf_4                    5
+     sg13g2_buf_8                    8
+     sg13g2_dfrbp_1                161
+     sg13g2_inv_1                   40
+     sg13g2_mux2_1                  19
+     sg13g2_mux4_1                  16
+     sg13g2_nand2_1                169
+     sg13g2_nand2_2                  1
+     sg13g2_nand2b_1                33
+     sg13g2_nand3_1                 38
+     sg13g2_nand4_1                 27
+     sg13g2_nor2_1                  41
+     sg13g2_nor2_2                   1
+     sg13g2_nor2b_1                 41
+     sg13g2_nor3_1                   9
+     sg13g2_nor3_2                   1
+     sg13g2_nor4_1                   5
+     sg13g2_nor4_2                   3
+     sg13g2_o21ai_1                186
+     sg13g2_or2_1                    2
+     sg13g2_or3_1                    2
+     sg13g2_or4_1                    1
+     sg13g2_xnor2_1                 76
+     sg13g2_xor2_1                  53
+
+   Chip area for module '\sfv_timer': 17731.677600
+     of which used for sequential elements: 197188.992000 (1112.07%)
+
+=== design hierarchy ===
+
+   sfv_soc_df                        1
+     $paramod$55d1b07e6438e37a99a1d3357b9d18fc602eac84\sfv_mbist      1
+     $paramod$8e72d3f19b6e9757518038b7ed8ba6faaae46fbe\sfv_periph_bridge      1
+     $paramod$d0d0579aeb7dfe7712dc4ea92f85da45153431d9\sfb_crossbar      1
+       $paramod$06f1363ea5af936eca348e1cb453d5c8bf83fef0\sfb_addr_decoder      2
+       $paramod$3ea2e8e6426ad75d0eb00b16d973718606304232\sfb_arbiter      7
+       $paramod$46ed8da08192c62c810a8c6c0b76c3fdd3661f86\sfb_req_mux      7
+       $paramod$4a49ecc287cfa93f28befb4ead8a068b20ad2ad1\sfb_addr_decoder      2
+       $paramod$8c7cca9b3fbb2cad1035c144906471bf5dc082a5\sfb_rsp_router      1
+       $paramod\sfb_error_slave\DW=s32'00000000000000000000000000100000      4
+     $paramod$d3254a828e9b042b9ccdb73122c5e4123e1bedb4\silicaflux_dma      1
+       $paramod$425c949b03f50736b1552886a361c957c7588c41\dma_control_regs      1
+         dma_irq                     1
+       $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_transfer_engine      1
+         $paramod$bfe0c80a13857ffaa5f2954c0f28625c780e5b09\dma_validate      1
+     $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_tile      1
+       $paramod$e1e19d502aed204329de22e3343ebff334944d0d\sfv_vec_engine      1
+       $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000000010000000000      4
+         $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000000010000000000      1
+       $paramod\sfv_tensor_engine\TSPM_WORDS=s32'00000000000000000001000000000000      1
+         $paramod$9e34d52547afa8fbbdb3403e58d5ac34ed42b3b7\sfv_mac_array      1
+       sfv_clkgate                   2
+     $paramod\sfv_bootrom\WORDS=s32'00000000000000000000010000000000      1
+       sfv_bootrom_image             1
+     $paramod\sfv_cpu\BOOT_ADDR=32'00000000000000000000000000000000      1
+     $paramod\sfv_gpio\N=s32'00000000000000000000000000001000      1
+       sfv_sync                      8
+     $paramod\sfv_intc\N=s32'00000000000000000000000000001001      1
+     $paramod\sfv_sram_slave\DEPTH=s32'00000000000000000010000000000000      4
+       $paramod\sfv_sram_sp\DEPTH=s32'00000000000000000010000000000000      1
+         $paramod\sfv_sram_macro_bank\DEPTH=s32'00000000000000000010000000000000      1
+     $paramod\sfv_uart\BAUD_RESET=16'0000000011011001      1
+       $paramod$c76342faba2795bb9f7122edda48f204b1464422\sfv_fifo      2
+       $paramod\sfv_sync\STAGES=s32'00000000000000000000000000000010\RESET_VAL=1'1      1
+     sfb_v1_slave_adapter            7
+     sfv_jtag_dbg                    1
+       sfv_jtag_tap                  1
+       sfv_sync                     10
+     sfv_rst_sync                    3
+     sfv_spi                         1
+     sfv_sync                        2
+     sfv_sysctrl                     1
+     sfv_timer                       1
+
+   Number of wires:             181216
+   Number of wire bits:         207646
+   Number of public wires:        1769
+   Number of public wire bits:   26258
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              93896
+     RM_IHPSG13_1P_2048x64_c2_bm_bist      8
+     RM_IHPSG13_1P_512x64_c2_bm_bist      4
+     sg13g2_a21o_1                2023
+     sg13g2_a21o_2                  13
+     sg13g2_a21oi_1               7419
+     sg13g2_a21oi_2                129
+     sg13g2_a221oi_1              1332
+     sg13g2_a22oi_1               3331
+     sg13g2_and2_1                2345
+     sg13g2_and2_2                  37
+     sg13g2_and3_1                 536
+     sg13g2_and3_2                  82
+     sg13g2_and4_1                 263
+     sg13g2_and4_2                   5
+     sg13g2_buf_1                 9732
+     sg13g2_buf_16                 223
+     sg13g2_buf_2                 4223
+     sg13g2_buf_4                 2040
+     sg13g2_buf_8                 1035
+     sg13g2_dfrbp_1               4512
+     sg13g2_dlygate4sd1_1            1
+     sg13g2_inv_1                 1975
+     sg13g2_inv_2                   49
+     sg13g2_inv_4                    4
+     sg13g2_inv_8                    1
+     sg13g2_mux2_1                4460
+     sg13g2_mux2_2                   4
+     sg13g2_mux4_1                1009
+     sg13g2_nand2_1              12432
+     sg13g2_nand2_2                167
+     sg13g2_nand2b_1              1430
+     sg13g2_nand2b_2                17
+     sg13g2_nand3_1               2518
+     sg13g2_nand3b_1               399
+     sg13g2_nand4_1               1401
+     sg13g2_nor2_1                6692
+     sg13g2_nor2_2                 110
+     sg13g2_nor2b_1               1427
+     sg13g2_nor2b_2                 16
+     sg13g2_nor3_1                1536
+     sg13g2_nor3_2                  95
+     sg13g2_nor4_1                 630
+     sg13g2_nor4_2                 108
+     sg13g2_o21ai_1               8051
+     sg13g2_or2_1                  916
+     sg13g2_or3_1                  462
+     sg13g2_or3_2                    1
+     sg13g2_or4_1                  177
+     sg13g2_slgcp_1                  2
+     sg13g2_xnor2_1               6472
+     sg13g2_xor2_1                2042
+
+   Chip area for top module '\sfv_soc_df': 5683477.201800
+     of which used for sequential elements: 197188.992000 (3.47%)
+

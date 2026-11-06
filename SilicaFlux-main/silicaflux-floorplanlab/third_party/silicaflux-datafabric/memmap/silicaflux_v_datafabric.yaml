@@ -1,0 +1,191 @@
+# =============================================================================
+# SilicaFlux-V + DataFabric memory map -- SINGLE SOURCE OF TRUTH
+#
+# Generated from this file (python/datafabric/memmap_gen.py):
+#   generated/sfb_memmap_pkg.sv   SystemVerilog constants (crossbar BASE/MASK/access matrix)
+#   rtl/dma/dma_defs.svh          DMA register map for the RTL
+#   rtl/interconnect/sfb_perf_defs.svh  perf-counter register map
+#   generated/sfv_df_map.h        C header (firmware)
+#   generated/datafabric_map.py   Python definitions (tests, tools)
+#   docs/datafabric/MEMORY_MAP.md human-readable map
+#
+# Provenance: every pre-existing address below is copied from SilicaFlux-V
+# release 1 (silicaflux-v rtl/pkg/sfv_pkg.sv, rtl/top/sfv_soc.sv,
+# docs/MEMORY_MAP.md) and cross-checked against sfv_pkg.sv by
+# `memmap_gen.py --sfv-pkg`.  New entries are marked `new: true`; they only
+# use addresses, pages, master and IRQ numbers that are unused in release 1.
+# =============================================================================
+meta:
+  name: silicaflux_v_datafabric
+  address_width: 32
+  data_width: 32
+  endianness: little
+  page_size: 0x1000
+
+# permissions a region may declare (r = read, w = write, x = instruction fetch)
+access_types: [r, rw, rx, rwx]
+
+# ---------------------------------------------------------------- top-level regions
+# Each region is one crossbar slave port (mask decode: power-of-two size,
+# base aligned to size).  Anything not listed is UNMAPPED -> decode error.
+regions:
+  - {name: BOOT_ROM,   base: 0x00000000, size: 0x1000,  kind: rom,    access: rx,  slave: ROM,
+     note: "4 KiB decode window (sfv_soc f_mask = ~(ROM_BYTES-1)); writes -> bus error from the ROM"}
+  - {name: SRAM_BANK0, base: 0x10000000, size: 0x8000,  kind: memory, access: rwx, slave: SRAM0}
+  - {name: SRAM_BANK1, base: 0x10008000, size: 0x8000,  kind: memory, access: rwx, slave: SRAM1}
+  - {name: SRAM_BANK2, base: 0x10010000, size: 0x8000,  kind: memory, access: rwx, slave: SRAM2}
+  - {name: SRAM_BANK3, base: 0x10018000, size: 0x8000,  kind: memory, access: rwx, slave: SRAM3}
+  - {name: TSPM,       base: 0x20000000, size: 0x4000,  kind: memory, access: rwx, slave: TSPM,
+     note: "tile scratchpad, 4-way word-interleaved banks (sfv_tile)"}
+  - {name: PERIPH,     base: 0x40000000, size: 0x20000, kind: window, access: rw,  slave: PERIPH,
+     note: "register bus behind sfv_periph_bridge, 32 pages of 4 KiB, word access only"}
+
+# ---------------------------------------------------------------- peripheral pages (inside PERIPH)
+pages:
+  - {name: SYSCTRL, index: 0,  parent: PERIPH}
+  - {name: INTC,    index: 1,  parent: PERIPH}
+  - {name: TIMER,   index: 2,  parent: PERIPH}
+  - {name: UART,    index: 3,  parent: PERIPH}
+  - {name: SPI,     index: 4,  parent: PERIPH}
+  - {name: GPIO,    index: 5,  parent: PERIPH}
+  - {name: DMA,     index: 6,  parent: PERIPH, new: true, block: dma}
+  - {name: DFPERF,  index: 7,  parent: PERIPH, new: true, block: dfperf}
+  - {name: VE,      index: 16, parent: PERIPH}
+  - {name: TE,      index: 17, parent: PERIPH}
+
+# ---------------------------------------------------------------- bus masters (crossbar ports)
+# deny: regions the master may not reach (access matrix -> decode error)
+masters:
+  - {name: DBG,  index: 0, note: "JTAG system-bus access"}
+  - {name: CPUD, index: 1, note: "CPU data port"}
+  - {name: CPUI, index: 2, deny: [PERIPH], note: "CPU instruction port; execute-never peripherals"}
+  - {name: DMA,  index: 3, deny: [PERIPH], new: true,
+     note: "DataFabric DMA; MMIO side effects not reviewed -> no peripheral access"}
+
+# ---------------------------------------------------------------- interrupt sources (sfv_intc)
+interrupts:
+  - {name: UART,   index: 0}
+  - {name: SPI,    index: 1}
+  - {name: GPIO,   index: 2}
+  - {name: VE,     index: 3}
+  - {name: TE,     index: 4}
+  - {name: MBIST,  index: 5}
+  - {name: BUSERR, index: 6}
+  - {name: DBG,    index: 7}
+  - {name: DMA,    index: 8, new: true}
+
+# ---------------------------------------------------------------- register blocks
+register_blocks:
+  dma:
+    prefix: DMA
+    id_value: 0x53464446          # "SFDF"
+    registers:
+      - name: CONTROL
+        offset: 0x00
+        access: wo
+        reset: 0x0
+        desc: "Command register (reads 0)."
+        fields:
+          - {name: START, bits: "0", access: w1s, desc: "Start the configured transfer. Refused (bus error, no effect) while BUSY."}
+          - {name: ABORT, bits: "1", access: w1s, desc: "Stop at the next beat boundary; outstanding transaction completes. No effect when idle."}
+      - name: STATUS
+        offset: 0x04
+        access: ro
+        reset: 0x0
+        fields:
+          - {name: BUSY,    bits: "0",    access: ro, desc: "Transfer in progress."}
+          - {name: DONE,    bits: "1",    access: ro, desc: "Last transfer completed; cleared by START."}
+          - {name: ERROR,   bits: "2",    access: ro, desc: "Last transfer ended with an error (see ERROR_CODE); cleared by START."}
+          - {name: ABORTED, bits: "3",    access: ro, desc: "Last transfer was aborted."}
+          - {name: STATE,   bits: "10:8", access: ro, desc: "Engine FSM state (debug)."}
+      - {name: SRC_ADDR,   offset: 0x08, access: rw, reset: 0x0, desc: "Source byte address (DW-aligned). Write refused while BUSY."}
+      - {name: DST_ADDR,   offset: 0x0C, access: rw, reset: 0x0, desc: "Destination byte address (DW-aligned). Write refused while BUSY."}
+      - {name: LENGTH,     offset: 0x10, access: rw, reset: 0x0, desc: "Transfer length in bytes (1 .. 2^MAX_LEN_LOG2). Write refused while BUSY."}
+      - {name: BYTES_DONE, offset: 0x14, access: ro, reset: 0x0, desc: "Bytes written and acknowledged (contiguous prefix)."}
+      - name: INT_ENABLE
+        offset: 0x18
+        access: rw
+        reset: 0x0
+        fields:
+          - {name: DONE,  bits: "0", access: rw, desc: "Completion interrupt enable."}
+          - {name: ERROR, bits: "1", access: rw, desc: "Error interrupt enable."}
+      - name: INT_STATUS
+        offset: 0x1C
+        access: rw
+        reset: 0x0
+        fields:
+          - {name: DONE,  bits: "0", access: w1c, desc: "Completion pending (write 1 to clear)."}
+          - {name: ERROR, bits: "1", access: w1c, desc: "Error pending (write 1 to clear)."}
+      - {name: ERROR_CODE, offset: 0x20, access: ro, reset: 0x0, desc: "Cause of the last error (enum dma_error)."}
+      - {name: ERROR_ADDR, offset: 0x24, access: ro, reset: 0x0, desc: "Bus address of the failing access (bus errors)."}
+      - name: INFO
+        offset: 0x28
+        access: ro
+        reset: 0x0
+        fields:
+          - {name: DW_BYTES,     bits: "7:0",   access: ro, desc: "Data width in bytes."}
+          - {name: BUFFERED,     bits: "8",     access: ro, desc: "1 = buffered/burst engine."}
+          - {name: FIFO_LOG2,    bits: "15:12", access: ro, desc: "log2 FIFO depth (buffered engine)."}
+          - {name: MAX_LEN_LOG2, bits: "23:16", access: ro, desc: "log2 of the maximum transfer length."}
+          - {name: VERSION,      bits: "31:24", access: ro, desc: "Register-map version (1)."}
+      - {name: ID,            offset: 0x2C, access: ro, reset: 0x53464446, desc: "Identification 'SFDF'."}
+      - {name: ACTIVE_CYCLES, offset: 0x30, access: ro, reset: 0x0, desc: "Cycles BUSY during the current/last transfer (PERF build; wraps)."}
+      - {name: STALL_CYCLES,  offset: 0x34, access: ro, reset: 0x0, desc: "Cycles a DMA request waited for acceptance (PERF build; wraps)."}
+      - {name: TRANSFERS,     offset: 0x38, access: ro, reset: 0x0, desc: "Completed transfers since reset (PERF build; wraps)."}
+    enums:
+      error:
+        - {name: NONE,         value: 0}
+        - {name: ZERO_LENGTH,  value: 1}
+        - {name: LENGTH,       value: 2}
+        - {name: SRC_ALIGN,    value: 3}
+        - {name: DST_ALIGN,    value: 4}
+        - {name: SRC_OVERFLOW, value: 5}
+        - {name: DST_OVERFLOW, value: 6}
+        - {name: OVERLAP,      value: 7}
+        - {name: READ_BUS,     value: 8}
+        - {name: WRITE_BUS,    value: 9}
+        - {name: ABORTED,      value: 10}
+      state:
+        - {name: IDLE,        value: 0}
+        - {name: VALIDATE,    value: 1}
+        - {name: ISSUE_READ,  value: 2}
+        - {name: WAIT_READ,   value: 3}
+        - {name: ISSUE_WRITE, value: 4}
+        - {name: WAIT_WRITE,  value: 5}
+        - {name: COMPLETE,    value: 6}
+        - {name: ERROR,       value: 7}
+
+  dfperf:
+    prefix: DFP
+    registers:
+      - name: CTRL
+        offset: 0x00
+        access: rw
+        reset: 0x1
+        fields:
+          - {name: ENABLE,   bits: "0", access: rw,  desc: "Counting enabled."}
+          - {name: CLEAR,    bits: "1", access: w1s, desc: "Zero all live counters (self-clearing)."}
+          - {name: SNAPSHOT, bits: "2", access: w1s, desc: "Copy all live counters to the read registers in one cycle (atomic)."}
+      - name: INFO
+        offset: 0x04
+        access: ro
+        reset: 0x0
+        fields:
+          - {name: MASTERS, bits: "7:0",  access: ro, desc: "Number of crossbar masters counted."}
+          - {name: WIDTH,   bits: "15:8", access: ro, desc: "Event counter width (saturating)."}
+      - {name: CYCLES_LO,   offset: 0x08, access: ro, reset: 0x0, desc: "Snapshot of the 64-bit cycle counter, low word."}
+      - {name: CYCLES_HI,   offset: 0x0C, access: ro, reset: 0x0, desc: "Snapshot of the 64-bit cycle counter, high word."}
+      - {name: DMA_BYTES,   offset: 0x10, access: ro, reset: 0x0, desc: "Bytes moved by completed DMA transfers."}
+      - {name: DMA_BUSY,    offset: 0x14, access: ro, reset: 0x0, desc: "Cycles the DMA was busy."}
+      - {name: DMA_IDLE,    offset: 0x18, access: ro, reset: 0x0, desc: "Cycles the DMA was idle."}
+      - {name: FIFO_MAX,    offset: 0x1C, access: ro, reset: 0x0, desc: "Maximum observed DMA FIFO occupancy (buffered engine; 0 otherwise)."}
+    per_master:
+      base: 0x40
+      stride: 0x20
+      registers:
+        - {name: READS,     offset: 0x00, desc: "Accepted read requests."}
+        - {name: WRITES,    offset: 0x04, desc: "Accepted write requests."}
+        - {name: REQ_STALL, offset: 0x08, desc: "Cycles req_valid && !req_ready."}
+        - {name: ARB_LOSS,  offset: 0x0C, desc: "Cycles the master lost arbitration (contention)."}
+        - {name: RSP_STALL, offset: 0x10, desc: "Cycles rsp_valid && !rsp_ready."}
+        - {name: ERRORS,    offset: 0x14, desc: "Error responses received."}

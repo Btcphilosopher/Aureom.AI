@@ -1,0 +1,10 @@
+# MCU-I -- NOT AVAILABLE.
+# The repository audit (reports/audit/REPOSITORY_INVENTORY.md) found no MCU-I
+# RTL, configuration or documentation anywhere in SilicaFlux-main/ (including
+# nested archives).  FloorplanLab refuses this design instead of substituting
+# another one.  To enable: add the MCU-I RTL, then fill a design.yaml like
+# configs/silicaflux_v/design.yaml (file list, top, defines, SDC template,
+# expected macro inventory per platform, logical groups, I/O plan).
+name: mcu_i
+status: not_available
+reason: "no MCU-I implementation exists in the repository (audit)"

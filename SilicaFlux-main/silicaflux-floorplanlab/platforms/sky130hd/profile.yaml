@@ -1,0 +1,71 @@
+# SkyWater SKY130 (130 nm, open PDK), sky130_fd_sc_hd + OpenRAM macros.
+# Values from ORFS ab2aaf0f flow/platforms/{sky130hd,sky130ram}.
+name: sky130hd
+status: enabled
+orfs_platform: sky130hd
+process: "SkyWater SKY130 130 nm CMOS, 5 metal (li1, met1-met5), open PDK"
+provenance:
+  orfs_revision: ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621
+tech_lef: ${ORFS_FLOW}/platforms/sky130hd/lef/sky130_fd_sc_hd.tlef
+sc_lefs: [${ORFS_FLOW}/platforms/sky130hd/lef/sky130_fd_sc_hd_merged.lef]
+sc_gds: [${ORFS_FLOW}/platforms/sky130hd/gds/sky130_fd_sc_hd.gds]
+corners:
+  typ: {liberty: [${ORFS_FLOW}/platforms/sky130hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib], voltage: 1.80, temperature_c: 25, process: typical}
+missing_corners:
+  - {corner: ss_100C_1v60, missing: "only the tt corner std-cell lib is in ORFS ab2aaf0f sky130hd"}
+  - {corner: ff_n40C_1v95, missing: "only the tt corner std-cell lib is in ORFS ab2aaf0f sky130hd"}
+analysis_corner: typ
+place_site: unithd
+row_height_um: 2.72
+site_width_um: 0.46
+routing:
+  min_layer: met1
+  max_layer: met5
+  io_h_layer: met3
+  io_v_layer: met2
+  fastroute_tcl: ${ORFS_FLOW}/platforms/sky130hd/fastroute.tcl
+  make_tracks_tcl: ${ORFS_FLOW}/platforms/sky130hd/make_tracks.tcl
+  pdn_layers: [met1, met4, met5]
+rc:
+  set_rc_tcl: ${ORFS_FLOW}/platforms/sky130hd/setRC.tcl
+  rcx_rules: ${ORFS_FLOW}/platforms/sky130hd/rcx_patterns.rules
+  assumption: "Pre-route parasitics from setRC.tcl per-layer R/C (estimate only)."
+tapcell:
+  method: tapcell
+  script: ${ORFS_FLOW}/platforms/sky130hd/tapcell.tcl
+  tapcell_master: sky130_fd_sc_hd__tapvpwrvgnd_1
+  distance_um: 14
+  note: "Platform tapcell.tcl: well taps every 14 um (sky130 latch-up rule as encoded by ORFS). No endcaps in sky130_fd_sc_hd."
+tie_cells: {hi: [sky130_fd_sc_hd__conb_1, HI], lo: [sky130_fd_sc_hd__conb_1, LO]}
+fill_cells: [sky130_fd_sc_hd__fill_1, sky130_fd_sc_hd__fill_2, sky130_fd_sc_hd__fill_4, sky130_fd_sc_hd__fill_8]
+dont_use: []
+power:
+  power_net: VDD
+  ground_net: VSS
+  supply_voltage: 1.80
+pdn:
+  tcl: ${PROJECT}/platforms/sky130hd/pdn.tcl
+  params: {ring: 0, ring_layers: [met4, met5], ring_width: 5.0, ring_spacing: 2.0, ring_offset: 2.0,
+           rail_layer: met1, rail_width: 0.48, rail_pitch: 5.44,
+           strap1_layer: met4, strap1_width: 1.6, strap1_pitch: 27.14, strap1_offset: 13.57,
+           strap2_layer: met5, strap2_width: 1.6, strap2_pitch: 27.2, strap2_offset: 13.6,
+           macro_connect: [met3, met4], macro_halo: 2.0}
+macro_pg_pins: {vdd: VDD, gnd: VSS}
+macro_pg_assumption: "OpenRAM vdd/gnd rings (met3) tied to the 1.8 V core VDD/VSS."
+macro_allowed_orients: [R0, MX, MY, R180]
+macros:
+  sky130_sram_1rw1r_128x256_8:
+    lef: ${ORFS_FLOW}/platforms/sky130ram/sky130_sram_1rw1r_128x256_8/sky130_sram_1rw1r_128x256_8.lef
+    liberty: {typ: ${ORFS_FLOW}/platforms/sky130ram/sky130_sram_1rw1r_128x256_8/sky130_sram_1rw1r_128x256_8_TT_1p8V_25C.lib}
+    gds: ${ORFS_FLOW}/platforms/sky130ram/sky130_sram_1rw1r_128x256_8/sky130_sram_1rw1r_128x256_8.gds
+    verilog: ${ORFS_FLOW}/platforms/sky130ram/sky130_sram_1rw1r_128x256_8/sky130_sram_1rw1r_128x256_8.v
+    words: 256
+    bits: 128
+    ports: 1RW + 1R (OpenRAM; read data launched on the falling clock edge per SilicaFlux-V ASIC_FLOW.md)
+rtl_tech_files:
+  sfv_clkgate: ${PROJECT}/third_party/silicaflux-v/asic/tech/sky130/sfv_clkgate.sv
+  sfv_sram_macro_bank: ${PROJECT}/third_party/silicaflux-v/asic/tech/sky130/sfv_sram_macro_bank.sv
+physical_verification:
+  drc: {tool: "Magic / KLayout", deck: "${ORFS_FLOW}/platforms/sky130hd/drc/", status: "available, not run"}
+  lvs: {tool: Netgen, status: "not installed"}
+io_pads: "sky130io pad cells exist in ORFS (flow/platforms/sky130io) but are not checked out / not used: logical pins only"

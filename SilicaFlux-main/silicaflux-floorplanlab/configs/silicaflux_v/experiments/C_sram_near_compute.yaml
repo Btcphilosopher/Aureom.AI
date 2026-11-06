@@ -1,0 +1,11 @@
+# EXPERIMENT C -- group SRAM macros nearer the compute engines.
+# Manual arrangement 'tspm_center_2x2': the four tile-scratchpad (TSPM) macros
+# that feed the vector/tensor engines form a 2x2 cluster in the core centre
+# (pins facing outward, into the logic), main SRAM rows on the top/bottom edges.
+extends: ../floorplan_base.yaml
+id: C_sram_near_compute
+description: "TSPM macros clustered at the core centre (tensor/tile-centric), main SRAM on top/bottom edges"
+tags: [experiment, locality]
+macros:
+  placement: manual
+  arrangement: tspm_center_2x2

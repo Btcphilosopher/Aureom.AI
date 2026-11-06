@@ -1,0 +1,11 @@
+# Utilisation exploration (illustrative targets 30..70 %), Mode B sizing,
+# automatic macro placement, everything else as the baseline.  These are
+# exploration values, not recommended final targets.  The 0.50 point is
+# experiment A_baseline (identical configuration), so it is not re-run here.
+id: util_grid
+kind: grid
+base: ../floorplan_base.yaml
+id_prefix: U
+parameters:
+  floorplan.target_util: [0.30, 0.40, 0.60, 0.70]
+stages: [check, synth, floorplan, pdn, place, route, export]

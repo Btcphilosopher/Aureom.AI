@@ -1,0 +1,8 @@
+# EXPERIMENT A -- baseline SilicaFlux-V floorplan.
+# Mode B sizing at 50 % std-cell-region utilisation, square core, automatic
+# SRAM macro placement by OpenROAD (macro_placement, halo 20 um / channel 40 um),
+# platform PDN, edge-constrained logical pins.
+extends: ../floorplan_base.yaml
+id: A_baseline
+description: "Baseline: Mode B (util 0.50, AR 1.0), automatic macro placement, platform PDN"
+tags: [experiment, baseline]

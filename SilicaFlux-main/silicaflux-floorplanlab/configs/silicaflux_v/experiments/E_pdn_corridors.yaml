@@ -1,0 +1,19 @@
+# EXPERIMENT E -- adjust the PDN and the macro routing corridors.
+# Same arrangement as L_periphery_rows (its reference), with
+#   * wider macro corridors: halo 20 -> 30 um, channel 40 -> 80 um
+#   * denser core PDN on the signal-routing layer: Metal5 strap pitch
+#     75.6 -> 50.4 um (2/3 of the platform pitch, same width; validated)
+# Question: congestion / timing effect of corridors vs. routing resources
+# consumed by a denser grid.
+extends: ../floorplan_base.yaml
+id: E_pdn_corridors
+description: "periphery_rows with 30 um halo / 80 um channels and 50.4 um Metal5 PDN strap pitch"
+tags: [experiment]
+macros:
+  placement: manual
+  arrangement: periphery_rows
+  halo_um: 30.0
+  channel_um: 80.0
+pdn:
+  params:
+    strap1_pitch: 50.4

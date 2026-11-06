@@ -1,0 +1,111 @@
+# SilicaFlux-V physical-design top for FloorplanLab.
+#
+# sfv_soc_df = SilicaFlux-V release-1 SoC (RV32I CPU, 4-lane vector engine,
+# 4x4 INT8 tensor engine, 16 KiB tile scratchpad, 128 KiB SRAM in 4 banks,
+# 4 KiB boot ROM, UART/SPI/GPIO/timer/INTC/sysctrl, JTAG + MBIST) integrated
+# with the DataFabric SFB2 crossbar and single-channel DMA (Project 03).
+# Configuration = DataFabric's recommended first-silicon setting (README
+# "SilicaFlux-V configuration") except SRAM_IMPL: SRAM_IMPL=0 is the only
+# setting that reaches hard SRAM macros (via sfv_sram_sp + SFV_SRAM_MACRO);
+# SRAM_IMPL=1 would select the SRAM Wrapper Library with its default GENERIC
+# backend because sfv_soc_df does not forward BACKEND/MACRO (audit finding).
+name: silicaflux_v
+description: "SilicaFlux-V + DataFabric (sfv_soc_df, PERF=0, ARB_MODE=1, DMA_ENGINE=0, SRAM_IMPL=0)"
+top: sfv_soc_df
+rtl:
+  # compile order: SilicaFlux-V files.f (sfv_clkgate replaced by the platform
+  # tech file), boot-ROM image, DataFabric memory-map package, interconnect,
+  # DMA, SoC top, platform SRAM macro wrapper -- identical to DataFabric
+  # scripts/datafabric/synth.py soc_files() plus the macro wrapper.
+  files:
+    - third_party/silicaflux-v/rtl/pkg/sfv_pkg.sv
+    - third_party/silicaflux-v/rtl/common/sfv_common.sv
+    - "@tech:sfv_clkgate"
+    - third_party/silicaflux-v/rtl/cpu/sfv_cpu.sv
+    - third_party/silicaflux-v/rtl/bus/sfv_xbar.sv
+    - third_party/silicaflux-v/rtl/bus/sfv_periph_bridge.sv
+    - third_party/silicaflux-v/rtl/mem/sfv_sram_sp.sv
+    - third_party/silicaflux-v/rtl/mem/sfv_mem_slaves.sv
+    - third_party/silicaflux-v/rtl/mem/sfv_mbist.sv
+    - third_party/silicaflux-v/rtl/periph/sfv_uart.sv
+    - third_party/silicaflux-v/rtl/periph/sfv_spi.sv
+    - third_party/silicaflux-v/rtl/periph/sfv_periph_misc.sv
+    - third_party/silicaflux-v/rtl/periph/sfv_sysctrl.sv
+    - third_party/silicaflux-v/rtl/accel/sfv_vec_engine.sv
+    - third_party/silicaflux-v/rtl/accel/sfv_tensor_engine.sv
+    - third_party/silicaflux-v/rtl/accel/sfv_tile.sv
+    - third_party/silicaflux-v/rtl/debug/sfv_jtag.sv
+    - third_party/silicaflux-v/rtl/top/sfv_soc.sv
+    - third_party/silicaflux-v/reports/firmware/sfv_bootrom_image.sv
+    - third_party/silicaflux-datafabric/generated/sfb_memmap_pkg.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_arbiter.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_addr_decoder.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_req_mux.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_rsp_router.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_error_slave.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_skid_buffer.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_reg_slice.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_v1_slave_adapter.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_crossbar.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_shared_bus.sv
+    - third_party/silicaflux-datafabric/rtl/interconnect/sfb_perf_counters.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_validate.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_fifo.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_transfer_engine.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_burst_engine.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_irq.sv
+    - third_party/silicaflux-datafabric/rtl/dma/dma_control_regs.sv
+    - third_party/silicaflux-datafabric/rtl/dma/silicaflux_dma.sv
+    - third_party/silicaflux-datafabric/rtl/soc/sfv_soc_df.sv
+    - "@tech:sfv_sram_macro_bank"
+  include_dirs:
+    - third_party/silicaflux-datafabric/rtl/dma
+    - third_party/silicaflux-datafabric/rtl/interconnect
+  # SYNTHESIS is defined by Yosys read_verilog itself (excludes the simulation
+  # fault-injection code in sfv_sram_sp).  SFV_SRAM_MACRO selects the hard
+  # macro wrapper.  ORFS ab2aaf0f has no VERILOG_DEFINES, so FloorplanLab
+  # writes these into a header read first (Yosys keeps defines across files).
+  defines: [SFV_SRAM_MACRO]
+  top_params: {PERF: 0, ARB_MODE: 1, DMA_ENGINE: 0, SRAM_IMPL: 0}
+clock:
+  name: clk
+  port: clk
+  period_ns: 20.0          # 50 MHz target of SilicaFlux-V release 1 (an input, not a result)
+  secondary: [{name: tck, port: tck, period_ns: 100.0}]
+sdc_template: constraints/sfv_soc_df.sdc.tmpl
+# Black boxes allowed to survive synthesis.  Hard macros are recognised from
+# the platform macro list (they have LEF+LIB); anything else unresolved fails.
+allowed_blackboxes: []
+expected_macros:
+  ihp_sg13g2: {RM_IHPSG13_1P_2048x64_c2_bm_bist: 8, RM_IHPSG13_1P_512x64_c2_bm_bist: 4}
+  sky130hd: {sky130_sram_1rw1r_128x256_8: 36}
+# Logical groups from the RTL hierarchy (instance-path prefixes of sfv_soc_df).
+# Used only for annotation and connectivity analysis -- they are NOT physical
+# fences: the mapped netlist keeps names, not block outlines.
+logical_groups:
+  - {name: cpu,        label: "CPU (sfv_cpu RV32I)",            match: ["u_cpu/"]}
+  - {name: vector,     label: "Vector engine (sfv_vec_engine)", match: ["u_tile/u_ve/"]}
+  - {name: tensor,     label: "Tensor engine (sfv_tensor_engine)", match: ["u_tile/u_te/"]}
+  - {name: tile,       label: "Tile glue + TSPM banks",         match: ["u_tile/"]}
+  - {name: dma,        label: "DataFabric DMA",                 match: ["u_dma/"]}
+  - {name: fabric,     label: "SFB2 crossbar + adapters + bridge", match: ["u_xbar/", "g_v1", "u_pbr/"]}
+  - {name: sram_ctrl,  label: "Main SRAM bank controllers",     match: ["g_sram"]}
+  - {name: mbist,      label: "MBIST",                          match: ["u_mbist/"]}
+  - {name: rom,        label: "Boot ROM",                       match: ["u_rom/"]}
+  - {name: debug,      label: "JTAG debug",                     match: ["u_dbg/"]}
+  - {name: periph,     label: "UART/SPI/GPIO/timer/INTC/sysctrl", match: ["u_uart/", "u_spi/", "u_gpio/", "u_timer/", "u_intc/", "u_sysctrl/", "u_st"]}
+  - {name: reset,      label: "Reset synchronisers",            match: ["u_rs_"]}
+# Macro groups (instance-path regular expressions) used by arrangements.
+macro_groups:
+  main_sram: 'g_sram\[(\d+)\].*g_m\[(\d+)\]'      # bank, macro-in-bank
+  tspm: 'u_tile.*g_bank\[(\d+)\]'                    # lane
+# Logical I/O ports -> preferred die edge.  These are core pins (no pad ring).
+io_plan:
+  groups:
+    - {name: clock_reset, edge: bottom, pins: [clk, rst_ni, test_mode], note: "clock source on the bottom edge centre"}
+    - {name: jtag,        edge: left,   pins: [tck, tms, tdi, tdo, tdo_oe]}
+    - {name: uart_spi,    edge: right,  pins: [uart_tx, uart_rx, spi_sck, spi_mosi, spi_miso, spi_cs0_n]}
+    - {name: gpio,        edge: right,  pins: ["gpio_i*", "gpio_o*", "gpio_oe*"]}
+    - {name: status,      edge: top,    pins: [test_pass, test_fail, "test_status*", cpu_sleep]}
+  # the release lists 21 mandatory *signal pins* for a pad ring; here every
+  # top-level port bit is a core pin (test_status[31:0] is 32 bits).

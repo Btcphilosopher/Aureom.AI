@@ -1,0 +1,30 @@
+# Shared defaults for SilicaFlux-V floorplan runs on IHP SG13G2.
+# Experiments `extends:` this file and override only what they study.
+design: silicaflux_v
+platform: ihp_sg13g2
+seed: 1
+floorplan:
+  mode: B                 # automatic sizing from the mapped netlist (geometry.py)
+  target_util: 0.50       # std-cell utilisation of the std-cell region (exploration value)
+  aspect_ratio: 1.0
+  core_margin_um: 40.0    # PDN ring (4.5 + 2x5 + 2 um) + I/O pin keep-out; no pad ring
+  logic_growth: 1.0       # synthesis area already contains ABC buffering removed at floorplan
+  corridor_um: 0.0
+  pdn_overhead: 0.0
+macros:
+  mode: physical
+  placement: auto         # OpenROAD macro_placement (TritonMP)
+  halo_um: 20.0
+  channel_um: 40.0
+pins:
+  mode: plan
+  min_distance_tracks: 2
+  corner_avoidance_um: 50.0
+place:
+  # ORFS PLACE_DENSITY_LB_ADDON: target density = GPL lower bound + 0.20 x (1 - lb) + 0.01,
+  # i.e. adapted to each floorplan (a fixed 0.60 failed GPL-0302 on the baseline).
+  density_lb_addon: 0.20
+  timing_driven: true
+  routability_driven: true
+route_estimate:
+  enabled: true

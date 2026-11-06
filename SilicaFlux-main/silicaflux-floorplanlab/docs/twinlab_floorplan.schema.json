@@ -1,0 +1,903 @@
+{
+  "$defs": {
+    "DensityGrid": {
+      "properties": {
+        "bins": {
+          "title": "Bins",
+          "type": "integer"
+        },
+        "bin_w_um": {
+          "title": "Bin W Um",
+          "type": "number"
+        },
+        "bin_h_um": {
+          "title": "Bin H Um",
+          "type": "number"
+        },
+        "origin_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Origin Um",
+          "type": "array"
+        },
+        "utilisation": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "title": "Utilisation",
+          "type": "array"
+        }
+      },
+      "required": [
+        "bins",
+        "bin_w_um",
+        "bin_h_um",
+        "origin_um",
+        "utilisation"
+      ],
+      "title": "DensityGrid",
+      "type": "object"
+    },
+    "GroupX": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "cells": {
+          "title": "Cells",
+          "type": "integer"
+        },
+        "area_um2": {
+          "title": "Area Um2",
+          "type": "number"
+        },
+        "centroid_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Centroid Um",
+          "type": "array"
+        },
+        "extent_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Extent Um",
+          "type": "array"
+        },
+        "annotation_only": {
+          "default": true,
+          "title": "Annotation Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "cells",
+        "area_um2",
+        "centroid_um",
+        "extent_um"
+      ],
+      "title": "GroupX",
+      "type": "object"
+    },
+    "Layer": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "title": "Direction",
+          "type": "string"
+        },
+        "pitch_um": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pitch Um"
+        },
+        "width_um": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width Um"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "Layer",
+      "type": "object"
+    },
+    "MacroX": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "master": {
+          "title": "Master",
+          "type": "string"
+        },
+        "bbox_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bbox Um",
+          "type": "array"
+        },
+        "orient": {
+          "title": "Orient",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "words": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Words"
+        },
+        "bits": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bits"
+        },
+        "signal_pin_edge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Pin Edge"
+        }
+      },
+      "required": [
+        "name",
+        "master",
+        "bbox_um",
+        "orient",
+        "status",
+        "group"
+      ],
+      "title": "MacroX",
+      "type": "object"
+    },
+    "PinX": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "dir": {
+          "title": "Dir",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "string"
+        },
+        "bbox_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bbox Um",
+          "type": "array"
+        },
+        "edge": {
+          "title": "Edge",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "dir",
+        "layer",
+        "bbox_um",
+        "edge"
+      ],
+      "title": "PinX",
+      "type": "object"
+    },
+    "PowerGrid": {
+      "properties": {
+        "stripes": {
+          "items": {
+            "$ref": "#/$defs/Stripe"
+          },
+          "title": "Stripes",
+          "type": "array"
+        },
+        "followpin_rails": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Followpin Rails",
+          "type": "array"
+        },
+        "connectivity": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connectivity"
+        }
+      },
+      "required": [
+        "stripes",
+        "followpin_rails"
+      ],
+      "title": "PowerGrid",
+      "type": "object"
+    },
+    "Provenance": {
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "design": {
+          "title": "Design",
+          "type": "string"
+        },
+        "top": {
+          "title": "Top",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "process": {
+          "title": "Process",
+          "type": "string"
+        },
+        "orfs_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Orfs Revision"
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "object"
+        },
+        "netlist_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Netlist Sha256"
+        },
+        "source_odb": {
+          "title": "Source Odb",
+          "type": "string"
+        },
+        "created": {
+          "title": "Created",
+          "type": "string"
+        },
+        "fidelity": {
+          "const": "OPENROAD_PRELIMINARY",
+          "default": "OPENROAD_PRELIMINARY",
+          "title": "Fidelity",
+          "type": "string"
+        },
+        "label": {
+          "default": "Preliminary floorplan/placement from OpenROAD (ORFS). Pre-CTS, pre-detailed-route; not a signoff or fabrication-ready layout.",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "design",
+        "top",
+        "platform",
+        "process",
+        "source_odb",
+        "created"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "RoutingX": {
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "completed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed"
+        },
+        "overflow_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overflow Total"
+        },
+        "routed_wirelength_um": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Routed Wirelength Um"
+        },
+        "layers": {
+          "additionalProperties": true,
+          "title": "Layers",
+          "type": "object"
+        }
+      },
+      "title": "RoutingX",
+      "type": "object"
+    },
+    "Stripe": {
+      "properties": {
+        "net": {
+          "title": "Net",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "string"
+        },
+        "shape": {
+          "title": "Shape",
+          "type": "string"
+        },
+        "bbox_um": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bbox Um",
+          "type": "array"
+        }
+      },
+      "required": [
+        "net",
+        "layer",
+        "shape",
+        "bbox_um"
+      ],
+      "title": "Stripe",
+      "type": "object"
+    },
+    "Technology": {
+      "properties": {
+        "site": {
+          "title": "Site",
+          "type": "string"
+        },
+        "row_height_um": {
+          "title": "Row Height Um",
+          "type": "number"
+        },
+        "site_width_um": {
+          "title": "Site Width Um",
+          "type": "number"
+        },
+        "routing_layers": {
+          "items": {
+            "$ref": "#/$defs/Layer"
+          },
+          "title": "Routing Layers",
+          "type": "array"
+        },
+        "signal_layer_range": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Signal Layer Range",
+          "type": "array"
+        },
+        "supply_voltage_v": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supply Voltage V"
+        },
+        "analysis_corner": {
+          "title": "Analysis Corner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "site",
+        "row_height_um",
+        "site_width_um",
+        "routing_layers",
+        "signal_layer_range",
+        "analysis_corner"
+      ],
+      "title": "Technology",
+      "type": "object"
+    },
+    "TimingX": {
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "wns_ns": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wns Ns"
+        },
+        "tns_ns": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tns Ns"
+        },
+        "whs_ns": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Whs Ns"
+        },
+        "clock_period_ns": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clock Period Ns"
+        },
+        "critical_paths": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Critical Paths",
+          "type": "array"
+        }
+      },
+      "title": "TimingX",
+      "type": "object"
+    },
+    "TwinLabBlock": {
+      "additionalProperties": false,
+      "description": "Shape of TwinLab's `SemiconductorBlock` (models/semiconductor.models.ts).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "CPU_CORE",
+            "VECTOR_UNIT",
+            "TENSOR_ARRAY",
+            "SRAM_BANK",
+            "NOC_ROUTER",
+            "MEM_CTRL",
+            "CLK_GEN",
+            "POWER_MGMT",
+            "IO_PAD_RING",
+            "DFT_JTAG"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "width": {
+          "title": "Width",
+          "type": "number"
+        },
+        "height": {
+          "title": "Height",
+          "type": "number"
+        },
+        "zLevel": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zlevel"
+        },
+        "color": {
+          "title": "Color",
+          "type": "string"
+        },
+        "dynamicPowerMw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dynamicpowermw"
+        },
+        "leakagePowerMw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leakagepowermw"
+        },
+        "activityFactor": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Activityfactor"
+        },
+        "cellCount": {
+          "title": "Cellcount",
+          "type": "integer"
+        },
+        "timingSlackPs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timingslackps"
+        },
+        "metalDensity": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metaldensity"
+        },
+        "voltageDomain": {
+          "title": "Voltagedomain",
+          "type": "string"
+        },
+        "clockDomain": {
+          "title": "Clockdomain",
+          "type": "string"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        },
+        "temperatureC": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperaturec"
+        },
+        "irDropMv": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Irdropmv"
+        },
+        "provenanceNote": {
+          "title": "Provenancenote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "x",
+        "y",
+        "width",
+        "height",
+        "color",
+        "cellCount",
+        "voltageDomain",
+        "clockDomain",
+        "provenanceNote"
+      ],
+      "title": "TwinLabBlock",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "technology": {
+      "$ref": "#/$defs/Technology"
+    },
+    "die_um": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Die Um",
+      "type": "array"
+    },
+    "core_um": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Core Um",
+      "type": "array"
+    },
+    "macros": {
+      "items": {
+        "$ref": "#/$defs/MacroX"
+      },
+      "title": "Macros",
+      "type": "array"
+    },
+    "std_cell_groups": {
+      "items": {
+        "$ref": "#/$defs/GroupX"
+      },
+      "title": "Std Cell Groups",
+      "type": "array"
+    },
+    "density_grid": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DensityGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "io_pins": {
+      "items": {
+        "$ref": "#/$defs/PinX"
+      },
+      "title": "Io Pins",
+      "type": "array"
+    },
+    "clock_source_pin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PinX"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "power_grid": {
+      "$ref": "#/$defs/PowerGrid"
+    },
+    "area": {
+      "additionalProperties": true,
+      "title": "Area",
+      "type": "object"
+    },
+    "timing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimingX"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "routing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RoutingX"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "twinlab_blocks": {
+      "items": {
+        "$ref": "#/$defs/TwinLabBlock"
+      },
+      "title": "Twinlab Blocks",
+      "type": "array"
+    },
+    "integration_status": {
+      "default": "TwinLab has no importer yet (hard-coded blocks in twinlab-state.ts); this file is the proposed import format. Integration NOT complete.",
+      "title": "Integration Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provenance",
+    "technology",
+    "die_um",
+    "core_um",
+    "macros",
+    "std_cell_groups",
+    "io_pins",
+    "power_grid",
+    "area",
+    "twinlab_blocks"
+  ],
+  "title": "FloorplanExport",
+  "type": "object"
+}

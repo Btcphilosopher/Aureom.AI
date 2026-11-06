@@ -1,0 +1,11 @@
+# Full SilicaFlux (2.x / 2.5 'silicaflux_top') -- NOT ENABLED.
+# Candidate top found by the audit: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/
+# silicaflux_top.sf (+ the RTL zips next to it).  It has no hard-SRAM macro
+# mapping (its memories are behavioural arrays that would synthesise to
+# flip-flops) and no platform technology wrappers, so a physical floorplan
+# would not be meaningful.  Enabling it requires SRAM wrappers (e.g. the
+# SilicaFlux SRAM Wrapper Library ASIC backend) and a design.yaml like
+# configs/silicaflux_v/design.yaml.
+name: full_silicaflux
+status: not_available
+reason: "silicaflux_top has no SRAM macro mapping / technology wrappers (audit)"

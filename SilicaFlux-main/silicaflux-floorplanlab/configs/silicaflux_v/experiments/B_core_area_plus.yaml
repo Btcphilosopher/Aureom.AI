@@ -1,0 +1,10 @@
+# EXPERIMENT B -- increase core area while preserving the netlist.
+# Identical to A (same synthesis key / netlist hash, automatic macro placement)
+# except the std-cell-region utilisation target drops 0.50 -> 0.35, which grows
+# the Mode B core.  Question: does the extra area buy timing/congestion?
+extends: ../floorplan_base.yaml
+id: B_core_area_plus
+description: "A with a larger core: Mode B target_util 0.35 (netlist unchanged)"
+tags: [experiment]
+floorplan:
+  target_util: 0.35

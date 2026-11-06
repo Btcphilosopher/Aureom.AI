@@ -1,0 +1,34 @@
+# GlobalFoundries GF180MCU (180 nm, open PDK).
+# The ORFS ab2aaf0f gf180 platform (std cells, tech LEF, tapcell, PDN) is
+# present and is a valid platform for designs WITHOUT large memories.  It is
+# DISABLED for SilicaFlux-V because the required SRAM implementation does not
+# exist on the path FloorplanLab implements:
+#   * ORFS ab2aaf0f flow/platforms/gf180 contains no SRAM macro LEF/LIB/GDS
+#     (gf180mcu_fd_ip_sram__sram{64,128,256,512}x8m8wm1 live in the GF180MCU
+#     open PDK, which is not installed here);
+#   * SilicaFlux-V release 1 has no asic/tech/gf180mcu/sfv_sram_macro_bank.sv;
+#   * the SRAM Wrapper Library's GF180 leaf (sram_leaf_gf180.sv) is only
+#     reachable from sfv_soc_df with SRAM_IMPL=1, but sfv_soc_df does not pass
+#     BACKEND/MACRO to sfb_sram_slave -> the generic (flip-flop) backend would
+#     be synthesised: 144 KiB of flops is not a floorplannable design.
+# Enabling it needs: GF180MCU PDK SRAM collateral + a wrapper (or an sfv_soc_df
+# change exposing BACKEND/MACRO) -- see docs/FABRICATION_DEPENDENCIES.md.
+name: gf180mcu
+status: disabled
+orfs_platform: gf180
+disabled_reason: >-
+  No GF180MCU SRAM macro collateral in ORFS ab2aaf0f and no SilicaFlux-V
+  GF180 SRAM wrapper on the sfv_soc_df implementation path; SilicaFlux-V
+  cannot be implemented with physical SRAM macros on this platform.
+process: "GF180MCU 180 nm CMOS, open PDK (ORFS default: 5LM_1TM_9K, 9-track)"
+provenance:
+  orfs_revision: ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621
+tech_lef: ${ORFS_FLOW}/platforms/gf180/lef/gf180mcu_5LM_1TM_9K_9t_tech.lef
+sc_lefs: [${ORFS_FLOW}/platforms/gf180/lef/gf180mcu_5LM_1TM_9K_9t_sc.lef]
+place_site: GF018hv5v_green_sc9
+routing: {min_layer: Metal2, max_layer: Metal5, io_h_layer: Metal3, io_v_layer: Metal4}
+tapcell: {method: tapcell, script: "${ORFS_FLOW}/platforms/gf180/openROAD/tapcell.tcl", note: "endcap + tap every 100 um per ORFS gf180 tapcell.tcl"}
+macros: {}
+missing:
+  - "SRAM macros: gf180mcu_fd_ip_sram__sram512x8m8wm1 (or similar) LEF/LIB/GDS from the GF180MCU PDK"
+  - "third_party/silicaflux-v/asic/tech/gf180mcu/sfv_sram_macro_bank.sv (does not exist)"

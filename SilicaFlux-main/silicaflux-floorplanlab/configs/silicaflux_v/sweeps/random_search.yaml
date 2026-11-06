@@ -1,0 +1,13 @@
+# Random search (deterministic seed) over aspect ratio, utilisation and
+# manual arrangement.  Small sample: each point is a full ORFS run.
+id: random_search
+kind: random
+base: ../floorplan_base.yaml
+id_prefix: R
+seed: 2026
+samples: 3
+parameters:
+  floorplan.target_util: {uniform: [0.40, 0.60]}
+  floorplan.aspect_ratio: {choice: [0.8, 1.0, 1.25]}
+  macros.arrangement: {choice: [periphery_rows, tspm_center_2x2, top_cluster]}
+stages: [check, synth, floorplan, pdn, place, route, export]

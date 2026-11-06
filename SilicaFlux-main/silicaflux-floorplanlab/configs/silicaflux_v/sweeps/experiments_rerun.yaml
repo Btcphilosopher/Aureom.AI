@@ -1,0 +1,15 @@
+# Re-run of the experiments whose first attempt failed for reasons fixed in
+# FloorplanLab (attempt-1 evidence in results/_history and the run records):
+#   C, D  -- PDN-0179 'Unable to repair all channels' (side-by-side macro
+#            channels narrower than the vertical strap pitch) -> arrangement
+#            engine now enforces gap >= Metal5 pitch + width (PDN_CHANNEL rule)
+#   E, L_periphery_rows -- GPL-0307 RePlAce divergence -> one recorded retry
+#            with GLOBAL_PLACEMENT_ARGS=-max_phi_coef 1.02, as the tool instructs
+id: experiments_rerun
+kind: list
+runs:
+  - ../experiments/C_sram_near_compute.yaml
+  - ../experiments/D_logic_consolidated.yaml
+  - ../experiments/E_pdn_corridors.yaml
+  - ../experiments/L_periphery_rows.yaml
+stages: [check, synth, floorplan, pdn, place, route, export]

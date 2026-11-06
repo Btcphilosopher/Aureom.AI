@@ -1,0 +1,42 @@
+# SilicaFlux FloorplanLab -- pinned toolchain (the exact stack every result in
+# reports/ was produced with).  env/install_toolchain.sh reproduces it.
+#
+# Pairing rule: the ORFS flow scripts and the OpenROAD/Yosys binaries must come
+# from the same epoch.  ORFS ab2aaf0f (2024-02-23) pins tools/OpenROAD to
+# 6011bbe775 and tools/yosys to 543faed9c8; the litex-hub conda channel ships
+# the exact OpenROAD build 2.0-12331-g6011bbe77 and the contemporaneous Yosys
+# 0.38+92 (84116c9a3).  No newer OpenROAD binary is installable in this
+# environment (conda-forge carries none; Docker has no daemon).
+orfs:
+  repository: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+  revision: ab2aaf0fb8513f6f6fa8898ba65ae9599a26e621     # 2024-02-23 17:21:22 -0300
+  submodule_openroad: 6011bbe775
+  submodule_yosys: 543faed9c8
+  checkout: sparse (flow/Makefile, flow/scripts, flow/util, flow/platforms/{ihp-sg13g2,sky130hd,sky130ram/sky130_sram_1rw1r_128x256_8,gf180}, flow/designs/{ihp-sg13g2,sky130hd}/gcd)
+openroad:
+  version: 2.0-12331-g6011bbe77
+  source: conda litex-hub openroad=2.0_12331_g6011bbe77 (py310 build 20240223_100318)
+  opensta: 2.4.0 (bundled in openroad)
+  dependency_channel: https://repo.anaconda.com/pkgs/main (libboost 1.73, qt 5.9.7 -- required by the litex-hub build)
+yosys:
+  flow: 0.38+92 (git sha1 84116c9a3) conda litex-hub yosys=0.38_93_g84116c9a3   # used by ORFS synthesis
+  aux:  0.33 (git sha1 2584903a060) Ubuntu 24.04 apt yosys 0.33-5build2          # same build as SilicaFlux-V release 1
+ihp_sram_collateral:
+  # The SG13G2 compiled SRAM macros were added to ORFS after ab2aaf0f; their
+  # LEF/LIB/GDS/Verilog are taken unmodified from the ORFS revision the
+  # SilicaFlux-V release-1 used for its IHP results and passed to ORFS as
+  # design-level ADDITIONAL_LEFS / ADDITIONAL_LIBS (documented ORFS mechanism).
+  repository: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+  revision: d0e5b3c13e4bb9bdbd33493d5e87656dcae66384     # 2026-11-05
+  path: flow/platforms/ihp-sg13g2/{lef,lib,gds,verilog}/RM_IHPSG13_1P_{256,512,1024,2048}x64_c2_bm_bist*
+  tech_lef_compatibility: layer list of sg13g2_tech.lef identical at ab2aaf0f and d0e5b3c (checked by install script)
+klayout: 0.28.16 (Ubuntu 24.04 apt klayout 0.28.16-0ubuntu0.24.04.1)
+icarus: 12.0 (apt)
+verilator: 5.020 (apt)
+python:
+  interpreter: ">=3.12 (run with 3.13.18)"
+  packages: {numpy: 2.5.3, pandas: 3.0.5, pydantic: 2.13.5, matplotlib: 3.10.7, plotly: 6.3.1, pytest: 8.4.2, PyYAML: 6.0.3}
+micromamba:
+  version: 2.10.0
+  source: https://conda.anaconda.org/conda-forge/linux-64/micromamba-2.10.0-0.tar.bz2
+  sha256: 9a97976244929bbae28fb1fae504e74a3e7e6d1932870e3a03321f01b7fbd07b

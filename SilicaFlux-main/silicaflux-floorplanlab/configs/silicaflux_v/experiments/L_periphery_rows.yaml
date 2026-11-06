@@ -1,0 +1,8 @@
+# LOCALITY STUDY -- memory-centric arrangement (also the reference for E).
+extends: ../floorplan_base.yaml
+id: L_periphery_rows
+description: "Memory-centric: main SRAM rows on top/bottom edges, TSPM row across the centre"
+tags: [locality]
+macros:
+  placement: manual
+  arrangement: periphery_rows

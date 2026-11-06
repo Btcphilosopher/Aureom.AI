@@ -1,0 +1,13 @@
+# EXPERIMENT D -- reorganise the CPU/vector/tensor placement region.
+# Manual arrangement 'top_cluster': all main SRAM packed in two rows at the top
+# (pins down, an 80 um pin channel between the rows) and the TSPM row on the
+# bottom edge, so CPU, fabric, DMA, vector and tensor logic share ONE contiguous
+# region instead of bands split by macro rows.  No fences are imposed on the
+# logical blocks (the netlist has none); the placer is free inside the region.
+extends: ../floorplan_base.yaml
+id: D_logic_consolidated
+description: "Main SRAM in two stacked rows at the top, TSPM row at the bottom: one contiguous logic region"
+tags: [experiment, locality]
+macros:
+  placement: manual
+  arrangement: top_cluster

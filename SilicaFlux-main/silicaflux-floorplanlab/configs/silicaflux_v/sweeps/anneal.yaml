@@ -1,0 +1,16 @@
+# Simulated annealing on the documented geometric surrogate (optimiser.py).
+# The surrogate only PROPOSES the top_k candidates; each is then implemented
+# with the real ORFS flow and judged on measured metrics like any other run.
+id: anneal
+kind: anneal
+base: ../floorplan_base.yaml
+id_prefix: SA
+seed: 7
+steps: 300
+t0: 0.5
+top_k: 2
+parameters:
+  floorplan.target_util: {uniform: [0.40, 0.65]}
+  floorplan.aspect_ratio: {choice: [0.7, 0.85, 1.0, 1.2]}
+  macros.arrangement: {choice: [periphery_rows, tspm_center_2x2, top_cluster, west_east_columns]}
+stages: [check, synth, floorplan, pdn, place, route, export]

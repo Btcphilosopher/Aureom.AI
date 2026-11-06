@@ -1,0 +1,14 @@
+# The five required experiments (A-E) plus two locality-study arrangements.
+# All use the same shared synthesis (identical netlist hash), tools, PDK
+# revision, clock constraint and seed -> comparable.
+id: experiments
+kind: list
+runs:
+  - ../experiments/A_baseline.yaml
+  - ../experiments/B_core_area_plus.yaml
+  - ../experiments/C_sram_near_compute.yaml
+  - ../experiments/D_logic_consolidated.yaml
+  - ../experiments/E_pdn_corridors.yaml
+  - ../experiments/L_periphery_rows.yaml
+  - ../experiments/L_west_east_columns.yaml
+stages: [check, synth, floorplan, pdn, place, route, export]

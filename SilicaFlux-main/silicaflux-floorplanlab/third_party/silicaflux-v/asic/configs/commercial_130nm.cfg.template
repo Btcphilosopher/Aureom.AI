@@ -1,0 +1,29 @@
+# =============================================================================
+# TEMPLATE: commercial 130 nm implementation (e.g. a foundry 0.13 um logic
+# process via an MPW broker).  NO FOUNDRY IP IS SUPPLIED HERE: every path below
+# must be filled from the foundry PDK / IP vendor kit under NDA.
+# Copy to commercial_130nm.cfg and run:  asic/scripts/run_asic.sh commercial_130nm
+# =============================================================================
+PDK_NAME=commercial_130nm
+P=${FOUNDRY_KIT:?set FOUNDRY_KIT to the installed PDK/IP kit root}
+LIB_STD=$P/<stdcell_lib>/liberty/<lib>_tt_1p20v_25c.lib          # typical
+# signoff corners to add: ss_1p08v_125c (setup), ff_1p32v_m40c (hold)
+LIB_MACROS="$P/<sram_compiler_out>/sram_sp_8192x32_tt.lib $P/<sram_compiler_out>/sram_sp_1024x32_tt.lib"
+LEF_TECH=$P/<stdcell_lib>/lef/<tech>.lef
+LEF_STD=$P/<stdcell_lib>/lef/<stdcells>.lef
+LEF_MACROS="$P/<sram_compiler_out>/sram_sp_8192x32.lef $P/<sram_compiler_out>/sram_sp_1024x32.lef"
+TECH_DIR=tech/commercial_130nm          # provide sfv_clkgate.sv + sfv_sram_macro_bank.sv
+TIEHI="<TIEHI_CELL> <PORT>"
+TIELO="<TIELO_CELL> <PORT>"
+BUF="<BUF_X2_CELL> <IN> <OUT>"
+CLK_PERIOD_NS=${CLK_PERIOD_NS:-15.0}     # 66 MHz target (see process comparison)
+SETRC=$P/<openroad_rc>.tcl               # or extracted RC tables
+SITE=<core_site>
+HOR_LAYER=<M3>
+VER_LAYER=<M2>
+STD_UTIL=0.65
+MACRO_HALO_UM=10
+# Recommended SRAM compiler instances for the baseline map:
+#   4 x single-port 8192 x 32 (byte write enable)  -> main SRAM banks
+#   4 x single-port 1024 x 32 (byte write enable)  -> TSPM banks
+#   (optional) via-ROM 1024 x 32                    -> boot ROM

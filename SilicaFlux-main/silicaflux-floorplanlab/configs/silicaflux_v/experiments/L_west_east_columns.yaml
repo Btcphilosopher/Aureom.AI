@@ -1,0 +1,8 @@
+# LOCALITY STUDY -- SRAM banks distributed around the compute region.
+extends: ../floorplan_base.yaml
+id: L_west_east_columns
+description: "Distributed: main SRAM columns on west/east edges, TSPM 2x2 cluster in the centre"
+tags: [locality]
+macros:
+  placement: manual
+  arrangement: west_east_columns

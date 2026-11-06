@@ -1,0 +1,13 @@
+# PORTABILITY CHECK -- the same SilicaFlux-V RTL on SkyWater SKY130 hd with the
+# OpenRAM sky130_sram_1rw1r_128x256_8 macros (36 instances, ~26 mm2 of SRAM).
+# Not part of the IHP comparison set (different PDK -> not comparable).
+extends: ../floorplan_base.yaml
+id: S_sky130_baseline
+description: "SKY130 hd + OpenRAM: Mode B util 0.5, automatic macro placement (portability check)"
+platform: sky130hd
+tags: [portability]
+floorplan:
+  core_margin_um: 30.0
+macros:
+  halo_um: 20.0
+  channel_um: 40.0
