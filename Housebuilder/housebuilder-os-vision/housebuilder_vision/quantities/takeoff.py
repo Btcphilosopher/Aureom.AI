@@ -285,6 +285,21 @@ def _geom_links(m: Measure, name: str) -> list[TraceLink]:
     return [TraceLink(kind="geometry", ref=r, description=name) for r in m.geometry_refs]
 
 
+def _unmodelled_lines(twin: BuildingTwin) -> list[QuantityLine]:
+    """Visible elements the parametric model does not represent (balconies, chimneys, unmatched
+    garage/extension boxes): listed as UNRESOLVED lines so they are not silently omitted from the bill."""
+    out: list[QuantityLine] = []
+    for k, desc in enumerate(getattr(twin, "unmodelled_elements", []) or []):
+        reason = (f"visible but not modelled: {desc}. Add it as a block / opening or price it as a manual "
+                  "allowance; no quantity is invented.")
+        out.append(_unresolved(line_id=f"9.unmodelled.{k}", code="9", ename="Unmodelled visible elements",
+                               description=f"Unmodelled: {desc}"[:200], reason=reason, unit="item",
+                               trace=[TraceLink(kind="evidence", ref="twin.unmodelled_elements",
+                                                description=str(desc)[:300])],
+                               refs=[]))
+    return out
+
+
 def _unresolved(*, line_id: str, code: str, ename: str, description: str, reason: str, unit: str,
                 trace: list[TraceLink], refs: list[str], assembly_id: Optional[str] = None,
                 layer_index: Optional[int] = None, material_id: Optional[str] = None,
@@ -943,6 +958,7 @@ def calculate_quantities(twin: BuildingTwin, library: AssemblyLibrary, *, metric
         else:
             lines.extend(_assembly_lines(ctx, inst))
     lines.extend(_allowance_lines(ctx, insts))
+    lines.extend(_unmodelled_lines(twin))
     lines.sort(key=lambda ln: _code_key(ln.element_code))
     return BillOfQuantities.model_construct(
         twin_id=twin.twin_id, twin_version=twin.version, library_name=library.name, lines=lines,

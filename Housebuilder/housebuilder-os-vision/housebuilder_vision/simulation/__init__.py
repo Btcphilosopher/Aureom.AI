@@ -48,9 +48,19 @@ from .uncertainty import (
     simulate_uncertainty,
     summarize,
 )
-from .scenarios import ScenarioEvaluation, compare_build_scenarios, evaluate_build_scenario, scale_rate_book
+from .scenarios import (
+    DEFAULT_SCENARIO_SAMPLES,
+    ScenarioEvaluation,
+    combined_information_value,
+    compare_build_scenarios,
+    evaluate_build_scenario,
+    scale_rate_book,
+    scenario_spread_entries,
+)
+from .uncertainty import input_action
 
 __all__ = [
+    "DEFAULT_SCENARIO_SAMPLES", "combined_information_value", "scenario_spread_entries", "input_action",
     "AdapterNotConfigured", "CarbonFactor", "EmbodiedCarbonDataAdapter", "EnergyAnalysisAdapter",
     "EnergyAnalysisReport", "EngineeringAdapters", "NotConfiguredCarbonDataAdapter", "NotConfiguredEnergyAdapter",
     "NotConfiguredStructuralAdapter", "StaticCarbonFactorAdapter", "StructuralAnalysisAdapter",

@@ -746,7 +746,16 @@ def export_project(project: Project, out_dir: Union[str, Path], *, boq: Optional
 
     # ---- JSON
     if "json" in fmts:
-        project_bytes = (project.model_dump_json(indent=2) + "\n").encode("utf-8")
+        # Source images are referenced by sha256 and a store-relative file name only: absolute local
+        # paths are machine-specific and must never be trusted as read paths when a project is reloaded.
+        portable = project.model_copy(update={"images": [
+            im.model_copy(update={"stored_path": Path(im.stored_path).name if im.stored_path else None})
+            for im in project.images]})
+        if portable.analysis is not None:
+            portable = portable.model_copy(update={"analysis": portable.analysis.model_copy(update={"images": [
+                im.model_copy(update={"stored_path": Path(im.stored_path).name if im.stored_path else None})
+                for im in portable.analysis.images]})})
+        project_bytes = (portable.model_dump_json(indent=2) + "\n").encode("utf-8")
         out.write("project.json", project_bytes, "json",
                   "Complete model state (Project.model_dump_json); reload with Project.model_validate_json.")
         counts = provenance_counts(twin) if twin is not None else {}

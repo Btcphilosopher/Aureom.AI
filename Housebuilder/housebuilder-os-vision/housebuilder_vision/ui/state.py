@@ -90,7 +90,7 @@ EXPORT_MIME = {"json": "application/json", "glb": "model/gltf-binary", "csv": "t
 #: the rest ``bbox``).
 ANNOTATION_TYPES: tuple[str, ...] = (
     "facade", "roof", "window", "door", "garage_door", "ground_line", "eaves_line", "ridge_line", "storey_line",
-    "chimney", "garage", "extension", "finish_region", "dimension", "other")
+    "balcony", "chimney", "garage", "extension", "finish_region", "dimension", "other")
 #: Feature types offered for a FLOOR_PLAN image: building outline boxes (one per block) and dimension lines.
 PLAN_ANNOTATION_TYPES: tuple[str, ...] = ("building_outline", "dimension", "other")
 LINE_TYPES = {"ground_line", "eaves_line", "ridge_line", "storey_line", "dimension"}

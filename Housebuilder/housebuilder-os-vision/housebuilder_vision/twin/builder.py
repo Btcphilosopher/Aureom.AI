@@ -526,6 +526,8 @@ def _check_range(v: float, what: str, lo: Optional[float] = None, hi: Optional[f
 
 def _edit_tv(tv: Optional[TrackedValue], v: float, edit: TwinEdit, target: str, unit: str) -> TrackedValue:
     base = tv if tv is not None else TrackedValue(value=None, unit=unit, basis=Basis.UNKNOWN)
+    # A user-confirmed value keeps its correlation group as a record of where it came from; the
+    # simulator samples USER_CONFIRMED values independently of the image scale (simulation.uncertainty).
     return base.edited(v, actor=edit.actor[:80], target=target, field=edit.field, reason=edit.reason[:500],
                        tolerance=_tol(edit))
 

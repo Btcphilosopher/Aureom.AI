@@ -588,6 +588,7 @@ def _uncertainty(ws: S.Workspace, ev: S.Evaluation) -> None:
                            "overlap, so shares need not sum to 100%. Shares carry sampling noise of a few percentage "
                            "points at a few hundred samples: treat close ranks as ties and use 1000+ samples before "
                            "acting on the order.")
+            _scenario_spreads(ws, cur)
     c1, c2 = st.columns([1, 1], gap="medium")
     with c1:
         section_title("Sensitivity", sub="tornado of the strongest inputs")
@@ -625,6 +626,34 @@ def _uncertainty(ws: S.Workspace, ev: S.Evaluation) -> None:
                      hide_index=True, width="stretch", height=300)
         for n in sim.notes:
             st.markdown(f"- {esc(n)}")
+
+
+def _scenario_spreads(ws: S.Workspace, cur: str) -> None:
+    """Hypothesis / construction-method questions: kept as explicit scenarios, never sampled into one house."""
+    from ...simulation.scenarios import scenario_spread_entries
+
+    comp = ws.comparison
+    if comp is None or len(comp.outcomes) < 2:
+        st.caption("Footprint hypotheses and construction methods are compared as explicit scenarios (never averaged "
+                   "into one house). Open Scenarios → Build scenarios to see how much each open question moves the cost.")
+        return
+    entries = scenario_spread_entries(comp, currency=cur)
+    if not entries:
+        return
+    section_title("Open questions between scenarios", sub="explicit alternatives, not averaged")
+    items = []
+    for e in entries:
+        lo, hi = e["low"], e["high"]
+        items.append(
+            f'<div class="hbv-iv"><div class="hbv-iv-rank">◇</div><div>'
+            f'<div class="hbv-iv-act">{esc(e["resolving_action"])}</div>'
+            f'<div class="hbv-small">{esc(e["label"])} · spread of {esc(e["measure"])} '
+            f'<span class="hbv-mono">{esc(fmt.money(e["spread"], cur))}</span></div>'
+            f'<div class="hbv-range">{esc(lo["scenario_id"])} {esc(fmt.money(lo["cost"], cur))} → '
+            f'{esc(hi["scenario_id"])} {esc(fmt.money(hi["cost"], cur))}</div></div></div>')
+    html('<div class="hbv-ivs">' + "".join(items) + "</div>")
+    st.caption("Each spread compares scenarios that differ only in that question (from the last scenario comparison). "
+               "It is the cost range that answering the question settles - not a share of one house's variance.")
 
 
 __all__ = ["render"]

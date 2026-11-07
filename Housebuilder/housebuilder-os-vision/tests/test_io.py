@@ -238,7 +238,15 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 def test_json_round_trip_equality(export_dir, project, twin, boq):
     out, manifest = export_dir
     reloaded = Project.model_validate_json((out / "project.json").read_text(encoding="utf-8"))
-    assert reloaded == project
+    # Exports carry store-relative image file names, never absolute local paths (security: a reloaded
+    # project must not be able to point the app at arbitrary files); everything else round-trips exactly.
+    for im in reloaded.images:
+        assert im.stored_path is None or ("/" not in im.stored_path and im.stored_path.startswith(im.sha256))
+
+    def portable(p):
+        return p.model_copy(update={"images": [i.model_copy(update={"stored_path": None}) for i in p.images]})
+
+    assert portable(reloaded) == portable(project)
     assert reloaded.twin == twin
     assert twin_hash(reloaded.twin) == twin_hash(twin)
 

@@ -70,7 +70,7 @@ def _build_scenarios(ws: S.Workspace, ev: S.Evaluation) -> None:
     c1, c2, c3 = st.columns([1.2, 1, 2.5])
     simulate = c1.toggle("Include P10 / P90", value=False, key="sc_sim",
                          help="Runs a small uncertainty simulation per scenario (slower).")
-    n = c2.number_input("Samples / scenario", value=60, min_value=20, max_value=1000, step=20, key="sc_n",
+    n = c2.number_input("Samples / scenario", value=200, min_value=20, max_value=1000, step=20, key="sc_n",
                         disabled=not simulate)
     with st.spinner("Evaluating scenarios…"):
         comp = S.compare_scenarios(ws, simulate=simulate, n=int(n))
