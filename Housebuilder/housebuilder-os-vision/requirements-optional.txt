@@ -1,0 +1,4 @@
+# Optional adapters. The core engine and the bundled demo run without any of these.
+opencv-python-headless>=4.8   # line-segment detection / vanishing points on arbitrary uploads
+ifcopenshell>=0.7             # IFC4 export adapter
+anthropic>=0.40               # structured vision-language extraction (Claude); needs ANTHROPIC_API_KEY

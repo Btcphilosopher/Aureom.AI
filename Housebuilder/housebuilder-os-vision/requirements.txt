@@ -1,0 +1,9 @@
+pydantic>=2.6
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+trimesh>=4.0
+pillow>=10.0
+streamlit>=1.36
+plotly>=5.20
+pytest>=7.4

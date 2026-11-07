@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "housebuilder-os-vision"
+version = "0.1.0"
+description = "Aureom.AI Housebuilder.OS Vision: image evidence to editable building twin, quantities, costs and uncertainty simulation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary - Aureom.AI" }
+dependencies = [
+  "pydantic>=2.6",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "pandas>=2.1",
+  "trimesh>=4.0",
+  "pillow>=10.0",
+  "streamlit>=1.36",
+  "plotly>=5.20",
+]
+
+[project.optional-dependencies]
+opencv = ["opencv-python-headless>=4.8"]
+ifc = ["ifcopenshell>=0.7"]
+vlm = ["anthropic>=0.40"]
+dev = ["pytest>=7.4"]
+all = ["opencv-python-headless>=4.8", "ifcopenshell>=0.7", "anthropic>=0.40", "pytest>=7.4"]
+
+[project.scripts]
+hbv-demo = "housebuilder_vision.demo.run_demo:main"
+
+[tool.setuptools.packages.find]
+include = ["housebuilder_vision*"]
+
+[tool.setuptools.package-data]
+"housebuilder_vision.demo" = ["data/*", "data/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
