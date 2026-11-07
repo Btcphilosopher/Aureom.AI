@@ -386,6 +386,9 @@ def _tf_lining_layers() -> list[AssemblyLayer]:
     ]
 
 
+_SEP_FACE_A = "Side A = face towards the block the wall is measured on; finished only if that block is heated."
+_SEP_FACE_B = "Side B = face towards the neighbouring block(s); finished only towards heated blocks."
+
 _STUD_NOTE = ("Studs @ 600 crs ≈ 1.67 m/m2 plus head/sole plates, noggings and opening framing ≈ 2.6 m/m2 "
               "(generic; frame not designed)")
 
@@ -467,12 +470,15 @@ def _assemblies() -> list[Assembly]:
         assembly_id="sw_masonry_separating", name="Masonry cavity wall between blocks", element=E.SEPARATING_WALL,
         structural_system="masonry cavity wall", information_level=_INFO,
         description="Plaster, 100 mm dense block, 100 mm mineral wool, 100 mm dense block, plaster. Generic "
-                    "wall between blocks of the building; any fire / acoustic separation requires design.",
+                    "wall between blocks of the building; any fire / acoustic separation requires design. "
+                    "Plaster is measured only on faces towards heated blocks (side A faces the block the wall "
+                    "is measured on, side B its neighbour); a face towards an unheated block such as a garage "
+                    "gets no internal finish, as for external walls.",
         layers=[
             _l("Gypsum plaster side A (undercoat 11 mm)", "plaster_hardwall_undercoat", R.INTERNAL_FINISH, 0.011,
-               hours=0.30, trade="plastering"),
-            _l("Finish (skim) plaster side A", "skim_plaster", R.INTERNAL_FINISH, 0.002, hours=0.20,
-               trade="plastering"),
+               measure="internal_face_area_a", note=_SEP_FACE_A, hours=0.30, trade="plastering"),
+            _l("Finish (skim) plaster side A", "skim_plaster", R.INTERNAL_FINISH, 0.002,
+               measure="internal_face_area_a", note=_SEP_FACE_A, hours=0.20, trade="plastering"),
             _l("Dense block leaf A 100 mm", "dense_concrete_block_100", R.STRUCTURE, 0.10, rule="per_area",
                factor=_BLOCKS_PER_M2, hours=0.06, trade="bricklaying"),
             _l("Mineral wool cavity batts 100 mm", "mineral_wool_100_cavity", R.INSULATION, 0.10, hours=0.10,
@@ -483,9 +489,9 @@ def _assemblies() -> list[Assembly]:
                factor=2 * SUBSTRUCTURE_RULES.mortar_m3_per_m2_block, trade="bricklaying"),
             _l("Wall ties", "wall_ties", R.FIXINGS, rule="per_area", factor=2.5, hours=0.01, trade="bricklaying"),
             _l("Gypsum plaster side B (undercoat 11 mm)", "plaster_hardwall_undercoat", R.INTERNAL_FINISH, 0.011,
-               hours=0.30, trade="plastering"),
-            _l("Finish (skim) plaster side B", "skim_plaster", R.INTERNAL_FINISH, 0.002, hours=0.20,
-               trade="plastering"),
+               measure="internal_face_area_b", note=_SEP_FACE_B, hours=0.30, trade="plastering"),
+            _l("Finish (skim) plaster side B", "skim_plaster", R.INTERNAL_FINISH, 0.002,
+               measure="internal_face_area_b", note=_SEP_FACE_B, hours=0.20, trade="plastering"),
         ]))
 
     # --------------------------------------------------------- partitions

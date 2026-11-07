@@ -3,6 +3,12 @@
 Display may be metric or imperial; conversion is explicit and dimension-checked.
 Count-like units (nr, sheet, pack, ...) are dimensionless and only convert to
 themselves unless a product-specific conversion factor is supplied elsewhere.
+
+Calendar vs working time: :func:`convert` treats ``day`` and ``week`` as *calendar*
+time (24 h and 168 h).  Labour, plant and preliminaries are normally quoted per
+*working* day / week; use :func:`convert_working_time_rate` (labelled hours per
+working day and working days per week) for those - a day rate divided by 24 would
+price an 8-hour working day at a third of its cost.
 """
 
 from __future__ import annotations
@@ -127,6 +133,51 @@ def convert_rate(rate: float, rate_unit: str, target_unit: str) -> float:
     """
     # price per unit scales inversely with the unit size
     return float(rate) / convert(1.0, rate_unit, target_unit)
+
+
+#: Time units whose length depends on the working pattern (working day / working week).
+WORKING_TIME_UNITS = frozenset({"day", "week"})
+
+
+def working_time_hours(unit: str, *, hours_per_working_day: float = 8.0,
+                       working_days_per_week: float = 5.0) -> float:
+    """Hours of *working* time in one ``unit`` (``hr``/``min``/``s`` as calendar; ``day`` = a working
+    day of ``hours_per_working_day`` hours; ``week`` = ``working_days_per_week`` working days).
+
+    Raises :class:`UnitError` for non-time units or non-positive working-time settings.
+    """
+    if not (hours_per_working_day > 0 and working_days_per_week > 0):
+        raise UnitError("hours_per_working_day and working_days_per_week must be positive")
+    u = normalise_unit(unit)
+    if u == "day":
+        return float(hours_per_working_day)
+    if u == "week":
+        return float(hours_per_working_day) * float(working_days_per_week)
+    if u in _UNITS and _UNITS[u][0] == "time":
+        return _UNITS[u][1]
+    raise UnitError(f"'{unit}' is not a time unit")
+
+
+def is_working_time_pair(rate_unit: str, target_unit: str) -> bool:
+    """True when both units are time units, they differ and at least one is a working-time unit (day / week)."""
+    try:
+        fu, tu = normalise_unit(rate_unit), normalise_unit(target_unit)
+        if fu == tu or dimension(fu) != "time" or dimension(tu) != "time":
+            return False
+    except UnitError:
+        return False
+    return fu in WORKING_TIME_UNITS or tu in WORKING_TIME_UNITS
+
+
+def convert_working_time_rate(rate: float, rate_unit: str, target_unit: str, *, hours_per_working_day: float = 8.0,
+                              working_days_per_week: float = 5.0) -> float:
+    """Convert a price per ``rate_unit`` of *working* time into a price per ``target_unit``.
+
+    e.g. 300 per day -> 37.5 per hr (8 h working day); 105 per day -> 525 per week (5 working days);
+    1200 per week -> 30 per hr (40 working hours).
+    """
+    kw = dict(hours_per_working_day=hours_per_working_day, working_days_per_week=working_days_per_week)
+    return float(rate) * working_time_hours(target_unit, **kw) / working_time_hours(rate_unit, **kw)
 
 
 _IMPERIAL_DISPLAY = {"length": "ft", "area": "ft2", "volume": "ft3", "mass": "lb"}

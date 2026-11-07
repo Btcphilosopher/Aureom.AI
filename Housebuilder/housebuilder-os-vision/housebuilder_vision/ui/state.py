@@ -831,10 +831,40 @@ def update_production_scenario(ws: Workspace, scenario: ProductionScenario) -> N
                               for s in p.production_scenarios]
 
 
-def add_example_production_scenarios(ws: Workspace, ev: Evaluation) -> None:
+def offsite_variant_estimate(ws: Workspace, ev: Evaluation) -> tuple[CostEstimate, str]:
+    """Estimate of the timber frame + brick outer leaf variant of the current twin and a truthful label.
+
+    Built like ``demo.build_demo.build_demo_project`` does (assembly change with actor
+    ``scenario:PS-offsite``, then the cached evaluation).  When the library has no such assembly, the
+    current estimate is returned with a label saying so.
+    """
+    from ..demo.build_demo import OFFSITE_EXTERNAL_WALL
+
+    p = ws.project
+    if p.twin.assemblies.external_wall == OFFSITE_EXTERNAL_WALL:
+        return ev.estimate, "the current house (already timber frame + brick outer leaf)"
+    if OFFSITE_EXTERNAL_WALL not in {a.assembly_id for a in p.library.assemblies}:
+        return ev.estimate, ("the current house's own assemblies (the timber frame + brick assembly is not in this "
+                             "library, so no timber-frame variant could be built)")
+    tf_twin = P.apply_construction_assemblies(p.twin, {"external_wall": OFFSITE_EXTERNAL_WALL}, p.library,
+                                              actor="scenario:PS-offsite",
+                                              reason="timber-frame variant for the off-site production scenario")
+    tf_ev = _cached_evaluation(eval_key(p, tf_twin), tf_twin, p.library, p.rate_book, p.cost_parameters, p.settings,
+                               p.assumptions)
+    return tf_ev.estimate, ("the timber frame + brick outer leaf variant of the current house (external wall "
+                            f"{OFFSITE_EXTERNAL_WALL}; other assemblies as selected)")
+
+
+def add_example_production_scenarios(ws: Workspace, ev: Evaluation) -> str:
+    """PS-site from the current estimate and PS-offsite from its timber-frame variant (labelled truthfully).
+
+    Returns where the PS-offsite per-house values come from.
+    """
     from ..demo.build_demo import demo_production_scenarios_for
 
-    ws.project.production_scenarios = demo_production_scenarios_for(ev.estimate, ev.estimate)
+    tf_est, source = offsite_variant_estimate(ws, ev)
+    ws.project.production_scenarios = demo_production_scenarios_for(ev.estimate, tf_est, offsite_source=source)
+    return source
 
 
 def add_example_build_scenarios(ws: Workspace) -> int:
@@ -987,7 +1017,8 @@ __all__ = [
     "analysis_key", "annotation_rows", "annotations_to_features", "build_twin", "clear_reference", "combine",
     "compare_scenarios", "data_dir", "edit_twin", "eval_key", "evaluate", "export_bundle", "fp", "get_registry",
     "get_workspace", "image_preview", "image_store_dir", "ingest_uploads", "kind_label", "kpis", "list_saved_projects",
-    "load_demo", "load_saved_project", "manual_from_analysis", "new_project", "refresh_evidence", "remove_image",
+    "load_demo", "load_saved_project", "manual_from_analysis", "new_project", "offsite_variant_estimate",
+    "refresh_evidence", "remove_image",
     "repeat_results", "replace_rate_book", "run_simulation", "save_project", "set_annotations", "set_assembly",
     "set_feature_active", "set_optional_adapters", "set_reference", "set_vlm", "simulation_is_current", "sync_twin",
     "twin_status", "update_cost_parameters", "update_image", "update_production_scenario", "update_settings",

@@ -80,8 +80,15 @@ from housebuilder_vision.quantities import (
 )
 
 LIB = default_library()
-SETTINGS = ProjectSettings()  # pricing date 2026-11-01, GBP
+PRICING_DATE = date(2026, 11, 1)  # pinned: ProjectSettings() defaults to today (COST-11)
+SETTINGS = ProjectSettings(pricing_date=PRICING_DATE)  # GBP
 EFF = date(2026, 10, 1)
+
+
+def settings(**kw) -> ProjectSettings:
+    """Project settings with the pinned test pricing date unless one is given."""
+    kw.setdefault("pricing_date", PRICING_DATE)
+    return ProjectSettings(**kw)
 
 
 # =============================================================================
@@ -340,8 +347,9 @@ def test_vat_stripping_with_and_without_rate_vat():
     book = RateBook(name="v", rates=[rate("v1", "mat:door", "nr", 120.0, tax_treatment="inc_vat", vat_rate=0.20),
                                      rate("v2", "mat:gate", "nr", 125.0, tax_treatment="inc_vat")])
     r, v, w = resolve_rate(book, "mat:door", "nr", settings=SETTINGS)
-    assert r.rate_id == "v1" and v == pytest.approx(100.0) and w == []
-    s = ProjectSettings(vat_rate=0.25)
+    # resolve_rate() lists every adjustment it applied (COST-1); no other warning here
+    assert r.rate_id == "v1" and v == pytest.approx(100.0) and w == ["VAT stripped ÷1.2"]
+    s = settings(vat_rate=0.25)
     r, v, w = resolve_rate(book, "mat:gate", "nr", settings=s)
     assert v == pytest.approx(100.0) and any("project VAT rate" in x for x in w)
     # the demo door is entered inc. VAT: 1386 / 1.2
@@ -365,7 +373,7 @@ def test_per_tonne_to_per_kg_and_incompatible_units():
 
 def test_fx_conversion_and_missing_fx():
     book = RateBook(name="fx", rates=[rate("e1", "mat:x", "nr", 100.0, currency="EUR")])
-    r, v, w = resolve_rate(book, "mat:x", "nr", settings=ProjectSettings(fx_rates={"EUR": 0.85}))
+    r, v, w = resolve_rate(book, "mat:x", "nr", settings=settings(fx_rates={"EUR": 0.85}))
     assert r.rate_id == "e1" and v == pytest.approx(85.0) and any("fx EUR->GBP" in x for x in w)
     r, v, w = resolve_rate(book, "mat:x", "nr", settings=SETTINGS)
     assert r is None and any("no fx rate" in x for x in w)
@@ -417,11 +425,11 @@ def test_future_dated_rates_are_excluded():
 def test_escalation_and_regional_factor_are_labelled():
     old = rate("o1", "mat:x", "nr", 100.0, effective_date=date(2025, 11, 1), location="Elsewhere (fictional)")
     book = RateBook(name="esc", rates=[old])
-    s = ProjectSettings(annual_escalation_rate=0.05)
+    s = settings(annual_escalation_rate=0.05)
     r, v, w = resolve_rate(book, "mat:x", "nr", settings=s)
     assert v == pytest.approx(100.0 * 1.05 ** (365 / 365.25))
     assert any("escalation" in x for x in w)
-    s2 = ProjectSettings(regional_cost_factor=1.10)
+    s2 = settings(regional_cost_factor=1.10)
     _, v2, w2 = resolve_rate(book, "mat:x", "nr", settings=s2)
     assert v2 == pytest.approx(110.0) and any("regional factor" in x for x in w2)
     local = RateBook(name="loc", rates=[rate("l1", "mat:x", "nr", 100.0)])  # Exampleton = project location
@@ -545,7 +553,7 @@ def test_layer9_land_finance_taxes_vat_sales_and_sales_value_excluded():
     p = TINY_PARAMS.model_copy(update=dict(land_cost=100_000.0, finance_rate_annual=0.08, finance_months=12.0,
                                            taxes={"Stamp duty (entered)": 2000.0}, sales_value=500_000.0,
                                            sales_cost_fraction=0.02))
-    s = ProjectSettings(include_vat=True, vat_rate=0.20)
+    s = settings(include_vat=True, vat_rate=0.20)
     est = tiny_estimate(params=p, settings=s)
     contract = est.boundary("contract_sum").amount
     lines = {ln.line_id: ln for ln in est.lines}
@@ -724,7 +732,9 @@ def test_incremental_equals_difference_and_differs_from_average():
     assert raised.comparison_ns == [1, 10, 25, 50, 100] and len(raised.rows) == 100
     assert any("max_n raised" in n for n in raised.notes)
     a = res.assumptions
-    assert a["learning_curve"]["learning_rate"] == 0.9 and "Wright" in a["learning_curve"]["model"]
+    # the default model is the unit-time (Crawford-style) curve, not Wright's cumulative average (COST-12)
+    assert a["learning_curve"]["learning_rate"] == 0.9 and a["learning_curve"]["model_key"] == "unit"
+    assert "Crawford" in a["learning_curve"]["model"] and "Wright" not in a["learning_curve"]["model"]
     assert "boundary_definition" in a and a["steps"] and "per_house_inputs" in a
 
 
@@ -799,12 +809,17 @@ def test_factory_gate_incremental_below_installed_and_boundaries():
     assert ins.assumptions["per_house_inputs"]["factory_material_fraction"]["source"].startswith("assumed")
     assert [r["n"] for r in out["comparison"]] == [1, 10, 25, 50, 100]
     assert 0 < out["comparison"][0]["factory_share_of_installed"] < 1
-    # development = installed with fees, contingency, OH&P in cascade
+    # development = installed + fees on the fee base (installed - design - factory capex; COST-3), then
+    # contingency, overhead and margin in cascade.  The one-off design fee is charged once here because the
+    # scenario has no reusable design cost.
     cp = CostParameters()
     dev = calculate_incremental_cost(_base_estimate(), sc, boundary="development", max_n=10, cost_params=cp)
-    f = sum(x.fraction for x in cp.fees)
-    k = (1 + f) * (1 + cp.contingency_fraction) * (1 + cp.overhead_fraction) * (1 + cp.margin_fraction)
-    assert dev.rows[4].total_cost == pytest.approx(ins.rows[4].total_cost * k)
+    capex = 40_000.0 + 100_000.0
+    i1, i5 = ins.rows[0].total_cost, ins.rows[4].total_cost
+    fees = sum(x.fraction * ((i5 if x.recurs_per_house else i1) - capex) for x in cp.fees)
+    k = (1 + cp.contingency_fraction) * (1 + cp.overhead_fraction) * (1 + cp.margin_fraction)
+    assert dev.rows[4].total_cost == pytest.approx((i5 + fees) * k)
+    assert dev.rows[4].components["fees"] == pytest.approx(fees)
     with pytest.raises(ValueError):
         calculate_incremental_cost(_base_estimate(), sc, boundary="gross")
 

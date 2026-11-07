@@ -52,15 +52,15 @@ and `params_from_twin(twin)`.
 | `vision/analysis.py` | `analyse_images(images: list[ImageAsset], *, store_dir, registry=None, settings=None) -> AnalysisResult` — runs adapters, records `AdapterRun`s, builds `FacadeObservation`s per view/block (storeys from window rows, widths/heights in px, roof form, apparent pitch only from visible gables/verges, openings with storey index, finishes as `ObservedFinish` with appearance-only caveat), sets `unknowns` (structural system, insulation, foundations, concealed services, engineering adequacy, hidden facades), warns for concept references (AI/rendering/sketch). |
 | `twin/calibration.py` | `calibrate_scale(analysis, reference: ReferenceMeasurement \| None = None, *, assumptions=None) -> ScaleCalibration` |
 | `twin/hypotheses.py` | `generate_geometry_hypotheses(analysis, calibration, *, assumptions=None, settings=None) -> list[GeometryHypothesis]` |
-| `twin/builder.py` | `build_parametric_twin(hypothesis, *, selection: AssemblySelection, settings=None, visual_finishes=None, twin_id=None) -> BuildingTwin`; `apply_twin_edit(twin, edit: TwinEdit) -> BuildingTwin` (returns new twin, version+1, logs `EditRecord`, sets basis `USER_CONFIRMED`); `regenerate_hidden_openings(twin) -> BuildingTwin`; `twin_hash(twin) -> str`. |
+| `twin/builder.py` | `build_parametric_twin(hypothesis, *, selection: AssemblySelection, settings=None, visual_finishes=None, twin_id=None) -> BuildingTwin`; `apply_twin_edit(twin, edit: TwinEdit, *, library: AssemblyLibrary \| None = None) -> BuildingTwin` (returns new twin, version+1, logs `EditRecord`, sets basis `USER_CONFIRMED`; system follow-ups are logged after it: attachment-aware reflow `system:reflow`, depth-pitch coupling through `RoofSpec.observed_rise_m` `system:coupling`, cleared opening overrides `system:assembly-check`; refuses detaching / overlapping blocks and storey reductions that strand openings; `library` checks opening assembly overrides against the kind's element); `regenerate_hidden_openings(twin) -> BuildingTwin`; `twin_hash(twin) -> str`; helpers `footprint_attachments(rects, root)` / `attached_origin(...)` (attachment tree, shared with `simulation/uncertainty.py`), `roof_span_field(block)`, `block_coupling(block)`, `depth_pitch_couplings(twin)`, `coupling_warnings(twin) -> list[str]`. |
 | `twin/mesh.py` | `build_mesh(twin) -> trimesh.Scene` (walls, roofs, openings as separate named nodes with `metadata={"block_id", "piece_id"/"opening_id", "kind"}`, colours from `visual_finishes` only); `scene_to_plotly_meshes(scene) -> list[dict]` (vertices/faces/colour/name per node for `go.Mesh3d`). |
 | `quantities/library.py` | `default_library() -> AssemblyLibrary` (materials, assemblies, foundations, allowances; illustrative data). |
 | `quantities/measures.py` | `MEASURES: dict[ElementType, set[str]]`; `element_measures(twin, metrics, library) -> ...` |
 | `quantities/takeoff.py` | `apply_construction_assemblies(twin, selection_changes: dict[str, str], library, *, actor="user") -> BuildingTwin`; `wall_thicknesses(twin, library) -> tuple[float, float]`; `calculate_quantities(twin, library, *, metrics=None) -> BillOfQuantities`. |
 | `quantities/procurement.py` | `procure(installed, material) -> dict` packaging/waste arithmetic (pure). |
-| `costing/rates.py` | `load_rate_book_csv(path_or_buffer, *, name) -> RateBook`, `load_rate_book_json(...)`, `resolve_rate(book, cost_key, unit, *, settings) -> tuple[Rate \| None, float, list[str]]` (returns rate, net value converted to the requested unit/currency/tax basis/escalation, warnings), `PricingAdapter` protocol. |
-| `costing/engine.py` | `estimate_construction_cost(boq, rate_book, params: CostParameters, *, settings, programme_weeks=None, library=None) -> CostEstimate` |
-| `costing/repeat_build.py` | `calculate_incremental_cost(estimate, scenario: ProductionScenario, *, boundary="installed", max_n=101, comparison_ns=(1,10,25,50,100)) -> RepeatBuildResult`; `total_cost_curve(...)`. |
+| `costing/rates.py` | `load_rate_book_csv(path_or_buffer, *, name) -> RateBook`, `load_rate_book_json(...)`, `resolve_rate(book, cost_key, unit, *, settings) -> tuple[Rate \| None, float, list[str]]` (returns rate, net value converted to the requested unit/currency/tax basis/escalation, warnings followed by every labelled adjustment applied; `day` / `week` rates of `lab:` / `plant:` / `prelim:` keys are working time per `ProjectSettings.hours_per_working_day` / `working_days_per_week`), `resolve_rate_detailed(...) -> ResolvedRate` (basis weakened to ASSUMED by assumed factors; `excluded_newer` = higher-priority rates excluded only by the pricing date), `PricingAdapter` protocol. |
+| `costing/engine.py` | `estimate_construction_cost(boq, rate_book, params: CostParameters, *, settings, programme_weeks=None, library=None) -> CostEstimate` (materials priced per order and allocated to lines, `CostEstimate.material_orders`; delivery treatment of every rate used; `COST_PARAMETER_FALLBACKS`) |
+| `costing/repeat_build.py` | `calculate_incremental_cost(estimate, scenario: ProductionScenario, *, boundary="installed", max_n=101, comparison_ns=(1,10,25,50,100)) -> RepeatBuildResult` (rows carry `underlying_marginal_cost` and `step_events`); `total_cost_curve(...)`; `single_house_reconciliation(estimate, scenario)`; `site_logistics_for(estimate, factory_material_fraction)`. |
 | `simulation/thermal.py` | `u_value(assembly, library) -> float` (ISO 6946-style combined method: upper/lower bound average with bridging; `u_value_override` for units) ; `heat_loss(twin, metrics, library, settings, ...) -> HeatLossResult` |
 | `simulation/carbon.py` | `embodied_carbon(boq, library) -> CarbonResult` |
 | `simulation/programme.py` | `build_programme(boq, library, *, crew_sizes=None, lead_times=None) -> ProgrammeResult` (CPM forward/backward pass) |
@@ -78,11 +78,15 @@ and `params_from_twin(twin)`.
 
 * Cost keys: materials `mat:<material_id>` (unit = material `purchase_unit`); labour `lab:<trade>`
   (unit `hr`); plant `plant:<item>`; allowances `allow:<allowance_id>`; logistics `log:delivery_load`,
-  `log:skip`; preliminaries `prelim:weekly`, `prelim:setup`.
+  `log:skip`; preliminaries `prelim:weekly`, `prelim:setup`.  For the time-based prefixes `lab:`,
+  `plant:` and `prelim:` a rate per `day` / `week` means a *working* day / week
+  (`ProjectSettings.hours_per_working_day`, `working_days_per_week`); other keys use calendar time.
 * Trades: `groundworks`, `bricklaying`, `carpentry`, `roofing`, `glazing`, `drylining`, `plastering`,
   `electrical`, `plumbing`, `decorating`, `general`.
 * Quantity line ids: `<element_code>.<block_id or "all">.<assembly_id>.<layer_index>` or
-  `<element_code>.allow.<allowance_id>` — stable across recalculation.
+  `<element_code>.allow.<allowance_id>` — stable across recalculation and unique within a bill.
+  Window / door groups whose assembly belongs to another element (or is not in the library) use
+  `all-<element>` in place of `all` (e.g. `2.6.all-external_door.win_upvc_dg.0`).
 * Element codes (NRM1-inspired grouping, not a claim of NRM compliance): `1` Substructure, `2.1` Frame
   allowance, `2.2` Upper floors, `2.3` Roof, `2.5` External walls, `2.6` Windows & external doors,
   `2.7` Internal walls & partitions, `2.8` Separating walls, `3` Internal finishes, `4` Fittings,
@@ -118,7 +122,10 @@ and `params_from_twin(twin)`.
   demonstration that appearance does not establish structure.  A third façade alternative,
   **timber frame with timber cladding**, is used in scenario comparisons.
 * Fictional supplier rates: `demo/data/fictional_rates_gbp_2026.csv`.
-* Repeat-build scenario: site-built vs off-site panelised timber frame, n ∈ {1, 10, 25, 50, 100}.
+* Repeat-build scenario: site-built vs off-site panelised timber frame, n ∈ {1, 10, 25, 50, 100}
+  (25 / 50 / 100 coincide with houses per site: their incremental cost contains a new site's
+  establishment, flagged by `step_events` next to the underlying marginal).  Priced at the pinned
+  demo pricing date 2026-11-01 (`demo.build_demo.DEMO_PRICING_DATE`; new projects default to today).
 
 ## 5. Implementation notes (integration)
 
@@ -158,4 +165,8 @@ Appended by the integration module; sections 0-4 above remain the contract.
   `demo_registry` - offline: no transformers adapters) ingests the demo elevation as
   `ELEVATION_DRAWING` (a dimensionally consistent synthetic drawing; `RENDERING` would mark it a
   concept reference).  Production scenarios `PS-site` / `PS-offsite` (fixed per-house values from the
-  timber-frame + brick variant) and build scenarios `S1`-`S4`.  `demo/run_demo.py` is the CLI.
+  timber-frame + brick variant, including its material orders, site logistics without the factory
+  share and its site overhead; the "Second factory shift and QA team" is a factory step) and build
+  scenarios `S1`-`S4`.  The UI's "Add illustrative production scenarios" builds the same
+  timber-frame variant of the current twin (`ui.state.offsite_variant_estimate`) or says which
+  assemblies it used.  `demo/run_demo.py` is the CLI.

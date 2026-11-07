@@ -9,12 +9,17 @@ uncertainty fractions; lines priced from a quantity line keep its
 
 Layers
 ------
-1. **Materials** - every resolved quantity line with a ``mat:`` key is priced on its
-   ``purchased_qty`` (pack-rounded *per line*, in the material's purchase unit);
-   ``allow:`` lines (labelled allowances) are priced on their quantity by the
-   ``allow:`` rate, which covers the material / supply component (labour on the line
-   is priced in layer 2).
-2. **Labour** - per quantity line, ``labour_hours x lab:<trade>`` (per hour).
+1. **Materials** - ``mat:`` lines are priced **per order**: for each material (cost key and
+   purchase unit) the lines' unrounded needs ``purchase_required = required_qty x
+   purchase_per_installed`` are summed, rounded once to whole packs (``packs = ceil(sum /
+   pack_size)``) and priced; the order cost is allocated back to the lines pro rata to their
+   need, so every cost line keeps its ``quantity_line_id`` and its formula shows its share.
+   The orders are recorded in ``CostEstimate.material_orders`` (repeat-build economics re-round
+   them for n houses).  ``allow:`` lines (labelled allowances) are priced on their quantity by
+   the ``allow:`` rate, which covers the material / supply component (labour on the line is
+   priced in layer 2).
+2. **Labour** - per quantity line, ``labour_hours x lab:<trade>`` (per hour; a day / week rate is
+   converted as working time, see :mod:`.rates`).
 3. **Plant** - quantity lines with a ``plant:`` key (``plant:excavation`` per m3 bank:
    excavator incl. fuel; when no per-m3 rate resolves but ``plant:excavator`` per hour
    does, hours = m3 x :attr:`CostRules.excavator_hours_per_m3`), plus derived hires
@@ -26,13 +31,16 @@ Layers
    delivery loads x ``log:delivery_load`` (site receipt per load) where loads =
    ``logistics.total_loads`` when a logistics plan is given, else one order per
    material (``max(1, ceil(max(mass / payload_kg, volume / payload_m3)))``) plus one per
-   allowance item; supplier delivery charges for rates that charge delivery separately
-   (``delivery_charge`` once per material order); waste skips =
+   allowance item; delivery treatment of **every rate used** (``mat:``, ``allow:``, ``plant:``
+   and rule keys): ``delivery_charged_separately`` / ``ex_works`` / ``collection`` rates add their
+   ``delivery_charge`` once per order (cost key); without a charge the carriage is listed in
+   ``unresolved_items`` (never priced as zero); waste skips =
    ``ceil(waste volume x bulking / skip volume)`` x ``log:skip``, waste volume from the
    lines' cutting + waste quantities via the material's volume (or mass / density) per
-   purchase unit.  ``log:`` rates fall back to ``CostParameters`` values (labelled).
+   purchase unit.  ``log:delivery_load`` / ``log:skip`` rates fall back to ``CostParameters``
+   values only when the rate book has none (:data:`COST_PARAMETER_FALLBACKS`, labelled).
 5. **Preliminaries** - setup + weekly x programme weeks (``prelim:setup`` /
-   ``prelim:weekly`` rates if present, else ``CostParameters``).
+   ``prelim:weekly`` rates if present, else the ``CostParameters`` fallbacks).
 6. **Fees** - ``FeeItem.fraction x base`` (``direct`` = layers 1-4, ``construction`` = 1-5).
 7. **Contingency** - ``contingency_fraction x (L1..L6)``.
 8. **Overhead & margin** - overhead = ``o x (L1..L7)``; margin = ``m x (L1..L7 + overhead)``.
@@ -49,7 +57,9 @@ Boundaries (cumulative): ``materials`` (L1), ``direct_works`` (L1-4),
 entered).  ``sales_value`` is reported separately and is never inside a boundary.
 
 Unresolved quantity lines and missing rates are listed in ``unresolved_items`` with the
-affected line ids - never priced as zero.
+affected line ids - never priced as zero.  When a higher-priority rate was excluded only because
+it is dated after the pricing date, the first warning starts with
+:data:`~housebuilder_vision.costing.rates.PRICING_DATE_WARNING`.
 
 Boundaries of the method: concept-stage estimate from a conceptual reconstruction and
 labelled assumptions.  Not a tender price, valuation or cost plan for contract; the
@@ -75,6 +85,7 @@ from ..core.models import (
     CostParameters,
     DeliveryTreatment,
     LogisticsResult,
+    MaterialOrder,
     MaterialSpec,
     QuantityLine,
     QuantityStatus,
@@ -82,7 +93,15 @@ from ..core.models import (
 )
 from ..core.provenance import Basis, weakest_basis
 from ..core.settings import ProjectSettings
-from .rates import RateIndex, ResolvedRate, cost_key_layer, rate_index, resolve_rate_detailed
+from ..quantities.procurement import PACK_TOLERANCE
+from .rates import (
+    PRICING_DATE_WARNING,
+    RateIndex,
+    ResolvedRate,
+    cost_key_layer,
+    rate_index,
+    resolve_rate_detailed,
+)
 
 __all__ = [
     "CostRules",
@@ -90,6 +109,7 @@ __all__ = [
     "BOUNDARY_KEYS",
     "COST_CONVENTIONS",
     "RULE_COST_KEYS",
+    "COST_PARAMETER_FALLBACKS",
     "estimate_construction_cost",
     "cost_lines_table",
     "boundary_table",
@@ -108,6 +128,15 @@ RULE_COST_KEYS: dict[str, str] = {
     "log:skip": "nr",
     "prelim:setup": "sum",
     "prelim:weekly": "week",
+}
+
+#: CostParameters fields used only when the rate book has no usable rate for the key:
+#: field -> (cost_key, unit).  The UI shows the rate in force next to each fallback input.
+COST_PARAMETER_FALLBACKS: dict[str, tuple[str, str]] = {
+    "prelims_weekly_cost": ("prelim:weekly", "week"),
+    "prelims_fixed_setup": ("prelim:setup", "sum"),
+    "cost_per_delivery_load": ("log:delivery_load", "load"),
+    "cost_per_skip": ("log:skip", "nr"),
 }
 
 BOUNDARY_KEYS = ("materials", "direct_works", "construction_before_contingency", "construction_incl_contingency",
@@ -139,16 +168,23 @@ DEFAULT_COST_RULES = CostRules()
 
 COST_CONVENTIONS: dict[str, str] = {
     "net_of_vat": "All rates are converted to net of VAT; VAT is only added in layer 9 when settings.include_vat.",
-    "materials_quantity": "Layer 1 uses each BoQ line's purchased_qty (pack-rounded per line, purchase unit).",
+    "materials_quantity": "Layer 1 prices each material once per order: the lines' unrounded purchase needs are "
+                          "summed and rounded to whole packs, and the order cost is allocated to the lines pro "
+                          "rata (CostEstimate.material_orders).",
+    "working_time": "Labour, plant and preliminaries rates quoted per day / week are working time "
+                    "(ProjectSettings.hours_per_working_day, working_days_per_week; assumption), not calendar time.",
     "allowances": "allow: rates price the supply / material component; installation labour is layer 2.",
     "labour": "Labour = labour_hours on each BoQ line x lab:<trade> hourly rate.",
     "plant": "plant:excavation per m3 bank (excavator incl. fuel); derived hires: dumper weeks = ceil(groundworks "
              "hours / 75), scaffold m2-weeks = external wall gross x 1.15 x 0.40 x programme weeks, telehandler weeks "
              "= ceil(0.35 x programme weeks) (CostRules defaults).",
     "logistics": "Loads from the logistics plan if given, else one order per material (payload 10 t / 20 m3) plus one "
-                 "per allowance item; supplier delivery charges once per material order; skips = ceil(waste volume x "
-                 "bulking / skip volume); all cutting and waste losses assumed to leave site in skips.",
-    "prelims": "Preliminaries = setup + weekly x programme weeks.",
+                 "per allowance item; delivery charges of every rate used (materials, allowances, plant) once per "
+                 "order - ex-works / collection / separately charged rates without a charge are unresolved; skips = "
+                 "ceil(waste volume x bulking / skip volume); all cutting and waste losses assumed to leave site in "
+                 "skips. CostParameters load / skip costs are fallbacks used only without log: rates.",
+    "prelims": "Preliminaries = setup + weekly x programme weeks (prelim: rates; CostParameters values only as "
+               "fallbacks when the rate book has none).",
     "fees": "Fees = fraction x layers 1-4 ('direct') or layers 1-5 ('construction').",
     "contingency": "Contingency = fraction x layers 1-6.",
     "overhead_margin": "Overhead = o x layers 1-7; margin = m x (layers 1-7 + overhead).",
@@ -162,8 +198,8 @@ COST_CONVENTIONS: dict[str, str] = {
 
 _BOUNDARY_DEFS: list[tuple[str, str, list[CostLayer], str, str]] = [
     ("materials", "Materials", [L1],
-     "Layer 1: purchased materials (per-line pack-rounded purchase quantities) and allowance supply components, "
-     "net of VAT.",
+     "Layer 1: purchased materials (order-level pack-rounded purchase quantities per material, allocated to the "
+     "lines) and allowance supply components, net of VAT.",
      "Labour, plant, logistics, preliminaries, fees, contingency, overhead & margin, land, finance, taxes, sales "
      "costs and VAT."),
     ("direct_works", "Direct works", [L1, L2, L3, L4],
@@ -226,6 +262,8 @@ class _State:
     #: (cost_key, unit) -> quantity line ids that could not be priced for lack of a rate
     missing: dict[tuple[str, str], list[str]] = field(default_factory=dict)
     used: dict[tuple[str, str], ResolvedRate] = field(default_factory=dict)
+    #: order-level material purchases (one per priced (mat: cost key, purchase unit))
+    orders: list[MaterialOrder] = field(default_factory=list)
 
     def add(self, *, line_id: str, layer: CostLayer, description: str, amount: float, cost_key: Optional[str] = None,
             quantity: Optional[float] = None, unit: str = "", rr: Optional[ResolvedRate] = None,
@@ -254,12 +292,36 @@ def _rate_formula(qty: float, unit: str, rr: ResolvedRate, cur: str, amount: flo
             f"[rate {rr.rate.rate_id}: {rr.rate.value:g} {rr.rate.currency}/{rr.rate.unit}{adj}]")
 
 
+def _delivery_note(rr: Optional[ResolvedRate]) -> str:
+    """How the delivery of a priced line's rate is handled (empty when delivery is included / not applicable)."""
+    if rr is None or rr.rate is None:
+        return ""
+    r = rr.rate
+    t = r.delivery_treatment
+    label = t.value.replace("_", " ")
+    if t in (DeliveryTreatment.DELIVERY_CHARGED_SEPARATELY, DeliveryTreatment.EX_WORKS):
+        if r.delivery_charge is None:
+            return f"Delivery: {label} - carriage NOT priced (no delivery_charge; listed as unresolved)."
+        return f"Delivery: {label} - delivery charge priced once per order in layer 4."
+    if t == DeliveryTreatment.COLLECTION:
+        if r.delivery_charge is None:
+            return "Delivery: collection - own transport to site NOT priced (listed as unresolved)."
+        return "Delivery: collection - collection cost (delivery_charge) priced once per order in layer 4."
+    if t == DeliveryTreatment.UNKNOWN:
+        return "Delivery: treatment unknown - assumed included in the rate."
+    return ""
+
+
+def _join_notes(*parts: str) -> str:
+    return " ".join(p for p in parts if p)
+
+
 def _priced(st: _State, *, line_id: str, layer: CostLayer, description: str, cost_key: str, qty: float, unit: str,
             rr: ResolvedRate, basis: Basis, quantity_line_id: Optional[str] = None, notes: str = "") -> float:
     amount = qty * rr.value
     st.add(line_id=line_id, layer=layer, description=description, amount=amount, cost_key=cost_key, quantity=qty,
            unit=unit, rr=rr, quantity_line_id=quantity_line_id, basis=weakest_basis(basis, rr.basis),
-           formula=_rate_formula(qty, unit, rr, st.currency, amount), notes=notes)
+           formula=_rate_formula(qty, unit, rr, st.currency, amount), notes=_join_notes(notes, _delivery_note(rr)))
     return amount
 
 
@@ -270,12 +332,110 @@ def _line_quantity(ln: QuantityLine) -> Optional[float]:
     return None
 
 
+def _purchase_need(ln: QuantityLine) -> Optional[float]:
+    """Unrounded purchase need of a line in purchase units (required x purchase_per_installed)."""
+    if ln.required_qty is not None:
+        return float(ln.required_qty) * float(ln.purchase_per_installed)
+    if ln.purchased_qty is not None:
+        return float(ln.purchased_qty)  # no unrounded figure available: the purchase as given
+    if ln.installed_qty is not None:
+        return float(ln.installed_qty) * float(ln.purchase_per_installed)
+    return None
+
+
+def _is_material_line(ln: QuantityLine) -> bool:
+    return bool(ln.cost_key) and ln.cost_key.startswith("mat:") and ln.status != QuantityStatus.UNRESOLVED
+
+
+@dataclass
+class _Order:
+    """Order-level purchase of one material (internal; exported as :class:`MaterialOrder`)."""
+
+    cost_key: str
+    unit: str
+    rr: ResolvedRate
+    lines: list[tuple[QuantityLine, float]]  # (line, unrounded need)
+    pack: float = 1.0
+    need: float = 0.0
+    packs: int = 0
+    purchased: float = 0.0
+    amount: float = 0.0
+
+
+def _plan_orders(st: _State, boq: BillOfQuantities, res: _Resolver,
+                 mats: dict[str, MaterialSpec]) -> dict[tuple[str, str], _Order]:
+    """Group the priceable ``mat:`` lines into one order per (cost key, purchase unit) and round it to packs."""
+    orders: dict[tuple[str, str], _Order] = {}
+    for ln in boq.lines:
+        if not _is_material_line(ln):
+            continue
+        need = _purchase_need(ln)
+        if need is None or need <= 0:
+            continue
+        unit = ln.purchase_unit or ln.unit
+        rr = res.get(ln.cost_key, unit)
+        if not rr.found:
+            continue
+        key = (ln.cost_key, unit)
+        o = orders.get(key)
+        if o is None:
+            o = orders[key] = _Order(cost_key=ln.cost_key, unit=unit, rr=rr, lines=[])
+        o.lines.append((ln, need))
+    for (ck, unit), o in orders.items():
+        packs_seen = {float(ln.pack_size) for ln, _ in o.lines}
+        mid = next((ln.material_id for ln, _ in o.lines if ln.material_id), None)
+        pack = packs_seen.pop() if len(packs_seen) == 1 else None
+        if pack is None:
+            mat = mats.get(mid or "")
+            pack = float(mat.pack_size) if mat is not None else max(float(ln.pack_size) for ln, _ in o.lines)
+            st.warnings.append(f"{ck}: the lines carry different pack sizes; the order is rounded to packs of "
+                               f"{pack:g} {unit}")
+        o.pack = pack if pack > 0 else 0.0
+        o.need = sum(need for _, need in o.lines)
+        if o.pack > 0:
+            o.packs = 0 if o.need <= 0 else int(math.ceil(o.need / o.pack - PACK_TOLERANCE))
+            o.purchased = o.packs * o.pack
+        else:  # no packaging information: buy the need as is
+            o.packs, o.purchased = 0, o.need
+        o.amount = o.purchased * o.rr.value
+        r = o.rr.rate
+        st.orders.append(MaterialOrder(
+            cost_key=ck, material_id=mid, purchase_unit=unit, pack_size=o.pack, purchase_required=o.need,
+            packs=o.packs, purchased=o.purchased, rate_id=r.rate_id if r is not None else None,
+            rate_value=o.rr.value, amount=o.amount, line_ids=[ln.line_id for ln, _ in o.lines],
+            line_level_purchased=sum(float(ln.purchased_qty or 0.0) for ln, _ in o.lines)))
+    return orders
+
+
+def _price_material_line(st: _State, ln: QuantityLine, need: float, o: _Order, note: str) -> None:
+    """Allocate the order of ``o`` to line ``ln`` pro rata to its unrounded need."""
+    rr = o.rr
+    cur, unit = st.currency, o.unit
+    share = need / o.need if o.need > 0 else 0.0
+    qty = o.purchased * share
+    amount = qty * rr.value
+    if len(o.lines) == 1:
+        order_txt = f"{need:.3f} {unit} required"
+    else:
+        order_txt = (f"share {need:.3f} / {o.need:.3f} {unit} ({share:.2%}) of the {o.cost_key} order over "
+                     f"{len(o.lines)} lines")
+    rounding = (f"ceil({o.need:.3f} / {o.pack:g} per pack) = {o.packs} packs = {o.purchased:.3f} {unit}"
+                if o.pack > 0 else f"{o.purchased:.3f} {unit} (no pack size)")
+    formula = f"{order_txt}; order {rounding}; allocated " + _rate_formula(qty, unit, rr, cur, amount)
+    st.add(line_id=f"1:{ln.line_id}", layer=L1, description=ln.description, amount=amount, cost_key=o.cost_key,
+           quantity=qty, unit=unit, rr=rr, quantity_line_id=ln.line_id, basis=weakest_basis(ln.basis, rr.basis),
+           formula=formula, notes=_join_notes(note, "Priced at order level (pack rounding on the material's total, "
+                                                    "allocated pro rata).", _delivery_note(rr)))
+
+
 # =============================================================================
 # Layers 1-3 from quantity lines
 # =============================================================================
-def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rules: CostRules) -> dict[str, float]:
+def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rules: CostRules,
+                          mats: dict[str, MaterialSpec]) -> dict[str, float]:
     """Layers 1-4 lines that come straight from BoQ lines; returns aggregates for the rules."""
     agg = {"groundworks_hours": 0.0, "excavation_m3": 0.0}
+    orders = _plan_orders(st, boq, res, mats)
     for ln in boq.lines:
         if ln.status == QuantityStatus.UNRESOLVED:
             reason = (ln.notes or ln.formula or "no reason given").removeprefix("UNRESOLVED: ")
@@ -285,19 +445,20 @@ def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rul
         if ck:
             qty = _line_quantity(ln)
             unit = ln.purchase_unit or ln.unit
+            note = "Labelled allowance (not measured)." if ln.status == QuantityStatus.ALLOWANCE else ""
+            order = orders.get((ck, unit)) if ck.startswith("mat:") else None
             if qty is None:
                 st.unresolved.append(f"{ln.line_id} ({ln.description}): no quantity on a {ln.status.value} line; "
                                      "not priced")
+            elif order is not None:
+                need = _purchase_need(ln) or 0.0
+                if need > 0:
+                    _price_material_line(st, ln, need, order, note)
             elif qty > 0:
                 layer = cost_key_layer(ck)
                 rr = res.get(ck, unit)
-                note = "Labelled allowance (not measured)." if ln.status == QuantityStatus.ALLOWANCE else ""
                 if rr.found:
                     layer = layer or rr.rate.layer
-                    if layer == L1 and rr.rate.delivery_treatment not in (DeliveryTreatment.DELIVERED_INCLUDED,
-                                                                         DeliveryTreatment.NOT_APPLICABLE):
-                        note = (note + " " if note else "") + \
-                            f"Delivery: {rr.rate.delivery_treatment.value.replace('_', ' ')} (see layer 4)."
                     _priced(st, line_id=f"{layer.value[0]}:{ln.line_id}", layer=layer, description=ln.description,
                             cost_key=ck, qty=qty, unit=unit, rr=rr, basis=ln.basis, quantity_line_id=ln.line_id,
                             notes=note)
@@ -312,7 +473,8 @@ def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rul
                            quantity_line_id=ln.line_id, basis=weakest_basis(ln.basis, rx.basis, Basis.ASSUMED),
                            formula=f"{qty:.3f} m3 bank × {rules.excavator_hours_per_m3:g} hr/m3 = {hours:.3f} hr; "
                                    + _rate_formula(hours, "hr", rx, st.currency, amount),
-                           notes="No per-m3 excavation rate: priced as excavator hours (CostRules assumption).")
+                           notes=_join_notes("No per-m3 excavation rate: priced as excavator hours (CostRules "
+                                             "assumption).", _delivery_note(rx)))
                     agg["excavation_m3"] += qty
                 else:
                     st.miss(ck, unit, ln.line_id)
@@ -365,7 +527,8 @@ def _derived_plant(st: _State, boq: BillOfQuantities, res: _Resolver, rules: Cos
                amount=amount, cost_key=ck, quantity=qty, unit=unit, rr=rr,
                basis=weakest_basis(Basis.ASSUMED, weeks_basis if name != "dumper" else Basis.ASSUMED, rr.basis),
                formula=rule_txt + "; " + _rate_formula(qty, unit, rr, st.currency, amount),
-               notes="Derived from BoQ / programme by a labelled CostRules assumption.")
+               notes=_join_notes("Derived from BoQ / programme by a labelled CostRules assumption.",
+                                 _delivery_note(rr)))
 
 
 # =============================================================================
@@ -390,79 +553,99 @@ def _log_rate(st: _State, res: _Resolver, ck: str, unit: str, fallback: float, f
     rr = res.get(ck, unit)
     if rr.found:
         return rr, rr.value, f"rate {rr.rate.rate_id}"
-    return None, float(fallback), f"CostParameters.{fallback_name} (no '{ck}' rate; assumption)"
+    return None, float(fallback), f"CostParameters.{fallback_name} (fallback: no usable '{ck}' rate; assumption)"
+
+
+def _delivery_line_id(cost_key: str) -> str:
+    """``4:log.delivery_charge.<item>`` for ``mat:`` keys (stable ids), ``...<prefix>.<item>`` for other keys."""
+    prefix, _, item = cost_key.partition(":")
+    return f"4:log.delivery_charge.{item}" if prefix == "mat" else f"4:log.delivery_charge.{prefix}.{item}"
+
+
+def _delivery_charges(st: _State) -> None:
+    """Delivery treatment of every rate actually used (materials, allowances, plant, rule keys): one order each.
+
+    ``delivery_charged_separately`` / ``ex_works`` / ``collection`` with a ``delivery_charge`` -> one layer-4
+    line per cost key; without a charge -> listed in ``unresolved_items`` (never priced as zero);
+    ``unknown`` -> warned and assumed included.
+    """
+    cur = st.currency
+    seen: set[tuple[str, str]] = set()
+    for rr in list(st.used.values()):
+        r = rr.rate
+        ck = rr.cost_key
+        if r is None or (ck, r.rate_id) in seen:
+            continue
+        seen.add((ck, r.rate_id))
+        t = r.delivery_treatment
+        label = t.value.replace("_", " ")
+        if t in (DeliveryTreatment.DELIVERY_CHARGED_SEPARATELY, DeliveryTreatment.EX_WORKS,
+                 DeliveryTreatment.COLLECTION):
+            if r.delivery_charge is None:
+                what = ("own transport to site (collection)" if t == DeliveryTreatment.COLLECTION
+                        else "carriage to site")
+                st.unresolved.append(f"{ck}: rate '{r.rate_id}' is {label} but has no delivery_charge; {what} not "
+                                     "priced - enter a delivery charge per order or use a delivered rate")
+                continue
+            amount = float(r.delivery_charge) * rr.money_factor
+            item = ck.split(":", 1)[1]
+            kind = "Collection / own transport cost" if t == DeliveryTreatment.COLLECTION else \
+                "Supplier delivery charge"
+            st.add(line_id=_delivery_line_id(ck), layer=L4, description=f"{kind} - {item} (1 order)", amount=amount,
+                   cost_key=ck, quantity=1.0, unit="order", rr=rr, rate_value=amount,
+                   basis=weakest_basis(Basis.ASSUMED, rr.basis),
+                   formula=f"1 order × {r.delivery_charge:g} {r.currency} delivery charge ({label})"
+                           + (f" × {rr.money_factor:.4f}" if abs(rr.money_factor - 1) > 1e-12 else "")
+                           + f" = {cur} {amount:.2f} [rate {r.rate_id}]",
+                   notes=f"One delivery order per cost key assumed ({ck}).")
+        elif t == DeliveryTreatment.UNKNOWN:
+            st.warnings.append(f"{ck}: delivery treatment of rate '{r.rate_id}' is unknown; assumed included.")
 
 
 def _logistics(st: _State, boq: BillOfQuantities, res: _Resolver, params: CostParameters, rules: CostRules,
                logistics: Optional[LogisticsResult], mats: dict[str, MaterialSpec]) -> None:
     cur = st.currency
     priced_mat_lines = [ln for ln in boq.lines
-                        if ln.status != QuantityStatus.UNRESOLVED and ln.cost_key and ln.cost_key.startswith("mat:")
-                        and (_line_quantity(ln) or 0.0) > 0]
+                        if _is_material_line(ln) and (_line_quantity(ln) or 0.0) > 0]
     # ---- delivery loads
     if logistics is not None:
         loads = int(logistics.total_loads)
         loads_txt = f"{loads} loads from the logistics plan"
         loads_basis = Basis.ASSUMED
     else:
-        per_mat: dict[str, list[float]] = {}
+        # purchase quantity per material: the order where one was priced, else the lines' own purchases
+        qty_by_mat: dict[str, float] = {}
+        ordered = {lid for o in st.orders for lid in o.line_ids}
+        for o in st.orders:
+            mid = o.material_id or o.cost_key.split(":", 1)[1]
+            qty_by_mat[mid] = qty_by_mat.get(mid, 0.0) + o.purchased
         for ln in priced_mat_lines:
+            if ln.line_id in ordered:
+                continue
             mid = ln.material_id or ln.cost_key.split(":", 1)[1]
-            acc = per_mat.setdefault(mid, [0.0, 0.0])
-            mat = mats.get(mid)
-            q = _line_quantity(ln) or 0.0
-            if mat is not None:
-                acc[0] += q * (mat.mass_per_purchase_unit_kg or 0.0)
-                acc[1] += q * (mat.volume_per_purchase_unit_m3 or 0.0)
+            qty_by_mat[mid] = qty_by_mat.get(mid, 0.0) + (_line_quantity(ln) or 0.0)
         mat_loads = 0
-        for mass, vol in per_mat.values():
+        for mid, q in qty_by_mat.items():
+            mat = mats.get(mid)
+            mass = q * (mat.mass_per_purchase_unit_kg or 0.0) if mat is not None else 0.0
+            vol = q * (mat.volume_per_purchase_unit_m3 or 0.0) if mat is not None else 0.0
             mat_loads += max(1, math.ceil(max(mass / rules.lorry_payload_kg, vol / rules.lorry_payload_m3) - 1e-9))
         allow_orders = len({ln.cost_key for ln in boq.lines if ln.status != QuantityStatus.UNRESOLVED
                             and ln.cost_key and ln.cost_key.startswith("allow:") and (_line_quantity(ln) or 0) > 0})
         loads = mat_loads + allow_orders
-        loads_txt = (f"{mat_loads} loads for {len(per_mat)} material orders (payload "
+        loads_txt = (f"{mat_loads} loads for {len(qty_by_mat)} material orders (payload "
                      f"{rules.lorry_payload_kg / 1000:g} t / {rules.lorry_payload_m3:g} m3) + {allow_orders} "
                      f"allowance deliveries = {loads} loads (estimate; no logistics plan supplied)")
         loads_basis = Basis.ASSUMED
     if loads > 0:
-        rr, val, src = _log_rate(st, res, "log:delivery_load", "load", params.cost_per_delivery_load,
-                                 "cost_per_delivery_load")
+        ck, unit = COST_PARAMETER_FALLBACKS["cost_per_delivery_load"]
+        rr, val, src = _log_rate(st, res, ck, unit, params.cost_per_delivery_load, "cost_per_delivery_load")
         amount = loads * val
         st.add(line_id="4:log.delivery_loads", layer=L4, description="Delivery loads - site receipt and handling",
-               amount=amount, cost_key="log:delivery_load", quantity=float(loads), unit="load", rr=rr,
+               amount=amount, cost_key=ck, quantity=float(loads), unit="load", rr=rr,
                rate_value=val, basis=weakest_basis(loads_basis, rr.basis if rr else Basis.ASSUMED),
                formula=f"{loads_txt}; × {cur} {val:.2f}/load ({src}) = {cur} {amount:.2f}",
-               notes="Supplier carriage is in the material rates unless charged separately (below).")
-    # ---- supplier delivery charges (one order per material)
-    seen: set[str] = set()
-    for ln in priced_mat_lines:
-        ck = ln.cost_key
-        if ck in seen:
-            continue
-        seen.add(ck)
-        rr = res.get(ck, ln.purchase_unit or ln.unit)
-        if not rr.found:
-            continue
-        r = rr.rate
-        t = r.delivery_treatment
-        if t in (DeliveryTreatment.DELIVERY_CHARGED_SEPARATELY, DeliveryTreatment.EX_WORKS):
-            if r.delivery_charge is None:
-                st.unresolved.append(f"{ck}: rate '{r.rate_id}' is {t.value.replace('_', ' ')} but has no "
-                                     "delivery_charge; carriage not priced")
-                continue
-            amount = float(r.delivery_charge) * rr.money_factor
-            st.add(line_id=f"4:log.delivery_charge.{ck.split(':', 1)[1]}", layer=L4,
-                   description=f"Supplier delivery charge - {ck.split(':', 1)[1]} (1 order)", amount=amount,
-                   cost_key=ck, quantity=1.0, unit="order", rr=rr, rate_value=amount,
-                   basis=weakest_basis(Basis.ASSUMED, rr.basis),
-                   formula=f"1 order × {r.delivery_charge:g} {r.currency} delivery charge"
-                           + (f" × {rr.money_factor:.4f}" if abs(rr.money_factor - 1) > 1e-12 else "")
-                           + f" = {cur} {amount:.2f} [rate {r.rate_id}]",
-                   notes="One delivery order per material assumed.")
-        elif t == DeliveryTreatment.COLLECTION:
-            st.notes.append(f"{ck}: rate '{r.rate_id}' is for collection; own transport is not priced separately.")
-        elif t == DeliveryTreatment.UNKNOWN:
-            st.warnings.append(f"{ck}: delivery treatment of rate '{r.rate_id}' is unknown; assumed included.")
+               notes="Supplier carriage is in the rates unless charged separately (delivery charges below).")
     # ---- waste skips
     vol = 0.0
     no_data: list[str] = []
@@ -480,10 +663,11 @@ def _logistics(st: _State, boq: BillOfQuantities, res: _Resolver, params: CostPa
     if vol > 0:
         bulk, skip_v = params.waste_bulking_factor, params.skip_volume_m3
         skips = math.ceil(vol * bulk / skip_v - 1e-9)
-        rr, val, src = _log_rate(st, res, "log:skip", "nr", params.cost_per_skip, "cost_per_skip")
+        ck, unit = COST_PARAMETER_FALLBACKS["cost_per_skip"]
+        rr, val, src = _log_rate(st, res, ck, unit, params.cost_per_skip, "cost_per_skip")
         amount = skips * val
         st.add(line_id="4:log.skips", layer=L4, description="Waste skips (cutting and waste losses)", amount=amount,
-               cost_key="log:skip", quantity=float(skips), unit="nr", rr=rr, rate_value=val,
+               cost_key=ck, quantity=float(skips), unit="nr", rr=rr, rate_value=val,
                basis=weakest_basis(Basis.ASSUMED, rr.basis if rr else Basis.ASSUMED),
                formula=f"ceil({vol:.3f} m3 waste × bulking {bulk:g} / {skip_v:g} m3 skip) = {skips} skips × "
                        f"{cur} {val:.2f} ({src}) = {cur} {amount:.2f}",
@@ -499,11 +683,13 @@ def _logistics(st: _State, boq: BillOfQuantities, res: _Resolver, params: CostPa
 def _prelims(st: _State, res: _Resolver, params: CostParameters, weeks: float, weeks_basis: Basis,
              weeks_src: str) -> None:
     cur = st.currency
-    rr, val, src = _log_rate(st, res, "prelim:setup", "sum", params.prelims_fixed_setup, "prelims_fixed_setup")
+    ck, unit = COST_PARAMETER_FALLBACKS["prelims_fixed_setup"]
+    rr, val, src = _log_rate(st, res, ck, unit, params.prelims_fixed_setup, "prelims_fixed_setup")
     st.add(line_id="5:prelim.setup", layer=L5, description="Site set-up (fixed preliminaries)", amount=val,
            cost_key="prelim:setup", quantity=1.0, unit="sum", rr=rr, rate_value=val,
            basis=rr.basis if rr else Basis.ASSUMED, formula=f"1 sum × {cur} {val:.2f} ({src})")
-    rr, val, src = _log_rate(st, res, "prelim:weekly", "week", params.prelims_weekly_cost, "prelims_weekly_cost")
+    ck, unit = COST_PARAMETER_FALLBACKS["prelims_weekly_cost"]
+    rr, val, src = _log_rate(st, res, ck, unit, params.prelims_weekly_cost, "prelims_weekly_cost")
     amount = weeks * val
     st.add(line_id="5:prelim.weekly", layer=L5, description="Time-related preliminaries", amount=amount,
            cost_key="prelim:weekly", quantity=weeks, unit="week", rr=rr, rate_value=val,
@@ -628,10 +814,12 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
     else:
         weeks, weeks_basis, weeks_src = float(programme_weeks), Basis.INFERRED, "indicative programme"
 
-    agg = _price_quantity_lines(st, boq, res, rules)
+    agg = _price_quantity_lines(st, boq, res, rules, mats)
     _derived_plant(st, boq, res, rules, weeks, weeks_basis, agg)
     _logistics(st, boq, res, params, rules, logistics, mats)
     _prelims(st, res, params, weeks, weeks_basis, weeks_src)
+    # delivery treatment of every rate used so far (materials, allowances, plant, logistics, prelims)
+    _delivery_charges(st)
     # Missing rates are summarised before percentage layers so the user sees them grouped.
     for (ck, unit), refs in st.missing.items():
         rr = res.get(ck, unit)
@@ -646,20 +834,26 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
     reg = sorted({rr.rate.rate_id for rr in st.used.values() if rr.regional_factor != 1.0})
     for rr in st.used.values():
         st.warnings.extend(rr.warnings)
-    if esc:
+    firm = sorted({rr.rate.rate_id for rr in st.used.values()
+                   if any(a.startswith("not escalated") for a in rr.adjustments)})
+    if esc or firm:
         st.notes.append(f"Escalation at {settings.annual_escalation_rate:+.1%}/yr applied to {len(esc)} rate(s) dated "
-                        f"before the pricing date {settings.pricing_date.isoformat()} (assumption).")
+                        f"before the pricing date {settings.pricing_date.isoformat()} (assumption)"
+                        + (f"; {len(firm)} rate(s) valid on the pricing date (firm quotes / price lists) were not "
+                           "escalated." if firm else "."))
     if settings.regional_cost_factor != 1.0:
         local = len({rr.rate.rate_id for rr in st.used.values()}) - len(reg)
-        st.notes.append(f"Regional cost factor ×{settings.regional_cost_factor:g} applied to {len(reg)} rate(s) from "
-                        f"other locations; {local} rate(s) located in the project area were not adjusted.")
+        st.notes.append(f"Regional cost factor ×{settings.regional_cost_factor:g} applied to {len(reg)} rate(s) not "
+                        f"located in the project area; {local} rate(s) were not adjusted (located in the project area, "
+                        "or supplier quotes without a location - treated as quoted for the site).")
     used_rates = {rr.rate.rate_id: rr.rate for rr in st.used.values()}
     fictional = sum(1 for r in used_rates.values() if _is_fictional(r))
     if fictional:
         st.warnings.append(f"{fictional} of {len(used_rates)} rates used are labelled FICTIONAL (demo data) - not "
                            "market prices.")
     st.warnings.extend(f"rate book: {w}" for w in rate_book.warnings[:20])
-    _order_level_note(st, boq, lib, res)
+    _pricing_date_summary(st, settings)
+    _order_level_note(st)
     if params.sales_value is not None:
         st.notes.append(f"Sales value {cur} {params.sales_value:.2f} is reported separately; it is not a cost and is "
                         "not netted off any boundary.")
@@ -682,24 +876,36 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
         rate_book_name=rate_book.name, lines=st.lines, layer_totals=layer_totals, boundaries=boundaries,
         gia_m2=float(boq.geometry.gia_m2), unresolved_items=st.unresolved, warnings=_dedupe(st.warnings),
         sales_value=params.sales_value, programme_weeks=weeks, conventions=conventions, notes=_dedupe(st.notes),
+        material_orders=st.orders,
     )
 
 
-def _order_level_note(st: _State, boq: BillOfQuantities, lib: AssemblyLibrary, res: _Resolver) -> None:
-    """Note how much ordering each material once (pack rounding on project totals) would save."""
-    from ..quantities.procurement import procurement_schedule
+def _pricing_date_summary(st: _State, settings: ProjectSettings) -> None:
+    """Prominent first warning when newer, higher-priority rates were excluded only by the pricing date."""
+    pairs: list[str] = []
+    for rr in st.used.values():
+        for rid in rr.excluded_newer:
+            used = rr.rate.rate_id + (" (FICTIONAL)" if _is_fictional(rr.rate) else "")
+            txt = f"{rid} for {rr.cost_key} -> {used} used"
+            if txt not in pairs:
+                pairs.append(txt)
+    if pairs:
+        st.warnings.insert(0, f"{PRICING_DATE_WARNING}: {len(pairs)} newer, higher-priority rate(s) are dated after the "
+                              f"pricing date {settings.pricing_date.isoformat()} and were excluded, so lower-priority "
+                              f"rates priced the estimate ({'; '.join(pairs[:8])}"
+                              + (f"; +{len(pairs) - 8} more" if len(pairs) > 8 else "")
+                              + "). Move the pricing date forward if the newer rates should apply.")
 
-    saving = 0.0
-    for row in procurement_schedule(boq, lib):
-        if row["rounding_saving"] <= 1e-9:
-            continue
-        rr = res.cache.get((f"mat:{row['material_id']}", row["purchase_unit"]))
-        if rr is not None and rr.found:
-            saving += row["rounding_saving"] * rr.value
-    if saving > 0.5:
-        st.notes.append(f"Materials are priced on per-line pack-rounded quantities; ordering each material once for "
-                        f"the project (procurement_schedule) would reduce layer 1 by about {st.currency} "
-                        f"{saving:.0f}.")
+
+def _order_level_note(st: _State) -> None:
+    """Note what per-line pack rounding would have added compared with the order-level pricing used."""
+    extra = sum(max(0.0, o.line_level_purchased - o.purchased) * o.rate_value for o in st.orders)
+    multi = sum(1 for o in st.orders if len(o.line_ids) > 1)
+    if st.orders:
+        st.notes.append(f"Materials are priced per order: {len(st.orders)} material order(s) ({multi} spanning several "
+                        f"BoQ lines) are rounded to whole packs once and allocated to the lines pro rata"
+                        + (f"; rounding each line separately would have added about {st.currency} {extra:.0f}."
+                           if extra > 0.5 else "."))
 
 
 def _is_fictional(rate) -> bool:

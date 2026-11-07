@@ -62,18 +62,28 @@ all commercial fractions (fees, contingency, overhead, margin).
 
 Coherence rules applied in every sample
 ---------------------------------------
-* **Attached blocks stay attached.**  The base footprint is analysed once: every
-  block touching an already placed block keeps that contact and its alignment
-  (front/rear or left/right flush, otherwise the base offset).  Their origins
-  are derived, not sampled.
-* **Depth-pitch coupling.**  When a block's roof span runs along its depth
-  (gable with ridge parallel to the frontage, or hip) and the front elevation
-  shows its roof rise (the depth or pitch carries image evidence), the rise is
-  an observation: ``rise = k x depth x tan(pitch)`` (k = 1/2).  If the depth is
-  assumed, the pitch prior is sampled and the depth derived
-  ``depth = rise / (k tan(pitch))`` (clipped to the depth range); if the depth
-  is evidence-derived, it is sampled and the pitch derived.  The rise scales
-  with the sampled ``metres_per_pixel`` of its correlation group.
+* **Attached blocks stay attached.**  The base footprint is analysed once with
+  ``twin.builder.footprint_attachments`` (the same attachment tree the twin
+  editor reflows with): every block touching an already placed block keeps
+  that contact and its alignment (front/rear or left/right flush, otherwise
+  the base offset).  Their origins are derived, not sampled.
+* **Depth-pitch coupling.**  A pitched block whose roof stores an observed rise
+  (``RoofSpec.observed_rise_m``, see ``twin.builder.block_coupling``) keeps
+  ``rise = k x span x tan(pitch)`` in every sample (k = 1/2 for gable / hip,
+  1 for monopitch; span = the dimension the roof spans).  Each sample starts
+  from the *stored* observed rise (scaled by the sampled ``metres_per_pixel``
+  of its correlation group unless the rise is user-confirmed), never from the
+  rise recomputed from an edited depth or pitch.  The sampled side is the one
+  that is fixed by evidence: a user-confirmed / observed span is sampled and
+  the pitch derived; a user-confirmed / observed pitch is sampled and the span
+  derived ``span = rise / (k tan(pitch))`` (clipped to the span range, then the
+  pitch re-derived so the relation stays exact); with neither fixed, an
+  image-derived span is sampled, otherwise the pitch prior.  Not coupled: both
+  fixed (sampled independently, stated in the notes) or a twin whose roof does
+  not reproduce its observed rise (``twin.builder.coupling_warnings``).  Twins
+  without a stored rise (saved before it existed) fall back to the rise of
+  their current geometry for gables with ridge ``x`` / hips whose depth or pitch
+  carries image evidence.
 * **Hidden-facade openings follow their rule.**  Rule-generated windows keep
   their count; their widths scale so the glazed area tracks
   ``ratio x hidden wall area - rule doors`` relative to the base, and their
@@ -155,6 +165,7 @@ from ..geometry.footprint import GeometryError, side_pieces
 from ..geometry.metrics import BlockParams, OpeningParams, compute_metrics, params_from_twin, roof_shape
 from ..quantities.measures import TakeoffAssumptions, unknown_openings
 from ..quantities.takeoff import apply_construction_assemblies, calculate_quantities, wall_thicknesses
+from ..twin.builder import BlockAttachment, attached_origin, block_coupling, footprint_attachments
 from .logistics import plan_deliveries
 from .programme import build_programme
 
@@ -350,24 +361,21 @@ class _Driver:
     classes: list[str] = field(default_factory=list)
 
 
-@dataclass
-class _Attach:
-    child: int
-    parent: int
-    relation: str  # right_of | left_of | behind | in_front
-    align: str  # front | rear | left | right | offset
-    delta: float
+#: Attachment of a block to its parent (shared with the twin editor's reflow).
+_Attach = BlockAttachment
 
 
 @dataclass
 class _Coupling:
     block: int
-    mode: str  # pitch_primary | depth_primary
+    mode: str  # pitch_primary (pitch sampled, span derived) | depth_primary (span sampled, pitch derived)
     k: float
     base_rise: float
-    depth_lo: float
+    depth_lo: float  # span range (the span is the depth unless ``span == "width"``)
     depth_hi: float
     group: Optional[str]
+    span: str = "depth"  # BlockParams attribute the roof spans: "depth" | "width"
+    stored: bool = True  # base_rise is the stored observed rise (False: legacy twin, rise of the geometry)
 
 
 @dataclass
@@ -445,6 +453,7 @@ class _HouseModel:
         self.block_index = {b.block_id: i for i, b in enumerate(twin.blocks)}
         self.root = next((i for i, b in enumerate(twin.blocks) if b.role.value == "main"), 0)
         self.attachments, self.detached = self._attachments()
+        self.coupling_notes: list[str] = []
         self.couplings = self._couplings()
         self.rule_sides = self._rule_sides()
         self.concrete_ids = {m.material_id for m in library.materials
@@ -455,55 +464,43 @@ class _HouseModel:
 
     # ------------------------------------------------------------ footprint analysis
     def _attachments(self) -> tuple[list[_Attach], set[int]]:
-        bps = self.base_bp
-        tol = 1e-4
-        placed = [self.root]
-        out: list[_Attach] = []
-        remaining = [i for i in range(len(bps)) if i != self.root]
-        progress = True
-        while remaining and progress:
-            progress = False
-            for i in list(remaining):
-                b = bps[i].rect
-                for j in placed:
-                    n = bps[j].rect
-                    ov_y = min(b.y1, n.y1) - max(b.y0, n.y0)
-                    ov_x = min(b.x1, n.x1) - max(b.x0, n.x0)
-                    rel = None
-                    if ov_y > tol and abs(b.x0 - n.x1) < tol:
-                        rel = "right_of"
-                    elif ov_y > tol and abs(b.x1 - n.x0) < tol:
-                        rel = "left_of"
-                    elif ov_x > tol and abs(b.y0 - n.y1) < tol:
-                        rel = "behind"
-                    elif ov_x > tol and abs(b.y1 - n.y0) < tol:
-                        rel = "in_front"
-                    if rel is None:
-                        continue
-                    if rel in ("right_of", "left_of"):
-                        if abs(b.y0 - n.y0) < tol:
-                            align, delta = "front", 0.0
-                        elif abs(b.y1 - n.y1) < tol:
-                            align, delta = "rear", 0.0
-                        else:
-                            align, delta = "offset", b.y0 - n.y0
-                    else:
-                        if abs(b.x0 - n.x0) < tol:
-                            align, delta = "left", 0.0
-                        elif abs(b.x1 - n.x1) < tol:
-                            align, delta = "right", 0.0
-                        else:
-                            align, delta = "offset", b.x0 - n.x0
-                    out.append(_Attach(i, j, rel, align, delta))
-                    placed.append(i)
-                    remaining.remove(i)
-                    progress = True
-                    break
-        return out, set(remaining)
+        return footprint_attachments([b.rect for b in self.base_bp], self.root, tol=1e-4)
 
     def _couplings(self) -> dict[int, _Coupling]:
         out: dict[int, _Coupling] = {}
+        fixed = (Basis.OBSERVED, Basis.USER_CONFIRMED)
         for i, (b, bp) in enumerate(zip(self.twin.blocks, self.base_bp)):
+            rise_tv = b.roof.observed_rise_m
+            if rise_tv is not None and rise_tv.value is not None:
+                c = block_coupling(b)
+                if c is None:
+                    continue
+                if not c.consistent:
+                    self.coupling_notes.append(
+                        f"{b.block_id}: depth/pitch not coupled - the roof does not reproduce its observed rise "
+                        f"(residual {c.residual_m:+.3f} m); {c.span_field} and pitch are sampled independently.")
+                    continue
+                span_fixed, pitch_fixed = c.span.basis in fixed, c.pitch.basis in fixed
+                if span_fixed and pitch_fixed:
+                    self.coupling_notes.append(
+                        f"{b.block_id}: {c.span_field} and pitch are both {c.span.basis.value}/"
+                        f"{c.pitch.basis.value}; sampled independently within their ranges (the observed rise "
+                        "is not enforced).")
+                    continue
+                if span_fixed:
+                    mode = "depth_primary"
+                elif pitch_fixed:
+                    mode = "pitch_primary"
+                else:
+                    mode = "depth_primary" if c.span.basis in _EVIDENCE else "pitch_primary"
+                lo, hi = c.span.bounds()
+                span_v = float(getattr(bp, c.span_field))
+                group = None if rise_tv.basis == Basis.USER_CONFIRMED else rise_tv.correlation_group
+                out[i] = _Coupling(block=i, mode=mode, k=1.0 / c.factor, base_rise=float(rise_tv.value),
+                                   depth_lo=float(lo if lo is not None else span_v),
+                                   depth_hi=float(hi if hi is not None else span_v), group=group, span=c.span_field)
+                continue
+            # legacy twins (no stored rise): the rise of the current geometry, depth spans only
             if bp.roof_form == RoofForm.GABLE and bp.ridge_axis == "x":
                 k = 0.5
             elif bp.roof_form == RoofForm.HIP and bp.depth <= bp.width:
@@ -514,7 +511,7 @@ class _HouseModel:
                 continue
             p_tv, d_tv = b.roof.pitch_deg, b.depth
             depth_ev = d_tv.basis in _EVIDENCE
-            pitch_ev = p_tv.basis in (Basis.OBSERVED, Basis.USER_CONFIRMED)
+            pitch_ev = p_tv.basis in fixed
             if depth_ev and pitch_ev:
                 continue
             if not (d_tv.evidence_ids or p_tv.evidence_ids):
@@ -525,7 +522,7 @@ class _HouseModel:
             out[i] = _Coupling(block=i, mode=mode, k=k, base_rise=rise,
                                depth_lo=float(lo if lo is not None else bp.depth),
                                depth_hi=float(hi if hi is not None else bp.depth),
-                               group=d_tv.correlation_group or p_tv.correlation_group)
+                               group=d_tv.correlation_group or p_tv.correlation_group, stored=False)
         return out
 
     def _ext_side_lengths(self, bps: Sequence[BlockParams]) -> dict[tuple[int, Side], float]:
@@ -593,26 +590,12 @@ class _HouseModel:
             rise = c.base_rise * s.scale_ratio.get(c.group or "", 1.0)
             if c.mode == "pitch_primary":
                 t = math.tan(math.radians(min(max(bp.pitch_deg, _PITCH_LIMITS[0]), _PITCH_LIMITS[1])))
-                depth = rise / (c.k * t)
-                bp.depth = min(max(depth, c.depth_lo), c.depth_hi)
-            bp.pitch_deg = min(max(math.degrees(math.atan(rise / (c.k * max(bp.depth, _MIN_DIM)))),
-                                   _PITCH_LIMITS[0]), _PITCH_LIMITS[1])
+                setattr(bp, c.span, min(max(rise / (c.k * t), c.depth_lo), c.depth_hi))
+            span = max(getattr(bp, c.span), _MIN_DIM)
+            bp.pitch_deg = min(max(math.degrees(math.atan(rise / (c.k * span))), _PITCH_LIMITS[0]), _PITCH_LIMITS[1])
         for a in self.attachments:
             b, n = bps[a.child], bps[a.parent]
-            if a.relation == "right_of":
-                b.x0 = n.x0 + n.width
-            elif a.relation == "left_of":
-                b.x0 = n.x0 - b.width
-            elif a.relation == "behind":
-                b.y0 = n.y0 + n.depth
-            else:
-                b.y0 = n.y0 - b.depth
-            if a.relation in ("right_of", "left_of"):
-                b.y0 = n.y0 if a.align == "front" else (n.y0 + n.depth - b.depth if a.align == "rear"
-                                                         else n.y0 + a.delta)
-            else:
-                b.x0 = n.x0 if a.align == "left" else (n.x0 + n.width - b.width if a.align == "right"
-                                                       else n.x0 + a.delta)
+            b.x0, b.y0 = attached_origin(a, (n.x0, n.y0, n.width, n.depth), b.width, b.depth)
         ops = [copy.copy(o) for o in self.base_op]
         for (oi, attr), v in s.opening.items():
             setattr(ops[oi], attr, v)
@@ -781,15 +764,15 @@ def _geometry_drivers(model: _HouseModel, calibration: Optional[ScaleCalibration
                 continue
             if attr == "parapet" and bp.roof_form != RoofForm.FLAT:
                 continue
-            if coupling is not None and ((coupling.mode == "pitch_primary" and attr == "depth")
+            if coupling is not None and ((coupling.mode == "pitch_primary" and attr == coupling.span)
                                          or (coupling.mode == "depth_primary" and attr == "pitch_deg")):
                 derived.append(f"{b.block_id}.{label}")
                 continue
             desc = _short(tv.note or tv.source)
-            if coupling is not None and attr in ("depth", "pitch_deg"):
-                other = "depth" if attr == "pitch_deg" else "roof pitch"
-                desc = (f"{other} derived from the observed rise (rise = {coupling.k:g} x depth x tan(pitch)). "
-                        + desc)
+            if coupling is not None and attr in (coupling.span, "pitch_deg"):
+                other = coupling.span if attr == "pitch_deg" else "roof pitch"
+                desc = (f"{other} derived from the observed rise (rise = {coupling.k:g} x {coupling.span} x "
+                        "tan(pitch)). " + desc)
             lo = 0.0 if attr in ("eaves_overhang", "verge_overhang", "parapet", "ffl") else _MIN_DIM
             clip = (_PITCH_LIMITS[0], _PITCH_LIMITS[1]) if attr == "pitch_deg" else (
                 (-math.inf, math.inf) if attr in ("x0", "y0") else (lo, math.inf))
@@ -856,6 +839,7 @@ def _geometry_drivers(model: _HouseModel, calibration: Optional[ScaleCalibration
     elif model.couplings:
         notes.append("No calibration passed: the observed roof rise of depth-pitch coupled blocks is held at its "
                      "base value (scale uncertainty then reaches depth only through the sampled pitch).")
+    notes.extend(model.coupling_notes)
     if derived:
         notes.append("Derived per sample (not sampled): " + ", ".join(sorted(set(derived)))
                      + " - attached blocks keep their contact and alignment; coupled depth/pitch follow the "

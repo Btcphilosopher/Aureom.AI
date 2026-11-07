@@ -15,13 +15,25 @@ Conventions (also returned in ``GeometryMetrics.conventions``):
   between blocks are measured once as separating walls up to the lower wall
   plate; the portion of a taller block above its neighbour is external.
 * Openings are deducted once, from the wall piece that contains them.  An
-  opening that falls on a separating wall is not deducted and is flagged.
+  opening that falls on a separating wall, or on a storey the block does not
+  have (``storey >= storeys``), is not deducted and is flagged; the quantity
+  take-off counts windows / doors from the deducted openings only.
+* The part of a taller block's wall that lies inside a lower neighbour's roof
+  void (above the lower wall plate, under its roof line) stays external wall
+  area (conservative); :func:`roof_void_wall_areas` reports it separately.
 * Roof surface area = roof plan area (incl. overhangs on exposed edges) /
   cos(pitch).  This is exact for roofs of uniform pitch (gable, hip,
   monopitch), including hips and valleys.  Overhang plan areas at re-entrant
   corners of roofs at the same level are allocated to one block only.  Edges of
   a taller block above a lower neighbour are roof-exposed: its eaves/verge
   overhang projects over the lower roof and is counted for the taller block.
+* Roof linear items follow the same exposure rule: a verge rafter runs over the
+  eaves overhang only at an end whose eaves edge is roof-exposed, ridges / top
+  edges / eaves run over the verge overhang only at fully exposed corners, and
+  the abutment of a lower roof against a taller wall is measured along the
+  roof line on that wall (along the rake at a gable or monopitch side).
+* A hip roof's ridge always runs along the longer side; a ``ridge_axis`` that
+  disagrees is flagged and not used.
 """
 
 from __future__ import annotations
@@ -49,6 +61,7 @@ from .footprint import (
     Rect,
     allocate_plan_areas,
     internal_area,
+    opposite,
     overhang_regions,
     side_pieces,
     validate_rects,
@@ -61,10 +74,19 @@ CONVENTIONS = {
            "and separating walls between blocks (half thickness each side). Internal partitions are included in GIA.",
     "external_wall_area": "Measured from finished ground-floor level to wall plate, plus gable/monopitch/parapet "
                           "infill above plate. Masonry below FFL is substructure.",
-    "openings": "Each opening deducted once from the wall piece containing it; openings on separating walls are not deducted.",
+    "openings": "Each opening deducted once from the wall piece containing it; openings on separating walls or on a "
+                "storey the block does not have are not deducted (flagged) and are not counted as windows/doors.",
     "separating_walls": "Walls between blocks are counted once, up to the lower wall plate; roof-void portions are not measured.",
+    "roof_void_wall": "The part of a taller block's wall inside a lower neighbour's roof void (above the lower wall plate, "
+                      "under its roof line) is kept in the taller block's external wall area (conservative) and reported "
+                      "separately as the external-wall measure lower_roof_void_area.",
     "roof_area": "Sloped area = plan area incl. overhangs on roof-exposed edges / cos(pitch); exact for uniform-pitch roofs. "
                  "Valleys at block junctions are not measured as separate linear items.",
+    "roof_linear_items": "Verge = rafter length from ridge (top edge) to eaves, plus the eaves overhang only at an end whose "
+                         "eaves edge is roof-exposed; ridge / monopitch top edge / eaves extend over the verge overhang only "
+                         "at fully exposed corners; abutment of a lower roof against a taller wall is measured along the "
+                         "roof line on that wall (along the rake at gable / monopitch sides, horizontal at eaves sides).",
+    "hip_roofs": "Hip roof ridges run along the longer side of the block; a ridge_axis that disagrees is flagged and not used.",
     "floors": "Ground-floor and upper-floor areas are internal (GIA) areas per storey.",
 }
 
@@ -117,6 +139,19 @@ def _req(tv, what: str) -> float:
 
 
 def params_from_twin(twin: BuildingTwin) -> tuple[list[BlockParams], list[OpeningParams]]:
+    blocks = block_params_from_twin(twin)
+    openings: list[OpeningParams] = []
+    for o in twin.openings:
+        openings.append(OpeningParams(
+            opening_id=o.opening_id, block_id=o.block_id, side=o.side, kind=o.kind, storey=o.storey,
+            offset=_req(o.offset_m, f"{o.opening_id}.offset"), width=_req(o.width_m, f"{o.opening_id}.width"),
+            height=_req(o.height_m, f"{o.opening_id}.height"), sill=_req(o.sill_m, f"{o.opening_id}.sill"),
+        ))
+    return blocks, openings
+
+
+def block_params_from_twin(twin: BuildingTwin) -> list[BlockParams]:
+    """Block parameters of a twin (raises :class:`GeometryError` for unknown values)."""
     blocks: list[BlockParams] = []
     for b in twin.blocks:
         r = b.roof
@@ -138,14 +173,7 @@ def params_from_twin(twin: BuildingTwin) -> tuple[list[BlockParams], list[Openin
             parapet=float(r.parapet_height_m.value) if (r.parapet_height_m and r.parapet_height_m.value) else 0.0,
             heated=b.heated,
         ))
-    openings: list[OpeningParams] = []
-    for o in twin.openings:
-        openings.append(OpeningParams(
-            opening_id=o.opening_id, block_id=o.block_id, side=o.side, kind=o.kind, storey=o.storey,
-            offset=_req(o.offset_m, f"{o.opening_id}.offset"), width=_req(o.width_m, f"{o.opening_id}.width"),
-            height=_req(o.height_m, f"{o.opening_id}.height"), sill=_req(o.sill_m, f"{o.opening_id}.sill"),
-        ))
-    return blocks, openings
+    return blocks
 
 
 # --------------------------------------------------------------------- roofs
@@ -205,20 +233,41 @@ def infill_height(bp: BlockParams, side: Side, u: float) -> float:
     return 0.0
 
 
+def _infill_breaks(bp: BlockParams, a: float, b: float) -> list[float]:
+    """[a, b] plus the gable apex if it lies inside: the infill height is linear between these."""
+    pts = [a, b]
+    if bp.roof_form == RoofForm.GABLE:
+        r = bp.rect
+        mid = 0.5 * (r.y0 + r.y1) if bp.ridge_axis == "x" else 0.5 * (r.x0 + r.x1)
+        if a < mid < b:
+            pts.insert(1, mid)
+    return pts
+
+
 def integrate_infill(bp: BlockParams, side: Side, a: float, b: float) -> float:
     """Exact integral of the (piecewise-linear) infill height over [a, b]."""
     if b - a <= TOL:
         return 0.0
-    pts = [a, b]
-    r = bp.rect
-    if bp.roof_form == RoofForm.GABLE:
-        mid = 0.5 * (r.y0 + r.y1) if bp.ridge_axis == "x" else 0.5 * (r.x0 + r.x1)
-        if a < mid < b:
-            pts.insert(1, mid)
+    pts = _infill_breaks(bp, a, b)
     total = 0.0
     for u0, u1 in zip(pts[:-1], pts[1:]):
         total += 0.5 * (infill_height(bp, side, u0) + infill_height(bp, side, u1)) * (u1 - u0)
     return total
+
+
+def roof_line_length(bp: BlockParams, side: Side, a: float, b: float) -> float:
+    """Length of the block's roof line on wall ``side`` over [a, b] (exact).
+
+    This is the top edge of the wall infill: along the rake on a gable side or a sloping
+    monopitch side (length / cos(pitch)), horizontal on eaves sides, the high side of a
+    monopitch, hip roofs and flat roofs.  Used for the abutment of a lower roof against a
+    taller block's wall.
+    """
+    if b - a <= TOL:
+        return 0.0
+    pts = _infill_breaks(bp, a, b)
+    return sum(math.hypot(u1 - u0, infill_height(bp, side, u1) - infill_height(bp, side, u0))
+               for u0, u1 in zip(pts[:-1], pts[1:]))
 
 
 def _hip_length(span: float, overhang: float, pitch_deg: float) -> float:
@@ -251,10 +300,15 @@ def _roof_metrics(bp: BlockParams, pieces: Sequence[Piece], plates: dict[str, fl
                 return roof_exposed(pc, plates)
         return False
 
+    def corner_ext(s: Side, g: Side) -> bool:
+        """Both end pieces at the corner of sides ``s`` and ``g`` are roof-exposed."""
+        return ext_at(s, _corner_u(r, s, g)) and ext_at(g, _corner_u(r, g, s))
+
+    # abutment against a taller block: along this roof's line on the shared wall (rake at a gable)
     abut = 0.0
     for pc in own:
         if not pc.external and plates.get(pc.neighbour, 0.0) > bp.plate + TOL:
-            abut += pc.length
+            abut += roof_line_length(bp, pc.side, pc.a, pc.b)
     ridge = hip = eaves = verge = 0.0
     xm, ym = 0.5 * (r.x0 + r.x1), 0.5 * (r.y0 + r.y1)
     if bp.roof_form == RoofForm.GABLE:
@@ -266,29 +320,34 @@ def _roof_metrics(bp: BlockParams, pieces: Sequence[Piece], plates: dict[str, fl
         for s in eaves_sides:
             eaves += ext_len(s)
         # eaves extend over the verge overhang at fully external corners
-        eaves += sum(bp.verge_overhang for s in eaves_sides for g in gable_sides
-                     if ext_at(s, _corner_u(r, s, g)) and ext_at(g, _corner_u(r, g, s)))
+        eaves += sum(bp.verge_overhang for s in eaves_sides for g in gable_sides if corner_ext(s, g))
         for g in gable_sides:
             a0, b0 = r.side_range(g)
-            for half_mid in (0.5 * (a0 + mids), 0.5 * (mids + b0)):
+            # each half-verge runs from the ridge down to one eaves side (lower-coordinate side first);
+            # it runs over the eaves overhang only where that eaves edge is roof-exposed
+            for half_mid, s in zip((0.5 * (a0 + mids), 0.5 * (mids + b0)), eaves_sides):
                 if ext_at(g, half_mid):
-                    verge += (0.5 * span + bp.eaves_overhang) / math.cos(p)
+                    eo = bp.eaves_overhang if ext_at(s, _corner_u(r, s, g)) else 0.0
+                    verge += (0.5 * span + eo) / math.cos(p)
     elif bp.roof_form == RoofForm.HIP:
         ridge = max(0.0, length - span)
         hip = 4.0 * _hip_length(span, bp.eaves_overhang, bp.pitch_deg)
         eaves = sum(ext_len(s) for s in Side) + 8.0 * bp.eaves_overhang * _external_corner_count(r, own, plates) / 4.0
     elif bp.roof_form == RoofForm.MONOPITCH:
         high = bp.high_side or Side.FRONT
-        low = {Side.FRONT: Side.REAR, Side.REAR: Side.FRONT, Side.LEFT: Side.RIGHT, Side.RIGHT: Side.LEFT}[high]
-        top_ext = ext_len(high)
-        ridge = top_ext  # exposed top edge (monopitch ridge)
-        eaves = ext_len(low)
-        for s in Side:
-            if s in (high, low):
-                continue
-            a0, b0 = r.side_range(s)
-            if ext_at(s, 0.5 * (a0 + b0)):
-                verge += (span + ov[high] + ov[low]) / math.cos(p)
+        low = opposite(high)
+        verge_sides = [s for s in Side if s not in (high, low)]
+        # exposed top edge (monopitch ridge) and eaves, extended over the verge overhang at
+        # fully exposed corners (as gable eaves); a top edge against a taller wall is abutment
+        ridge = ext_len(high) + sum(ov[g] for g in verge_sides if corner_ext(high, g))
+        eaves = ext_len(low) + sum(ov[g] for g in verge_sides if corner_ext(low, g))
+        for g in verge_sides:
+            a0, b0 = r.side_range(g)
+            if ext_at(g, 0.5 * (a0 + b0)):
+                # the rake runs over the high / low overhang only where that edge is roof-exposed
+                oh = ov[high] if ext_at(high, _corner_u(r, high, g)) else 0.0
+                ol = ov[low] if ext_at(low, _corner_u(r, low, g)) else 0.0
+                verge += (span + oh + ol) / math.cos(p)
     else:  # flat: roof edge length
         eaves = sum(ext_len(s) for s in Side)
     plate = bp.plate
@@ -317,6 +376,104 @@ def _external_corner_count(r: Rect, own: Sequence[Piece], plates: dict[str, floa
     from .footprint import outline_corners
 
     return sum(1 for v in outline_corners(r, own, lambda p: roof_exposed(p, plates)).values() if v)
+
+
+# ------------------------------------------------------------ piece helpers
+def piece_ids(pieces: Sequence[Piece]) -> list[str]:
+    """``WallPiece.piece_id`` of each piece: ``<block>:<side>:<n>``, n counting that block side's pieces."""
+    seen: dict[tuple[str, Side], int] = {}
+    out: list[str] = []
+    for pc in pieces:
+        k = seen.get((pc.rid, pc.side), 0)
+        seen[(pc.rid, pc.side)] = k + 1
+        out.append(f"{pc.rid}:{pc.side.value}:{k}")
+    return out
+
+
+def _integrate_min_above(f, g, c: float, pts: Sequence[float]) -> float:
+    """Exact integral of max(0, min(f, g) - c), with ``f`` and ``g`` linear between consecutive ``pts``."""
+    total = 0.0
+    for u0, u1 in zip(pts[:-1], pts[1:]):
+        if u1 - u0 <= TOL:
+            continue
+        sub = [u0, u1]
+        d0, d1 = f(u0) - g(u0), f(u1) - g(u1)
+        if d0 * d1 < 0.0:  # f and g cross: min(f, g) switches line
+            sub.insert(1, u0 + (u1 - u0) * d0 / (d0 - d1))
+        knots = [sub[0]]
+        for v0, v1 in zip(sub[:-1], sub[1:]):
+            h0, h1 = min(f(v0), g(v0)) - c, min(f(v1), g(v1)) - c
+            if h0 * h1 < 0.0:  # min(f, g) crosses the floor c
+                knots.append(v0 + (v1 - v0) * h0 / (h0 - h1))
+            knots.append(v1)
+        for v0, v1 in zip(knots[:-1], knots[1:]):
+            total += 0.5 * (max(0.0, min(f(v0), g(v0)) - c) + max(0.0, min(f(v1), g(v1)) - c)) * (v1 - v0)
+    return total
+
+
+def roof_void_wall_areas(blocks: Sequence[BlockParams]) -> dict[str, float]:
+    """Wall area (m2) of each taller-block piece that lies inside a lower neighbour's roof void.
+
+    For a piece of block T shared with a block L whose wall plate is lower, this is the part of
+    T's wall between L's wall plate (or T's FFL, if higher) and L's roof line on that wall
+    (L's gable / monopitch infill on its facing side), capped at T's own wall top.  An eaves side,
+    a hip end or a flat roof of L meets T's wall at L's plate, so the area is 0 there.
+
+    Convention: this area stays in T's external wall area (conservative - the wall is built and
+    faced either way); it is reported separately so it can be reviewed or re-specified.  Keys are
+    the ``WallPiece.piece_id`` values of :func:`compute_metrics` for the same blocks; pieces with
+    no such area are omitted.
+    """
+    pieces = side_pieces([b.rect for b in blocks])
+    by_id = {b.block_id: b for b in blocks}
+    out: dict[str, float] = {}
+    for pid, pc in zip(piece_ids(pieces), pieces):
+        if pc.external:
+            continue
+        tall, low = by_id[pc.rid], by_id[pc.neighbour]
+        if low.plate >= tall.plate - TOL or low.roof_form in (RoofForm.FLAT, RoofForm.HIP):
+            continue
+        low_side = opposite(pc.side)  # same coordinate axis along the shared wall
+
+        def low_roof(u: float, _b=low, _s=low_side) -> float:
+            return _b.plate + infill_height(_b, _s, u)
+
+        def tall_top(u: float, _b=tall, _s=pc.side) -> float:
+            return _b.plate + infill_height(_b, _s, u)
+
+        pts = sorted(set(_infill_breaks(low, pc.a, pc.b) + _infill_breaks(tall, pc.a, pc.b)))
+        area = _integrate_min_above(low_roof, tall_top, max(low.plate, tall.ffl), pts)
+        if area > 1e-9:
+            out[pid] = area
+    return out
+
+
+def ground_internal_area(metrics: GeometryMetrics, external_strip_m: float, shared_strip_m: float) -> float:
+    """Ground-storey plan area inside wall strips of the given widths (exact, rectilinear).
+
+    External pieces lose a strip ``external_strip_m`` wide measured from the external face; each
+    side of a wall shared between blocks loses ``shared_strip_m`` measured from the shared face.
+    With ``(t_ext, t_sep / 2)`` this equals the ground-storey GIA; the substructure take-off uses
+    wider strips to keep the foundation-trench plan out of the oversite dig.  Block rectangles
+    and pieces are rebuilt from ``metrics.pieces`` (the ground-level outline).
+    """
+    by_block: dict[str, list[WallPiece]] = {}
+    for wp in metrics.pieces:
+        by_block.setdefault(wp.block_id, []).append(wp)
+    total = 0.0
+    for bid, wps in by_block.items():
+        xs = [v for w in wps for v in (w.x0, w.x1)]
+        ys = [v for w in wps for v in (w.y0, w.y1)]
+        rect = Rect(bid, min(xs), min(ys), max(xs), max(ys))
+        pcs = []
+        for w in wps:
+            if w.side in (Side.FRONT, Side.REAR):
+                a, b, coord = min(w.x0, w.x1), max(w.x0, w.x1), w.y0
+            else:
+                a, b, coord = min(w.y0, w.y1), max(w.y0, w.y1), w.x0
+            pcs.append(Piece(bid, w.side, a, b, coord, w.neighbour_block_id if w.exposure == "shared" else None))
+        total += internal_area(rect, pcs, external_strip_m, 2.0 * shared_strip_m)
+    return total
 
 
 # ---------------------------------------------------------------- main entry
@@ -349,14 +506,17 @@ def compute_metrics(blocks: Sequence[BlockParams], openings: Sequence[OpeningPar
             raise GeometryError(f"block '{b.block_id}' must have at least one storey")
         if b.roof_form != RoofForm.FLAT and not (0.0 < b.pitch_deg < 75.0):
             raise GeometryError(f"block '{b.block_id}' roof pitch {b.pitch_deg:.1f} deg is outside (0, 75)")
-        if b.roof_form == RoofForm.HIP and b.ridge_axis == "y" and b.width > b.depth + TOL:
-            warnings.append(f"{b.block_id}: hip roof ridge follows the longer side (x).")
+        if b.roof_form == RoofForm.HIP:
+            longer = "x" if b.width > b.depth + TOL else ("y" if b.depth > b.width + TOL else None)
+            if longer is not None and b.ridge_axis != longer:
+                warnings.append(f"{b.block_id}: hip roof ridge follows the longer side ({longer}); "
+                                f"ridge_axis '{b.ridge_axis}' is not used.")
     pieces = side_pieces(rects)
 
     # ---- wall pieces (ground-level outline)
     wall_pieces: list[WallPiece] = []
     piece_index: dict[tuple[str, Side], list[int]] = {}
-    for pc in pieces:
+    for pid, pc in zip(piece_ids(pieces), pieces):
         bp = by_id[pc.rid]
         h = bp.plate - bp.ffl
         infill = integrate_infill(bp, pc.side, pc.a, pc.b)
@@ -372,7 +532,7 @@ def compute_metrics(blocks: Sequence[BlockParams], openings: Sequence[OpeningPar
         x0, y0, x1, y1 = pc.endpoints()
         idx = len(wall_pieces)
         wall_pieces.append(WallPiece(
-            piece_id=f"{pc.rid}:{pc.side.value}:{len(piece_index.get((pc.rid, pc.side), []))}",
+            piece_id=pid,
             block_id=pc.rid, side=pc.side, x0=x0, y0=y0, x1=x1, y1=y1, length_m=pc.length,
             exposure="external" if pc.external else "shared", neighbour_block_id=pc.neighbour,
             external_rect_area_m2=rect_area, external_infill_area_m2=infill_area, shared_area_m2=shared_area,
@@ -394,7 +554,11 @@ def compute_metrics(blocks: Sequence[BlockParams], openings: Sequence[OpeningPar
         if op.offset < -TOL or op.offset + op.width > side_len + 1e-3:
             warnings.append(f"Opening {op.opening_id} extends beyond the {op.side.value} wall of {op.block_id}.")
         if op.storey >= bp.storeys:
-            warnings.append(f"Opening {op.opening_id} is on storey {op.storey} but {op.block_id} has {bp.storeys}.")
+            # the storey does not exist: the opening cannot be in the wall (like a separating-wall opening)
+            warnings.append(f"Opening {op.opening_id} is on storey {op.storey} but {op.block_id} has {bp.storeys} "
+                            f"storey(s) (storeys are numbered from 0); not deducted from any wall and not counted as "
+                            "a window/door - move it to an existing storey or delete it.")
+            continue
         z0 = bp.ffl + op.storey * bp.floor_to_floor + op.sill
         z1 = z0 + op.height
         if z1 > bp.plate + infill_height(bp, op.side, u) + 1e-3:

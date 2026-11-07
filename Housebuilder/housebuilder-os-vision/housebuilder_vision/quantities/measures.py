@@ -9,9 +9,13 @@ Element instances
 -----------------
 * external / separating walls, ground / intermediate floors, pitched / flat
   roofs: one instance **per block** (``instance_id = block_id``);
-* windows / external doors / garage doors: one instance **per assembly**
-  (``instance_id = "all"``; openings are grouped by the assembly that applies to
-  them: ``Opening.assembly_id`` override, else the block / twin selection);
+* windows / external doors / garage doors: one instance **per (element,
+  assembly)** - openings are grouped by the assembly that applies to them
+  (``Opening.assembly_id`` override, else the block / twin selection).
+  ``instance_id = "all"`` when the assembly belongs to that opening element in
+  the library, otherwise ``"all-<element>"`` (e.g. a door overridden with a
+  window assembly, or an assembly id missing from the library), so every line
+  id stays unique and does not depend on which other groups exist;
 * internal partitions and foundations: one instance **per twin** (``"all"``).
 
 Conventions and boundaries
@@ -21,6 +25,9 @@ Conventions and boundaries
   Opening areas per assembly are taken from the wall pieces the openings were
   deducted from, split pro rata to nominal twin sizes when a piece mixes
   assemblies, so window/door areas always reconcile with wall deductions.
+  Windows / doors are counted from **deducted openings only**: an opening that
+  metrics did not deduct (on a separating wall, outside the wall, or on a
+  storey the block does not have) is excluded with a warning, never priced.
   ``metrics`` must have been computed from this twin's blocks and openings.
 * ``internal_face_area`` of an external wall = rectangular zone (FFL to wall
   plate) minus openings, for **heated blocks only**; gable / monopitch infill
@@ -28,6 +35,17 @@ Conventions and boundaries
   blocks (garages) are assumed to have no internal wall finish and no finished /
   insulated ceiling (``ceiling_area = 0``) - select another assembly or mark
   the block heated to change this.
+* ``lower_roof_void_area`` of an external wall = the part of the block's wall
+  inside a lower neighbour's roof void (above the lower wall plate, under its
+  roof line; see :func:`~housebuilder_vision.geometry.metrics.roof_void_wall_areas`).
+  It is **included** in ``gross_area`` / ``element_area`` (conservative: the
+  wall is still built and faced) and reported separately for review.
+* Separating walls: ``internal_face_area_a`` is the face towards the block the
+  wall is measured on (the lexicographically smaller block id), and
+  ``internal_face_area_b`` the face towards its neighbour; a face is finished
+  only when the block it faces is heated (same rule as external walls), so the
+  wall between a house and an unheated garage is finished on the house side
+  only.
 * ``truss_run_length`` (pitched roofs) = footprint area / span, i.e. the
   wall-to-wall run along the ridge direction (gable: ridge length less verge
   overhangs; hip: full length, hip-end framing approximated by an equivalent
@@ -40,6 +58,11 @@ Conventions and boundaries
   centreline (P - 4 t n, n = connected footprint parts, no enclosed courtyards
   assumed) + separating-wall length (counted once) + internal loadbearing
   allowance (fraction x external perimeter)``.  T-junction overlaps are ignored.
+  ``oversite_area`` = ground-storey GIA minus the trench plan inside it, so the
+  top of the trenches is not excavated twice: external trench beyond the inner
+  wall face (``max(t, (t + W) / 2)`` strip from the external face), separating
+  trench beyond each wall face (``max(t_sep, W) / 2`` each side) and the whole
+  internal loadbearing trench (``W x internal length``) are excluded.
 * Basis of each measure = weakest basis of the TrackedValues it depends on
   (block dimensions, storeys, heights, roof pitch / overhangs, neighbour
   positions for blocks that share walls, openings, the external-wall assembly
@@ -74,6 +97,8 @@ from ..core.models import (
 )
 from ..core.provenance import BASIS_RANK, Basis, TrackedValue, assumed
 from ..core.settings import ASSUMPTION_SOURCE, AssumptionLibrary
+from ..geometry.footprint import GeometryError
+from ..geometry.metrics import block_params_from_twin, ground_internal_area, roof_void_wall_areas
 
 __all__ = [
     "FOUNDATION_KEY",
@@ -90,6 +115,8 @@ __all__ = [
     "unresolved_instances",
     "selection_basis",
     "opening_element",
+    "opening_instance_id",
+    "off_storey_openings",
     "unknown_openings",
 ]
 
@@ -101,6 +128,9 @@ MEASURE_UNITS: dict[str, str] = {
     "element_area": "m2",
     "gross_area": "m2",
     "internal_face_area": "m2",
+    "internal_face_area_a": "m2",
+    "internal_face_area_b": "m2",
+    "lower_roof_void_area": "m2",
     "opening_head_length": "m",
     "opening_reveal_length": "m",
     "opening_sill_length": "m",
@@ -125,14 +155,16 @@ MEASURE_UNITS: dict[str, str] = {
     "trench_length": "m",
     "footprint_area": "m2",
     "ground_floor_area": "m2",
+    "oversite_area": "m2",
     "average_ffl": "m",
 }
 
 #: Measures available to assembly layers, per element type (the contract for ``AssemblyLayer.measure``).
 MEASURES: dict[ElementType, set[str]] = {
     ElementType.EXTERNAL_WALL: {"element_area", "gross_area", "internal_face_area", "opening_head_length",
-                                "opening_reveal_length", "opening_sill_length", "opening_count"},
-    ElementType.SEPARATING_WALL: {"element_area", "length"},
+                                "opening_reveal_length", "opening_sill_length", "opening_count",
+                                "lower_roof_void_area"},
+    ElementType.SEPARATING_WALL: {"element_area", "length", "internal_face_area_a", "internal_face_area_b"},
     ElementType.INTERNAL_PARTITION: {"element_area", "partition_length"},
     ElementType.GROUND_FLOOR: {"element_area", "perimeter"},
     ElementType.INTERMEDIATE_FLOOR: {"element_area"},
@@ -147,7 +179,7 @@ MEASURES: dict[ElementType, set[str]] = {
 #: Measures of the per-twin foundation instance (used by the substructure take-off).
 FOUNDATION_MEASURES: set[str] = {"ground_perimeter", "centreline_perimeter", "separating_wall_length",
                                  "internal_loadbearing_length", "trench_length", "footprint_area",
-                                 "ground_floor_area", "average_ffl"}
+                                 "ground_floor_area", "oversite_area", "average_ffl"}
 
 #: NRM1-inspired element code and name per element type (not a claim of NRM compliance).
 ELEMENT_CODES: dict[ElementType, tuple[str, str]] = {
@@ -179,6 +211,33 @@ _OPENING_ELEMENTS = (ElementType.WINDOW, ElementType.EXTERNAL_DOOR, ElementType.
 def opening_element(kind: OpeningKind) -> ElementType:
     """Element type whose assembly applies to an opening of this kind (glazed doors -> window)."""
     return OPENING_ELEMENT[kind]
+
+
+def opening_instance_id(element: ElementType, assembly_id: str, library: AssemblyLibrary) -> str:
+    """Instance id of an opening group: ``"all"`` when ``assembly_id`` is a library assembly of
+    ``element``, else ``"all-<element>"`` (wrong-element override or unknown id).
+
+    All opening elements share element code 2.6, so two groups with the same assembly id (e.g.
+    the windows and a door overridden with a window assembly) would otherwise get the same line
+    id.  The rule depends only on (element, assembly, library), so ids are stable.
+    """
+    try:
+        ok = library.assembly(assembly_id).element == element
+    except KeyError:
+        ok = False
+    return "all" if ok else f"all-{element.value}"
+
+
+def off_storey_openings(twin: BuildingTwin, storeys: dict[str, int]) -> dict[str, str]:
+    """Openings on a storey their block does not have: ``{opening_id: reason}``.
+
+    ``storeys`` maps block ids to storey counts (e.g. from ``GeometryMetrics.blocks``).  Such
+    openings are not deducted from walls by the geometry metrics and are excluded from
+    window / door quantities.
+    """
+    return {o.opening_id: f"opening {o.opening_id} is on storey {o.storey} but block {o.block_id} has "
+                          f"{storeys[o.block_id]} storey(s) (numbered from 0)"
+            for o in twin.openings if o.block_id in storeys and o.storey >= storeys[o.block_id]}
 
 
 class TakeoffAssumptions(BaseModel):
@@ -355,9 +414,18 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
     warn = warnings if warnings is not None else []
     sel = twin.assemblies
     ctxs = _block_contexts(twin, metrics)
+    ctx_by_id = {c.block.block_id: c for c in ctxs}
     out: list[ElementMeasures] = []
     ext_sel_basis, _ = selection_basis(sel, ElementType.EXTERNAL_WALL.value)
     sep_sel_basis, _ = selection_basis(sel, ElementType.SEPARATING_WALL.value)
+    # openings on a storey their block does not have are never deducted or counted (not even as
+    # unresolved): they cannot exist in the wall, whatever their size
+    off_storey = off_storey_openings(twin, {bm.block_id: bm.storeys for bm in metrics.blocks})
+    unknown = {k: v for k, v in unknown.items() if k not in off_storey}
+    try:  # taller-wall areas inside lower roof voids (reported, still counted as external wall)
+        void_by_piece = roof_void_wall_areas(block_params_from_twin(twin))
+    except GeometryError:
+        void_by_piece = {}
 
     unknown_by_block: dict[str, list[str]] = {}
     ops_by_id = {o.opening_id: o for o in twin.openings}
@@ -393,11 +461,25 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
         op_basis = _weakest(*[_bases(ops_by_id[o].width_m, ops_by_id[o].height_m) for o in oids if o in ops_by_id])
         n_basis = _weakest(g_basis, op_basis if oids else None)
         refs_n = refs + oids
+        void_pcs = [p for p in pcs if p.piece_id in void_by_piece]
+        void = sum(void_by_piece[p.piece_id] for p in void_pcs)
+        void_note = (f"; incl. {_f(void)} m2 inside a lower neighbour's roof void (kept as external wall, "
+                     "conservative)" if void > 1e-9 else "")
         m: dict[str, Measure] = {
             "gross_area": Measure(gross, "m2", refs, g_basis,
                                   f"Σ pieces (FFL to plate {_f(gross - infill)} + gable/infill {_f(infill)}) "
-                                  f"= {_f(gross)} m2"),
+                                  f"= {_f(gross)} m2{void_note}"),
         }
+        if void_pcs:
+            low = sorted({p.neighbour_block_id or "" for p in void_pcs})
+            v_basis = _weakest(g_basis, *[ctx_by_id[n].pitch for n in low if n in ctx_by_id])
+            m["lower_roof_void_area"] = Measure(
+                void, "m2", tuple(p.piece_id for p in void_pcs), v_basis,
+                f"wall inside the roof void of lower block(s) {', '.join(low)} (above their wall plate, under "
+                f"their roof line) = {_f(void)} m2; included in gross and net external wall area (conservative)")
+        else:
+            m["lower_roof_void_area"] = Measure(0.0, "m2", refs, g_basis,
+                                                "no wall inside a lower neighbour's roof void = 0 m2")
         bad = unknown_by_block.get(bid)
         net_names = ("element_area", "internal_face_area", "opening_head_length", "opening_reveal_length",
                      "opening_sill_length", "opening_count")
@@ -407,7 +489,7 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
         else:
             m["element_area"] = Measure(net, "m2", refs_n, n_basis,
                                         f"gross {_f(gross)} m2 − openings {_f(op_area)} m2 = {_f(net)} m2 "
-                                        f"(each opening deducted once, per piece)")
+                                        f"(each opening deducted once, per piece){void_note}")
             if c.block.heated:
                 rect_net = sum(max(0.0, p.external_rect_area_m2 - p.opening_area_m2) for p in pcs)
                 rect = sum(p.external_rect_area_m2 for p in pcs)
@@ -432,20 +514,34 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
         out.append(inst(ElementType.EXTERNAL_WALL, c, m))
 
     # -------------------------------------------------------- separating walls
+    heated = {b.block_id: b.heated for b in twin.blocks}
     for c in ctxs:
         pcs = [p for p in c.pieces if p.shared_area_m2 > 1e-9]
         if not pcs:
             continue
+        bid = c.block.block_id
         refs = tuple(p.piece_id for p in pcs)
         area = sum(p.shared_area_m2 for p in pcs)
         length = sum(p.length_m for p in pcs)
         b = _weakest(c.plan, c.height, c.adj)
         nbs = ", ".join(sorted({p.neighbour_block_id or "" for p in pcs}))
+        # each face is finished only towards a heated block (unheated blocks get no internal finish)
+        face_a = area if c.block.heated else 0.0
+        hot_nbs = sorted({p.neighbour_block_id for p in pcs if heated.get(p.neighbour_block_id or "", False)})
+        face_b = sum(p.shared_area_m2 for p in pcs if heated.get(p.neighbour_block_id or "", False))
         out.append(inst(ElementType.SEPARATING_WALL, c, {
             "element_area": Measure(area, "m2", refs, b,
                                     f"Σ shared length × height to lower plate = {_f(area)} m2 "
-                                    f"(with {nbs}; counted once on block {c.block.block_id})"),
+                                    f"(with {nbs}; counted once on block {bid})"),
             "length": Measure(length, "m", refs, b, f"Σ shared piece lengths = {_f(length)} m"),
+            "internal_face_area_a": Measure(
+                face_a, "m2", refs, b,
+                f"side A faces {bid}: {_f(area)} m2" if c.block.heated
+                else f"side A faces {bid} (unheated: no internal finish assumed) = 0 m2"),
+            "internal_face_area_b": Measure(
+                face_b, "m2", refs, b,
+                f"side B faces heated neighbour(s) {', '.join(hot_nbs)}: {_f(face_b)} m2" if hot_nbs
+                else f"side B faces {nbs} (unheated: no internal finish assumed) = 0 m2"),
         }))
 
     # ----------------------------------------------------------- ground floors
@@ -522,7 +618,9 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
         }))
 
     # --------------------------------------------------------------- openings
-    out.extend(_opening_instances(twin, ctxs, ops_by_id, unknown, warn))
+    # metrics already flags (by id) the openings it could not deduct; avoid repeating that warning
+    flagged = {oid for oid in off_storey if any(f"Opening {oid} " in w for w in metrics.warnings)}
+    out.extend(_opening_instances(twin, ctxs, ops_by_id, unknown, warn, library, off_storey, flagged))
 
     # ------------------------------------------------------------- partitions
     part = _partition_instance(twin, ctxs, library, ta, gia_sel)
@@ -530,12 +628,14 @@ def element_measures(twin: BuildingTwin, metrics: GeometryMetrics, library: Asse
         out.append(part)
 
     # ------------------------------------------------------------- foundation
-    out.append(_foundation_instance(twin, metrics, library, ctxs, ext_sel_basis))
+    out.append(_foundation_instance(twin, metrics, library, ctxs, ext_sel_basis, sep_sel_basis))
     return out
 
 
 def _opening_instances(twin: BuildingTwin, ctxs: list[_BlockCtx], ops_by_id: dict[str, Opening],
-                       unknown: dict[str, str], warn: list[str]) -> list[ElementMeasures]:
+                       unknown: dict[str, str], warn: list[str], library: AssemblyLibrary,
+                       off_storey: dict[str, str], flagged: set[str]) -> list[ElementMeasures]:
+    """Window / door instances counted from the openings deducted from wall pieces (see module doc)."""
     sel = twin.assemblies
 
     def assembly_of(o: Opening) -> tuple[ElementType, str, Basis, str]:
@@ -596,6 +696,12 @@ def _opening_instances(twin: BuildingTwin, ctxs: list[_BlockCtx], ops_by_id: dic
     for o in twin.openings:
         if o.opening_id in located:
             continue
+        if o.opening_id in off_storey:
+            if o.opening_id not in flagged:
+                why = off_storey[o.opening_id]
+                warn.append(f"{why[:1].upper()}{why[1:]}: not deducted from any wall and excluded from "
+                            "window/door quantities - move it to an existing storey or delete it.")
+            continue
         if o.opening_id in unknown:
             et, aid, sb, sref = assembly_of(o)
             g = group(et, aid)
@@ -617,7 +723,8 @@ def _opening_instances(twin: BuildingTwin, ctxs: list[_BlockCtx], ops_by_id: dic
                             description="opening generated by a hidden-facade rule, not observed")
                   for rule in sorted(g["rules"])]
         sel_refs = sorted(set(g["sel_refs"]))
-        em = ElementMeasures(element_key=et.value, element=et, instance_id="all", block_id=None, assembly_id=aid,
+        em = ElementMeasures(element_key=et.value, element=et, instance_id=opening_instance_id(et, aid, library),
+                             block_id=None, assembly_id=aid,
                              measures={}, selection_basis=_weakest(g["sel"]),
                              selection_ref=sel_refs[0] if len(sel_refs) == 1 else ",".join(sel_refs),
                              trace_extra=extra)
@@ -710,7 +817,7 @@ def _components(blocks: list[str], pieces: list[WallPiece]) -> int:
 
 
 def _foundation_instance(twin: BuildingTwin, metrics: GeometryMetrics, library: AssemblyLibrary,
-                         ctxs: list[_BlockCtx], ext_sel_basis: Basis) -> ElementMeasures:
+                         ctxs: list[_BlockCtx], ext_sel_basis: Basis, sep_sel_basis: Basis) -> ElementMeasures:
     sel = twin.assemblies
     opt_id = sel.foundation
     sb, sref = selection_basis(sel, FOUNDATION_KEY)
@@ -754,7 +861,8 @@ def _foundation_instance(twin: BuildingTwin, metrics: GeometryMetrics, library: 
     }
     if f.value is None:
         reason = f"internal loadbearing fraction of '{opt_id}' unknown"
-        m.update(_unresolved_measures(("internal_loadbearing_length", "trench_length"), refs, reason))
+        m.update(_unresolved_measures(("internal_loadbearing_length", "trench_length", "oversite_area"), refs,
+                                      reason))
     else:
         Lint = f.value * P
         L = Pc + Lsep + Lint
@@ -763,6 +871,26 @@ def _foundation_instance(twin: BuildingTwin, metrics: GeometryMetrics, library: 
         m["trench_length"] = Measure(L, "m", refs, _weakest(cl_b, f.basis),
                                      f"centreline {_f(Pc)} + separating {_f(Lsep)} + internal {_f(Lint)} "
                                      f"= {_f(L)} m")
+        W = opt.trench_width_m
+        if W.value is None:
+            m.update(_unresolved_measures(("oversite_area",), refs, f"trench width of '{opt_id}' unknown"))
+        else:
+            # oversite dig = ground-storey GIA less the trench plan inside it (trenches are measured
+            # in full by the trench excavation, so their top is not dug twice)
+            w = W.value
+            t_sep = metrics.separating_wall_thickness_m
+            e_ext, e_sep = max(t, 0.5 * (t + w)), max(0.5 * t_sep, 0.5 * w)
+            gfa = metrics.ground_floor_area_m2
+            a_walls = ground_internal_area(metrics, e_ext, e_sep)
+            a_int = w * Lint
+            oa = max(0.0, a_walls - a_int)
+            ob = _weakest(cl_b, W.basis, f.basis, sep_sel_basis if Lsep > 1e-9 else None)
+            m["oversite_area"] = Measure(
+                oa, "m2", refs + ("storey:0",), ob,
+                f"ground-storey GIA {_f(gfa)} m2 − trench plan inside the GIA {_f(gfa - oa)} m2 (external trench "
+                f"{_f(e_ext - t)} m beyond the inner wall face, separating trench {_f(e_sep - 0.5 * t_sep)} m beyond "
+                f"each wall face, internal trench {w:g} m × {_f(Lint)} m) = {_f(oa)} m2; trench volumes are "
+                "measured separately (no double count)")
     em.measures = m
     em.trace_extra = [
         TraceLink(kind="assumption", ref=f"foundation:{opt_id}",
@@ -812,7 +940,7 @@ def unresolved_instances(twin: BuildingTwin, library: AssemblyLibrary, reason: s
         seen.add((et, aid))
         ids = tuple(x.opening_id for x in twin.openings
                     if OPENING_ELEMENT[x.kind] == et and (x.assembly_id or sel.for_element(et, x.block_id)) == aid)
-        add(et, "all", None, aid, ids)
+        add(et, opening_instance_id(et, aid, library), None, aid, ids)
     if any(b.heated for b in twin.blocks):
         add(ElementType.INTERNAL_PARTITION, "all", None, sel.internal_partition,
             tuple(f"block:{b.block_id}" for b in twin.blocks if b.heated), QuantityStatus.ALLOWANCE)

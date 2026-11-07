@@ -66,7 +66,7 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
             _rate_book(ws)
     with t4:
         with guard("Commercial parameters"):
-            _commercial(ws)
+            _commercial(ws, ev)
 
 
 def _pricing_notice(ws: S.Workspace, ev: S.Evaluation) -> None:
@@ -85,6 +85,12 @@ def _pricing_notice(ws: S.Workspace, ev: S.Evaluation) -> None:
                  f"{esc(est.location)} · {esc(est.currency)} · "
                  + ("VAT added as a layer-9 line" if p.settings.include_vat else "all amounts net of VAT"))
     html(callout(" ".join(parts), title="Pricing basis", tone="warn" if fict else "info"))
+    from ...costing.rates import PRICING_DATE_WARNING
+
+    excluded = [w for w in est.warnings if w.startswith(PRICING_DATE_WARNING) and "newer, higher-priority" in w]
+    if excluded:
+        html(callout(esc(excluded[0].split(":", 1)[1].strip()) + " Change the pricing date in the sidebar settings.",
+                     title="Newer rates excluded by the pricing date", tone="danger"))
 
 
 def _boundary_cards(ws: S.Workspace, ev: S.Evaluation) -> None:
@@ -273,31 +279,78 @@ def _rate_book(ws: S.Workspace) -> None:
 # =============================================================================
 # Commercial parameters
 # =============================================================================
-def _commercial(ws: S.Workspace) -> None:
+_FALLBACK_LABELS = {"prelims_weekly_cost": "prelims weekly", "prelims_fixed_setup": "prelims set-up",
+                   "cost_per_delivery_load": "cost per delivery load", "cost_per_skip": "cost per skip"}
+
+
+def _rates_in_force(ws: S.Workspace) -> dict[str, tuple[bool, str]]:
+    """For each CostParameters fallback field: (rate book rate in force?, short text of what the engine uses)."""
+    from ...costing.engine import COST_PARAMETER_FALLBACKS
+    from ...costing.rates import resolve_rate_detailed
+
+    p = ws.project
+    cur = p.settings.currency
+    out: dict[str, tuple[bool, str]] = {}
+    for name, (ck, unit) in COST_PARAMETER_FALLBACKS.items():
+        rr = resolve_rate_detailed(p.rate_book, ck, unit, settings=p.settings)
+        if rr.found:
+            out[name] = (True, f"rate {rr.rate.rate_id} = {cur} {rr.value:,.2f}/{unit} ({ck}) is in force - this "
+                               "fallback is not used")
+        else:
+            out[name] = (False, f"no usable {ck} rate in the rate book - this fallback IS used")
+    return out
+
+
+def _commercial(ws: S.Workspace, ev: S.Evaluation) -> None:
     cp = ws.project.cost_parameters
     cur = ws.project.settings.currency
+    in_force = _rates_in_force(ws)
+
+    def fb_help(name: str) -> str:
+        text = in_force[name][1]
+        return f"Fallback, used only when the rate book has no prelim: / log: rate for it. Now: {text}."
+
+    def fb_label(name: str, base: str) -> str:
+        return base + (" · fallback (rate in force)" if in_force[name][0] else " · fallback (IN USE)")
+
     with st.form("cp_form", border=False):
         st.markdown("**Preliminaries and logistics**")
         c = st.columns(4)
-        weekly = c[0].number_input(f"Prelims weekly ({cur})", value=float(cp.prelims_weekly_cost), min_value=0.0, step=50.0)
-        setup = c[1].number_input(f"Prelims set-up ({cur})", value=float(cp.prelims_fixed_setup), min_value=0.0, step=100.0)
+        weekly = c[0].number_input(fb_label("prelims_weekly_cost", f"Prelims weekly ({cur})"),
+                                   value=float(cp.prelims_weekly_cost), min_value=0.0, step=50.0,
+                                   help=fb_help("prelims_weekly_cost"))
+        setup = c[1].number_input(fb_label("prelims_fixed_setup", f"Prelims set-up ({cur})"),
+                                  value=float(cp.prelims_fixed_setup), min_value=0.0, step=100.0,
+                                  help=fb_help("prelims_fixed_setup"))
         weeks = c[2].number_input("Default programme (weeks)", value=float(cp.default_programme_weeks), min_value=1.0,
                                   step=1.0, help="Used only when no programme is supplied (the UI supplies one).")
-        load = c[3].number_input(f"Cost per delivery load ({cur})", value=float(cp.cost_per_delivery_load),
-                                 min_value=0.0, step=5.0)
+        load = c[3].number_input(fb_label("cost_per_delivery_load", f"Cost per delivery load ({cur})"),
+                                 value=float(cp.cost_per_delivery_load), min_value=0.0, step=5.0,
+                                 help=fb_help("cost_per_delivery_load"))
         c = st.columns(4)
         skipv = c[0].number_input("Skip volume (m³)", value=float(cp.skip_volume_m3), min_value=0.5, step=0.5)
-        skipc = c[1].number_input(f"Cost per skip ({cur})", value=float(cp.cost_per_skip), min_value=0.0, step=10.0)
+        skipc = c[1].number_input(fb_label("cost_per_skip", f"Cost per skip ({cur})"), value=float(cp.cost_per_skip),
+                                  min_value=0.0, step=10.0, help=fb_help("cost_per_skip"))
         bulk = c[2].number_input("Waste bulking factor", value=float(cp.waste_bulking_factor), min_value=1.0,
                                  max_value=3.0, step=0.1)
+        st.caption("Prelims weekly / set-up, cost per delivery load and cost per skip are **fallbacks**: the engine "
+                   "uses the rate book's prelim:weekly, prelim:setup, log:delivery_load and log:skip rates when they "
+                   "exist. In force now - "
+                   + "; ".join(f"{_FALLBACK_LABELS[k]}: {t}" for k, (_, t) in in_force.items()) + ". To change "
+                   "those amounts, edit the rates in the Rate book tab.")
         st.markdown("**Fees (fractions of a boundary)**")
         fees_df = pd.DataFrame([{"name": f.name, "percent": 100 * f.fraction, "applies_to": f.applies_to,
-                                 "note": f.note} for f in cp.fees])
+                                 "recurs per house": bool(f.recurs_per_house), "note": f.note} for f in cp.fees],
+                               columns=["name", "percent", "applies_to", "recurs per house", "note"])
         fees_ed = st.data_editor(fees_df, key="cp_fees", num_rows="dynamic", hide_index=True, width="stretch",
                                  column_config={"percent": st.column_config.NumberColumn("percent (%)", min_value=0.0,
                                                                                          max_value=100.0, format="%.2f"),
                                                 "applies_to": st.column_config.SelectboxColumn(
-                                                    options=["direct", "construction"], required=True)})
+                                                    options=["direct", "construction"], required=True),
+                                                "recurs per house": st.column_config.CheckboxColumn(
+                                                    help="Repeat build only: unticked = one-off (design-stage) fee, "
+                                                         "covered by the scenario's reusable design cost when it "
+                                                         "has one. The single-house estimate charges every fee.")})
         st.markdown("**Risk, overhead and margin**")
         c = st.columns(3)
         cont = c[0].number_input("Contingency (%)", value=100 * cp.contingency_fraction, min_value=0.0, max_value=100.0,
@@ -332,8 +385,10 @@ def _commercial(ws: S.Workspace) -> None:
         for r in fees_ed.to_dict(orient="records"):
             if not r.get("name") or r.get("percent") is None or (isinstance(r["percent"], float) and math.isnan(r["percent"])):
                 continue
+            rec = r.get("recurs per house")
             fees.append({"name": str(r["name"])[:120], "fraction": float(r["percent"]) / 100.0,
-                         "applies_to": r.get("applies_to") or "construction", "note": str(r.get("note") or "")[:300]})
+                         "applies_to": r.get("applies_to") or "construction", "note": str(r.get("note") or "")[:300],
+                         "recurs_per_house": True if rec is None or rec is pd.NA else bool(rec)})
         taxes = {}
         for r in tax_ed.to_dict(orient="records"):
             if r.get("tax") and r.get("amount") is not None and not (isinstance(r["amount"], float) and math.isnan(r["amount"])):
@@ -345,12 +400,34 @@ def _commercial(ws: S.Workspace) -> None:
                 "land_cost": land, "finance_rate_annual": None if fin_r is None else fin_r / 100.0,
                 "finance_months": fin_m, "taxes": taxes, "sales_cost_fraction": None if sales_f is None else sales_f / 100.0,
                 "sales_value": gdv}
+        before = cp
         err = S.update_cost_parameters(ws, data)
         if err:
             st.error(err)
         else:
-            ws.say("success", "Commercial parameters applied - costs recalculated.")
+            ws.say(*_applied_message(ws, ev, before, in_force))
             st.rerun()
+
+
+def _applied_message(ws: S.Workspace, ev: S.Evaluation, before, in_force: dict[str, tuple[bool, str]]
+                     ) -> tuple[str, str]:
+    """Flash message that reports what actually changed (never claims an effect that did not happen)."""
+    after = ws.project.cost_parameters
+    cur = ws.project.settings.currency
+    shadowed = [_FALLBACK_LABELS[k] for k, (used_rate, _) in in_force.items()
+                if used_rate and getattr(before, k) != getattr(after, k)]
+    note = (f" Changed fallback(s) {', '.join(shadowed)} have no effect: the rate book's prelim: / log: rates are "
+            "in force (edit them in the Rate book tab)." if shadowed else "")
+    if after == before:
+        return "info", "No commercial parameter changed."
+    new_ev = S.evaluate(ws)
+    old_cs = ev.estimate.boundary("contract_sum").amount
+    new_cs = new_ev.estimate.boundary("contract_sum").amount if new_ev is not None else old_cs
+    if abs(new_cs - old_cs) < 0.005 and new_ev is not None and \
+            new_ev.estimate.layer_totals == ev.estimate.layer_totals:
+        return "warning", "Commercial parameters saved - the single-house estimate did not change." + note
+    return "success", (f"Commercial parameters applied - contract sum {fmt.money(old_cs, cur)} → "
+                       f"{fmt.money(new_cs, cur)}." + note)
 
 
 # =============================================================================

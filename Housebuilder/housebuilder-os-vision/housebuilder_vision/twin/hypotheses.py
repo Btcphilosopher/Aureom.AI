@@ -11,9 +11,12 @@ cannot show plan depth, so the hypotheses differ in what is hidden:
 ``H-A`` "Rectangular plan"
     main depth from the observed ridge rise and the pitch prior,
     ``depth = 2 * rise / tan(pitch)`` (range from the pitch prior range, clipped
-    to the depth/width prior range); without a visible rise,
-    ``depth = width * depth_to_width``.  Depth and pitch are *coupled*: the
-    pitch is assumed and confirming either fixes the other.
+    to the depth/width prior range; if the value itself is clipped the pitch
+    is re-derived from the rise so the roof still reproduces it); without a
+    visible rise, ``depth = width * depth_to_width``.  Depth and pitch are
+    *coupled*: the observed rise is stored on the roof
+    (``RoofSpec.observed_rise_m``) and ``twin.builder.apply_twin_edit``
+    re-derives the other value when either is edited.
 ``H-B`` "L-shaped: shallower main + single-storey rear extension"
     ``main depth = max(0.6 * width, depth_A - 1.2 m)`` (assumed), pitch implied
     by the same observed rise ``atan(2 * rise / depth)``, plus a heated
@@ -39,8 +42,18 @@ Provenance rules
   reference *is* the main facade width, the main width is ``USER_CONFIRMED``
   (value = reference, range = tolerance).
 * Storeys come from the observation; floor-to-floor = (eaves - FFL) / storeys
-  when calibrated (``INFERRED``, the assumed FFL range is folded into the
-  range), otherwise the prior.  FFL is always the prior (``ASSUMED``).
+  when calibrated, otherwise the prior.  FFL is always the prior
+  (``ASSUMED``), so the floor-to-floor and every opening sill (bottom above
+  ground - FFL - storey x floor-to-floor) take ``ASSUMED`` too (weakest basis;
+  the notes say which part was observed).  A hidden rear extension copies the
+  main block's floor-to-floor and FFL as ``ASSUMED`` values without evidence.
+* Pixel lengths (opening sizes and positions, overhangs, block offsets) use the
+  +/-2-sigma band of a length between two edges, ``2 x sqrt(2) x`` the
+  per-edge pixel sigma (``calibration.length_band``).
+* When the front view shows the roof band of a ridge parallel to the frontage,
+  the rise (``INFERRED`` with a calibrated scale, else ``ASSUMED``) is stored on
+  the main block's roof as ``observed_rise_m`` with its evidence ids, in every
+  hypothesis that uses it (H-A, H-B, H-C and the side-view variants).
 * Pitch is ``OBSERVED`` only when a gable is seen in elevation (front gable or
   linked side view); otherwise it is the prior or implied by an assumed depth
   (``ASSUMED``).
@@ -78,9 +91,11 @@ from ..core.models import (
 from ..core.provenance import Basis, Distribution, TrackedValue, assumed, weakest_basis
 from ..core.settings import AssumptionLibrary, ProjectSettings
 from ..geometry.footprint import GeometryError, Rect, validate_rects
+from .builder import block_coupling
 from .calibration import (
     find_feature,
     front_facades,
+    length_band,
     main_facade,
     prior_cue_calibration,
     primary_image_id,
@@ -316,11 +331,12 @@ def _ftf(obs: FacadeObservation, scale: _Scale, storeys: TrackedValue, ffl: Trac
     if not (FTF_PLAUSIBLE[0] <= v <= FTF_PLAUSIBLE[1]):
         return _copy_prior(prior), (f"{obs.block_hint}: floor-to-floor from the eaves height would be {v:.2f} m "
                                     "(implausible); the prior is used. Check storeys / eaves detection.")
-    tv = _tv(v, "m", weakest_basis(scale.basis, eh.basis, storeys.basis, Basis.INFERRED), lo, hi,
+    basis = weakest_basis(scale.basis, eh.basis, storeys.basis, ffl.basis, Basis.INFERRED)
+    tv = _tv(v, "m", basis, lo, hi,
              group=scale.group, evidence=eh.evidence_ids,
-             note=(f"(eaves {plate.value:.2f} m - FFL {ffl.value:.2f} m) / {int(n)} storey(s); inferred from the "
-                   "observed wall-plate height. The split between the assumed FFL and the storey height is in "
-                   "the range."))
+             note=(f"(eaves {plate.value:.2f} m - assumed FFL {ffl.value:.2f} m) / {int(n)} storey(s). The wall-plate "
+                   f"height above ground is {plate.basis.value} from the image; the value is {basis.value} because "
+                   "the FFL is an assumed prior (its range is folded into this range)."))
     return tv, None
 
 
@@ -348,11 +364,12 @@ def _roof_overhang(analysis: AnalysisResult, obs: FacadeObservation, scale: _Sca
         return None
     left = obs.left_x_px - min(xs)
     right = max(xs) - (obs.left_x_px + obs.width_px.value)
-    vals = [v for v in (left, right) if v > 2.0 * sig]
+    band = length_band(sig)  # overhang = difference of two edges (roof outline, facade end)
+    vals = [v for v in (left, right) if v > band]
     if not vals:
         return None
     px = sum(vals) / len(vals)
-    tv = scale.m(px, 2.0 * sig, evidence=ids,
+    tv = scale.m(px, band, evidence=ids,
                  note="Overhang beyond the wall ends measured from the roof outline in the front view.")
     if tv.value > MAX_OVERHANG_M:
         return None
@@ -409,7 +426,7 @@ def _volume(analysis: AnalysisResult, obs: FacadeObservation, *, is_main: bool, 
             and rh.value - eh.value > 1.0):
         band = math.hypot(px_band(rh, pu), px_band(eh, pu))
         rise = scale.m(rh.value - eh.value, band, px_basis=weakest_basis(rh.basis, eh.basis),
-                       evidence=[*rh.evidence_ids, *eh.evidence_ids],
+                       evidence=[*rh.evidence_ids, *eh.evidence_ids] or list(obs.feature_ids),
                        note="Ridge rise above the wall plate seen as the roof band (ridge parallel to the view).")
     # overhangs
     eaves = _copy_prior(A.eaves_overhang_m)
@@ -454,7 +471,7 @@ def _openings(analysis: AnalysisResult, obs: FacadeObservation, vol: _Vol, side:
         feat = find_feature(analysis, o.feature_id, obs.image_id)
         pu = float(feat.pixel_uncertainty) if feat is not None else pu_default
         fb = feat.basis if feat is not None else Basis.OBSERVED
-        band = 2.0 * pu
+        band = length_band(pu)  # every opening dimension is a difference of two edges
         ev = [o.feature_id]
         width = scale.m(x1 - x0, band, px_basis=fb, evidence=ev, note="Opening width from its bounding box.")
         height = scale.m(y1 - y0, band, px_basis=fb, evidence=ev, note="Opening height from its bounding box.")
@@ -476,9 +493,11 @@ def _openings(analysis: AnalysisResult, obs: FacadeObservation, vol: _Vol, side:
             lo = _lo(zb) - _hi(ffl) - storey * _hi(ftf)
             hi = _hi(zb) - _lo(ffl) - storey * _lo(ftf)
             v, lo, hi = max(v, 0.0), max(lo, 0.0), max(hi, 0.0)
-            sill = _tv(v, "m", weakest_basis(scale.basis, fb), lo, hi, group=scale.group, evidence=ev,
-                       note=(f"Opening bottom above ground minus assumed FFL {ffl.value:.2f} m"
-                             f"{f' minus {storey} x floor-to-floor' if storey else ''}; clamped at 0."))
+            sill_basis = weakest_basis(scale.basis, fb, ffl.basis, *([ftf.basis] if storey else []))
+            sill = _tv(v, "m", sill_basis, lo, hi, group=scale.group, evidence=ev,
+                       note=(f"Opening bottom above ground ({zb.basis.value}) minus assumed FFL {ffl.value:.2f} m"
+                             f"{f' minus {storey} x floor-to-floor ({ftf.basis.value})' if storey else ''}; "
+                             f"clamped at 0. {sill_basis.value.capitalize()} because it depends on the assumed FFL."))
         else:
             storey = min(max(int(o.storey_index or 0), 0), max(n_storeys - 1, 0))
             sv = 0.0 if kind in (OpeningKind.DOOR, OpeningKind.GARAGE_DOOR, OpeningKind.PATIO_DOOR) else 0.9
@@ -547,9 +566,11 @@ def _option_a(vol: _Vol, A: AssumptionLibrary, depth_obs: Optional[TrackedValue]
         lo = f * _lo(r) / t(_hi(prior))
         hi = f * _hi(r) / t(_lo(prior))
         clo, chi = max(lo, clip_lo), min(hi, clip_hi)
+        clipped = False
         if clo <= chi:
             lo, hi = clo, chi
-            v = min(max(v, lo), hi)
+            v_c = min(max(v, lo), hi)
+            clipped, v = abs(v_c - v) > 1e-9, v_c
         else:
             notes.append("Depth from rise and pitch prior falls outside the depth/width prior; not clipped.")
         depth = _tv(v, "m", weakest_basis(r.basis, Basis.ASSUMED), lo, hi, group=scale.group,
@@ -559,13 +580,18 @@ def _option_a(vol: _Vol, A: AssumptionLibrary, depth_obs: Optional[TrackedValue]
                           f"{ratio.low:.2f}-{ratio.high:.2f} x width."))
         p_lo = max(_lo(prior), _atan_deg(f * _lo(r) / hi))
         p_hi = min(_hi(prior), _atan_deg(f * _hi(r) / lo))
-        pitch = _tv(prior.value, "deg", Basis.ASSUMED, min(p_lo, prior.value), max(p_hi, prior.value),
+        p_v = prior.value
+        if clipped:  # keep the roof on the observed rise: the pitch follows the clipped depth
+            p_v = _clamp_pitch(_atan_deg(f * r.value / v))
+            notes.append(f"Depth clipped to the depth/width prior; pitch {p_v:.1f} deg re-derived from the observed "
+                         "rise so the roof still reproduces it.")
+        pitch = _tv(p_v, "deg", Basis.ASSUMED, min(p_lo, p_v), max(p_hi, p_v),
                     source=prior.source,
                     note=("Pitch prior (not observed). Depth-pitch coupling: depth x tan(pitch) / "
-                          f"{f:g} = observed rise; confirming the depth or the pitch fixes the other."))
+                          f"{f:g} = observed rise; confirming the depth or the pitch re-derives the other."))
         notes.append(f"Depth-pitch coupling: main depth {v:.2f} m follows from the observed ridge rise "
-                     f"{r.value:.2f} m and the ASSUMED pitch {prior.value:.1f} deg; a different pitch gives a "
-                     "different depth. Confirm either one.")
+                     f"{r.value:.2f} m and the ASSUMED pitch {p_v:.1f} deg; a different pitch gives a "
+                     "different depth. Confirm either one: the other is re-derived from the rise.")
         return _DepthPitch(depth, pitch, notes)
     v = ratio.value * w.value
     depth = _tv(v, "m", weakest_basis(w.basis, Basis.ASSUMED), ratio.low * _lo(w), ratio.high * _hi(w),
@@ -671,7 +697,7 @@ def _place(vols: list[_Vol], main: _Vol, scale: _Scale, pu: float) -> tuple[dict
                                    note=f"Snapped to the right edge of '{prev.block_id}' (gap {gap:+.2f} m < "
                                         f"{SNAP_GAP_M:.2f} m).")
         else:
-            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, 2.0 * pu,
+            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu),
                                        note="Offset of the facade's left edge from the main block's left edge.")
             notes.append(f"'{cur.block_id}' is {gap:.2f} m from '{prev.block_id}'; kept as a detached volume.")
     for j in range(im - 1, -1, -1):
@@ -687,7 +713,7 @@ def _place(vols: list[_Vol], main: _Vol, scale: _Scale, pu: float) -> tuple[dict
                                    _lo(nx0) - _hi(cw), _hi(nx0) - _lo(cw), group=scale.group,
                                    note=f"Snapped to the left edge of '{nxt.block_id}' (gap {gap:+.2f} m).")
         else:
-            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, 2.0 * pu,
+            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu),
                                        note="Offset of the facade's left edge from the main block's left edge.")
             notes.append(f"'{cur.block_id}' is {gap:.2f} m from '{nxt.block_id}'; kept as a detached volume.")
     return xs, notes
@@ -719,12 +745,33 @@ def _extension(main_block: Block, ext_id: str, at_right: bool, A: AssumptionLibr
                     verge_overhang_m=assumed(0.10, "m", low=0.0, high=0.25, source=SOURCE,
                                              note="Flat roof edge overhang assumed."),
                     parapet_height_m=assumed(0.0, "m", source=SOURCE, note="No parapet assumed."))
+    mf, mg = main_block.floor_to_floor, main_block.ground_floor_level
+    # the extension is hidden: its storey height and FFL are assumptions (copied from the main block), not
+    # observations - basis ASSUMED and no evidence ids, whatever the main block's own basis is
+    ftf = mf.model_copy(update={"basis": Basis.ASSUMED, "evidence_ids": [], "source": SOURCE,
+                                "note": (f"Assumed equal to the main block's floor-to-floor {mf.value:.2f} m "
+                                         f"({mf.basis.value} there); the extension is not visible in any view.")},
+                        deep=True)
+    ffl = mg.model_copy(update={"basis": Basis.ASSUMED, "evidence_ids": [], "source": SOURCE,
+                                "note": f"Assumed equal to the main block's FFL {mg.value:.2f} m (hidden)."}, deep=True)
     return Block(block_id=ext_id, name="Rear extension (hypothetical)", role=BlockRole.EXTENSION, origin_x=x0,
                  origin_y=y0, width=width, depth=depth,
                  storeys=assumed(1.0, "storeys", source=SOURCE, note="Single storey assumed."),
-                 floor_to_floor=main_block.floor_to_floor.model_copy(deep=True),
-                 ground_floor_level=main_block.ground_floor_level.model_copy(deep=True), roof=roof, heated=True,
+                 floor_to_floor=ftf, ground_floor_level=ffl, roof=roof, heated=True,
                  visible_sides=[], notes="Entirely assumed: not visible in any view.")
+
+
+def _attach_rise(block: Block, vol: _Vol) -> Optional[str]:
+    """Store the observed roof rise on ``block`` (depth-pitch coupling); returns a consistency note or None."""
+    if vol.rise is None or block.roof.form == RoofForm.FLAT:
+        return None
+    block.roof.observed_rise_m = vol.rise.model_copy(deep=True)
+    c = block_coupling(block)
+    if c is None or c.consistent:
+        return None
+    return (f"{block.block_id}: the stored roof does not reproduce the observed rise exactly "
+            f"({c.span_field} x tan(pitch) / {c.factor:g} = {c.implied_rise_m:.2f} m vs observed {c.rise.value:.2f} m; "
+            f"{'within' if c.within_observed_range else 'outside'} the observed range).")
 
 
 def _hidden(A: AssumptionLibrary) -> HiddenSideAssumptions:
@@ -920,8 +967,9 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
     for hid, name, desc, opt, with_ext in options:
         main_block = _block(main_vol, xs[main_vol.block_id], opt.depth, opt.pitch, heated=True,
                             notes="; ".join(opt.notes))
+        rise_note = _attach_rise(main_block, main_vol)
         blocks = [main_block] + [b.model_copy(deep=True) for b in side_blocks]
-        notes = list(opt.notes) + side_notes + base_notes
+        notes = list(opt.notes) + ([rise_note] if rise_note else []) + side_notes + base_notes
         if with_ext:
             seen = set(main_vol.visible_sides)
             at_right = Side.LEFT in seen and Side.RIGHT not in seen

@@ -25,7 +25,9 @@ Conventions
   ``1.all.<foundation_id>.<n>`` with fixed ``n`` per item
   (0 trench excavation, 1 oversite dig, 2 disposal, 3 concrete, 4 raft extra
   thickness, 5 below-ground blockwork, 6 its mortar, 7 piles, 8 reinforcement
-  allowance), allowances ``<element_code>.allow.<allowance_id>``.
+  allowance), allowances ``<element_code>.allow.<allowance_id>``.  Window / door
+  groups use ``all``, or ``all-<element>`` when their assembly belongs to another
+  element (or is not in the library), so line ids are always unique.
 * Cost keys: ``mat:<material_id>`` (unit = purchase unit), ``lab:<trade>`` (hr),
   ``allow:<id>``, ``plant:excavation`` (m3 bank), ``log:spoil_disposal``
   (m3 loose).  Thermal-only layers (air cavity) have no cost key.
@@ -36,10 +38,18 @@ Conventions
   courtyards); separating walls between blocks are added once; internal
   loadbearing walls are an allowance ``fraction x P_ext``.  All excavated spoil
   is assumed removed off site (no backfill credit) at the assumed bulking factor.
+* Oversite dig = (ground-storey GIA - trench plan inside the GIA) x dig depth:
+  the trench excavation is measured in full (L x W x D), so the part of the
+  trenches inside the internal wall faces is left out of the oversite area and
+  no volume is excavated twice.
+* Windows / doors are counted from the openings deducted from wall pieces only;
+  openings on separating walls, outside a wall or on a storey the block does
+  not have are excluded with a warning (never priced).
 * Allowances ``per_m2_gia`` use **heated** GIA (garages / unheated blocks get no
   services, doors, finishes); ``per_m2_finishable`` uses internally finished
   wall faces (heated blocks), partitions (both sides), separating-wall faces
-  facing heated blocks and ceilings of heated storeys.
+  facing heated blocks and ceilings of heated storeys.  Separating-wall plaster
+  is measured on the same faces (``internal_face_area_a`` / ``_b``).
 * GIA uses the twin-wide external-wall assembly thickness; per-block wall
   overrides of a different thickness are flagged, not re-measured.
 
@@ -89,6 +99,7 @@ from .measures import (
     TakeoffAssumptions,
     _weakest,
     element_measures,
+    off_storey_openings,
     unknown_openings,
     unresolved_instances,
 )
@@ -128,13 +139,20 @@ QUANTITY_CONVENTIONS: dict[str, str] = {
              "allowance factors) and the assembly-selection basis.",
     "status": "derived = geometry x assembly rule; allowance = labelled allowance (not measured); "
               "unresolved = could not be derived (reason given), never filled with invented numbers.",
-    "openings": "Opening areas are those deducted from wall pieces (each once); grouped per assembly.",
+    "openings": "Opening areas are those deducted from wall pieces (each once); grouped per (element, assembly) "
+                "with instance id 'all', or 'all-<element>' when the assembly belongs to another element or is not in "
+                "the library. Openings not deducted (separating wall, outside the wall, storey the block does not "
+                "have) are excluded with a warning, never priced.",
     "internal_finishes": "Wall internal finishes use the FFL-to-plate zone minus openings of heated blocks; "
-                         "gable infill above the ceiling and unheated blocks get no internal finish.",
+                         "gable infill above the ceiling and unheated blocks get no internal finish. Separating "
+                         "walls are finished only on faces towards heated blocks.",
+    "roof_void_wall": "A taller block's wall inside a lower neighbour's roof void stays in its external wall "
+                      "quantities (conservative) and is reported as the measure lower_roof_void_area.",
     "partitions": "Internal partitions are an allowance: length per m2 heated GIA x clear storey height.",
     "substructure": "Trench length = external centreline perimeter (P - 4 t n) + separating walls + internal "
-                    "loadbearing allowance (fraction x P). Spoil assumed removed off site with bulking. "
-                    "Foundation options are indicative and require site investigation and engineer's design.",
+                    "loadbearing allowance (fraction x P). Oversite dig = (ground-storey GIA - trench plan inside the "
+                    "GIA) x dig depth, so trench volume is not excavated twice. Spoil assumed removed off site with "
+                    "bulking. Foundation options are indicative and require site investigation and engineer's design.",
     "allowances": "per_m2_gia allowances use heated GIA; per_m2_finishable uses measured finished faces.",
     "exclusions": "No reinforcement schedules, structural member sizes, foundation design, concealed service "
                   "layouts or compliance checks are produced.",
@@ -509,6 +527,7 @@ def _substructure_lines(ctx: _Ctx, inst: ElementMeasures, gf_insts: list[Element
     L = L_m.value
     W, D, CD = w.value, d.value, cd.value
     gfa = ms["ground_floor_area"]
+    osa = ms.get("oversite_area")
     fdesc = opt.name
     idx = SUBSTRUCTURE_LINE_INDEX
     out: list[QuantityLine] = []
@@ -524,22 +543,29 @@ def _substructure_lines(ctx: _Ctx, inst: ElementMeasures, gf_insts: list[Element
     od = ta.oversite_dig_depth_m
     ov_link = TraceLink(kind="assumption", ref="takeoff.oversite_dig_depth_m",
                         description=f"oversite dig depth {od.label()} ({od.basis.value})")
-    v_over = gfa.value * (od.value or 0.0) if od.value is not None else None
+    osa_ok = osa is not None and osa.value is not None
+    v_over = osa.value * od.value if (osa_ok and od.value is not None) else None
     if v_over is None:
+        why = "oversite dig depth unknown" if od.value is None else (
+            osa.formula.removeprefix("UNRESOLVED: ") if osa is not None else "oversite area not measured")
         out.append(_unresolved(line_id=f"{code}.all.{oid}.{idx['oversite_excavation']}", code=code, ename=ename,
-                               description=f"Oversite excavation - {fdesc}", reason="oversite dig depth unknown",
+                               description=f"Oversite excavation - {fdesc}", reason=why,
                                unit="m3", trace=trace0 + [ov_link], refs=list(gfa.geometry_refs), assembly_id=oid,
                                layer_index=idx["oversite_excavation"], trade="groundworks"))
     else:
         out.append(_op_line(
             line_id=f"{code}.all.{oid}.{idx['oversite_excavation']}",
-            description=f"Oversite excavation / topsoil strip under ground-floor slab - {fdesc}",
+            description=f"Oversite excavation / topsoil strip under ground-floor slab, outside the trenches - {fdesc}",
             status=QuantityStatus.DERIVED, assembly_id=oid, layer_index=idx["oversite_excavation"],
-            cost_key=r.excavation_cost_key, unit="m3", measure_name="ground_floor_area", measure_value=gfa.value,
-            measure_unit="m2", formula=f"{gfa.value:.3f} m2 × {od.value:g} m = {v_over:.3f} m3 (bank)",
+            cost_key=r.excavation_cost_key, unit="m3", measure_name="oversite_area", measure_value=osa.value,
+            measure_unit="m2",
+            formula=f"oversite area {osa.value:.3f} m2 (ground-storey GIA {gfa.value:.3f} m2 less trench plan inside "
+                    f"the GIA {gfa.value - osa.value:.3f} m2) × {od.value:g} m = {v_over:.3f} m3 (bank)",
             qty=v_over, trade="groundworks", hours_per_unit=r.oversite_hours_per_m3,
-            basis=_weakest(gfa.basis, od.basis, sel_b), trace=trace0 + [ov_link] + _geom_links(gfa, "ground_floor_area"),
-            refs=list(gfa.geometry_refs)))
+            basis=_weakest(osa.basis, od.basis, sel_b),
+            trace=trace0 + [ov_link] + _geom_links(osa, "oversite_area"), refs=list(osa.geometry_refs),
+            notes="Trench excavation is measured in full; the trench plan inside the GIA is excluded here "
+                  "(no double count)."))
     bf = ta.spoil_bulking_factor
     bulk_link = TraceLink(kind="assumption", ref="takeoff.spoil_bulking_factor",
                           description=f"spoil bulking {bf.label()}; all spoil assumed removed off site")
@@ -558,7 +584,7 @@ def _substructure_lines(ctx: _Ctx, inst: ElementMeasures, gf_insts: list[Element
             cost_key=r.disposal_cost_key, unit="m3", measure_name="excavated_volume", measure_value=v_bank,
             measure_unit="m3", formula=f"({v_trench:.3f} + {v_over:.3f}) m3 bank × bulking {bf.value:g} = "
             f"{v_loose:.3f} m3 loose", qty=v_loose, trade="groundworks", hours_per_unit=r.disposal_hours_per_m3,
-            basis=_weakest(ex_b, od.basis, bf.basis, gfa.basis), trace=trace + [ov_link, bulk_link], refs=refs,
+            basis=_weakest(ex_b, od.basis, bf.basis, osa.basis), trace=trace + [ov_link, bulk_link], refs=refs,
             notes="No reuse / backfill credited (assumption); contamination not assessed."))
     c_b = _weakest(L_m.basis, w.basis, cd.basis, sel_b)
     v_conc = L * W * CD
@@ -709,13 +735,18 @@ def _finishable_area(ctx: _Ctx, insts: list[ElementMeasures]) -> Measure:
             bases.append(m.basis)
             parts.append(f"partitions 2 × {m.value:.2f}")
     heated = {b.block_id: b.heated for b in ctx.twin.blocks}
-    sep_bases = [i.measures["element_area"].basis for i in insts
-                 if i.element == ElementType.SEPARATING_WALL and "element_area" in i.measures]
-    sep = 0.0
-    for p in ctx.metrics.pieces:
-        if p.shared_area_m2 > 1e-9:
-            sides = int(heated.get(p.block_id, False)) + int(heated.get(p.neighbour_block_id or "", False))
-            sep += p.shared_area_m2 * sides
+    # separating-wall faces towards heated blocks: the same measures the plaster layers use
+    sep, sep_bases = 0.0, []
+    for inst in insts:
+        if inst.element != ElementType.SEPARATING_WALL:
+            continue
+        for name in ("internal_face_area_a", "internal_face_area_b"):
+            m = inst.measures.get(name)
+            if m is None or m.value is None:
+                return Measure(None, "m2", tuple(refs), Basis.UNKNOWN,
+                               f"UNRESOLVED: separating wall faces of {inst.block_id} unresolved")
+            sep += m.value
+            sep_bases.append(m.basis)
     if sep > 0:
         total += sep
         parts.append(f"separating faces {sep:.2f}")
@@ -877,9 +908,11 @@ def calculate_quantities(twin: BuildingTwin, library: AssemblyLibrary, *, metric
         warnings.append(f"Metrics were computed with wall thicknesses {metrics.external_wall_thickness_m:.4f} / "
                         f"{metrics.separating_wall_thickness_m:.4f} m but the selected assemblies are {t_ext:.4f} / "
                         f"{t_sep:.4f} m; internal areas follow the metrics supplied.")
-    for oid, why in unknown.items():
-        warnings.append(f"{why}: dependent quantities are unresolved.")
     geometry_ok = reason is None and metrics is not None
+    off = off_storey_openings(twin, {bm.block_id: bm.storeys for bm in metrics.blocks}) if geometry_ok else {}
+    for oid, why in unknown.items():
+        if oid not in off:  # off-storey openings are excluded altogether (warned by element_measures)
+            warnings.append(f"{why}: dependent quantities are unresolved.")
     if not geometry_ok:
         metrics = _empty_metrics(t_ext, t_sep, reason or "unknown")
         warnings.append(f"Geometry unresolved - {reason}. Quantities depending on geometry are UNRESOLVED.")

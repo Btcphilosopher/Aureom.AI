@@ -361,6 +361,12 @@ class RoofSpec(_Model):
     high_side: Optional[Side] = None
     #: Flat roof only: parapet height above wall plate (0 = none).
     parapet_height_m: Optional[TrackedValue] = None
+    #: (additive) Rise of the roof above the wall plate as seen in an elevation (e.g. the roof band of a
+    #: ridge parallel to the front view), with its evidence ids; ``None`` when no rise was observed.  While
+    #: set on a pitched roof, the span dimension (gable: depth for ridge "x", width for ridge "y"; hip: the
+    #: shorter side; monopitch: the dimension along the slope) and the pitch are coupled:
+    #: ``rise = span x tan(pitch) / f`` (f = 2 gable / hip, 1 monopitch) - see ``twin.builder``.
+    observed_rise_m: Optional[TrackedValue] = None
 
 
 class Block(_Model):
@@ -1009,6 +1015,11 @@ class FeeItem(_Model):
     applies_to: Literal["direct", "construction"] = "construction"
     basis: Basis = Basis.ASSUMED
     note: str = ""
+    #: (additive, costing module) Repeat-build economics only: True = charged on every house (e.g.
+    #: building control, warranty); False = a one-off (design-stage) fee for the house type, which the
+    #: repeat build treats as covered by the scenario's ``reusable_design_cost`` when one is set (else it
+    #: is charged once).  The single-house estimate always charges every fee.
+    recurs_per_house: bool = True
 
 
 class CostParameters(_Model):
@@ -1024,8 +1035,9 @@ class CostParameters(_Model):
     cost_per_skip: float = 290.0
     waste_bulking_factor: float = 1.6  # loose waste volume / solid volume
     fees: list[FeeItem] = Field(default_factory=lambda: [
-        FeeItem(name="Architectural & design", fraction=0.06, applies_to="construction",
-                note="Fictional demo assumption."),
+        FeeItem(name="Architectural & design", fraction=0.06, applies_to="construction", recurs_per_house=False,
+                note="Fictional demo assumption. One-off design fee: in repeat-build economics it is covered by "
+                     "the production scenario's reusable design cost, not charged again per house."),
         FeeItem(name="Structural engineer (indicative)", fraction=0.015, applies_to="construction",
                 note="Fictional demo assumption."),
         FeeItem(name="Building control & warranty allowance", fraction=0.012, applies_to="construction",
@@ -1073,6 +1085,32 @@ class CostBoundary(_Model):
     excludes: str = ""
 
 
+class MaterialOrder(_Model):
+    """(additive, costing module) Order-level purchase of one material for one house.
+
+    The cost engine prices each ``mat:`` cost key once per order: ``packs = ceil(purchase_required /
+    pack_size)``, ``amount = packs x pack_size x rate_value``, allocated back to the quantity lines pro
+    rata to their ``purchase_required``.  Repeat-build economics re-round the order for ``n`` houses:
+    ``ceil(n x purchase_required / pack_size) x pack_size x rate_value``.
+    """
+
+    cost_key: str
+    material_id: Optional[str] = None
+    purchase_unit: str
+    pack_size: float = 1.0
+    #: Unrounded need summed over the lines (purchase units, incl. cutting and waste losses).
+    purchase_required: float
+    packs: int
+    purchased: float
+    rate_id: Optional[str] = None
+    #: Net rate per purchase unit used for the order.
+    rate_value: float
+    amount: float
+    line_ids: list[str] = Field(default_factory=list)
+    #: Sum of the lines' own pack-rounded purchases (what per-line ordering would buy), for reference.
+    line_level_purchased: float = 0.0
+
+
 class CostEstimate(_Model):
     currency: str
     pricing_date: date
@@ -1092,6 +1130,8 @@ class CostEstimate(_Model):
     conventions: dict[str, str] = Field(default_factory=dict)
     #: Informational notes that are not problems (e.g. order-level rounding saving) - additive.
     notes: list[str] = Field(default_factory=list)
+    #: (additive, costing module) One entry per priced ``mat:`` order (see :class:`MaterialOrder`).
+    material_orders: list[MaterialOrder] = Field(default_factory=list)
 
     def boundary(self, key: str) -> CostBoundary:
         for b in self.boundaries:
@@ -1104,7 +1144,12 @@ class CostEstimate(_Model):
 # Repeat-build economics
 # =============================================================================
 class LearningCurve(_Model):
-    """Wright learning curve: hours(i) = h1 * i ** log2(rate), floored."""
+    """Learning curve with a floor on unit hours (b = log2(learning_rate)).
+
+    ``model="unit"`` (default; unit-time, Crawford-style): hours of unit i = h1 * max(floor, i ** b).
+    ``model="cumulative_average"`` (Wright): the *average* hours of the first n units = h1 * n ** b, so
+    unit i takes h1 * (i ** (1 + b) - (i - 1) ** (1 + b)), floored at h1 * floor.
+    """
 
     learning_rate: float = Field(default=0.92, gt=0.5, le=1.0)
     floor_fraction: float = Field(default=0.70, gt=0.0, le=1.0)
@@ -1112,6 +1157,8 @@ class LearningCurve(_Model):
         default_factory=lambda: ["site_labour", "factory_labour"])
     basis: Basis = Basis.ASSUMED
     note: str = "Assumed learning rate; not calibrated against Aureom outturn data."
+    #: (additive, costing module) "unit" (Crawford-style unit-time model) or "cumulative_average" (Wright).
+    model: Literal["unit", "cumulative_average"] = "unit"
 
 
 class DiscountTier(_Model):
@@ -1127,6 +1174,9 @@ class StepCost(_Model):
     cost: float
     starts_after_units: int = 0
     note: str = ""
+    #: (additive, costing module) Where the cost arises: "factory" steps (e.g. a second shift) are part of
+    #: the factory-gate boundary; "site" steps (e.g. a pumping station) only of the installed boundary.
+    boundary: Literal["factory", "site"] = "site"
 
 
 class ProductionScenario(_Model):
@@ -1170,8 +1220,18 @@ class ProductionScenario(_Model):
     #: How procurement tiers apply: "all_units" (the tier reached by n discounts every unit) or
     #: "incremental" (each unit gets the tier in force when it is bought).
     discount_mode: Literal["all_units", "incremental"] = "all_units"
-    #: Site logistics & waste per house (deliveries, skips, disposal); None -> estimate layer 4.
+    #: Site logistics & waste per house (deliveries, skips, disposal); None -> estimate layer 4 with its
+    #: material deliveries and skips scaled by (1 - factory_material_fraction).
     site_logistics_per_house: Optional[float] = None
+    #: (additive) Time-related site overhead per house (supervision, welfare hire, cleaning while the house
+    #: is built); None -> the single-house estimate's time-related preliminaries x ``site_overhead_share``.
+    site_overhead_per_house: Optional[float] = None
+    #: (additive) Assumed share of a single-house programme's time-related preliminaries carried by each
+    #: house when houses are built concurrently on a shared site (labelled assumption).
+    site_overhead_share: float = Field(default=0.5, ge=0.0, le=1.0)
+    #: (additive) Order-level material data behind ``materials_per_house`` (e.g. copied from the estimate
+    #: the value came from) so the repeat build can re-round packs for n houses; None -> linear in n.
+    material_orders: Optional[list[MaterialOrder]] = None
 
 
 class RepeatBuildRow(_Model):
@@ -1180,6 +1240,11 @@ class RepeatBuildRow(_Model):
     average_cost: float  # C(n)/n
     incremental_cost: float  # C(n+1) - C(n): cost of the next house
     components: dict[str, float] = Field(default_factory=dict)  # breakdown of C(n)
+    #: (additive) C(n+1) - C(n) without capacity steps, pack-rounding steps and all-units tier re-pricing
+    #: (definition in ``RepeatBuildResult.assumptions["underlying_marginal_definition"]``).
+    underlying_marginal_cost: Optional[float] = None
+    #: (additive) Steps and tier crossings that occur between house n and house n+1.
+    step_events: list[str] = Field(default_factory=list)
 
 
 class RepeatBuildResult(_Model):

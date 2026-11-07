@@ -44,7 +44,8 @@ command).  `run_demo` options: `--out DIR` (default `exports/demo`), `--samples 
 The demo prints a compact report - evidence with basis counts, calibration, hypotheses with
 dimension ranges, the twin, the top bill-of-quantities lines, cost boundaries, P10/P50/P90, the
 top uncertainty drivers and the next-best evidence, the build-scenario comparison and repeat-build
-tables at n = 1/10/25/50/100 for the factory-gate and installed boundaries - and writes
+tables at n = 1/10/25/50/100 for the factory-gate and installed boundaries (with the underlying
+marginal, the steps between n and n+1 and a single-house reconciliation) - and writes
 `project.json`, `results.json`, `twin.glb`, CSV tables, `twin.ifc` (when `ifcopenshell` is
 installed), `README.txt` and a sha256 `manifest.json`.
 
@@ -118,6 +119,35 @@ seed, and versions (package, model schema, Python and libraries, image-analysis 
 `run_pipeline` keeps an existing twin built from the selected hypothesis (with its edits) and
 updates the project in place.
 
+### Editing the twin
+
+`twin.builder.apply_twin_edit(twin, TwinEdit(...), library=None)` returns a new twin version; the
+edited value becomes `user_confirmed` (a `tolerance` gives it a range - uniform if it had none) and
+the edit log records it.  Values the system changes as a consequence are logged after it with
+actor `system:reflow`, `system:coupling` or `system:assembly-check`.
+
+* **Attached blocks stay attached.**  Each block hangs from the block it was first attached to
+  (the main block is the plan datum).  After a width / depth change every block is re-placed from
+  its parent with the same contact side and alignment - a rear extension flush with the
+  rear-right corner stays at that corner, a garage on the main block's left grows leftwards, a
+  block hanging from an unmoved block is not dragged along.  An edit that would detach a block or
+  make blocks overlap is refused with a message naming them.  The uncertainty simulation uses the
+  same attachment tree.
+* **Observed roof rise couples span and pitch.**  When the front view shows the roof band of a
+  ridge parallel to the frontage, the rise is stored on the roof (`RoofSpec.observed_rise_m`,
+  with its evidence).  Then `rise = span x tan(pitch) / 2` (monopitch `/ 1`; span = depth for a
+  ridge parallel to the frontage, width for a front-to-rear ridge, the shorter side of a hip).
+  Editing the span re-derives the pitch; editing the pitch re-derives the span (attached blocks
+  follow); editing the rise or the roof form / ridge axis re-derives the pitch.  The re-derived
+  value takes the weakest basis of the rise and the edited value.  A user-confirmed or observed
+  value is never overwritten: if both are fixed, both are kept, the implied-vs-observed rise
+  residual is logged and the Twin view shows a warning (`coupling_warnings(twin)`).
+* Reducing a block's storeys is refused while observed or user openings sit on a removed storey
+  (they are named); rule-filled hidden-side openings are regenerated.
+* An opening's assembly override is recorded as user-confirmed; with `library=` it must belong to
+  the opening kind's element (window, external door, garage door).  Changing the opening kind to
+  another element clears the override.
+
 ## Provenance legend
 
 | Basis | Meaning | Examples |
@@ -125,11 +155,13 @@ updates the project in place.
 | `observed` | Measured directly from image evidence | pixel widths, a pitch seen on a gable in elevation |
 | `inferred` | Derived by a rule or model from observations | metres from pixels with a calibrated scale, storeys from window rows, VLM output (always inferred, untrusted) |
 | `user_confirmed` | Entered or confirmed by a person - the strongest basis | the reference frontage, edited dimensions, chosen assemblies, supplier quotes |
-| `assumed` | A labelled default you may continue with | hidden depth, pitch prior, FFL, hidden-facade glazing, assembly defaults, rate ranges |
+| `assumed` | A labelled default you may continue with | hidden depth, pitch prior, FFL (and the floor-to-floor and sill heights measured above it), hidden-facade glazing, assembly defaults, rate ranges |
 | `unknown` | Not recoverable from the evidence | dependent quantities are left UNRESOLVED, never invented |
 
 Derived values take the **weakest** basis of their inputs.  Visual finishes (what a surface *looks
-like*) are stored separately from construction assemblies and never set them.
+like*) are stored separately from construction assemblies and never set them.  A detection's pixel
+uncertainty is one sigma per edge; a length between two edges or endpoints (a reference, an
+opening, a plan dimension) carries √2 × that, and ranges are ±2 sigma.
 
 ## Measurement conventions
 
@@ -141,23 +173,39 @@ like*) are stored separately from construction assemblies and never set them.
 * External wall area runs from finished ground-floor level (FFL) to the wall plate plus gable /
   monopitch / parapet infill; masonry below FFL is substructure.  Walls shared between blocks are
   counted once as separating walls up to the lower plate.
-* Each opening is deducted once, from the wall piece containing it.
+* Each opening is deducted once, from the wall piece containing it.  An opening on a separating
+  wall, outside its wall or on a storey its block does not have (e.g. after reducing the storeys) is
+  not deducted and is never counted or priced as a window / door; it is listed in the warnings.
+* The part of a taller block's wall inside a lower neighbour's roof void (e.g. the main wall inside
+  the garage loft) stays external wall area (conservative) and is reported separately as the
+  external-wall measure `lower_roof_void_area`.
+* Separating walls are plastered only on faces towards heated blocks (no finish on the garage side),
+  consistent with unheated blocks getting no internal wall finish.
 * Roof surface = plan area including external overhangs / cos(pitch) (exact for uniform pitch).
+  Linear items follow the same exposure rule: a verge runs over the eaves overhang only where that
+  eaves edge is exposed, ridges / monopitch top edges / eaves run over the verge overhang only at
+  fully exposed corners, and the abutment of a lower roof against a taller wall is measured along
+  the roof line (along the rake where a gable end meets the wall).  A hip roof's ridge follows the
+  longer side; a `ridge_axis` that disagrees is flagged.
+* Oversite dig = (ground-storey GIA - trench plan inside the GIA) x dig depth; trenches are measured
+  in full, so no volume is excavated (or carted away) twice.
 * Every BoQ line keeps the measure, formula, installed quantity, cutting and waste losses, pack
   rounding, purchased quantity, labour hours and trade, basis and trace links to geometry,
-  assemblies, allowances and assumptions.  Line ids are stable:
-  `<element_code>.<block|all>.<assembly>.<layer>`, `<code>.allow.<allowance>`; element codes are
+  assemblies, allowances and assumptions.  Line ids are stable and unique:
+  `<element_code>.<block|all>.<assembly>.<layer>`, `<code>.allow.<allowance>`; a window / door group
+  whose assembly belongs to another element (or is not in the library) uses `all-<element>` instead
+  of `all` (e.g. `2.6.all-external_door.win_upvc_dg.0`, unresolved).  Element codes are
   NRM1-inspired groupings (not an NRM compliance claim).
 
 ## Cost layers and boundaries
 
 | Layer | Content |
 |---|---|
-| 1 Materials | purchased quantities (pack-rounded) x `mat:` rates; `allow:` supply allowances |
+| 1 Materials | one order per material: the lines' unrounded needs are summed, rounded to whole packs once and priced with the `mat:` rate, then allocated to the lines pro rata (each cost line keeps its BoQ line id and shows its share; `CostEstimate.material_orders`); `allow:` supply allowances |
 | 2 Labour | BoQ labour hours x `lab:<trade>` rates |
 | 3 Plant | excavation, dumper, scaffold, telehandler (programme-dependent hires) |
-| 4 Logistics & waste | delivery loads (from the logistics plan), skips, spoil disposal |
-| 5 Preliminaries | setup + weekly x programme weeks |
+| 4 Logistics & waste | delivery loads (from the logistics plan), skips, spoil disposal; delivery / collection charges of every rate used (materials, allowances, plant) once per order |
+| 5 Preliminaries | setup + weekly x programme weeks (`prelim:` rates) |
 | 6 Fees & allowances | fractions of layers 1-4 or 1-5 |
 | 7 Contingency | fraction of layers 1-6 |
 | 8 Overhead & margin | overhead on 1-7, margin on 1-7 + overhead |
@@ -166,20 +214,65 @@ like*) are stored separately from construction assemblies and never set them.
 Cumulative boundaries: `materials` (1), `direct_works` (1-4), `construction_before_contingency`
 (1-6), `construction_incl_contingency` (1-7), `contract_sum` (1-8) and `total_development_cost`
 (1-9, only with layer-9 entries).  Sales value is reported separately and never inside a cost.
-Missing rates and unresolved quantities are listed in `unresolved_items` - never priced as zero.
+Missing rates and unresolved quantities are listed in `unresolved_items` - never priced as zero;
+so are ex-works, separately charged and collection rates without a `delivery_charge` (carriage not
+priced).  `CostParameters` prelims weekly / set-up, cost per delivery load and cost per skip are
+**fallbacks**, used only when the rate book has no `prelim:weekly` / `prelim:setup` /
+`log:delivery_load` / `log:skip` rate (the Costs view shows which value is in force).
+
+Rate resolution (`costing.rates.resolve_rate`; every adjustment is listed in its warnings):
+
+* **Working time.** Labour, plant and preliminaries rates (`lab:`, `plant:`, `prelim:`) quoted per
+  `day` / `week` are converted as *working* time - `ProjectSettings.hours_per_working_day` (8) and
+  `working_days_per_week` (5), a labelled assumption with a warning - never as 24 h / 7 days.
+  Calendar conversion is kept for other cost keys.
+* **Escalation** applies to rates dated before the pricing date, except rates whose `valid_until`
+  covers it (a firm quote or price list).  **Regional factor** applies to rates that are not local:
+  a rate location is local when, normalised (lower case, punctuation removed), it equals the site
+  location, the region or one comma-separated part of either; a supplier quote without a location
+  is treated as quoted for the site (warned).  A rate changed by an assumed factor (escalation,
+  regional factor, VAT stripped at the project rate, working-time conversion) is `assumed`.
+* **Pricing date** defaults to today for a new project (the demo is pinned to 2026-11-01).  When a
+  higher-priority rate (e.g. a new supplier quote) is excluded only because it is dated after the
+  pricing date and a lower-priority / FICTIONAL rate is used instead, the estimate's first warning
+  starts with `PRICING DATE` and the Costs view shows it prominently.
 
 ## Marginal vs average cost (repeat build)
 
 For a `ProductionScenario` (`calculate_incremental_cost`): **total** C(n) is the cost of n houses,
 **average** = C(n)/n spreads one-off and step costs (design, tooling, factory set-up, lines, site
 establishment, capacity steps), and **incremental** = C(n+1) - C(n) is the cost of *one more*
-house - it only contains a step cost when a threshold is crossed, and all-units procurement tiers
-can make it drop sharply.  Learning follows a Wright curve with a floor; labour scarcity can make
-costs rise with volume.  Boundaries: `factory_gate` (factory components), `installed` (factory gate
-+ transport, site labour and materials, plant, logistics, site works and establishment,
-infrastructure) and `development` (installed + fees, contingency, overhead and margin).  The demo
-compares **PS-site** (site-built) with **PS-offsite** (off-site panelised timber frame); both are
-fictional.
+house - it contains a step cost when house n+1 crosses a threshold (a new site, factory line or
+capacity step), and all-units procurement tiers can make it drop sharply.  Each row therefore also
+carries `step_events` (what happens between n and n+1) and the **underlying marginal** cost: the
+cost of house n+1 without capacity steps, pack-rounding steps and the all-units re-pricing of
+earlier houses (house n+1 at the tier in force for it; learning, scarcity and per-house items kept).
+In the demo the comparison quantities 25 / 50 / 100 coincide with houses per site, so their
+incremental cost includes a new site's establishment - the report and the UI flag it.
+
+* **Learning** (`LearningCurve.model`): `unit` (default; unit-time, Crawford-style - each house's
+  hours fall by 1 - rate per doubling) or `cumulative_average` (Wright - the average hours of the
+  first n houses fall by 1 - rate per doubling, i.e. faster learning for the same rate); the floor
+  applies to unit hours.  Labour scarcity can make costs rise with volume.
+* **Materials** re-round the single-house material orders for n houses
+  (`ceil(n x need / pack) x pack x rate`), so the single-house pack surplus is not multiplied by n.
+* **Time-related site overhead** (`site_overhead`: supervision, welfare hire) per house = the
+  scenario value, else the single-house time-related preliminaries x `site_overhead_share`
+  (assumed 0.5 for PS-site, 0.35 for PS-offsite); site establishment per started site replaces the
+  single-house set-up.  `single_house_reconciliation` (shown in the report and the UI) sets the
+  single-house layers 1-5 next to the installed C(1), item by item.
+* **Boundaries:** `factory_gate` (tooling, factory set-up and lines, factory labour and overhead,
+  factory share of materials, factory capacity steps - `StepCost.boundary = "factory"`), `installed`
+  (factory gate + design, transport, site labour and materials, plant, site logistics - with the
+  factory share of material deliveries and skips removed - site works, establishment and overhead,
+  infrastructure, site steps) and `development` (installed + fees, contingency, overhead and
+  margin).  Recurring fees apply to a fee base of installed minus reusable design minus factory
+  capex (tooling, set-up, lines; for `direct` fees also minus establishment and overhead); one-off
+  fees (`FeeItem.recurs_per_house = False`, by default "Architectural & design") are covered by the
+  scenario's reusable design cost, not charged per house.
+
+The demo compares **PS-site** (site-built) with **PS-offsite** (off-site panelised timber frame,
+per-house values from the timber-frame + brick variant); both are fictional.
 
 ## Uncertainty simulation
 
@@ -192,8 +285,9 @@ partitions), `unit_prices` and `labour_rates` (each rate's own range), `labour_p
 (0.85-1.30), `waste` (0.6-1.8 x waste fractions), `ground` (ground classes -> foundation option)
 and `lead_time` (window/door lead times -> programme -> preliminaries).  Latin hypercube or Monte
 Carlo sampling (seeded, reproducible), Gaussian copula with within-group correlation and
-configurable between-group correlation.  Coherence: attached blocks stay attached, an observed
-roof rise couples depth and pitch, hidden-facade openings follow their glazing rule.
+configurable between-group correlation.  Coherence: attached blocks stay attached, the stored
+observed roof rise couples span and pitch (every sample starts from the observed rise, also after
+edits), hidden-facade openings follow their glazing rule.
 
 Outputs: P5..P95 summaries (cost boundaries, GIA, wall and roof areas, concrete, labour hours,
 programme weeks, block dimensions), samples, Spearman sensitivities, first-order variance shares,
@@ -348,17 +442,17 @@ observed, inferred, assumed, unknown) are the same in every view and always carr
 | View | What you can do |
 |---|---|
 | **Images** | Drag and drop photos, renderings, AI concepts, sketches, floor plans or elevations and set each image's kind and view; uploads are validated by `vision.ingest` and rejections are shown with their reason.  Evidence overlay (hover: type, method + version, confidence, pixel uncertainty, evidence), feature table with an *active* toggle (rejecting a feature re-runs the analysis), manual annotation editor (type, x0..y1, label, storey, block, roof form; or box-select on the image), opt-in Claude cross-check (only shown when the adapter is available), calibration (feature width or pixel endpoints + real length, unit and tolerance) with a prompt for the most useful measurement and a "continue with labelled assumptions" option, unknowns and warnings (concept-reference caveat shown prominently), and hypothesis cards with dimension ranges, subjective plausibility and assumption labels → build the twin. |
-| **Twin** | 3D massing coloured by visual finish or by evidence basis; information-level banner; editors for blocks, roofs, openings, hidden-side assumptions, construction assemblies ("appearance does not establish structure") and the foundation option - each value with its basis badge and range.  Every edit goes through `apply_twin_edit` / `apply_construction_assemblies` and recalculates quantities and costs at once; the edit log lists every change. |
+| **Twin** | 3D massing coloured by visual finish or by evidence basis; information-level banner; editors for blocks, roofs, openings, hidden-side assumptions, construction assemblies ("appearance does not establish structure") and the foundation option - each value with its basis badge and range, and the observed roof rise where one couples span and pitch (a warning appears when a roof no longer reproduces it).  Every edit goes through `apply_twin_edit` / `apply_construction_assemblies` and recalculates quantities and costs at once; attached blocks follow their parent and coupled values are re-derived (see *Editing the twin*); the edit log lists every change, including system follow-ups. |
 | **Quantities** | Bill of quantities with filters (element, status, basis, text); select a line to see its formula, measure and trace links while the 3D view highlights the wall pieces, blocks, roofs, openings or storeys it was measured from.  Allowances and unresolved items are listed separately; measurement conventions and GEA / GIA by storey. |
-| **Costs** | Boundary cards (amount, definition, exclusions; GDV shown separately), layer waterfall, cost lines with rate provenance (source, type, date, location, tax, delivery, validity, range), rate book upload (CSV / JSON, validated, warnings shown) and inline editing, commercial parameters, and the uncertainty simulation (samples, seed, groups → histogram + CDF with P10 / P50 / P90, quantiles, tornado, "what to resolve next", results by ground class, interval-type statement). |
-| **Scenarios** | Build-scenario comparison (table + small multiples: cost, cost / m², GIA, wall thickness, carbon, HLC, programme, labour), repeat-build economics (editable learning, tiers, step costs, houses per site; average vs incremental cost for the factory-gate and installed boundaries with markers at n = 1 / 10 / 25 / 50 / 100 and their definitions), programme Gantt (critical path in gold), deliveries, carbon by element and heat-loss breakdown - each with its assumptions and boundary. |
+| **Costs** | Boundary cards (amount, definition, exclusions; GDV shown separately), layer waterfall, cost lines with rate provenance (source, type, date, location, tax, delivery, validity, range), rate book upload (CSV / JSON, validated, warnings shown) and inline editing, a prominent warning when the pricing date excludes newer higher-priority rates, commercial parameters (prelim / log fallbacks labelled with the rate actually in force; fees with "recurs per house"; the "applied" message reports the real change), and the uncertainty simulation (samples, seed, groups → histogram + CDF with P10 / P50 / P90, quantiles, tornado, "what to resolve next", results by ground class, interval-type statement). |
+| **Scenarios** | Build-scenario comparison (table + small multiples: cost, cost / m², GIA, wall thickness, carbon, HLC, programme, labour), repeat-build economics (editable learning model and rate, tiers, factory / site step costs, houses per site, site overhead share; average, incremental and underlying marginal cost for the factory-gate and installed boundaries with markers at n = 1 / 10 / 25 / 50 / 100, the steps between n and n+1, their definitions and the single house vs installed C(1) reconciliation), programme Gantt (critical path in gold), deliveries, carbon by element and heat-loss breakdown - each with its assumptions and boundary. |
 
 The sidebar loads the fictional demo (optionally with the left elevation and an AI-concept
 example), creates a new project, saves / loads projects through `io.persistence.ProjectStore`
 (`$HBV_DATA_DIR/housebuilder.db`, preserved images in `$HBV_DATA_DIR/images`; default `./.hbv`),
-holds the settings (location, currency with FX rates for foreign-currency rates, pricing date,
-metric / imperial display, VAT) and prepares downloads (JSON, GLB, CSV and IFC when
-`ifcopenshell` is installed) through `io.export`.
+holds the settings (location, currency with FX rates for foreign-currency rates, pricing date -
+today for a new project, 2026-11-01 for the demo - metric / imperial display, VAT) and prepares
+downloads (JSON, GLB, CSV and IFC when `ifcopenshell` is installed) through `io.export`.
 
 Behaviour: only the open tab runs; heavy work is cached with explicit keys (`twin_hash` + rate
 book + parameters), so an edit recalculates in well under a second and a 300-sample simulation

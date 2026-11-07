@@ -193,6 +193,11 @@ class TrackedValue(BaseModel):
 
         By default the edit is treated as a user confirmation: the range
         collapses to ``value ± tolerance`` (or to the point value).
+
+        The previous distribution shape is kept when the edit carries a range;
+        a ``FIXED`` value that receives a range (``tolerance`` or ``low``/
+        ``high``) becomes ``UNIFORM`` (as :func:`confirmed` does), so the range
+        the person entered is sampled rather than silently ignored.
         """
         if new_value is None:
             lo = hi = None
@@ -214,7 +219,10 @@ class TrackedValue(BaseModel):
             new_basis=basis,
             reason=reason,
         )
-        dist = self.distribution if (lo is not None and hi is not None and hi > lo) else Distribution.FIXED
+        if lo is not None and hi is not None and hi > lo:
+            dist = Distribution.UNIFORM if self.distribution == Distribution.FIXED else self.distribution
+        else:
+            dist = Distribution.FIXED
         return self.model_copy(
             update={
                 "value": new_value,

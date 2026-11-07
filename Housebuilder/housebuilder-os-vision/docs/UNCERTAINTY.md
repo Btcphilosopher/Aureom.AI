@@ -49,15 +49,23 @@ input, because the hypothesis states one assumption for all blocks.
 
 ## 3. Coherence rules
 
-* **Attached blocks stay attached.**  The base footprint is analysed once; every block touching an
-  already placed block keeps its contact side and alignment (flush front/rear or left/right, else
-  the base offset).  Their origins are derived per sample.
-* **Depth-pitch coupling.**  For a gable with its ridge parallel to the frontage (or a hip) whose
-  front elevation shows the roof rise (the depth or pitch carries image evidence), the rise is an
-  observation: `rise = 0.5 x depth x tan(pitch)`.  An assumed depth is *derived* from the sampled
-  pitch prior, `depth = rise / (0.5 tan(pitch))`, clipped to the depth range; an evidence-derived
-  depth is sampled and the pitch derived.  The rise scales with the sampled `metres_per_pixel` of
-  its image.  When both depth and pitch are evidence (a side view), both are sampled independently.
+* **Attached blocks stay attached.**  The base footprint is analysed once with
+  `twin.builder.footprint_attachments` - the same attachment tree the twin editor reflows with -
+  so every block touching an already placed block keeps its contact side and alignment (flush
+  front/rear or left/right, else the base offset).  Their origins are derived per sample.
+* **Depth-pitch coupling.**  A pitched roof that stores an observed rise (`RoofSpec.observed_rise_m`,
+  set by the hypotheses when the front view shows the roof band) keeps
+  `rise = k x span x tan(pitch)` exact in every sample (k = 0.5 gable / hip, 1 monopitch; span =
+  depth for a ridge parallel to the frontage, width for a front-to-rear ridge, the shorter side of
+  a hip).  Every sample starts from the *stored* observed rise - never from the rise recomputed from
+  an edited depth or pitch - scaled by the sampled `metres_per_pixel` of its image (unless the rise
+  itself was user-confirmed).  A user-confirmed / observed span is sampled and the pitch derived; a
+  user-confirmed / observed pitch is sampled and the span derived, `span = rise / (k tan(pitch))`,
+  clipped to the span range (the pitch is then re-derived so the relation stays exact); with
+  neither fixed, an image-derived span is sampled, otherwise the pitch prior (and the span
+  derived).  Not coupled, and stated in the notes: span and pitch both user-confirmed / observed
+  (sampled independently), or a roof that no longer reproduces its observed rise.  Twins saved
+  before the rise was stored fall back to the rise of their current geometry.
 * **Hidden-facade openings follow their rule.**  Rule-generated windows keep their count; their
   widths scale so the glazed area tracks `ratio x hidden wall area - rule doors` relative to the
   base, positions scale with the wall length.

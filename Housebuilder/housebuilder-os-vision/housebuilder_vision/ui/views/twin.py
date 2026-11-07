@@ -15,6 +15,7 @@ import streamlit as st
 
 from ...core.models import ElementType, OpeningKind, RoofForm, Side, TwinEdit
 from ...core.provenance import Basis
+from ...twin.builder import coupling_warnings, roof_span_field
 from .. import fmt
 from .. import state as S
 from ..charts import twin_figure
@@ -83,6 +84,7 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
                      "twin; rebuild it to follow the current hypothesis.", title="Twin based on earlier evidence",
                      tone="danger"))
         st.button(f"Rebuild twin from {p.selected_hypothesis_id}", key="tw_rebuild", on_click=_cb_rebuild)
+    _coupling_callout(twin)
     left, right = st.columns([1.65, 1], gap="medium")
     with left:
         with guard("3D preview"):
@@ -100,6 +102,13 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     with st.expander(f"Edit log ({len(twin.edit_log)} edit(s))"):
         with guard("Edit log"):
             _edit_log(ws, ev)
+
+
+def _coupling_callout(twin) -> None:
+    """Twin warnings: roofs that no longer reproduce their observed rise (both values fixed)."""
+    msgs = coupling_warnings(twin)
+    if msgs:
+        html(callout("<br>".join(esc(m) for m in msgs), title="Roof does not match the observed rise", tone="warn"))
 
 
 def _viewer(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
@@ -197,8 +206,12 @@ def _blocks(ws: S.Workspace, ev) -> None:
             k = f"b_{v}_{b.block_id}_heated"
             st.toggle("Heated (inside the thermal envelope)", value=b.heated, key=k,
                       on_change=_cb_select, args=(k, _edit("block", b.block_id, "heated")))
-    st.caption("Width / depth are external dimensions. Blocks attached at the right or rear move with an edited "
-               "edge so the footprint stays valid. Every edit is recorded and marks the value user-confirmed.")
+    st.caption("Width / depth are external dimensions. Each block hangs from the block it was attached to (the main "
+               "block is the plan datum and keeps its origin): an edited block keeps that contact and alignment, and "
+               "blocks attached to it follow (a rear extension flush with a corner stays at that corner). An edit that "
+               "would detach a block or make blocks overlap is refused, as is removing a storey that still has "
+               "observed or user openings (rule-filled openings are regenerated). Every edit is recorded and marks "
+               "the value user-confirmed; values moved or derived by the system are logged as system edits.")
 
 
 def _roofs(ws: S.Workspace, ev) -> None:
@@ -238,8 +251,19 @@ def _roofs(ws: S.Workspace, ev) -> None:
             if r.form == RoofForm.FLAT:
                 tv_number("Parapet height", r.parapet_height_m, key=f"r_{v}_{b.block_id}_par",
                           apply=_edit("roof", b.block_id, "parapet_height_m"), system=system, min_si=0.0, max_si=3.0)
-    st.caption("Pitch is observed only where a gable / verge is seen in elevation; otherwise it is a prior. With an "
-               "observed ridge rise, depth and pitch are coupled - confirm either one.")
+            rise = r.observed_rise_m
+            if rise is not None and rise.value is not None and r.form != RoofForm.FLAT:
+                span = roof_span_field(b)
+                link = f"coupled with the {span[0]}" if span else "not coupled"
+                html(f'<div class="hbv-val">{badge(rise.basis)}<span class="hbv-range">observed roof rise '
+                     f'{esc(fmt.tv_value(rise, system))} · {esc(link)}</span><span class="hbv-small">'
+                     f'{esc(rise.note or rise.source)[:120]}</span></div>')
+    st.caption("Pitch is observed only where a gable / verge is seen in elevation; otherwise it is a prior. Where a "
+               "roof rise was observed in elevation, span and pitch are coupled (rise = span × tan(pitch) / 2, "
+               "monopitch / 1; the span is the depth for a ridge parallel to the frontage): confirming the span "
+               "re-derives the pitch, and confirming the pitch re-derives the span and moves attached blocks - "
+               "unless that other value is itself user-confirmed or observed. If both are, both are kept and the "
+               "mismatch with the observed rise is shown above and in the edit log.")
 
 
 _OPEN_COLS = ["opening_id", "block", "side", "kind", "storey", "offset", "width", "height", "sill", "basis", "rule"]

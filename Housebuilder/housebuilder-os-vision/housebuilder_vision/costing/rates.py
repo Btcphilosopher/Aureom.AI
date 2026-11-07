@@ -34,12 +34,30 @@ Resolution
    ``settings.vat_rate`` with a warning when the rate carries none)
    ``× fx`` (``settings.fx_rates[currency]``)
    ``× unit conversion`` (:func:`~housebuilder_vision.core.units.convert_rate`,
-   dimension-checked; count units only match themselves)
+   dimension-checked; count units only match themselves).  For time-based cost keys
+   (:data:`TIME_BASED_COST_KEY_PREFIXES`: ``lab:``, ``plant:``, ``prelim:``) a ``day`` /
+   ``week`` is *working* time - ``settings.hours_per_working_day`` hours /
+   ``settings.working_days_per_week`` days
+   (:func:`~housebuilder_vision.core.units.convert_working_time_rate`), never 24 h / 7 days;
+   the conversion is warned and labelled as an assumption.  Other keys use calendar time.
    ``× (1 + settings.annual_escalation_rate) ** years`` for rates dated before
-   the pricing date (years = days / 365.25)
-   ``× settings.regional_cost_factor`` when it differs from 1 and the rate's
-   location differs from the project location (the ``ProjectSettings``
-   contract); every such factor is labelled.
+   the pricing date (years = days / 365.25) - except rates whose ``valid_until`` covers the
+   pricing date (a firm quote / price list is not escalated)
+   ``× settings.regional_cost_factor`` when it differs from 1 and the rate is not local:
+   a rate is local when its normalised location (lower case, punctuation removed) *equals*
+   the project's site location, its region or one comma-separated part of either (e.g.
+   ``"Exampleton (fictional)"`` matches ``"Plot 7, Fictional Lane, Exampleton
+   (fictional)"``; ``"Lane"`` does not).  A supplier quote without a location is treated as
+   quoted for the project site (warned); any other rate without a location is adjusted.
+   Every factor is labelled.
+
+Provenance: ``ResolvedRate.basis`` is the rate's basis (:data:`RATE_SOURCE_BASIS`; expired
+quotes ASSUMED), weakened to ASSUMED when an assumed factor changed the value (escalation,
+regional factor, VAT stripped at the project rate, working-time conversion).
+
+Pricing date: a rate dated after the pricing date is excluded; when it outranks the rate that
+is used instead (e.g. a new supplier quote excluded and a FICTIONAL demo rate used), the
+warning starts with :data:`PRICING_DATE_WARNING` and ``ResolvedRate.excluded_newer`` names it.
 
 No rate -> ``(None, nan, warnings)``: the value is NaN on purpose so a missing
 price can never be silently treated as zero.
@@ -55,6 +73,7 @@ import io
 import json
 import math
 import os
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
@@ -73,9 +92,9 @@ from ..core.models import (
     RateSourceType,
     TaxTreatment,
 )
-from ..core.provenance import Basis
+from ..core.provenance import Basis, weakest_basis
 from ..core.settings import ProjectSettings
-from ..core.units import UnitError, convert_rate, normalise_unit
+from ..core.units import UnitError, convert_rate, convert_working_time_rate, is_working_time_pair, normalise_unit
 
 __all__ = [
     "MAX_FILE_BYTES",
@@ -83,6 +102,8 @@ __all__ = [
     "MAX_CELL_CHARS",
     "RATE_COLUMNS",
     "KNOWN_COST_KEY_PREFIXES",
+    "TIME_BASED_COST_KEY_PREFIXES",
+    "PRICING_DATE_WARNING",
     "RATE_SOURCE_BASIS",
     "RateBookError",
     "RateIndex",
@@ -111,6 +132,11 @@ _REQUIRED_COLUMNS = ("rate_id", "cost_key", "layer", "unit", "value", "effective
 _FLOAT_FIELDS = ("value", "vat_rate", "delivery_charge", "uncertainty_low", "uncertainty_high")
 _OPTIONAL_EMPTY_IS_NONE = ("vat_rate", "delivery_charge", "valid_until")
 KNOWN_COST_KEY_PREFIXES = ("mat", "lab", "plant", "allow", "log", "prelim")
+#: Cost keys priced per unit of time: their ``day`` / ``week`` units are working time (see module docstring).
+TIME_BASED_COST_KEY_PREFIXES = ("lab", "plant", "prelim")
+#: Start of the warning raised when a higher-priority rate is excluded only because it is dated after the
+#: pricing date and a lower-priority rate is used instead (the estimate and the UI show it prominently).
+PRICING_DATE_WARNING = "PRICING DATE"
 
 #: Provenance of a rate by source type (expired quotes are downgraded to ASSUMED).
 RATE_SOURCE_BASIS: dict[RateSourceType, Basis] = {
@@ -474,17 +500,44 @@ class ResolvedRate:
     regional_factor: float = 1.0
     expired: bool = False
     basis: Basis = Basis.UNKNOWN
+    #: True when a day / week rate of a time-based key was converted as working time (assumption).
+    working_time: bool = False
+    #: Rate ids that outrank the chosen rate but were excluded only because they are dated after the
+    #: pricing date (see :data:`PRICING_DATE_WARNING`).
+    excluded_newer: tuple[str, ...] = ()
 
     @property
     def found(self) -> bool:
         return self.rate is not None
 
 
+_NON_ALNUM = re.compile(r"[^0-9a-z]+")
+
+
+def _norm_location(text: str) -> str:
+    """Lower case, punctuation removed, whitespace collapsed: "Exampleton (fictional)" -> "exampleton fictional"."""
+    return " ".join(_NON_ALNUM.sub(" ", (text or "").lower()).split())
+
+
+def _local_names(settings: ProjectSettings) -> set[str]:
+    """Normalised names that count as the project location: site location, region and their comma parts."""
+    names: set[str] = set()
+    for text in (settings.site_location, settings.region):
+        names.add(_norm_location(text))
+        names.update(_norm_location(part) for part in (text or "").split(","))
+    names.discard("")
+    return names
+
+
 def _location_is_local(rate: Rate, settings: ProjectSettings) -> bool:
-    loc = rate.location.strip().lower()
-    if not loc:
-        return False
-    return loc in settings.site_location.lower() or loc in settings.region.lower()
+    """Normalised token equality with the site location, region or one of their comma-separated parts."""
+    loc = _norm_location(rate.location)
+    return bool(loc) and loc in _local_names(settings)
+
+
+def _is_fictional(rate: Rate) -> bool:
+    return (rate.source_type == RateSourceType.FICTIONAL_DEMO or "fictional" in rate.source.lower()
+            or "fictional" in rate.supplier.lower())
 
 
 def resolve_rate_detailed(book: Union[RateBook, RateIndex], cost_key: str, unit: str, *,
@@ -497,13 +550,17 @@ def resolve_rate_detailed(book: Union[RateBook, RateIndex], cost_key: str, unit:
                             (f"no rate for '{cost_key}' in rate book '{idx.book_name}'",))
     pdate: date = settings.pricing_date
     req_unit = _unit_key(unit)
+    time_based = cost_key.split(":", 1)[0].strip() in TIME_BASED_COST_KEY_PREFIXES
+    hpd, dpw = settings.hours_per_working_day, settings.working_days_per_week
     warnings: list[str] = []
     excluded: list[str] = []
-    usable: list[tuple[tuple, Rate, float, float, bool]] = []
+    future: list[Rate] = []
+    usable: list[tuple[tuple, Rate, float, float, bool, bool]] = []
     for r in cands:
         if r.effective_date > pdate:
             warnings.append(f"rate '{r.rate_id}' for '{cost_key}' is effective from {r.effective_date.isoformat()}, "
                             f"after the pricing date {pdate.isoformat()}; excluded")
+            future.append(r)
             continue
         if r.currency == settings.currency:
             fx = 1.0
@@ -514,8 +571,13 @@ def resolve_rate_detailed(book: Union[RateBook, RateIndex], cost_key: str, unit:
                             f"{settings.currency} is set; excluded")
             continue
         r_unit = _unit_key(r.unit)
+        working = False
         if r_unit == req_unit:
             uf = 1.0
+        elif time_based and is_working_time_pair(r_unit, req_unit):
+            uf = convert_working_time_rate(1.0, r_unit, req_unit, hours_per_working_day=hpd,
+                                           working_days_per_week=dpw)
+            working = True
         else:
             try:
                 uf = convert_rate(1.0, r_unit, req_unit)
@@ -525,56 +587,96 @@ def resolve_rate_detailed(book: Union[RateBook, RateIndex], cost_key: str, unit:
         expired = r.valid_until is not None and r.valid_until < pdate
         rank = (0 if expired else 1, RATE_SOURCE_PRIORITY.get(r.source_type, 0), r.effective_date.toordinal(),
                 -idx.position(r))
-        usable.append((rank, r, fx, uf, expired))
+        usable.append((rank, r, fx, uf, expired, working))
     if not usable:
         return ResolvedRate(cost_key, unit, None, math.nan,
                             tuple(warnings + excluded + [f"no usable rate for '{cost_key}' per '{unit}'"]))
     usable.sort(key=lambda t: t[0], reverse=True)
-    _, rate, fx, uf, expired = usable[0]
-    for _, other, _, _, other_expired in usable[1:]:
+    _, rate, fx, uf, expired, working = usable[0]
+    for _, other, _, _, other_expired, _ in usable[1:]:
         if other_expired and other.source_type == RateSourceType.SUPPLIER_QUOTE:
             warnings.append(f"quote '{other.rate_id}' for '{cost_key}' expired on {other.valid_until.isoformat()} "
                             f"(before {pdate.isoformat()}); deprioritised in favour of '{rate.rate_id}'")
     if expired:
         warnings.append(f"using expired rate '{rate.rate_id}' for '{cost_key}' (valid until "
                         f"{rate.valid_until.isoformat()}, pricing date {pdate.isoformat()}); re-quote")
+    # ---- newer rates excluded only by the pricing date that outrank the rate used (COST-11)
+    prio = RATE_SOURCE_PRIORITY.get(rate.source_type, 0)
+    newer = [f for f in future if RATE_SOURCE_PRIORITY.get(f.source_type, 0) > prio
+             or (expired and RATE_SOURCE_PRIORITY.get(f.source_type, 0) == prio)]
+    for f in newer:
+        used_label = f"{rate.source_type.value} rate '{rate.rate_id}'" + (" (FICTIONAL demo data)"
+                                                                         if _is_fictional(rate) else "")
+        warnings.insert(0, f"{PRICING_DATE_WARNING}: rate '{f.rate_id}' ({f.source_type.value}, effective "
+                           f"{f.effective_date.isoformat()}) for '{cost_key}' is dated after the pricing date "
+                           f"{pdate.isoformat()} and was excluded; the lower-priority {used_label} was used instead. "
+                           f"Move the pricing date to {f.effective_date.isoformat()} or later if the newer rate "
+                           "should apply.")
     adjustments: list[str] = []
+    assumed_factor = False
     v = float(rate.value)
     money = 1.0
     if rate.tax_treatment == TaxTreatment.INC_VAT:
         vr = rate.vat_rate
         if vr is None:
             vr = settings.vat_rate
+            assumed_factor = True
             warnings.append(f"rate '{rate.rate_id}' is VAT-inclusive without a vat_rate; stripped at the project "
                             f"VAT rate {vr:.0%} (assumption)")
+            adjustments.append(f"VAT stripped ÷{1.0 + vr:g} at the project VAT rate (assumption)")
+        else:
+            adjustments.append(f"VAT stripped ÷{1.0 + vr:g}")
         money /= (1.0 + vr)
-        adjustments.append(f"VAT stripped ÷{1.0 + vr:g}")
     elif rate.tax_treatment == TaxTreatment.UNKNOWN:
         warnings.append(f"rate '{rate.rate_id}' has unknown tax treatment; used as entered (assumed net of VAT)")
     if fx != 1.0:
         money *= fx
         adjustments.append(f"fx {rate.currency}->{settings.currency} ×{fx:g}")
-    if uf != 1.0:
+    if working:
+        assumed_factor = True
+        adjustments.append(f"per {rate.unit} -> per {unit} ×{uf:g} (working time: {hpd:g} h per working day, "
+                           f"{dpw:g} working days per week; assumption)")
+        warnings.append(f"rate '{rate.rate_id}' for '{cost_key}' is per {rate.unit}: converted to per {unit} as "
+                        f"working time ({hpd:g} h per working day, {dpw:g} working days per week - "
+                        "ProjectSettings.hours_per_working_day / working_days_per_week; assumption), not calendar "
+                        "time")
+    elif uf != 1.0:
         adjustments.append(f"per {rate.unit} -> per {unit} ×{uf:g}")
     esc = 1.0
     e = settings.annual_escalation_rate
     days = (pdate - rate.effective_date).days
+    firm = rate.valid_until is not None and rate.valid_until >= pdate
     if e and days > 0:
-        years = days / 365.25
-        esc = (1.0 + e) ** years
-        money *= esc
-        adjustments.append(f"escalation {e:+.1%}/yr × {years:.2f} yr = ×{esc:.4f} (assumption)")
+        if firm:
+            adjustments.append(f"not escalated: valid until {rate.valid_until.isoformat()} (firm price on the "
+                               f"pricing date {pdate.isoformat()})")
+        else:
+            years = days / 365.25
+            esc = (1.0 + e) ** years
+            money *= esc
+            assumed_factor = True
+            adjustments.append(f"escalation {e:+.1%}/yr × {years:.2f} yr = ×{esc:.4f} (assumption)")
     reg = 1.0
     rf = settings.regional_cost_factor
-    if rf != 1.0 and not _location_is_local(rate, settings):
-        reg = rf
-        money *= reg
-        adjustments.append(f"regional factor ×{rf:g} (rate location '{rate.location or 'unspecified'}' "
-                           "differs from the project location; assumption)")
+    if rf != 1.0:
+        if not rate.location.strip() and rate.source_type == RateSourceType.SUPPLIER_QUOTE:
+            warnings.append(f"supplier quote '{rate.rate_id}' for '{cost_key}' has no location; treated as quoted "
+                            f"for the project site (regional factor ×{rf:g} not applied; assumption) - add the "
+                            "quote's location to confirm")
+        elif not _location_is_local(rate, settings):
+            reg = rf
+            money *= reg
+            assumed_factor = True
+            adjustments.append(f"regional factor ×{rf:g} (rate location '{rate.location or 'unspecified'}' "
+                               "differs from the project location; assumption)")
     v = v * money * uf
+    basis = rate_basis(rate, expired=expired)
+    if assumed_factor:
+        basis = weakest_basis(basis, Basis.ASSUMED)
     return ResolvedRate(cost_key=cost_key, unit=unit, rate=rate, value=v, warnings=tuple(warnings),
                         adjustments=tuple(adjustments), money_factor=money, unit_factor=uf, escalation_factor=esc,
-                        regional_factor=reg, expired=expired, basis=rate_basis(rate, expired=expired))
+                        regional_factor=reg, expired=expired, basis=basis, working_time=working,
+                        excluded_newer=tuple(f.rate_id for f in newer))
 
 
 def resolve_rate(book: Union[RateBook, RateIndex], cost_key: str, unit: str, *,
@@ -582,12 +684,15 @@ def resolve_rate(book: Union[RateBook, RateIndex], cost_key: str, unit: str, *,
     """``(rate, net value per unit, warnings)`` for ``cost_key`` priced per ``unit``.
 
     The net value is converted to the requested unit and ``settings.currency``, VAT-exclusive,
-    escalated to the pricing date and regionally adjusted (each labelled assumption is listed in
-    the warnings).  ``rate`` is ``None`` and the value NaN when nothing usable exists.
+    escalated to the pricing date and regionally adjusted.  The warnings list the resolution
+    warnings followed by *every* adjustment applied (VAT strip, fx, unit / working-time conversion,
+    escalation, regional factor), each labelled.  ``rate`` is ``None`` and the value NaN when
+    nothing usable exists.
     """
     rr = resolve_rate_detailed(book, cost_key, unit, settings=settings)
-    labelled = [a for a in rr.adjustments if "assumption" in a or a.startswith("fx")]
-    return rr.rate, rr.value, list(rr.warnings) + labelled
+    out = list(rr.warnings)
+    out.extend(a for a in rr.adjustments if a not in out)
+    return rr.rate, rr.value, out
 
 
 def __getattr__(name: str) -> Any:

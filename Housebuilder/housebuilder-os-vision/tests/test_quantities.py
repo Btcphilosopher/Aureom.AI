@@ -503,7 +503,13 @@ def test_trench_length_and_foundation_quantities():
     assert conc.installed_qty == pytest.approx(L * 0.6 * 0.85) and conc.cost_key == "mat:concrete_c25"
     assert conc.purchased_qty == pytest.approx(math.ceil(conc.installed_qty * 1.05 / 0.25 - 1e-9) * 0.25)
     over = boq.line("1.all.fdn_trench_fill.1")
-    assert over.installed_qty == pytest.approx(boq.geometry.ground_floor_area_m2 * 0.25)
+    # oversite = GIA less the trench plan inside it (GEO-11: the trench top is not dug twice): the
+    # 0.6 m trench on the external-wall centreline reaches (t + 0.6) / 2 in from the external face,
+    # and the internal loadbearing trench (0.6 m x 0.2 P) lies wholly inside the GIA
+    e = (t + 0.6) / 2
+    assert over.measure_name == "oversite_area"
+    assert over.installed_qty == pytest.approx(((10 - 2 * e) * (8 - 2 * e) - 0.6 * 0.2 * P) * 0.25)
+    assert over.installed_qty < boq.geometry.ground_floor_area_m2 * 0.25
     disp = boq.line("1.all.fdn_trench_fill.2")
     assert disp.installed_qty == pytest.approx((exc.installed_qty + over.installed_qty) * 1.25)
     assert disp.cost_key == "log:spoil_disposal"

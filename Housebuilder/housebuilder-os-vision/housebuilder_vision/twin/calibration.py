@@ -10,7 +10,10 @@ first FRONT facade observation).  Three methods, in order of preference:
    length), or - with neither - the width of the main front facade::
 
        m_per_px = real_m / px
-       e_px     = 2 * pixel_uncertainty / px      (one sigma per endpoint, both ends)
+       e_px     = 2 * sigma_len / px      (sigma_len = sqrt(2) x the per-endpoint sigma: the
+                                          length is the difference of two independently located
+                                          endpoints / edges; a facade width's own band already
+                                          carries both edges)
        e_tol    = tolerance_m / real_m
        e_persp  = perspective.foreshortening_uncertainty   (else assumptions.perspective_dimension_error)
        hw       = sqrt(e_px**2 + e_tol**2 + e_persp**2)
@@ -43,14 +46,22 @@ first FRONT facade observation).  Three methods, in order of preference:
        low  = prior.low  / (px + band) * (1 - e_persp)
        high = prior.high / (px - band) * (1 + e_persp)
 
-   (``band`` = 2 x per-endpoint pixel sigma, or the +/-2-sigma half range of a
-   facade measurement).  Cues are combined as the inverse-variance-weighted
+   (``band`` = 2 x sqrt(2) x per-endpoint pixel sigma for an opening height
+   measured between two edges, or the +/-2-sigma half range of a facade
+   measurement).  Cues are combined as the inverse-variance-weighted
    *geometric* mean of their modes (log-space sigma = ln(high/low)/4); the range
    is the intersection of the cue intervals (never narrower than the combined
    +/-2 sigma) or, if they do not intersect, their union with the warning
    "scale cues disagree".  Basis ``ASSUMED``; ``Distribution.TRIANGULAR``.
 
 With no cue at all the method is ``none`` and the value is ``UNKNOWN``.
+
+Pixel errors: a feature's ``pixel_uncertainty`` is one sigma per edge / vertex
+(see :mod:`housebuilder_vision.vision.analysis`).  Every *length* between two
+independently located endpoints or edges (reference endpoints, a bbox width,
+a plan dimension line, a building outline width, an opening height) has a
+1-sigma error of ``sqrt(2)`` x that (:func:`length_sigma`); ranges use +/-2
+sigma (:func:`length_band`).
 
 Every calibration carries ``correlation_group = "scale:<image_id>"`` so all
 dimensions scaled from the same image are sampled with a common driver, and a
@@ -98,6 +109,20 @@ RECOMMEND_DEPTH = ("Scale is calibrated. The next most useful measurement is the
                    "roof quantities.")
 RECOMMEND_CHECK_PLAN = ("Scale comes from a dimensioned plan; confirm the frontage width on site to check the "
                         "drawing scale and its transfer to the elevation.")
+
+
+#: A length between two independently located endpoints has sigma = sqrt(2) x the per-endpoint sigma.
+ENDPOINT_PAIR_FACTOR = math.sqrt(2.0)
+
+
+def length_sigma(endpoint_sigma: float) -> float:
+    """1-sigma error (px) of a length between two endpoints, each with ``endpoint_sigma``."""
+    return ENDPOINT_PAIR_FACTOR * float(endpoint_sigma)
+
+
+def length_band(endpoint_sigma: float) -> float:
+    """+/-2-sigma half range (px) of a length between two endpoints, each with ``endpoint_sigma``."""
+    return 2.0 * length_sigma(endpoint_sigma)
 
 
 def scale_group(image_id: str) -> str:
@@ -172,10 +197,10 @@ def perspective_error(analysis: AnalysisResult, image_id: Optional[str], assumpt
 
 
 def px_band(tv: Optional[TrackedValue], default_pixel_sigma: float) -> float:
-    """Half range (px) of a pixel measurement: +/- (high-low)/2, else 2 x per-endpoint sigma."""
+    """Half range (px) of a pixel length: +/- (high-low)/2, else :func:`length_band` of the endpoint sigma."""
     if tv is not None and tv.low is not None and tv.high is not None and tv.high > tv.low:
         return 0.5 * (tv.high - tv.low)
-    return 2.0 * default_pixel_sigma
+    return length_band(default_pixel_sigma)
 
 
 def relative_scale(analysis: AnalysisResult, image_id: str) -> Optional[TrackedValue]:
@@ -214,7 +239,8 @@ class ResolvedReference:
 
     image_id: str
     pixels: float
-    #: Per-endpoint 1-sigma pixel error.
+    #: 1-sigma error (px) of the pixel *length* (both endpoints / edges: sqrt(2) x the per-endpoint sigma
+    #: for endpoints and feature boxes; half the +/-2-sigma band of a facade width measurement).
     pixel_uncertainty: float
     real_m: float
     tolerance_m: float
@@ -277,7 +303,8 @@ def resolve_reference(analysis: AnalysisResult, reference: ReferenceMeasurement,
                 if abs(xa - f.left_x_px) <= tol and abs(xb - (f.left_x_px + w)) <= tol:
                     hint = f.block_hint
                     break
-        res = ResolvedReference(reference.image_id, px, pu_default, real_m, tol_m, "points", hint, ())
+        res = ResolvedReference(reference.image_id, px, length_sigma(pu_default), real_m, tol_m, "points", hint,
+                                ())
     elif reference.feature_id:
         fid = reference.feature_id
         feat = find_feature(analysis, fid, reference.image_id)
@@ -291,8 +318,8 @@ def resolve_reference(analysis: AnalysisResult, reference: ReferenceMeasurement,
                     if fid in f.feature_ids:
                         hint = f.block_hint
                         break
-            res = ResolvedReference(reference.image_id, float(px), float(feat.pixel_uncertainty), real_m, tol_m,
-                                    f"feature:{fid}", hint, (fid,))
+            res = ResolvedReference(reference.image_id, float(px), length_sigma(feat.pixel_uncertainty), real_m,
+                                    tol_m, f"feature:{fid}", hint, (fid,))
         else:
             name = fid.split(":", 1)[1] if fid.startswith("facade:") else fid
             fac = next((f for f in facades if f.block_hint == name), None)
@@ -373,7 +400,7 @@ def prior_scale_cues(analysis: AnalysisResult, image_id: Optional[str],
         hit = _median_opening(facades, kind)
         if hit is not None:
             h, fid, _ = hit
-            c = _cue(label, fid, h, 2.0 * pu_of(fid), prior, e_persp)
+            c = _cue(label, fid, h, length_band(pu_of(fid)), prior, e_persp)
             if c is not None:
                 cues.append(c)
 
@@ -468,7 +495,7 @@ def _plan_scale(analysis: AnalysisResult, A: AssumptionLibrary) -> Optional[dict
             if not (0 < px <= MAX_PIXELS):
                 notes.append(f"Plan dimension {f.feature_id}: no measurable pixel length; ignored.")
                 continue
-            e_px = 2.0 * float(f.pixel_uncertainty) / px
+            e_px = length_band(f.pixel_uncertainty) / px
             v = length / px
             rb = f.basis if f.basis in (Basis.OBSERVED, Basis.USER_CONFIRMED) else Basis.INFERRED
             cues.append(ScaleCue(
@@ -528,7 +555,7 @@ def calibrate_scale(analysis: AnalysisResult, reference: Optional[ReferenceMeasu
 def _from_reference(analysis: AnalysisResult, reference: ReferenceMeasurement, primary: Optional[str],
                     A: AssumptionLibrary) -> ScaleCalibration:
     rr = resolve_reference(analysis, reference, assumptions=A)
-    e_px = 2.0 * rr.pixel_uncertainty / rr.pixels
+    e_px = 2.0 * rr.pixel_uncertainty / rr.pixels  # rr.pixel_uncertainty is the 1-sigma of the length
     e_tol = rr.tolerance_m / rr.real_m
     e_persp = perspective_error(analysis, rr.image_id, A)
     hw = math.sqrt(e_px ** 2 + e_tol ** 2 + e_persp ** 2)
@@ -591,8 +618,8 @@ def _from_plan(analysis: AnalysisResult, plan: dict[str, Any], primary: Optional
         if ow > 0 and span > 0:
             frontage = ow * v
             pu = float(A.pixel_measurement_error_px)
-            e_out = 2.0 * float(outline.pixel_uncertainty) / ow
-            e_span = 2.0 * pu / span
+            e_out = length_band(outline.pixel_uncertainty) / ow
+            e_span = length_band(pu) / span
             e_persp = perspective_error(analysis, primary, A)
             hw = min(math.sqrt(e ** 2 + e_out ** 2 + e_span ** 2 + e_persp ** 2), MAX_HALF_WIDTH)
             val = frontage / span
@@ -649,11 +676,14 @@ def prior_cue_calibration(analysis: AnalysisResult, image_id: Optional[str], *,
 
 __all__ = [
     "ResolvedReference",
+    "ENDPOINT_PAIR_FACTOR",
     "SCALE_UNIT",
     "calibrate_scale",
     "combine_cues",
     "find_feature",
     "front_facades",
+    "length_band",
+    "length_sigma",
     "main_facade",
     "perspective_error",
     "primary_image_id",

@@ -27,11 +27,20 @@ class ProjectSettings(BaseModel):
     currency: str = "GBP"
     #: Display units only. All internal calculations are SI metric.
     unit_system: Literal["metric", "imperial"] = "metric"
-    pricing_date: date = Field(default_factory=lambda: date(2026, 11, 1))
+    #: Date at which rates are resolved (rates dated after it are excluded, quotes that expired before it
+    #: are deprioritised, older rates are escalated to it).  A new project defaults to *today*; the
+    #: bundled demo pins 2026-11-01 explicitly (``demo.build_demo.DEMO_PRICING_DATE``) for reproducibility.
+    pricing_date: date = Field(default_factory=date.today)
     #: Regional multiplier applied to rates whose location differs (labelled assumption).
     regional_cost_factor: float = 1.0
     #: Annual escalation applied to rates dated before the pricing date (0 = none).
     annual_escalation_rate: float = 0.0
+    #: Working time used to convert labour, plant and preliminaries rates (``lab:``, ``plant:``,
+    #: ``prelim:`` cost keys) quoted per day or per week: a working day of ``hours_per_working_day``
+    #: hours and a working week of ``working_days_per_week`` days (labelled assumptions; calendar
+    #: 24 h / 7 day conversion is used only for other cost keys).  Additive, costing module.
+    hours_per_working_day: float = Field(default=8.0, gt=0.0, le=24.0)
+    working_days_per_week: float = Field(default=5.0, gt=0.0, le=7.0)
     #: Currency -> multiplier into ``currency`` for rates quoted in other currencies.
     fx_rates: dict[str, float] = Field(default_factory=dict)
     #: VAT is only added as a layer-9 line when this is True (enter the rate that applies).

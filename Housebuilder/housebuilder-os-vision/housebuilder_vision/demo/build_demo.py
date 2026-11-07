@@ -12,10 +12,12 @@ assets, using the logged pipeline functions (every step is in ``project.run_log`
 5. build the twin with the library's default assembly selection (masonry cavity wall,
    trench-fill foundation - all ASSUMED, never inferred from the brick-like appearance);
 6. the illustrative assembly library, the FICTIONAL rate book from
-   ``fictional_rates_gbp_2026.csv``, default :class:`CostParameters`;
+   ``fictional_rates_gbp_2026.csv`` priced at the pinned :data:`DEMO_PRICING_DATE`
+   (2026-11-01, for reproducibility), default :class:`CostParameters`;
 7. production scenarios **PS-site** (site-built) and **PS-offsite** (off-site panelised
-   timber frame with factory set-up, lines, learning, procurement tiers and a capacity
-   step) - fictional, labelled assumptions;
+   timber frame with factory set-up, lines, learning, procurement tiers and a factory
+   capacity step; per-house values from the timber-frame + brick variant estimate) -
+   fictional, labelled assumptions;
 8. build scenarios **S1** masonry H-A, **S2** timber frame + brick H-A, **S3** timber frame +
    timber cladding H-A, **S4** masonry H-B; default :class:`SimulationConfig`.
 
@@ -37,6 +39,7 @@ the supplier quotes and the production economics.
 from __future__ import annotations
 
 import tempfile
+from datetime import date
 from pathlib import Path
 from typing import Optional, Union
 
@@ -57,6 +60,7 @@ from ..core.settings import AssumptionLibrary, ProjectSettings
 
 __all__ = [
     "DATA_DIR",
+    "DEMO_PRICING_DATE",
     "FRONT_IMAGE",
     "LEFT_IMAGE",
     "DEMO_PROJECT_ID",
@@ -69,6 +73,7 @@ __all__ = [
     "demo_build_scenarios",
     "demo_production_scenarios_for",
     "demo_registry",
+    "OFFSITE_EXTERNAL_WALL",
     "main_facade_feature_id",
 ]
 
@@ -83,6 +88,8 @@ REFERENCE_DESCRIPTION = "confirmed frontage width from a fictional measured surv
 REFERENCE_SOURCE = "fictional measured survey (demo)"
 SELECTED_HYPOTHESIS = "H-A"
 FICTIONAL_NOTE = "FICTIONAL demonstration assumption - not calibrated against outturn data."
+#: The demo is priced at a fixed date so its results are reproducible (a new project defaults to today).
+DEMO_PRICING_DATE = date(2026, 11, 1)
 
 
 def main_facade_feature_id(analysis, image_id: str) -> str:
@@ -137,35 +144,53 @@ def demo_build_scenarios() -> list[BuildScenario]:
     ]
 
 
-def demo_production_scenarios_for(site_estimate, timber_frame_estimate) -> list[ProductionScenario]:
+#: External-wall assembly of the off-site panelised production scenario (PS-offsite).
+OFFSITE_EXTERNAL_WALL = "ew_timber_frame_brick"
+OFFSITE_SOURCE_DEFAULT = "the timber frame + brick outer leaf house (scenario S2 assemblies)"
+
+
+def demo_production_scenarios_for(site_estimate, timber_frame_estimate, *,
+                                  offsite_source: Optional[str] = None) -> list[ProductionScenario]:
     """PS-site (from the masonry estimate) and PS-offsite (from the timber-frame estimate).
 
-    PS-site leaves per-house materials / labour / plant / logistics to the estimate it is applied
-    to (the selected masonry twin).  PS-offsite fixes them from the timber-frame + brick house so
-    its economics describe a panelised timber frame.  All values are fictional assumptions.
+    PS-site leaves per-house materials / labour / plant / logistics / site overhead to the estimate it
+    is applied to (the selected masonry twin).  PS-offsite fixes them from ``timber_frame_estimate`` so
+    its economics describe a panelised timber frame: materials with their order-level data (re-rounded
+    for n houses), plant, site logistics with the factory share (35 %) of material deliveries, delivery
+    charges and skips removed (:func:`~housebuilder_vision.costing.repeat_build.site_logistics_for`)
+    and the time-related site overhead share of its preliminaries.  ``offsite_source`` describes where
+    those values come from (default: the timber frame + brick house); pass the truth when the caller
+    could not build that variant.  The "Second factory shift and QA team" step is a *factory* step
+    (inside the factory-gate boundary).  All values are fictional assumptions.
     """
-    from ..costing.repeat_build import demo_production_scenarios
+    from ..costing.repeat_build import _estimate_defaults, demo_production_scenarios, site_logistics_for
 
     site0 = demo_production_scenarios(site_estimate)[0]
     panel0 = demo_production_scenarios(timber_frame_estimate)[1]
     lt = timber_frame_estimate.layer_totals
+    phi = float(panel0.factory_material_fraction or 0.0)
+    source = offsite_source or OFFSITE_SOURCE_DEFAULT
     site = site0.model_copy(update={
         "scenario_id": "PS-site",
         "name": "PS-site: site-built (traditional) - FICTIONAL",
         "notes": "Site-built repeat of the selected house. " + FICTIONAL_NOTE + " " + site0.notes,
     })
+    tf_time_prelims = _estimate_defaults(timber_frame_estimate)["time_related_prelims"]
     panel = panel0.model_copy(update={
         "scenario_id": "PS-offsite",
         "name": "PS-offsite: off-site panelised timber frame - FICTIONAL",
         "materials_per_house": float(lt.get("1_materials", 0.0)),
+        "material_orders": [o.model_copy() for o in timber_frame_estimate.material_orders],
         "plant_per_house": float(lt.get("3_plant", 0.0)),
-        "site_logistics_per_house": float(lt.get("4_logistics_waste", 0.0)),
+        "site_logistics_per_house": site_logistics_for(timber_frame_estimate, phi),
+        "site_overhead_per_house": tf_time_prelims * panel0.site_overhead_share,
         "step_costs": [StepCost(name="Second factory shift and QA team", every_n_units=50, cost=55000.0,
-                                starts_after_units=40,
-                                note="Capacity step beyond 40 units: " + FICTIONAL_NOTE)],
-        "notes": ("Per-house materials, plant and site logistics from the timber frame + brick outer leaf house "
-                  "(scenario S2 assemblies); factory set-up, lines, learning, tiers and capacity step are "
-                  + FICTIONAL_NOTE + " " + panel0.notes),
+                                starts_after_units=40, boundary="factory",
+                                note="Factory capacity step beyond 40 units: " + FICTIONAL_NOTE)],
+        "notes": (f"Per-house materials (with their order-level pack data), plant, site logistics (factory share "
+                  f"{phi:.0%} of material deliveries and skips removed) and time-related site overhead "
+                  f"({panel0.site_overhead_share:.0%} of its preliminaries) from {source}; factory set-up, lines, "
+                  "learning, tiers and the factory capacity step are " + FICTIONAL_NOTE + " " + panel0.notes),
     })
     return [site, panel]
 
@@ -195,7 +220,7 @@ def build_demo_project(store_dir: Union[str, Path, None] = None, *, include_side
 
     store = Path(store_dir) if store_dir is not None else Path(tempfile.mkdtemp(prefix="hbv-demo-"))
     store.mkdir(parents=True, exist_ok=True)
-    settings = ProjectSettings()
+    settings = ProjectSettings(pricing_date=DEMO_PRICING_DATE)
     assumptions = AssumptionLibrary()
     project = Project(
         project_id=DEMO_PROJECT_ID if with_reference else f"{DEMO_PROJECT_ID}-uncalibrated",
@@ -241,7 +266,7 @@ def build_demo_project(store_dir: Union[str, Path, None] = None, *, include_side
                                             logistics=sims["logistics"], library=library)
 
     site_est = quick_estimate(twin)
-    tf_twin = P.apply_construction_assemblies(twin, {"external_wall": "ew_timber_frame_brick"}, library,
+    tf_twin = P.apply_construction_assemblies(twin, {"external_wall": OFFSITE_EXTERNAL_WALL}, library,
                                               actor="scenario:PS-offsite",
                                               reason="timber-frame variant for the off-site production scenario",
                                               run_log=project)

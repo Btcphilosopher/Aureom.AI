@@ -2,7 +2,10 @@
 
 Each build scenario is one coherent house (hypothesis + assembly overrides + foundation + price
 level); results are compared side by side and never averaged.  Repeat-build curves show average
-C(n)/n and incremental C(n+1) - C(n) cost for the factory-gate and installed boundaries.  Every
+C(n)/n, incremental C(n+1) - C(n) and the underlying marginal cost (without capacity steps, pack
+rounding steps and all-units tier re-pricing) for the factory-gate and installed boundaries; the
+table lists the steps / tier crossings between n and n+1 and the single house is reconciled with
+the installed C(1).  Every
 chart carries its assumptions / boundary caption: the programme is an indicative critical path,
 carbon uses illustrative placeholder factors, heat loss is a simplified steady-state calculation
 (not SAP / SBEM / PHPP) - none of them is a compliance or performance claim.
@@ -14,13 +17,15 @@ import math
 from typing import Optional
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from ...core.models import DiscountTier, LearningCurve, ProductionScenario, StepCost
+from .. import fmt
 from .. import state as S
 from ..charts import carbon_chart, gantt, heat_loss_chart, repeat_chart, scenario_multiples
 from ..components import cards, guard, html, section_title
-from ..theme import callout, card, esc
+from ..theme import IVORY_MUTED, callout, card, esc
 
 
 def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
@@ -112,8 +117,9 @@ def _cb_add_ps() -> None:
     ws = S.get_workspace()
     ev = S.evaluate(ws)
     if ev is not None:
-        S.add_example_production_scenarios(ws, ev)
-        ws.say("success", "Illustrative (FICTIONAL) production scenarios added: site-built and off-site panelised.")
+        source = S.add_example_production_scenarios(ws, ev)
+        ws.say("success", "Illustrative (FICTIONAL) production scenarios added: site-built (current house) and "
+                          f"off-site panelised (per-house values from {source}).")
 
 
 def _repeat(ws: S.Workspace, ev: S.Evaluation) -> None:
@@ -135,7 +141,9 @@ def _repeat(ws: S.Workspace, ev: S.Evaluation) -> None:
     res = S.repeat_results(ws, ev, ps)
     cur = res["installed"].currency
     with right:
-        st.plotly_chart(repeat_chart(res, height=360), key="ps_chart", theme=None, config={"displaylogo": False})
+        fig = repeat_chart(res, height=360)
+        _add_underlying(fig, res)
+        st.plotly_chart(fig, key="ps_chart", theme=None, config={"displaylogo": False})
         rows = []
         fg = {r.n: r for r in res["factory_gate"].rows}
         ins = {r.n: r for r in res["installed"].rows}
@@ -144,24 +152,33 @@ def _repeat(ws: S.Workspace, ev: S.Evaluation) -> None:
             if a is None or b is None:
                 continue
             rows.append({"n": n, "FG average": a.average_cost, "FG incremental": a.incremental_cost,
+                         "FG underlying": a.underlying_marginal_cost,
                          "installed average": b.average_cost, "installed incremental": b.incremental_cost,
-                         "installed C(n)": b.total_cost,
-                         "factory share": a.total_cost / b.total_cost if b.total_cost else None})
+                         "installed underlying": b.underlying_marginal_cost, "installed C(n)": b.total_cost,
+                         "factory share": a.total_cost / b.total_cost if b.total_cost else None,
+                         "steps between n and n+1": "; ".join(b.step_events) or "-"})
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                      column_config={**{c: st.column_config.NumberColumn(c, format="%,.0f")
-                                       for c in ("FG average", "FG incremental", "installed average",
-                                                 "installed incremental", "installed C(n)")},
+                                       for c in ("FG average", "FG incremental", "FG underlying", "installed average",
+                                                 "installed incremental", "installed underlying", "installed C(n)")},
                                     "n": st.column_config.NumberColumn(format="%d"),
-                                    "factory share": st.column_config.NumberColumn(format="percent")})
+                                    "factory share": st.column_config.NumberColumn(format="percent"),
+                                    "steps between n and n+1": st.column_config.TextColumn(width="large")})
         st.caption(f"Amounts in {cur} per house (C(n) in total). FG = factory gate; factory share = factory-gate "
-                   "C(n) / installed C(n).")
+                   "C(n) / installed C(n). Incremental = C(n+1) − C(n) exactly: when house n+1 starts a new site, "
+                   "factory line or capacity step, or reaches a procurement tier, it contains that step (listed in the "
+                   "last column). Underlying = the cost of house n+1 without capacity steps, pack-rounding steps and "
+                   "all-units tier re-pricing (dotted lines in the chart).")
     html(callout(
         "<b>Average cost</b> = C(n) / n spreads one-off and step costs (design, tooling, factory set-up and lines, site "
         "establishment, capacity steps) over n houses. <b>Incremental cost</b> = C(n+1) − C(n) is the cost of one more "
         "house: it only contains a step cost when a threshold is crossed, and all-units procurement tiers can make it "
-        f"drop sharply.<br><b>Factory gate:</b> {esc(res['factory_gate'].boundary_definition)}<br>"
+        "drop sharply. <b>Underlying marginal</b>: "
+        f"{esc(res['installed'].assumptions.get('underlying_marginal_definition', ''))}<br>"
+        f"<b>Factory gate:</b> {esc(res['factory_gate'].boundary_definition)}<br>"
         f"<b>Installed:</b> {esc(res['installed'].boundary_definition)}", title="Definitions and boundaries",
         tone="info"))
+    _reconciliation(res["installed"])
     with st.expander("Model notes and per-house inputs"):
         for n in res["installed"].notes:
             st.markdown(f"- {esc(n)}")
@@ -182,19 +199,70 @@ def _repeat(ws: S.Workspace, ev: S.Evaluation) -> None:
                                     for c in crow[0] if c != "scenario"})
 
 
+def _add_underlying(fig: go.Figure, res: dict) -> None:
+    """Dotted underlying-marginal line per boundary panel of :func:`charts.repeat_chart`."""
+    keys = [k for k in ("factory_gate", "installed", "development") if k in res]
+    for c, k in enumerate(keys, start=1):
+        r = res[k]
+        ys = [row.underlying_marginal_cost for row in r.rows]
+        if all(y is None or abs(y) < 1e-9 for y in ys):
+            continue
+        label = "Underlying marginal (no steps / re-pricing)"
+        fig.add_trace(go.Scatter(x=[row.n for row in r.rows], y=ys, mode="lines", name=label, legendgroup=label,
+                                 showlegend=c == 1, line=dict(color=IVORY_MUTED, width=1.4, dash="dot"),
+                                 hovertemplate=f"n=%{{x}}<br>{label}: %{{y:,.0f}} {r.currency}<extra></extra>"),
+                      row=1, col=c)
+
+
+def _reconciliation(res) -> None:
+    """Single-house layers 1-5 next to the installed C(1) components."""
+    rec = res.assumptions.get("single_house_reconciliation")
+    if not rec:
+        return
+    cur = res.currency
+    with st.expander(f"Single house vs installed C(1): {fmt.money(rec['single_house_l1_l5'], cur)} (layers 1-5) → "
+                     f"{fmt.money(rec['installed_c1'], cur)}"):
+        rows = [{"item": r["item"], "single house": r["single_house"], "installed C(1)": r["installed_c1"],
+                 "difference": r["difference"], "note": r["note"]} for r in rec["rows"]]
+        rows.append({"item": "Total", "single house": rec["single_house_l1_l5"], "installed C(1)": rec["installed_c1"],
+                     "difference": rec["difference"], "note": ""})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={k: st.column_config.NumberColumn(f"{k} ({cur})", format="%,.0f")
+                                    for k in ("single house", "installed C(1)", "difference")})
+        st.caption(rec["note"] + " The single-house preliminaries become site establishment per started site plus a "
+                   "time-related site overhead share per house; compare averages C(n)/n with installed C(1).")
+
+
 def _ps_editor(ws: S.Workspace, ps: ProductionScenario) -> None:
     with st.form(f"ps_form_{ps.scenario_id}", border=True):
         st.markdown("**Key assumptions** <span class='hbv-small'>(labelled, not calibrated)</span>",
                     unsafe_allow_html=True)
-        c = st.columns(2)
-        lr = c[0].number_input("Learning rate", value=float(ps.learning.learning_rate), min_value=0.51, max_value=1.0,
-                               step=0.01, format="%.2f", help="Wright curve: hours fall by (1 − rate) per doubling.")
-        fl = c[1].number_input("Learning floor", value=float(ps.learning.floor_fraction), min_value=0.05,
-                               max_value=1.0, step=0.05, format="%.2f", help="Hours never fall below floor × h1.")
-        c = st.columns(2)
+        c = st.columns(3)
+        models = ["unit", "cumulative_average"]
+        lm = c[0].selectbox("Learning model", models, index=models.index(ps.learning.model),
+                            format_func=lambda m: "Unit (Crawford-style)" if m == "unit" else
+                            "Cumulative average (Wright)",
+                            help="Unit (Crawford-style): each house's hours fall by (1 − rate) per doubling of "
+                                 "output. Cumulative average (Wright): the average hours of the first n houses fall by "
+                                 "(1 − rate) per doubling - faster learning for the same rate. Use the model your "
+                                 "benchmark rate was quoted for.")
+        lr = c[1].number_input("Learning rate", value=float(ps.learning.learning_rate), min_value=0.51, max_value=1.0,
+                               step=0.01, format="%.2f", help="Hours (unit model) or average hours (Wright) fall by "
+                                                              "(1 − rate) per doubling of output.")
+        fl = c[2].number_input("Learning floor", value=float(ps.learning.floor_fraction), min_value=0.05,
+                               max_value=1.0, step=0.05, format="%.2f",
+                               help="A house's hours never fall below floor × h1 (both models).")
+        c = st.columns(3)
         hps = c[0].number_input("Houses per site", value=int(ps.houses_per_site), min_value=1, max_value=10000, step=1)
         est = c[1].number_input("Site establishment / site", value=float(ps.site_establishment_per_site), min_value=0.0,
                                 step=1000.0)
+        ovs = c[2].number_input("Site overhead share", value=float(ps.site_overhead_share), min_value=0.0,
+                                max_value=1.0, step=0.05, format="%.2f",
+                                disabled=ps.site_overhead_per_house is not None,
+                                help="Share of the single-house time-related preliminaries (supervision, welfare "
+                                     "hire) each house carries when built concurrently on a shared site (assumed). "
+                                     + ("This scenario fixes its site overhead per house, so the share is not used."
+                                        if ps.site_overhead_per_house is not None else ""))
         tiers = pd.DataFrame([{"min units": t.min_units, "discount %": 100 * t.discount_fraction}
                               for t in ps.procurement_tiers], columns=["min units", "discount %"])
         st.caption("Procurement discount tiers")
@@ -205,16 +273,19 @@ def _ps_editor(ws: S.Workspace, ps: ProductionScenario) -> None:
                                                  "discount %": st.column_config.NumberColumn(min_value=0.0,
                                                                                              max_value=99.0,
                                                                                              format="%.1f")})
-        steps = pd.DataFrame([{"name": s.name, "every n": s.every_n_units, "cost": s.cost, "after": s.starts_after_units}
-                              for s in ps.step_costs], columns=["name", "every n", "cost", "after"])
-        st.caption("Capacity step costs")
+        steps = pd.DataFrame([{"name": s.name, "every n": s.every_n_units, "cost": s.cost, "after": s.starts_after_units,
+                               "boundary": s.boundary} for s in ps.step_costs],
+                             columns=["name", "every n", "cost", "after", "boundary"])
+        st.caption("Capacity step costs (factory steps count at the factory gate; site steps only when installed)")
         steps_ed = st.data_editor(steps, key=f"ps_steps_{ps.scenario_id}", num_rows="dynamic", hide_index=True,
                                   width="stretch",
                                   column_config={"every n": st.column_config.NumberColumn(min_value=1, step=1,
                                                                                           format="%d"),
                                                  "after": st.column_config.NumberColumn(min_value=0, step=1,
                                                                                         format="%d"),
-                                                 "cost": st.column_config.NumberColumn(format="%,.0f")})
+                                                 "cost": st.column_config.NumberColumn(format="%,.0f"),
+                                                 "boundary": st.column_config.SelectboxColumn(
+                                                     options=["site", "factory"], required=True)})
         ok = st.form_submit_button("Apply assumptions", type="primary")
     if ok:
         try:
@@ -222,13 +293,16 @@ def _ps_editor(ws: S.Workspace, ps: ProductionScenario) -> None:
                        for r in tiers_ed.to_dict(orient="records")
                        if _ok(r.get("min units")) and _ok(r.get("discount %"))]
             steps_l = [StepCost(name=str(r["name"])[:120], every_n_units=int(r["every n"]), cost=float(r["cost"]),
-                                starts_after_units=int(r["after"] or 0), note="edited in the UI (assumption)")
+                                starts_after_units=int(r["after"] if _ok(r.get("after")) else 0),
+                                boundary="factory" if r.get("boundary") == "factory" else "site",
+                                note="edited in the UI (assumption)")
                        for r in steps_ed.to_dict(orient="records")
                        if r.get("name") and _ok(r.get("every n")) and _ok(r.get("cost"))]
             new = ProductionScenario.model_validate({
                 **ps.model_dump(), "learning": LearningCurve.model_validate(
-                    {**ps.learning.model_dump(), "learning_rate": lr, "floor_fraction": fl}).model_dump(),
+                    {**ps.learning.model_dump(), "learning_rate": lr, "floor_fraction": fl, "model": lm}).model_dump(),
                 "houses_per_site": int(hps), "site_establishment_per_site": float(est),
+                "site_overhead_share": float(ovs),
                 "procurement_tiers": [t.model_dump() for t in tiers_l], "step_costs": [s.model_dump() for s in steps_l]})
         except Exception as e:  # noqa: BLE001 - validation message shown to the user
             st.error(f"Assumptions not applied: {e}")

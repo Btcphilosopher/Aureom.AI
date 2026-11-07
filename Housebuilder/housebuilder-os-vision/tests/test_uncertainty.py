@@ -9,10 +9,11 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from housebuilder_vision.core.models import Side, SimulationConfig
+from housebuilder_vision.core.models import Side, SimulationConfig, TwinEdit
 from housebuilder_vision.core.provenance import Basis
 from housebuilder_vision.demo.build_demo import build_demo_project, build_uncalibrated_demo_project
 from housebuilder_vision.geometry import compute_metrics
+from housebuilder_vision.geometry.footprint import Rect
 from housebuilder_vision.geometry.metrics import roof_shape
 from housebuilder_vision.quantities import apply_construction_assemblies
 from housebuilder_vision.simulation import (
@@ -25,7 +26,8 @@ from housebuilder_vision.simulation import (
     summarize,
 )
 from housebuilder_vision.simulation import uncertainty as U
-from housebuilder_vision.twin import build_parametric_twin
+from housebuilder_vision.twin import apply_twin_edit, build_parametric_twin
+from housebuilder_vision.twin.builder import footprint_attachments
 
 
 # =============================================================================
@@ -191,6 +193,55 @@ def test_attached_blocks_stay_attached(cal):
         assert bps[e].y0 == pytest.approx(bps[m].y0 + bps[m].depth)
         assert bps[e].x0 == pytest.approx(bps[m].x0)
         compute_metrics(bps, ops, mb.t_ext, mb.t_sep)
+
+
+def _edit(twin, target_type, target_id, field, value, **kw):
+    return apply_twin_edit(twin, TwinEdit(target_type=target_type, target_id=target_id, field=field, value=value,
+                                          **kw))
+
+
+def test_coupling_samples_around_the_stored_rise_after_a_pitch_edit(cal):
+    """GEO-1: a confirmed pitch re-derives the depth in the twin; samples keep the *observed* rise."""
+    stored = cal.twin.block("main").roof.observed_rise_m.value
+    t = _edit(cal.twin, "roof", "main", "pitch_deg", 30.0, tolerance=1.0)
+    model = model_for(cal, t)
+    main = model.block_index["main"]
+    c = model.couplings[main]
+    assert c.stored and c.mode == "pitch_primary" and c.span == "depth"
+    assert c.base_rise == pytest.approx(stored)  # not the rise of the stale depth x new pitch
+    assert roof_shape(model.base_bp[main])[2] == pytest.approx(stored)  # base sample == deterministic twin
+    for pitch in (29.0, 31.0):
+        bp = model._geometry(U._Sample(block={(main, "pitch_deg"): pitch}))[0][main]
+        assert roof_shape(bp)[2] == pytest.approx(stored, rel=1e-9)
+        assert bp.depth == pytest.approx(stored / (0.5 * math.tan(math.radians(pitch))), rel=1e-9)
+    inputs = {i.name: i for i in discover_inputs(t, cal.library, cal.rate_book, cal.cost_parameters, cal.settings,
+                                                 calibration=cal.calibration)}
+    assert "main.roof.pitch_deg" in inputs and "main.depth" not in inputs
+
+
+def test_coupling_after_a_depth_edit_samples_the_depth(cal):
+    stored = cal.twin.block("main").roof.observed_rise_m.value
+    t = _edit(cal.twin, "block", "main", "depth", 9.5, tolerance=0.05)
+    model = model_for(cal, t)
+    main = model.block_index["main"]
+    c = model.couplings[main]
+    assert c.mode == "depth_primary" and c.base_rise == pytest.approx(stored)
+    assert (c.depth_lo, c.depth_hi) == (pytest.approx(9.45), pytest.approx(9.55))
+    bp = model._geometry(U._Sample(block={(main, "depth"): 9.46}))[0][main]
+    assert roof_shape(bp)[2] == pytest.approx(stored, rel=1e-9)
+
+
+def test_both_confirmed_values_are_not_coupled(cal):
+    t = _edit(_edit(cal.twin, "block", "main", "depth", 9.5), "roof", "main", "pitch_deg", 35.0)
+    model = model_for(cal, t)
+    assert model.block_index["main"] not in model.couplings
+    assert any("main" in n and "observed rise" in n for n in model.coupling_notes)
+
+
+def test_attachments_are_the_twin_editors_attachment_tree(cal):
+    model = model_for(cal)
+    rects = [Rect(b.block_id, b.x0, b.y0, b.x0 + b.width, b.y0 + b.depth) for b in model.base_bp]
+    assert (model.attachments, model.detached) == footprint_attachments(rects, model.root)
 
 
 def test_hidden_rule_openings_follow_the_glazing_ratio(cal):

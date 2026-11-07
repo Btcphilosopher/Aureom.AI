@@ -265,7 +265,8 @@ def test_reference_calibration_exact_scale_and_range(analysis, cal_ref):
     assert cal_ref.image_id == IMG
     assert s.value == pytest.approx(1.0 / PPM, rel=1e-12)
     px = MAIN_W * PPM
-    hw = math.sqrt((2 * 2.0 / px) ** 2 + (0.02 / MAIN_W) ** 2 + 0.02 ** 2)
+    # the facade bbox width is the difference of two edges, each with sigma 2.0 px: 2-sigma = 2 x sqrt(2) x 2.0
+    hw = math.sqrt((2 * math.sqrt(2) * 2.0 / px) ** 2 + (0.02 / MAIN_W) ** 2 + 0.02 ** 2)
     assert s.low == pytest.approx(s.value * (1 - hw))
     assert s.high == pytest.approx(s.value * (1 + hw))
     assert s.basis == Basis.INFERRED
@@ -367,7 +368,9 @@ def test_h_a_depth_pitch_coupling(hyps_ref):
     assert m.depth.basis == Basis.ASSUMED
     assert 0.6 * MAIN_W - 1e-9 <= m.depth.low < m.depth.value < m.depth.high <= 1.2 * MAIN_W + 1e-9
     assert any("coupling" in n.lower() for n in hyps_ref["H-A"].notes)
-    assert m.floor_to_floor.value == pytest.approx(FTF) and m.floor_to_floor.basis == Basis.INFERRED
+    # (eaves - assumed FFL) / storeys: the assumed FFL makes the storey height ASSUMED (weakest basis)
+    assert m.floor_to_floor.value == pytest.approx(FTF) and m.floor_to_floor.basis == Basis.ASSUMED
+    assert m.roof.observed_rise_m.value == pytest.approx(RISE) and m.roof.observed_rise_m.basis == Basis.INFERRED
     assert m.storeys.value == 2
     assert m.roof.verge_overhang_m.value == pytest.approx(0.20, abs=0.01)
 
@@ -524,7 +527,9 @@ def test_width_edit_reflows_garage_and_never_mutates(twin_a):
     before = twin_a.model_dump(mode="json")
     t2 = edit(twin_a, "block", "main", "width", 10.0, reason="measured")
     assert twin_a.model_dump(mode="json") == before
-    assert t2.version == twin_a.version + 1 and len(t2.edit_log) == 1
+    # the user's record first, then the system's follow-up (the garage kept attached at the moved wall)
+    assert t2.version == twin_a.version + 1 and [r.actor for r in t2.edit_log] == ["user", "system:reflow"]
+    assert (t2.edit_log[1].target, t2.edit_log[1].field) == ("block:garage", "origin_x")
     rec = t2.edit_log[0]
     assert rec.target == "block:main" and rec.old_value == pytest.approx(MAIN_W) and rec.new_value == 10.0
     assert rec.new_basis == Basis.USER_CONFIRMED and rec.old_basis == Basis.USER_CONFIRMED
@@ -848,10 +853,13 @@ def test_garage_on_left_placement_and_reflow(analysis):
     assert g.origin_x.value == pytest.approx(-GAR_W)  # snapped to the main block's left wall
     t = build_parametric_twin(hyps["H-B"], selection=selection())
     assert not metrics(t).warnings
-    t2 = edit(t, "block", "garage", "width", 4.0)  # grows rightwards: main + its rear extension follow
-    assert t2.block("garage").origin_x.value == pytest.approx(-GAR_W)
-    assert t2.block("main").origin_x.value == pytest.approx(0.8)
-    assert t2.block("rear_ext").origin_x.value == pytest.approx(0.8)
+    # the garage hangs from the main block's left wall: it keeps that contact and grows leftwards; the main
+    # block is the plan datum and keeps its origin, so it and its rear extension do not move
+    t2 = edit(t, "block", "garage", "width", 4.0)
+    assert t2.block("garage").origin_x.value == pytest.approx(-4.0)
+    assert t2.block("main").origin_x.value == pytest.approx(0.0)
+    assert t2.block("rear_ext").origin_x.value == pytest.approx(0.0)
+    assert t2.block("garage").origin_x.history[-1].actor == "system:reflow"
     metrics(t2)
 
 

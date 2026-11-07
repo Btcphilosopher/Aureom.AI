@@ -52,6 +52,14 @@ def _rng(tv, fmt: str = "{:.2f}") -> str:
     return f"{s} {tv.unit}".strip() + f" [{tv.basis.value}]"
 
 
+def _steps(events: Sequence[str], width: int = 70) -> str:
+    """Compact text of the step events between n and n+1 for the report table."""
+    if not events:
+        return "-"
+    txt = "; ".join(e.split(" (")[0] if not e.startswith("procurement") else e.split(":")[0] for e in events)
+    return txt if len(txt) <= width else txt[: width - 3] + "..."
+
+
 def _table(rows: Sequence[Sequence[str]], header: Sequence[str]) -> list[str]:
     cols = [header, *rows]
     widths = [max(len(str(r[i])) for r in cols) for i in range(len(header))]
@@ -199,6 +207,8 @@ def format_report(project, result, manifest=None) -> str:
     # ---------------------------------------------------------------- repeat build
     if result.repeat_build:
         L.append("9. Repeat build (FICTIONAL production economics): average C(n)/n vs incremental C(n+1)-C(n)")
+        L.append("  incremental = C(n+1) - C(n) exactly; 'underlying' = the cost of house n+1 without capacity steps,")
+        L.append("  pack-rounding steps and all-units tier re-pricing; 'steps n->n+1' = what the incremental contains")
         for sid, by_b in result.repeat_build.items():
             for boundary in ("factory_gate", "installed"):
                 rb = by_b.get(boundary)
@@ -209,9 +219,18 @@ def format_report(project, result, manifest=None) -> str:
                     continue
                 by_n = {r.n: r for r in rb.rows}
                 rows = [[str(n), _money(by_n[n].total_cost, cur), _money(by_n[n].average_cost, cur),
-                         _money(by_n[n].incremental_cost, cur)] for n in rb.comparison_ns if n in by_n]
+                         _money(by_n[n].incremental_cost, cur), _money(by_n[n].underlying_marginal_cost, cur),
+                         _steps(by_n[n].step_events)] for n in rb.comparison_ns if n in by_n]
                 L.append(f"  {sid} - {boundary}")
-                L += _table(rows, ["n", "total C(n)", "average", "incremental"])
+                L += _table(rows, ["n", "total C(n)", "average", "incremental", "underlying", "steps n->n+1"])
+            rec = (by_b.get("installed") or by_b.get("development"))
+            rec = rec.assumptions.get("single_house_reconciliation") if rec is not None else None
+            if rec:
+                L.append(f"  {sid} - reconciliation: single-house layers 1-5 vs installed C(1)")
+                rows = [[r["item"][:48], _money(r["single_house"], cur), _money(r["installed_c1"], cur)]
+                        for r in rec["rows"] if abs(r["single_house"]) > 0.5 or abs(r["installed_c1"]) > 0.5]
+                rows.append(["Total", _money(rec["single_house_l1_l5"], cur), _money(rec["installed_c1"], cur)])
+                L += _table(rows, ["item", "single house", "installed C(1)"])
         L.append("")
     # ---------------------------------------------------------------- exports
     if manifest is not None:
