@@ -145,3 +145,22 @@ def test_l_shape_roof_overhang_not_double_counted():
     # union of the footprint grown by 0.3 everywhere on external edges:
     expected = union_area([(-eo, -eo, 10 + eo, 8 + eo), (-eo, 8, 4 + eo, 12 + eo)])
     assert m.roof_plan_area_m2 == pytest.approx(expected)
+
+
+def test_taller_block_keeps_verge_and_overhang_above_lower_neighbour():
+    """The main gable above a lower garage keeps its verge, ridge extension and overhang."""
+    eo, vo = 0.3, 0.2
+    alone = compute_metrics([blk("main", 0, 0, 10, 8, eo=eo, vo=vo)], [], 0.3, 0.2)
+    garage = blk("garage", 10, 0, 3, 6, storeys=1, pitch=30.0, axis="y", eo=eo, vo=vo)
+    both = compute_metrics([blk("main", 0, 0, 10, 8, eo=eo, vo=vo), garage], [], 0.3, 0.2)
+    ra = alone.roofs[0]
+    rm = [r for r in both.roofs if r.block_id == "main"][0]
+    rg = [r for r in both.roofs if r.block_id == "garage"][0]
+    assert rm.verge_length_m == pytest.approx(ra.verge_length_m)
+    assert rm.ridge_length_m == pytest.approx(ra.ridge_length_m)
+    assert rm.eaves_length_m == pytest.approx(ra.eaves_length_m)
+    assert rm.plan_area_m2 == pytest.approx(ra.plan_area_m2)  # verge strip over the garage still counts
+    # the garage roof abuts the taller wall: no overhang into the main block, abutment recorded
+    assert rg.abutment_length_m == pytest.approx(6.0)
+    # ridge along y: eaves on the exposed right side only, verges front and rear
+    assert rg.plan_area_m2 == pytest.approx((3 + eo) * (6 + 2 * vo))

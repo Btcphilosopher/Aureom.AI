@@ -16,10 +16,12 @@ Conventions (also returned in ``GeometryMetrics.conventions``):
   plate; the portion of a taller block above its neighbour is external.
 * Openings are deducted once, from the wall piece that contains them.  An
   opening that falls on a separating wall is not deducted and is flagged.
-* Roof surface area = roof plan area (incl. overhangs on external edges) /
+* Roof surface area = roof plan area (incl. overhangs on exposed edges) /
   cos(pitch).  This is exact for roofs of uniform pitch (gable, hip,
   monopitch), including hips and valleys.  Overhang plan areas at re-entrant
-  corners are allocated to one block only.
+  corners of roofs at the same level are allocated to one block only.  Edges of
+  a taller block above a lower neighbour are roof-exposed: its eaves/verge
+  overhang projects over the lower roof and is counted for the taller block.
 """
 
 from __future__ import annotations
@@ -61,7 +63,7 @@ CONVENTIONS = {
                           "infill above plate. Masonry below FFL is substructure.",
     "openings": "Each opening deducted once from the wall piece containing it; openings on separating walls are not deducted.",
     "separating_walls": "Walls between blocks are counted once, up to the lower wall plate; roof-void portions are not measured.",
-    "roof_area": "Sloped area = plan area incl. external overhangs / cos(pitch); exact for uniform-pitch roofs. "
+    "roof_area": "Sloped area = plan area incl. overhangs on roof-exposed edges / cos(pitch); exact for uniform-pitch roofs. "
                  "Valleys at block junctions are not measured as separate linear items.",
     "floors": "Ground-floor and upper-floor areas are internal (GIA) areas per storey.",
 }
@@ -224,6 +226,14 @@ def _hip_length(span: float, overhang: float, pitch_deg: float) -> float:
     return math.sqrt(2.0 * half * half + (half * math.tan(math.radians(pitch_deg))) ** 2)
 
 
+def roof_exposed(piece: Piece, plates: dict[str, float]) -> bool:
+    """A piece is exposed at roof level if it is external, or shared with a block whose
+    wall plate is lower (the taller block's eaves/verge then project over the lower roof)."""
+    if piece.external:
+        return True
+    return plates.get(piece.neighbour, 0.0) < plates.get(piece.rid, 0.0) - TOL
+
+
 def _roof_metrics(bp: BlockParams, pieces: Sequence[Piece], plates: dict[str, float],
                   plan_area: float) -> RoofMetrics:
     span, length, rise, ov = roof_shape(bp)
@@ -233,12 +243,12 @@ def _roof_metrics(bp: BlockParams, pieces: Sequence[Piece], plates: dict[str, fl
     r = bp.rect
 
     def ext_len(side: Side) -> float:
-        return sum(pc.length for pc in own if pc.side == side and pc.external)
+        return sum(pc.length for pc in own if pc.side == side and roof_exposed(pc, plates))
 
     def ext_at(side: Side, u: float) -> bool:
         for pc in own:
             if pc.side == side and pc.a - TOL <= u <= pc.b + TOL:
-                return pc.external
+                return roof_exposed(pc, plates)
         return False
 
     abut = 0.0
@@ -266,7 +276,7 @@ def _roof_metrics(bp: BlockParams, pieces: Sequence[Piece], plates: dict[str, fl
     elif bp.roof_form == RoofForm.HIP:
         ridge = max(0.0, length - span)
         hip = 4.0 * _hip_length(span, bp.eaves_overhang, bp.pitch_deg)
-        eaves = sum(ext_len(s) for s in Side) + 8.0 * bp.eaves_overhang * _external_corner_count(r, own) / 4.0
+        eaves = sum(ext_len(s) for s in Side) + 8.0 * bp.eaves_overhang * _external_corner_count(r, own, plates) / 4.0
     elif bp.roof_form == RoofForm.MONOPITCH:
         high = bp.high_side or Side.FRONT
         low = {Side.FRONT: Side.REAR, Side.REAR: Side.FRONT, Side.LEFT: Side.RIGHT, Side.RIGHT: Side.LEFT}[high]
@@ -303,10 +313,10 @@ def _corner_u(r: Rect, along: Side, of: Side) -> float:
     return r.x0 if of == Side.LEFT else r.x1
 
 
-def _external_corner_count(r: Rect, own: Sequence[Piece]) -> int:
+def _external_corner_count(r: Rect, own: Sequence[Piece], plates: dict[str, float]) -> int:
     from .footprint import outline_corners
 
-    return sum(1 for v in outline_corners(r, own).values() if v)
+    return sum(1 for v in outline_corners(r, own, lambda p: roof_exposed(p, plates)).values() if v)
 
 
 # ---------------------------------------------------------------- main entry
@@ -449,11 +459,11 @@ def compute_metrics(blocks: Sequence[BlockParams], openings: Sequence[OpeningPar
     regions, footprints = {}, {}
     for b in blocks:
         _, _, _, ov = roof_shape(b)
-        regions[b.block_id] = overhang_regions(b.rect, pieces, ov)
+        regions[b.block_id] = overhang_regions(b.rect, pieces, ov, lambda p: roof_exposed(p, plates))
         r = b.rect
         footprints[b.block_id] = (r.x0, r.y0, r.x1, r.y1)
     priority = [b.block_id for b in sorted(blocks, key=lambda b: (-b.plate, b.block_id))]
-    plan = allocate_plan_areas(regions, footprints, priority)
+    plan = allocate_plan_areas(regions, footprints, priority, plates)
     roofs = [_roof_metrics(b, pieces, plates, plan[b.block_id]) for b in blocks]
 
     # ---- per-block summaries

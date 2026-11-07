@@ -12,7 +12,7 @@ L-shape, simple composites).  This module computes, without approximation:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence
+from typing import Callable, Iterable, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -213,15 +213,25 @@ def internal_area(rect: Rect, pieces: Sequence[Piece], ext_t: float, shared_t: f
     return max(0.0, rect.area - union_area(strips))
 
 
-def outline_corners(rect: Rect, pieces: Sequence[Piece]) -> dict[tuple[Side, Side], bool]:
-    """For each block corner, whether both adjoining end pieces are external."""
+def _is_external(p: Piece) -> bool:
+    return p.external
+
+
+def outline_corners(rect: Rect, pieces: Sequence[Piece],
+                    exposed: Optional[Callable[[Piece], bool]] = None) -> dict[tuple[Side, Side], bool]:
+    """For each block corner, whether both adjoining end pieces are exposed.
+
+    ``exposed`` defaults to plan exposure (piece has no neighbour); roof calculations
+    pass a roof-level predicate so a taller block's edges above a lower neighbour count.
+    """
     own = [p for p in pieces if p.rid == rect.rid]
+    is_exp = exposed or _is_external
 
     def end_external(side: Side, at_start: bool) -> bool:
         ps = sorted((p for p in own if p.side == side), key=lambda p: p.a)
         if not ps:
             return False
-        return (ps[0] if at_start else ps[-1]).external
+        return is_exp(ps[0] if at_start else ps[-1])
 
     return {
         (Side.FRONT, Side.LEFT): end_external(Side.FRONT, True) and end_external(Side.LEFT, True),
@@ -231,12 +241,14 @@ def outline_corners(rect: Rect, pieces: Sequence[Piece]) -> dict[tuple[Side, Sid
     }
 
 
-def overhang_regions(rect: Rect, pieces: Sequence[Piece], overhang: dict[Side, float]) -> list[tuple[float, float, float, float]]:
+def overhang_regions(rect: Rect, pieces: Sequence[Piece], overhang: dict[Side, float],
+                     exposed: Optional[Callable[[Piece], bool]] = None) -> list[tuple[float, float, float, float]]:
     """Plan rectangles making up a block's roof: the block plus outward strips over
-    external pieces and corner squares at fully external corners."""
+    exposed pieces and corner squares at fully exposed corners."""
+    is_exp = exposed or _is_external
     regs = [(rect.x0, rect.y0, rect.x1, rect.y1)]
     for p in pieces:
-        if p.rid != rect.rid or not p.external:
+        if p.rid != rect.rid or not is_exp(p):
             continue
         o = overhang.get(p.side, 0.0)
         if o <= TOL:
@@ -249,7 +261,7 @@ def overhang_regions(rect: Rect, pieces: Sequence[Piece], overhang: dict[Side, f
             regs.append((rect.x0 - o, p.a, rect.x0, p.b))
         else:
             regs.append((rect.x1, p.a, rect.x1 + o, p.b))
-    for (s1, s2), ext in outline_corners(rect, pieces).items():
+    for (s1, s2), ext in outline_corners(rect, pieces, exposed).items():
         if not ext:
             continue
         oy = overhang.get(s1, 0.0)
@@ -264,35 +276,51 @@ def overhang_regions(rect: Rect, pieces: Sequence[Piece], overhang: dict[Side, f
 
 def allocate_plan_areas(regions: dict[str, list[tuple[float, float, float, float]]],
                         footprints: dict[str, tuple[float, float, float, float]],
-                        priority: Sequence[str]) -> dict[str, float]:
-    """Exactly partition the union of all roof regions between blocks.
+                        priority: Sequence[str],
+                        plates: Optional[Mapping[str, float]] = None) -> dict[str, float]:
+    """Exactly partition roof plan areas between blocks without double counting.
 
-    Footprint cells belong to their own block; remaining overhang cells go to the
-    first block in ``priority`` whose region covers them (no double counting
-    where overhangs meet at re-entrant corners).
+    * Each block always owns its own footprint.
+    * An overhang cell is excluded if it lies over the footprint of another block whose
+      wall plate is at least as high (the overhang would run into that block).
+    * Where overhangs of blocks *at the same wall-plate level* meet (re-entrant corners,
+      valleys) the cell is counted once, for the first block in ``priority``.
+    * An overhang of a taller block that projects over a lower block's roof is counted for
+      the taller block as well - both roof surfaces physically exist at different levels.
+    Without ``plates`` all blocks are treated as the same level.
     """
     allr = [r for rs in regions.values() for r in rs] + list(footprints.values())
     if not allr:
         return {}
     xs = np.unique(np.array([v for r in allr for v in (r[0], r[2])], dtype=float))
     ys = np.unique(np.array([v for r in allr for v in (r[1], r[3])], dtype=float))
-    owner = -np.ones((len(xs) - 1, len(ys) - 1), dtype=int)
     order = list(priority)
+    plate_of = {b: (float(plates[b]) if plates is not None else 0.0) for b in order}
+    shape = (len(xs) - 1, len(ys) - 1)
+    fp_owner = -np.ones(shape, dtype=int)
+    claimed_level = np.full(shape, np.nan)
 
-    def paint(rect, idx, only_empty=True):
+    def cells(rect) -> tuple[slice, slice]:
         x0, y0, x1, y1 = rect
-        i0, i1 = np.searchsorted(xs, x0), np.searchsorted(xs, x1)
-        j0, j1 = np.searchsorted(ys, y0), np.searchsorted(ys, y1)
-        sub = owner[i0:i1, j0:j1]
-        if only_empty:
-            sub[sub < 0] = idx
-        else:
-            sub[:] = idx
+        return (slice(np.searchsorted(xs, x0), np.searchsorted(xs, x1)),
+                slice(np.searchsorted(ys, y0), np.searchsorted(ys, y1)))
 
     for bid, fp in footprints.items():
-        paint(fp, order.index(bid), only_empty=False)
-    for bid in order:
+        fp_owner[cells(fp)] = order.index(bid)
+    fp_plate = np.full(shape, -np.inf)
+    for k, bid in enumerate(order):
+        fp_plate[fp_owner == k] = plate_of[bid]
+    cell_area = np.diff(xs)[:, None] * np.diff(ys)[None, :]
+    out: dict[str, float] = {}
+    for k, bid in enumerate(order):
+        mask = np.zeros(shape, dtype=bool)
         for r in regions.get(bid, []):
-            paint(r, order.index(bid), only_empty=True)
-    cell = np.diff(xs)[:, None] * np.diff(ys)[None, :]
-    return {bid: float(cell[owner == k].sum()) for k, bid in enumerate(order)}
+            mask[cells(r)] = True
+        own = fp_owner == k
+        level = plate_of[bid]
+        blocked = (fp_owner >= 0) & ~own & (fp_plate >= level - TOL)
+        same_level_claim = ~np.isnan(claimed_level) & (np.abs(claimed_level - level) <= TOL)
+        over = mask & ~own & ~blocked & ~same_level_claim
+        claimed_level[over & np.isnan(claimed_level)] = level
+        out[bid] = float(cell_area[own].sum() + cell_area[over].sum())
+    return out
