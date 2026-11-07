@@ -1,0 +1,35 @@
+# Housebuilder.OS Vision - Aureom.AI theme (graphite / ivory / restrained gold).
+[theme]
+base = "dark"
+primaryColor = "#B39A62"
+backgroundColor = "#15171A"
+secondaryBackgroundColor = "#202328"
+textColor = "#F3EEE4"
+linkColor = "#CDB57E"
+borderColor = "#30343A"
+dataframeBorderColor = "#2A2E34"
+dataframeHeaderBackgroundColor = "#1B1E22"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "0.25rem"
+buttonRadius = "0.2rem"
+baseFontSize = 14
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap, monospace"
+chartCategoricalColors = ["#4576B4", "#AB5D2B", "#4AA076"]
+
+[theme.sidebar]
+backgroundColor = "#1A1C20"
+secondaryBackgroundColor = "#24272C"
+
+[server]
+# Matches the image-ingest limit (25 MB); rate books are limited to 5 MB by the loader.
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+# Never show raw tracebacks in the browser; sections report errors with context instead.
+showErrorDetails = "none"

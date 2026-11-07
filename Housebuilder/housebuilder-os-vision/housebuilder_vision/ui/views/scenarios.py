@@ -1,0 +1,302 @@
+"""Scenarios view: build-scenario comparison, repeat-build economics, programme / logistics, carbon / heat loss.
+
+Each build scenario is one coherent house (hypothesis + assembly overrides + foundation + price
+level); results are compared side by side and never averaged.  Repeat-build curves show average
+C(n)/n and incremental C(n+1) - C(n) cost for the factory-gate and installed boundaries.  Every
+chart carries its assumptions / boundary caption: the programme is an indicative critical path,
+carbon uses illustrative placeholder factors, heat loss is a simplified steady-state calculation
+(not SAP / SBEM / PHPP) - none of them is a compliance or performance claim.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Optional
+
+import pandas as pd
+import streamlit as st
+
+from ...core.models import DiscountTier, LearningCurve, ProductionScenario, StepCost
+from .. import state as S
+from ..charts import carbon_chart, gantt, heat_loss_chart, repeat_chart, scenario_multiples
+from ..components import cards, guard, html, section_title
+from ..theme import callout, card, esc
+
+
+def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
+    p = ws.project
+    if p is None or p.twin is None or ev is None:
+        html(callout("Build a twin first - scenarios are evaluated from it.", title="Scenarios", tone="neutral"))
+        return
+    t1, t2, t3, t4 = st.tabs(["Build scenarios", "Repeat build", "Programme & logistics", "Carbon & heat loss"])
+    with t1:
+        with guard("Build-scenario comparison"):
+            _build_scenarios(ws, ev)
+    with t2:
+        with guard("Repeat-build economics"):
+            _repeat(ws, ev)
+    with t3:
+        with guard("Programme and logistics"):
+            _programme(ws, ev)
+    with t4:
+        with guard("Carbon and heat loss"):
+            _carbon_heat(ws, ev)
+
+
+# =============================================================================
+# Build scenarios
+# =============================================================================
+def _cb_add_build() -> None:
+    ws = S.get_workspace()
+    n = S.add_example_build_scenarios(ws)
+    ws.say("success" if n else "warning", f"{n} example build scenario(s) added." if n else
+           "No example scenario fits this project's hypotheses / library.")
+
+
+def _build_scenarios(ws: S.Workspace, ev: S.Evaluation) -> None:
+    p = ws.project
+    if not p.build_scenarios:
+        html(callout("No build scenarios on this project. Example scenarios compare masonry cavity, timber frame + "
+                     "brick and timber frame + cladding on the available hypotheses.", title="Build scenarios",
+                     tone="neutral"))
+        st.button("Add example build scenarios", key="sc_add", on_click=_cb_add_build)
+        return
+    c1, c2, c3 = st.columns([1.2, 1, 2.5])
+    simulate = c1.toggle("Include P10 / P90", value=False, key="sc_sim",
+                         help="Runs a small uncertainty simulation per scenario (slower).")
+    n = c2.number_input("Samples / scenario", value=60, min_value=20, max_value=1000, step=20, key="sc_n",
+                        disabled=not simulate)
+    with st.spinner("Evaluating scenarios…"):
+        comp = S.compare_scenarios(ws, simulate=simulate, n=int(n))
+    cur = ev.estimate.currency
+    outs = comp.outcomes
+    rows = []
+    for o in outs:
+        rows.append({"scenario": o.scenario_id, "name": o.name, "hypothesis": o.hypothesis_id,
+                     "wall (mm)": 1000 * o.external_wall_thickness_m, "GIA (m²)": o.gia_m2,
+                     f"construction ({cur})": o.construction_cost, f"per m² ({cur})": o.cost_per_m2_gia,
+                     f"contract sum ({cur})": o.contract_sum, "labour h": o.labour_hours,
+                     "programme (wk)": o.programme_weeks, "carbon (tCO₂e)": o.embodied_carbon_kgco2e / 1000,
+                     "HLC (W/K)": o.heat_loss_coefficient_w_k, "peak load (kW)": o.peak_heat_load_kw,
+                     "P10": o.cost_p10, "P50": o.cost_p50, "P90": o.cost_p90})
+    df = pd.DataFrame(rows)
+    money_cols = [f"construction ({cur})", f"per m² ({cur})", f"contract sum ({cur})", "P10", "P50", "P90"]
+    st.dataframe(df, hide_index=True, width="stretch",
+                 column_config={**{c: st.column_config.NumberColumn(format="%,.0f") for c in money_cols},
+                                "wall (mm)": st.column_config.NumberColumn(format="%.0f"),
+                                "GIA (m²)": st.column_config.NumberColumn(format="%.1f"),
+                                "labour h": st.column_config.NumberColumn(format="%,.0f"),
+                                "programme (wk)": st.column_config.NumberColumn(format="%.1f"),
+                                "carbon (tCO₂e)": st.column_config.NumberColumn(format="%.1f"),
+                                "HLC (W/K)": st.column_config.NumberColumn(format="%.0f"),
+                                "peak load (kW)": st.column_config.NumberColumn(format="%.2f"),
+                                "name": st.column_config.TextColumn(width="medium")})
+    st.plotly_chart(scenario_multiples(outs, cur, height=420), key="sc_multi", theme=None,
+                    config={"displaylogo": False})
+    st.caption("Each scenario is one coherent house (one hypothesis, one assembly set); results are compared, never "
+               "averaged. Hypothesis plausibility is a subjective prior. Whiskers on cost (when shown) are P10-P90 of "
+               "assumed scenario uncertainty.")
+    with st.expander("Key assumptions per scenario"):
+        for o in outs:
+            st.markdown(f"**{esc(o.scenario_id)} · {esc(o.name)}**")
+            for a in o.key_assumptions:
+                st.markdown(f"- {esc(a)}")
+        for nn in comp.notes:
+            st.caption(nn)
+
+
+# =============================================================================
+# Repeat build
+# =============================================================================
+def _cb_add_ps() -> None:
+    ws = S.get_workspace()
+    ev = S.evaluate(ws)
+    if ev is not None:
+        S.add_example_production_scenarios(ws, ev)
+        ws.say("success", "Illustrative (FICTIONAL) production scenarios added: site-built and off-site panelised.")
+
+
+def _repeat(ws: S.Workspace, ev: S.Evaluation) -> None:
+    p = ws.project
+    if not p.production_scenarios:
+        html(callout("No production scenario on this project. Add the illustrative site-built vs off-site panelised "
+                     "pair (fictional, labelled assumptions) to explore repeat-build economics.",
+                     title="Repeat build", tone="neutral"))
+        st.button("Add illustrative production scenarios", key="ps_add", on_click=_cb_add_ps)
+        return
+    ids = [s.scenario_id for s in p.production_scenarios]
+    names = {s.scenario_id: s.name for s in p.production_scenarios}
+    sid = st.segmented_control("Production scenario", ids, default=ids[0], key="ps_sel",
+                               format_func=lambda i: names.get(i, i)) or ids[0]
+    ps = next(s for s in p.production_scenarios if s.scenario_id == sid)
+    left, right = st.columns([1.15, 2], gap="medium")
+    with left:
+        _ps_editor(ws, ps)
+    res = S.repeat_results(ws, ev, ps)
+    cur = res["installed"].currency
+    with right:
+        st.plotly_chart(repeat_chart(res, height=360), key="ps_chart", theme=None, config={"displaylogo": False})
+        rows = []
+        fg = {r.n: r for r in res["factory_gate"].rows}
+        ins = {r.n: r for r in res["installed"].rows}
+        for n in res["installed"].comparison_ns:
+            a, b = fg.get(n), ins.get(n)
+            if a is None or b is None:
+                continue
+            rows.append({"n": n, "FG average": a.average_cost, "FG incremental": a.incremental_cost,
+                         "installed average": b.average_cost, "installed incremental": b.incremental_cost,
+                         "installed C(n)": b.total_cost,
+                         "factory share": a.total_cost / b.total_cost if b.total_cost else None})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={**{c: st.column_config.NumberColumn(c, format="%,.0f")
+                                       for c in ("FG average", "FG incremental", "installed average",
+                                                 "installed incremental", "installed C(n)")},
+                                    "n": st.column_config.NumberColumn(format="%d"),
+                                    "factory share": st.column_config.NumberColumn(format="percent")})
+        st.caption(f"Amounts in {cur} per house (C(n) in total). FG = factory gate; factory share = factory-gate "
+                   "C(n) / installed C(n).")
+    html(callout(
+        "<b>Average cost</b> = C(n) / n spreads one-off and step costs (design, tooling, factory set-up and lines, site "
+        "establishment, capacity steps) over n houses. <b>Incremental cost</b> = C(n+1) − C(n) is the cost of one more "
+        "house: it only contains a step cost when a threshold is crossed, and all-units procurement tiers can make it "
+        f"drop sharply.<br><b>Factory gate:</b> {esc(res['factory_gate'].boundary_definition)}<br>"
+        f"<b>Installed:</b> {esc(res['installed'].boundary_definition)}", title="Definitions and boundaries",
+        tone="info"))
+    with st.expander("Model notes and per-house inputs"):
+        for n in res["installed"].notes:
+            st.markdown(f"- {esc(n)}")
+        inputs = res["installed"].assumptions.get("per_house_inputs", {})
+        if inputs:
+            st.dataframe(pd.DataFrame([{"input": k, "value": v.get("value"), "source": v.get("source")}
+                                       for k, v in inputs.items()]), hide_index=True, width="stretch")
+        st.caption(esc(ps.notes))
+    if len(p.production_scenarios) > 1:
+        section_title("Production scenarios side by side", sub="installed boundary, average cost per house")
+        crow = []
+        for s in p.production_scenarios:
+            r = S.repeat_results(ws, ev, s, ("installed",))["installed"]
+            by = {x.n: x for x in r.rows}
+            crow.append({"scenario": s.name, **{f"n={n}": by[n].average_cost for n in r.comparison_ns if n in by}})
+        st.dataframe(pd.DataFrame(crow), hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(f"{c} ({cur})", format="%,.0f")
+                                    for c in crow[0] if c != "scenario"})
+
+
+def _ps_editor(ws: S.Workspace, ps: ProductionScenario) -> None:
+    with st.form(f"ps_form_{ps.scenario_id}", border=True):
+        st.markdown("**Key assumptions** <span class='hbv-small'>(labelled, not calibrated)</span>",
+                    unsafe_allow_html=True)
+        c = st.columns(2)
+        lr = c[0].number_input("Learning rate", value=float(ps.learning.learning_rate), min_value=0.51, max_value=1.0,
+                               step=0.01, format="%.2f", help="Wright curve: hours fall by (1 − rate) per doubling.")
+        fl = c[1].number_input("Learning floor", value=float(ps.learning.floor_fraction), min_value=0.05,
+                               max_value=1.0, step=0.05, format="%.2f", help="Hours never fall below floor × h1.")
+        c = st.columns(2)
+        hps = c[0].number_input("Houses per site", value=int(ps.houses_per_site), min_value=1, max_value=10000, step=1)
+        est = c[1].number_input("Site establishment / site", value=float(ps.site_establishment_per_site), min_value=0.0,
+                                step=1000.0)
+        tiers = pd.DataFrame([{"min units": t.min_units, "discount %": 100 * t.discount_fraction}
+                              for t in ps.procurement_tiers], columns=["min units", "discount %"])
+        st.caption("Procurement discount tiers")
+        tiers_ed = st.data_editor(tiers, key=f"ps_tiers_{ps.scenario_id}", num_rows="dynamic", hide_index=True,
+                                  width="stretch",
+                                  column_config={"min units": st.column_config.NumberColumn(min_value=1, step=1,
+                                                                                            format="%d"),
+                                                 "discount %": st.column_config.NumberColumn(min_value=0.0,
+                                                                                             max_value=99.0,
+                                                                                             format="%.1f")})
+        steps = pd.DataFrame([{"name": s.name, "every n": s.every_n_units, "cost": s.cost, "after": s.starts_after_units}
+                              for s in ps.step_costs], columns=["name", "every n", "cost", "after"])
+        st.caption("Capacity step costs")
+        steps_ed = st.data_editor(steps, key=f"ps_steps_{ps.scenario_id}", num_rows="dynamic", hide_index=True,
+                                  width="stretch",
+                                  column_config={"every n": st.column_config.NumberColumn(min_value=1, step=1,
+                                                                                          format="%d"),
+                                                 "after": st.column_config.NumberColumn(min_value=0, step=1,
+                                                                                        format="%d"),
+                                                 "cost": st.column_config.NumberColumn(format="%,.0f")})
+        ok = st.form_submit_button("Apply assumptions", type="primary")
+    if ok:
+        try:
+            tiers_l = [DiscountTier(min_units=int(r["min units"]), discount_fraction=float(r["discount %"]) / 100.0)
+                       for r in tiers_ed.to_dict(orient="records")
+                       if _ok(r.get("min units")) and _ok(r.get("discount %"))]
+            steps_l = [StepCost(name=str(r["name"])[:120], every_n_units=int(r["every n"]), cost=float(r["cost"]),
+                                starts_after_units=int(r["after"] or 0), note="edited in the UI (assumption)")
+                       for r in steps_ed.to_dict(orient="records")
+                       if r.get("name") and _ok(r.get("every n")) and _ok(r.get("cost"))]
+            new = ProductionScenario.model_validate({
+                **ps.model_dump(), "learning": LearningCurve.model_validate(
+                    {**ps.learning.model_dump(), "learning_rate": lr, "floor_fraction": fl}).model_dump(),
+                "houses_per_site": int(hps), "site_establishment_per_site": float(est),
+                "procurement_tiers": [t.model_dump() for t in tiers_l], "step_costs": [s.model_dump() for s in steps_l]})
+        except Exception as e:  # noqa: BLE001 - validation message shown to the user
+            st.error(f"Assumptions not applied: {e}")
+            return
+        S.update_production_scenario(ws, new)
+        S.get_workspace().say("success", f"{ps.scenario_id}: assumptions applied - curves recalculated.")
+        st.rerun()
+
+
+def _ok(v) -> bool:
+    return v is not None and not (isinstance(v, float) and math.isnan(v))
+
+
+# =============================================================================
+# Programme, logistics, carbon, heat loss
+# =============================================================================
+def _programme(ws: S.Workspace, ev: S.Evaluation) -> None:
+    prog, logi = ev.programme, ev.logistics
+    cards([card("Programme", f"{prog.duration_weeks:.1f} weeks", sub=f"{prog.duration_days:.0f} working days",
+                accent=True),
+           card("Labour", f"{prog.total_labour_hours:,.0f} h", sub=f"{len(prog.labour_hours_by_trade)} trades"),
+           card("Deliveries", f"{logi.total_loads} loads", sub=f"{logi.total_mass_t:,.1f} t"),
+           card("Peak storage", f"{logi.peak_storage_area_m2:,.0f} m²", sub="held to end of task (conservative)"),
+           card("Waste", f"{logi.skips} skips", sub=f"{logi.waste_volume_m3:,.1f} m³ loose")])
+    section_title("Programme", sub=prog.method)
+    st.plotly_chart(gantt(prog), key="pg_gantt", theme=None, config={"displaylogo": False})
+    crews = prog.assumptions.get("crew_sizes", {})
+    st.caption(" · ".join(prog.caveats) + (" Crew sizes (assumed): " + ", ".join(f"{k} {v:g}" for k, v in crews.items())
+                                          if crews else ""))
+    section_title("Deliveries", sub="indicative batches per task and delivery category")
+    rows = [{"batch": b.batch_id, "task": b.task_id, "category": b.delivery_category, "loads": b.loads,
+             "mass (t)": b.mass_kg / 1000, "volume (m³)": b.volume_m3, "order by (day)": b.order_by_day,
+             "deliver (day)": b.delivery_day, "needed by (day)": b.required_by_day,
+             "storage (m²)": b.storage_area_m2, "lead time (d)": b.lead_time_days,
+             "ready-mix": b.ready_mix, "description": b.description} for b in logi.batches]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=min(420, 38 + 35 * len(rows)),
+                 column_config={k: st.column_config.NumberColumn(format="%.1f")
+                                for k in ("mass (t)", "volume (m³)", "order by (day)", "deliver (day)",
+                                          "needed by (day)", "storage (m²)", "lead time (d)")})
+    st.caption(" ".join(logi.caveats) + " Negative order-by days mean ordering before site start.")
+
+
+def _carbon_heat(ws: S.Workspace, ev: S.Evaluation) -> None:
+    carbon, heat = ev.carbon, ev.heat_loss
+    c1, c2 = st.columns(2, gap="medium")
+    with c1:
+        section_title("Embodied carbon by element", sub="illustrative factors")
+        cards([card("A1-A3 + A5 waste", f"{carbon.total_kgco2e / 1000:,.1f} tCO₂e",
+                    sub=f"{carbon.per_m2_gia_kgco2e:,.0f} kgCO₂e / m² GIA", accent=True)])
+        st.plotly_chart(carbon_chart(carbon), key="cb_chart", theme=None, config={"displaylogo": False})
+        st.caption(f"Boundary: {carbon.boundary} {carbon.factor_source}")
+        with st.expander(f"Caveats and unmatched items ({len(carbon.unmatched)})"):
+            for c in carbon.caveats + carbon.unmatched:
+                st.markdown(f"- {esc(c)}")
+    with c2:
+        section_title("Heat-loss breakdown", sub="simplified steady state")
+        cards([card("Heat-loss coefficient", f"{heat.heat_loss_coefficient_w_k:,.0f} W/K",
+                    sub=f"HLP {heat.hlp_w_m2k:.2f} W/m²K", accent=True),
+               card("Peak load", f"{heat.peak_heat_load_kw:,.1f} kW", sub=f"ΔT {heat.design_delta_t_k:.0f} K"),
+               card("Space heat (indicative)", f"{heat.annual_space_heat_kwh:,.0f} kWh/yr", sub="degree-day, no gains")])
+        st.plotly_chart(heat_loss_chart(heat), key="hl_chart", theme=None, config={"displaylogo": False})
+        a = heat.assumptions
+        st.caption(f"{heat.method} Assumed: thermal bridging y = {a.get('thermal_bridging_y_w_m2k')} W/m²K, "
+                   f"{a.get('air_change_rate_ach')} ach, design {a.get('internal_design_temp_c')} / "
+                   f"{a.get('external_design_temp_c')} °C. Construction build-ups are assumptions.")
+        with st.expander("Caveats"):
+            for c in heat.caveats + heat.warnings:
+                st.markdown(f"- {esc(c)}")
+
+
+__all__ = ["render"]

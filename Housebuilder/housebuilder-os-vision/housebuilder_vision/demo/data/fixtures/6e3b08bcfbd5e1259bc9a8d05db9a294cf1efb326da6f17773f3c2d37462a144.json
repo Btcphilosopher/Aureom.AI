@@ -1,0 +1,367 @@
+{
+ "schema_version": "1.0",
+ "fixture_key": "aureom-demo-left-elevation-v1",
+ "image_sha256": "6e3b08bcfbd5e1259bc9a8d05db9a294cf1efb326da6f17773f3c2d37462a144",
+ "width_px": 1400,
+ "height_px": 900,
+ "detector": {
+  "name": "fixture:aureom-demo-detector",
+  "version": "1.0"
+ },
+ "description": "Synthetic detections for the Aureom Demo House (fictional) left (gable-end) elevation.",
+ "image_attributes": {
+  "image_kind_hint": "synthetic_elevation_drawing",
+  "fictional": true
+ },
+ "features": [
+  {
+   "feature_id": "f01_facade_main",
+   "feature_type": "facade",
+   "label": "main block gable-end wall (ground to wall plate)",
+   "bbox": [
+    371.48,
+    368.56,
+    1026.66,
+    800.87
+   ],
+   "confidence": 0.948,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f02_roof_main",
+   "feature_type": "roof",
+   "label": "main gable (roof outline through wall corners)",
+   "polygon": [
+    [
+     371.67,
+     366.91
+    ],
+    [
+     699.22,
+     136.53
+    ],
+    [
+     1027.14,
+     366.32
+    ]
+   ],
+   "confidence": 0.844,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "roof_form": "gable",
+    "ridge_orientation": "perpendicular_to_view",
+    "gable_visible": true
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f03_eaves_main",
+   "feature_type": "eaves_line",
+   "label": "wall plate at gable base",
+   "line": [
+    371.05,
+    366.18,
+    1028.14,
+    366.87
+   ],
+   "confidence": 0.844,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f04_ridge_main",
+   "feature_type": "ridge_line",
+   "label": "ridge end at gable apex",
+   "line": [
+    688.17,
+    138.02,
+    711.74,
+    138.95
+   ],
+   "confidence": 0.826,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f05_ground",
+   "feature_type": "ground_line",
+   "label": "ground line",
+   "line": [
+    293.61,
+    799.35,
+    1103.75,
+    799.04
+   ],
+   "confidence": 0.867,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f06_storey_main",
+   "feature_type": "storey_line",
+   "label": "first-floor band",
+   "line": [
+    371.68,
+    578.05,
+    1027.06,
+    578.02
+   ],
+   "confidence": 0.838,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o01",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    815.5,
+    623.99,
+    885.59,
+    717.7
+   ],
+   "confidence": 0.878,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 0
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o02",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    676.86,
+    422.8,
+    721.66,
+    493.27
+   ],
+   "confidence": 0.922,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 1
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r01_walls_main",
+   "feature_type": "finish_region",
+   "label": "gable wall",
+   "bbox": [
+    373.47,
+    136.57,
+    1026.83,
+    800.01
+   ],
+   "confidence": 0.927,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "element": "walls",
+    "appearance": "red-brown brick-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r02_roof_main",
+   "feature_type": "finish_region",
+   "label": "verge tiles",
+   "polygon": [
+    [
+     351.93,
+     380.6
+    ],
+    [
+     698.93,
+     137.56
+    ],
+    [
+     1046.73,
+     380.95
+    ],
+    [
+     1047.31,
+     395.58
+    ],
+    [
+     699.99,
+     152.08
+    ],
+    [
+     352.83,
+     396.23
+    ]
+   ],
+   "confidence": 0.823,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "element": "roof",
+    "appearance": "dark grey tile-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l01",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    371.27,
+    783.09,
+    371.62,
+    378.51
+   ],
+   "confidence": 0.883,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l02",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    1025.91,
+    785.05,
+    1026.66,
+    378.15
+   ],
+   "confidence": 0.952,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l03",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    372.3,
+    800.48,
+    1027.29,
+    799.15
+   ],
+   "confidence": 0.826,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l04",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    371.05,
+    366.62,
+    1026.21,
+    367.03
+   ],
+   "confidence": 0.964,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l05",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    372.72,
+    577.13,
+    1026.62,
+    578.55
+   ],
+   "confidence": 0.966,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  }
+ ],
+ "perspective_lines": [
+  [
+   816.94,
+   717.37,
+   816.45,
+   623.47
+  ],
+  [
+   886.6,
+   719.27,
+   885.91,
+   624.33
+  ],
+  [
+   817.0,
+   625.84,
+   887.19,
+   624.33
+  ],
+  [
+   817.06,
+   717.48,
+   885.6,
+   719.1
+  ],
+  [
+   676.1,
+   493.18,
+   675.26,
+   420.24
+  ],
+  [
+   723.04,
+   492.54,
+   724.47,
+   422.11
+  ],
+  [
+   674.98,
+   421.88,
+   722.66,
+   420.75
+  ],
+  [
+   677.16,
+   492.54,
+   723.93,
+   492.23
+  ]
+ ],
+ "notes": [
+  "Fictional demonstration data.",
+  "The garage (right of the main block) is not visible in this view."
+ ]
+}

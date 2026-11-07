@@ -1,0 +1,586 @@
+{
+ "schema_version": "1.0",
+ "fixture_key": "aureom-concept-render-example-v1",
+ "image_sha256": "ec030cdf8e469aa7f8ddc5e5b4c229ca0c730a5a80130ad6ce90a0d879516be3",
+ "width_px": 1200,
+ "height_px": 614,
+ "detector": {
+  "name": "manual-annotation-fixture",
+  "version": "1.0"
+ },
+ "description": "Approximate manual annotations of an AI-generated house render used as a concept reference.",
+ "image_attributes": {
+  "image_kind_hint": "ai_generated_concept",
+  "source_note": "AI-generated house render supplied as a design concept; not a photograph or a measured drawing of a real building.",
+  "annotation_quality": "approximate manual annotation, low confidence"
+ },
+ "features": [
+  {
+   "feature_id": "c01_facade_main",
+   "feature_type": "facade",
+   "label": "two-storey main mass: left wing, glazed centre, right wing",
+   "bbox": [
+    190.0,
+    168.0,
+    1118.0,
+    450.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c02_facade_garage",
+   "feature_type": "facade",
+   "label": "single-storey garage wing",
+   "bbox": [
+    77.0,
+    320.0,
+    372.0,
+    456.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "garage",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c03_roof_left",
+   "feature_type": "roof",
+   "label": "left wing low-pitch hipped roof",
+   "polygon": [
+    [
+     135.0,
+     205.0
+    ],
+    [
+     168.0,
+     172.0
+    ],
+    [
+     455.0,
+     170.0
+    ],
+    [
+     505.0,
+     218.0
+    ]
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "roof_form": "hip",
+    "pitch_hint": "low",
+    "gable_visible": false,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c04_roof_centre",
+   "feature_type": "roof",
+   "label": "glazed centre low-pitch hipped roof",
+   "polygon": [
+    [
+     452.0,
+     197.0
+    ],
+    [
+     540.0,
+     140.0
+    ],
+    [
+     845.0,
+     145.0
+    ],
+    [
+     907.0,
+     187.0
+    ]
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "roof_form": "hip",
+    "pitch_hint": "low",
+    "gable_visible": false,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c05_roof_right",
+   "feature_type": "roof",
+   "label": "right wing low-pitch hipped roof",
+   "polygon": [
+    [
+     852.0,
+     246.0
+    ],
+    [
+     860.0,
+     215.0
+    ],
+    [
+     1060.0,
+     232.0
+    ],
+    [
+     1140.0,
+     266.0
+    ]
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "roof_form": "hip",
+    "pitch_hint": "low",
+    "gable_visible": false,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c06_roof_garage",
+   "feature_type": "roof",
+   "label": "garage low-pitch hipped roof",
+   "polygon": [
+    [
+     42.0,
+     322.0
+    ],
+    [
+     75.0,
+     281.0
+    ],
+    [
+     358.0,
+     279.0
+    ],
+    [
+     392.0,
+     322.0
+    ]
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "garage",
+    "roof_form": "hip",
+    "pitch_hint": "low",
+    "gable_visible": false,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "c07_ground",
+   "feature_type": "ground_line",
+   "label": "ground / terrace line",
+   "line": [
+    60.0,
+    457.0,
+    1190.0,
+    446.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w01",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    235.0,
+    209.0,
+    345.0,
+    285.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w02",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    381.0,
+    219.0,
+    454.0,
+    292.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w03",
+   "feature_type": "window",
+   "label": "curtain-wall glazing (upper part)",
+   "bbox": [
+    548.0,
+    172.0,
+    842.0,
+    292.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w04",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    857.0,
+    251.0,
+    924.0,
+    311.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w05",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    958.0,
+    259.0,
+    1018.0,
+    316.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w06",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    1048.0,
+    266.0,
+    1108.0,
+    321.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 1,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w07",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    380.0,
+    343.0,
+    454.0,
+    421.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 0,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "w08",
+   "feature_type": "window",
+   "label": "curtain-wall glazing (lower part)",
+   "bbox": [
+    655.0,
+    320.0,
+    845.0,
+    445.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 0,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "d01",
+   "feature_type": "door",
+   "label": "glazed entrance door",
+   "bbox": [
+    575.0,
+    350.0,
+    618.0,
+    447.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 0,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "d02",
+   "feature_type": "door",
+   "label": "sliding glazed doors to terrace",
+   "bbox": [
+    857.0,
+    345.0,
+    1110.0,
+    445.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "storey": 0,
+    "kind": "patio_door",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "g01",
+   "feature_type": "garage_door",
+   "label": "garage door",
+   "bbox": [
+    118.0,
+    351.0,
+    336.0,
+    456.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "garage",
+    "storey": 0,
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r01_walls_left",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    190.0,
+    200.0,
+    500.0,
+    450.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "element": "walls",
+    "appearance": "light horizontal board cladding-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r02_walls_right",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    854.0,
+    245.0,
+    1117.0,
+    345.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "element": "walls",
+    "appearance": "light horizontal board cladding-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r03_roof_main",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    452.0,
+    140.0,
+    907.0,
+    197.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "element": "roof",
+    "appearance": "dark grey standing-seam metal-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r04_roof_garage",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    42.0,
+    279.0,
+    392.0,
+    322.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "garage",
+    "element": "roof",
+    "appearance": "dark grey standing-seam metal-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r05_garage_door",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    118.0,
+    351.0,
+    336.0,
+    456.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "garage",
+    "element": "garage_door",
+    "appearance": "dark grey flush panel-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  },
+  {
+   "feature_id": "r06_glazing",
+   "feature_type": "finish_region",
+   "label": "finish region",
+   "bbox": [
+    548.0,
+    172.0,
+    842.0,
+    445.0
+   ],
+   "confidence": 0.6,
+   "pixel_uncertainty": 6.0,
+   "basis": "observed",
+   "method": "manual-annotation-fixture",
+   "attributes": {
+    "block": "main",
+    "element": "windows",
+    "appearance": "black-framed glazing-like",
+    "source_image": "ai_generated_concept"
+   },
+   "evidence": "Approximate manual annotation of an AI-generated concept render (low confidence); describes the concept image, not a real building."
+  }
+ ],
+ "perspective_lines": [],
+ "notes": [
+  "Concept reference: geometry may be internally inconsistent; dimensions indicative only."
+ ]
+}

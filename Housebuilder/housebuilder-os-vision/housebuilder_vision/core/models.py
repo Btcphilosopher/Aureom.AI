@@ -417,6 +417,9 @@ class HiddenSideAssumptions(_Model):
     typical_window_height_m: float = 1.2
     typical_window_sill_m: float = 0.9
     notes: str = "Hidden facades are filled by rule; replace with observed openings when evidence exists."
+    #: (additive) Block sides ``"<block_id>:<side>"`` whose openings a person has specified
+    #: (added / edited / deleted); hidden-side rules no longer fill them.
+    specified_sides: list[str] = Field(default_factory=list)
 
 
 class GeometryHypothesis(_Model):
@@ -588,11 +591,19 @@ class AllowanceRule(_Model):
     description: str
     cost_key: str
     unit: str
-    basis_measure: Literal["per_dwelling", "per_m2_gia", "per_m2_gea", "per_storey", "per_bathroom"]
+    #: ``per_m2_finishable`` (additive): m2 of internally finished wall + ceiling surface
+    #: measured by the quantity take-off (used e.g. for decoration).
+    basis_measure: Literal["per_dwelling", "per_m2_gia", "per_m2_gea", "per_storey", "per_bathroom",
+                           "per_m2_finishable"]
     quantity_per: TrackedValue
     trade: str = "services"
     labour_hours_per_unit: float = 0.0
     notes: str = ""
+    #: Optional material the allowance quantity is made of (e.g. structural steel in kg),
+    #: so carbon / logistics can use it.  Costing still uses ``cost_key`` (``allow:...``).
+    material_id: Optional[str] = None
+    #: Apply only when the twin's tallest block has at least this many storeys (e.g. stairs: 2).
+    min_storeys: int = Field(default=1, ge=1)
 
 
 class AssemblyLibrary(_Model):
@@ -987,6 +998,8 @@ class RateBook(_Model):
     name: str
     rates: list[Rate] = Field(default_factory=list)
     notes: str = ""
+    #: Load-time validation messages (skipped rows, clamped values) - additive, costing module.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class FeeItem(_Model):
@@ -1075,6 +1088,10 @@ class CostEstimate(_Model):
     sales_value: Optional[float] = None
     programme_weeks: Optional[float] = None
     created_at: datetime = Field(default_factory=utcnow)
+    #: Pricing conventions and rule assumptions used (additive, costing module).
+    conventions: dict[str, str] = Field(default_factory=dict)
+    #: Informational notes that are not problems (e.g. order-level rounding saving) - additive.
+    notes: list[str] = Field(default_factory=list)
 
     def boundary(self, key: str) -> CostBoundary:
         for b in self.boundaries:
@@ -1146,6 +1163,15 @@ class ProductionScenario(_Model):
     labour_scarcity_threshold_units: Optional[int] = None
     labour_scarcity_premium: float = 0.0
     notes: str = ""
+    # --- additive (costing module) ------------------------------------------------
+    #: Share of materials procured and consumed in the factory (counted at the factory gate).
+    #: None -> assumed default by method (site_built 0, offsite_panelised 0.35, volumetric 0.70).
+    factory_material_fraction: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    #: How procurement tiers apply: "all_units" (the tier reached by n discounts every unit) or
+    #: "incremental" (each unit gets the tier in force when it is bought).
+    discount_mode: Literal["all_units", "incremental"] = "all_units"
+    #: Site logistics & waste per house (deliveries, skips, disposal); None -> estimate layer 4.
+    site_logistics_per_house: Optional[float] = None
 
 
 class RepeatBuildRow(_Model):
@@ -1249,6 +1275,15 @@ class CarbonLine(_Model):
     factor_kgco2e_per_kg: float
     a1_a3_kgco2e: float
     a5_waste_kgco2e: float
+    # --- additive (simulation module) -------------------------------------------
+    #: Element code of the quantity line (e.g. "2.5").
+    element_code: str = ""
+    #: How the installed quantity was converted to mass (e.g. "m3 x density 2400 kg/m3").
+    mass_method: str = ""
+    #: Mass of cutting + waste losses (kg) that the A5 waste share is computed on.
+    waste_mass_kg: float = 0.0
+    #: Provenance of the line (weakest of the quantity line basis and the assumed factor).
+    basis: Basis = Basis.ASSUMED
 
 
 class CarbonResult(_Model):
@@ -1262,6 +1297,16 @@ class CarbonResult(_Model):
     unmatched: list[str] = Field(default_factory=list)
     factor_source: str = "Illustrative placeholder factors - replace with EPD / ICE data via adapter."
     caveats: list[str] = Field(default_factory=list)
+    # --- additive (simulation module) -------------------------------------------
+    #: Provenance of the totals (assumed at best: factors and assemblies are assumptions).
+    basis: Basis = Basis.ASSUMED
+    #: Labelled inputs and conventions used (A4 inputs, mass conversion rules, GIA).
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def total_kgco2e(self) -> float:
+        """A1-A3 + A5 waste share + A4 (when calculated)."""
+        return self.total_a1_a3_kgco2e + self.total_a5_waste_kgco2e + self.a4_transport_kgco2e
 
 
 class HeatLossElement(_Model):
@@ -1270,6 +1315,13 @@ class HeatLossElement(_Model):
     area_m2: float
     u_value: float
     ua_w_k: float
+    # --- additive (simulation module) -------------------------------------------
+    #: Temperature factor b applied (1 = to outside air / ground; < 1 = to an unheated space);
+    #: ``ua_w_k = u_value * area_m2 * b_factor``.
+    b_factor: float = 1.0
+    #: Provenance (construction assemblies and conductivities are assumptions unless confirmed).
+    basis: Basis = Basis.ASSUMED
+    notes: str = ""
 
 
 class HeatLossResult(_Model):
@@ -1285,6 +1337,10 @@ class HeatLossResult(_Model):
     hlp_w_m2k: float  # heat loss parameter per m2 floor
     assumptions: dict[str, Any] = Field(default_factory=dict)
     caveats: list[str] = Field(default_factory=list)
+    # --- additive (simulation module) -------------------------------------------
+    basis: Basis = Basis.ASSUMED
+    #: Elements excluded or approximated (e.g. missing conductivity data).
+    warnings: list[str] = Field(default_factory=list)
 
 
 class TaskSpec(_Model):
@@ -1303,6 +1359,10 @@ class TaskSpec(_Model):
     latest_finish: float = 0.0
     total_float: float = 0.0
     critical: bool = False
+    # --- additive (simulation module) -------------------------------------------
+    #: Quantity line ids whose labour (and materials) are assigned to this task.
+    line_ids: list[str] = Field(default_factory=list)
+    notes: str = ""
 
 
 class ProgrammeResult(_Model):
@@ -1315,6 +1375,15 @@ class ProgrammeResult(_Model):
     total_labour_hours: float
     labour_hours_by_trade: dict[str, float]
     caveats: list[str] = Field(default_factory=list)
+    # --- additive (simulation module) -------------------------------------------
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+    def task(self, task_id: str) -> TaskSpec:
+        for t in self.tasks:
+            if t.task_id == task_id:
+                return t
+        raise KeyError(task_id)
 
 
 class DeliveryBatch(_Model):
@@ -1328,6 +1397,16 @@ class DeliveryBatch(_Model):
     required_by_day: float
     order_by_day: float
     storage_area_m2: float
+    # --- additive (simulation module) -------------------------------------------
+    delivery_category: str = ""
+    line_ids: list[str] = Field(default_factory=list)
+    #: Longest supplier lead time of the batch (working days).
+    lead_time_days: float = 0.0
+    #: Planned delivery day and the day the batch is used up (end of its task).
+    delivery_day: float = 0.0
+    consumed_by_day: float = 0.0
+    #: Ready-mixed concrete: loads by truck volume, delivered on the day of use, no storage.
+    ready_mix: bool = False
 
 
 class LogisticsResult(_Model):
@@ -1339,6 +1418,8 @@ class LogisticsResult(_Model):
     skips: int
     assumptions: dict[str, Any] = Field(default_factory=dict)
     caveats: list[str] = Field(default_factory=list)
+    # --- additive (simulation module) -------------------------------------------
+    warnings: list[str] = Field(default_factory=list)
 
 
 # =============================================================================

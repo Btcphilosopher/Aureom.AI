@@ -1,0 +1,764 @@
+{
+ "schema_version": "1.0",
+ "fixture_key": "aureom-demo-front-elevation-v1",
+ "image_sha256": "a47a726c6c33ac97bd3274d2b47610d6bc8a49f00dc52d684561c9b85031b536",
+ "width_px": 1600,
+ "height_px": 1000,
+ "detector": {
+  "name": "fixture:aureom-demo-detector",
+  "version": "1.0"
+ },
+ "description": "Synthetic detections for the Aureom Demo House (fictional) front elevation, as an element detector would emit them.",
+ "image_attributes": {
+  "image_kind_hint": "synthetic_elevation_drawing",
+  "fictional": true
+ },
+ "features": [
+  {
+   "feature_id": "f01_facade_main",
+   "feature_type": "facade",
+   "label": "main block facade (walls, ground to wall plate)",
+   "bbox": [
+    210.38,
+    390.59,
+    1094.03,
+    899.18
+   ],
+   "confidence": 0.851,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f02_facade_garage",
+   "feature_type": "facade",
+   "label": "garage facade (walls, ground to wall plate)",
+   "bbox": [
+    1094.32,
+    636.32,
+    1388.56,
+    900.89
+   ],
+   "confidence": 0.88,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f03_roof_main",
+   "feature_type": "roof",
+   "label": "main roof band (eaves to ridge, verges at both ends)",
+   "polygon": [
+    [
+     191.01,
+     388.74
+    ],
+    [
+     190.86,
+     118.68
+    ],
+    [
+     1111.61,
+     119.0
+    ],
+    [
+     1113.09,
+     390.28
+    ]
+   ],
+   "confidence": 0.906,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "roof_form": "gable",
+    "ridge_orientation": "parallel_to_view",
+    "gable_visible": false,
+    "verge_overhang_visible": true
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f04_roof_garage",
+   "feature_type": "roof",
+   "label": "garage front gable (roof outline through wall corners)",
+   "polygon": [
+    [
+     1094.67,
+     636.95
+    ],
+    [
+     1239.38,
+     553.15
+    ],
+    [
+     1386.23,
+     636.41
+    ]
+   ],
+   "confidence": 0.888,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage",
+    "roof_form": "gable",
+    "ridge_orientation": "perpendicular_to_view",
+    "gable_visible": true
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f05_eaves_main",
+   "feature_type": "eaves_line",
+   "label": "main eaves (wall plate)",
+   "line": [
+    191.5,
+    390.65,
+    1111.99,
+    389.44
+   ],
+   "confidence": 0.884,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f06_eaves_garage",
+   "feature_type": "eaves_line",
+   "label": "garage wall plate at gable base",
+   "line": [
+    1092.44,
+    636.34,
+    1386.68,
+    638.38
+   ],
+   "confidence": 0.834,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f07_ridge_main",
+   "feature_type": "ridge_line",
+   "label": "main ridge",
+   "line": [
+    191.21,
+    117.35,
+    1112.59,
+    117.8
+   ],
+   "confidence": 0.845,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f08_ground",
+   "feature_type": "ground_line",
+   "label": "ground line",
+   "line": [
+    119.14,
+    900.03,
+    1480.64,
+    900.42
+   ],
+   "confidence": 0.926,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "f09_storey_main",
+   "feature_type": "storey_line",
+   "label": "first-floor band",
+   "line": [
+    208.77,
+    637.92,
+    1093.22,
+    638.91
+   ],
+   "confidence": 0.861,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o01",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    302.29,
+    691.68,
+    467.26,
+    802.87
+   ],
+   "confidence": 0.826,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 0
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o02",
+   "feature_type": "door",
+   "label": "front door",
+   "bbox": [
+    606.55,
+    692.64,
+    699.04,
+    886.47
+   ],
+   "confidence": 0.903,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 0
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o03",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    836.01,
+    693.53,
+    1000.15,
+    803.22
+   ],
+   "confidence": 0.841,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 0
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o04",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    329.31,
+    443.39,
+    441.4,
+    554.15
+   ],
+   "confidence": 0.914,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 1
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o05",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    595.8,
+    445.72,
+    707.29,
+    553.89
+   ],
+   "confidence": 0.944,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 1
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o06",
+   "feature_type": "window",
+   "label": "window",
+   "bbox": [
+    864.53,
+    445.81,
+    973.81,
+    553.94
+   ],
+   "confidence": 0.833,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "storey": 1
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "o07",
+   "feature_type": "garage_door",
+   "label": "garage door",
+   "bbox": [
+    1131.28,
+    690.4,
+    1349.84,
+    887.35
+   ],
+   "confidence": 0.909,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage",
+    "storey": 0
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r01_walls_main",
+   "feature_type": "finish_region",
+   "label": "main walls",
+   "bbox": [
+    210.21,
+    389.03,
+    1092.93,
+    899.22
+   ],
+   "confidence": 0.806,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "element": "walls",
+    "appearance": "red-brown brick-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r02_walls_garage",
+   "feature_type": "finish_region",
+   "label": "garage walls",
+   "bbox": [
+    1094.33,
+    552.72,
+    1387.74,
+    899.47
+   ],
+   "confidence": 0.928,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage",
+    "element": "walls",
+    "appearance": "red-brown brick-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r03_roof_main",
+   "feature_type": "finish_region",
+   "label": "main roof covering",
+   "bbox": [
+    190.18,
+    118.46,
+    1110.19,
+    388.27
+   ],
+   "confidence": 0.964,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "main",
+    "element": "roof",
+    "appearance": "dark grey tile-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r04_roof_garage",
+   "feature_type": "finish_region",
+   "label": "garage verge tiles",
+   "polygon": [
+    [
+     1075.27,
+     648.21
+    ],
+    [
+     1240.47,
+     553.93
+    ],
+    [
+     1405.53,
+     648.69
+    ],
+    [
+     1406.55,
+     662.71
+    ],
+    [
+     1240.46,
+     568.33
+    ],
+    [
+     1076.03,
+     662.1
+    ]
+   ],
+   "confidence": 0.959,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage",
+    "element": "roof",
+    "appearance": "dark grey tile-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "r05_garage_door",
+   "feature_type": "finish_region",
+   "label": "garage door",
+   "bbox": [
+    1128.52,
+    691.0,
+    1351.73,
+    885.11
+   ],
+   "confidence": 0.871,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {
+    "block": "garage",
+    "element": "garage_door",
+    "appearance": "white panel-like"
+   },
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l01",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    210.95,
+    880.14,
+    210.39,
+    404.08
+   ],
+   "confidence": 0.887,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l02",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    1093.88,
+    623.18,
+    1092.3,
+    402.79
+   ],
+   "confidence": 0.83,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l03",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    1387.14,
+    882.94,
+    1387.82,
+    651.12
+   ],
+   "confidence": 0.846,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l04",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    606.96,
+    881.43,
+    607.04,
+    697.65
+   ],
+   "confidence": 0.889,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l05",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    698.79,
+    882.33,
+    697.84,
+    697.38
+   ],
+   "confidence": 0.949,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l06",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    209.73,
+    901.27,
+    1386.31,
+    899.79
+   ],
+   "confidence": 0.888,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l07",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    192.95,
+    388.65,
+    1112.52,
+    389.93
+   ],
+   "confidence": 0.922,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l08",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    191.99,
+    120.25,
+    1111.1,
+    118.53
+   ],
+   "confidence": 0.834,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  },
+  {
+   "feature_id": "l09",
+   "feature_type": "line_segment",
+   "label": "straight edge",
+   "line": [
+    208.65,
+    636.94,
+    1094.45,
+    638.82
+   ],
+   "confidence": 0.819,
+   "pixel_uncertainty": 1.5,
+   "basis": "observed",
+   "attributes": {},
+   "evidence": "Synthetic demo detection (fixture): computed from the drawing parameters with seeded +/-1.5 px noise. Fictional data."
+  }
+ ],
+ "perspective_lines": [
+  [
+   302.31,
+   803.34,
+   302.28,
+   693.48
+  ],
+  [
+   467.02,
+   804.78,
+   467.5,
+   693.38
+  ],
+  [
+   302.41,
+   692.05,
+   466.29,
+   692.73
+  ],
+  [
+   302.79,
+   804.35,
+   468.29,
+   802.24
+  ],
+  [
+   606.84,
+   887.11,
+   606.73,
+   693.07
+  ],
+  [
+   698.85,
+   884.84,
+   696.19,
+   691.56
+  ],
+  [
+   604.86,
+   692.25,
+   696.66,
+   693.2
+  ],
+  [
+   834.22,
+   803.67,
+   834.6,
+   693.53
+  ],
+  [
+   999.76,
+   802.83,
+   1002.52,
+   693.12
+  ],
+  [
+   836.53,
+   693.47,
+   1001.53,
+   692.07
+  ],
+  [
+   835.82,
+   802.02,
+   1002.1,
+   804.78
+  ],
+  [
+   330.66,
+   553.65,
+   329.12,
+   444.05
+  ],
+  [
+   438.84,
+   555.38,
+   440.89,
+   444.04
+  ],
+  [
+   330.69,
+   445.49,
+   438.89,
+   445.4
+  ],
+  [
+   330.75,
+   554.09,
+   440.22,
+   555.42
+  ],
+  [
+   596.73,
+   553.79,
+   596.88,
+   445.0
+  ],
+  [
+   707.77,
+   555.91,
+   706.28,
+   445.27
+  ],
+  [
+   597.5,
+   445.78,
+   705.78,
+   443.18
+  ],
+  [
+   596.85,
+   554.14,
+   706.99,
+   556.33
+  ],
+  [
+   862.84,
+   554.26,
+   863.07,
+   445.07
+  ],
+  [
+   972.4,
+   554.64,
+   972.5,
+   445.09
+  ],
+  [
+   864.19,
+   444.23,
+   973.22,
+   444.72
+  ],
+  [
+   862.35,
+   554.24,
+   973.09,
+   554.87
+  ],
+  [
+   1128.74,
+   886.96,
+   1130.24,
+   689.64
+  ],
+  [
+   1349.53,
+   886.99,
+   1349.69,
+   689.14
+  ],
+  [
+   1128.89,
+   688.98,
+   1352.02,
+   689.55
+  ]
+ ],
+ "notes": [
+  "Fictional demonstration data.",
+  "Facade boxes cover the wall zone from ground to wall plate; roof outlines are separate features."
+ ]
+}

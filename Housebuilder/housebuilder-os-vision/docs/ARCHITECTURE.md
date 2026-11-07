@@ -119,3 +119,43 @@ and `params_from_twin(twin)`.
   **timber frame with timber cladding**, is used in scenario comparisons.
 * Fictional supplier rates: `demo/data/fictional_rates_gbp_2026.csv`.
 * Repeat-build scenario: site-built vs off-site panelised timber frame, n ∈ {1, 10, 25, 50, 100}.
+
+## 5. Implementation notes (integration)
+
+Appended by the integration module; sections 0-4 above remain the contract.
+
+* **Pipeline** (`pipeline.py`): the 11 engine functions are logged wrappers with one calling
+  convention (`library`, `rate_book`, `cost_params`, `settings`, `assumptions`) plus `run_log=`
+  (a `Project` or a list).  Each call appends a `RunRecord` with sha256 fingerprints of the
+  canonical JSON of inputs and outputs (keys `created_at`, `uploaded_at`, `updated_at`, `timestamp`
+  removed so equal inputs hash equally), the seed and versions (package `__version__`, model schema,
+  Python / libraries, image-analysis adapters, rate book).  Wider signatures than the table in §2:
+  `estimate_construction_cost(boq, rate_book, cost_params, *, settings, programme_weeks, logistics,
+  library)`, `simulate_uncertainty(twin, library, rate_book, cost_params, settings, *, config,
+  calibration, assumptions, scenario_id, crew_sizes)`, `compare_build_scenarios(base_twin,
+  hypotheses, scenarios, library, rate_book, cost_params, settings, *, simulate, config, calibration,
+  assumptions, crew_sizes)`, `export_project(project, out_dir, *, boq, estimate, simulation, repeat,
+  comparison, formats, library, rate_book)`.
+* `run_digital_simulations(twin, boq, library, settings, *, cost_params, crew_sizes,
+  lead_time_weeks)` -> `{"programme", "logistics", "carbon", "heat_loss"}`; logistics uses the cost
+  parameters' waste bulking and skip volume so skip counts agree with the cost engine.
+* `run_pipeline(project, *, store_dir, simulate=True, n_samples=500, registry=None,
+  scenario_samples=None, crew_sizes=None) -> PipelineResult`: analysis -> calibration (first
+  reference) -> hypotheses -> selected hypothesis -> twin (an existing twin from the same hypothesis
+  is kept with its edits) -> quantities -> programme/logistics/carbon/heat loss -> estimate
+  (programme weeks + logistics) -> simulation -> repeat build for every production scenario and
+  boundary (`factory_gate`, `installed`, `development`) -> scenario comparison.  The project is
+  updated in place.  `registry_from_env()` enables the Claude VLM adapter only with
+  `HBV_ENABLE_VLM=1`.
+* **Uncertainty**: see `docs/UNCERTAINTY.md` (groups, coherence rules, copula, estimators,
+  interval meaning).  `GROUP_RHO`, `RESOLVING_ACTIONS` and `GROUND_FOUNDATIONS` are module
+  constants of `simulation/uncertainty.py`.
+* **Scenarios**: each `BuildScenario` is evaluated as one house; a scenario on the base twin's own
+  hypothesis uses the base twin (edits kept), another hypothesis is rebuilt with the base selection;
+  assembly overrides are applied with `actor="scenario"` (basis ASSUMED); `rate_multiplier` scales
+  every rate.
+* **Demo**: `demo/build_demo.py` (`build_demo_project`, `build_uncalibrated_demo_project`,
+  `demo_registry` - offline: no transformers adapters) ingests the demo elevation as
+  `ELEVATION_DRAWING` (a dimensionally consistent synthetic drawing; `RENDERING` would mark it a
+  concept reference).  Production scenarios `PS-site` / `PS-offsite` (fixed per-house values from the
+  timber-frame + brick variant) and build scenarios `S1`-`S4`.  `demo/run_demo.py` is the CLI.
