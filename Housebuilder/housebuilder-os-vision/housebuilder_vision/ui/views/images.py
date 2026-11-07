@@ -16,11 +16,12 @@ import streamlit as st
 from pydantic import ValidationError
 
 from ...core.models import CONCEPT_KINDS, ImageKind, ReferenceMeasurement, ViewDirection
+from ...pipeline import is_user_rejection
 from .. import fmt
 from .. import state as S
 from ..charts import overlay_figure
 from ..components import guard, html, section_title
-from ..theme import BASIS_ORDER, badge, basis_legend_html, callout, esc, tag
+from ..theme import BASIS_ORDER, badge, basis_legend_html, callout, esc, md_escape, tag
 
 UPLOAD_TYPES = ["png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"]
 REF_UNITS = ("m", "mm", "cm", "ft", "in")
@@ -45,7 +46,8 @@ def _cb_ingest(files: list[tuple[str, bytes, str]]) -> None:
         ws.say("error", f"Rejected '{name}': {why}")
     if added:
         ws.say("success", f"Added {len(added)} image(s): {', '.join(added)}")
-        st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
+    # every attempt clears the uploader: a rejected file is reported once, not re-submitted with later uploads
+    st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
 
 
 def _cb_image_meta(image_id: str, kkey: str, vkey: str) -> None:
@@ -74,7 +76,9 @@ def _cb_features(image_id: str, key: str, ids: list[str]) -> None:
             continue
         try:
             fid = ids[int(row)]
-            S.set_feature_active(ws, image_id, feats[fid], bool(change["active"]))
+            msg = S.set_feature_active(ws, image_id, feats[fid], bool(change["active"]))
+            if msg:
+                ws.say("warning", msg)
         except Exception as e:  # noqa: BLE001
             ws.say("error", f"Feature change not applied: {type(e).__name__}: {e}")
 
@@ -148,7 +152,10 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     with right:
         with guard("Image details"):
             _image_details(ws, asset, ia)
-    t1, t2, t3, t4 = st.tabs(["Evidence", "Annotate", "Calibration", "Unknowns & warnings"])
+    # stateful (keyed) sub-tabs: e.g. the Calibration tab stays open after a reference is applied (the rerun
+    # and its flash message would otherwise reset an unkeyed tab bar to the first tab)
+    t1, t2, t3, t4 = st.tabs(["Evidence", "Annotate", "Calibration", "Unknowns & warnings"], key="images_subtab",
+                             on_change="rerun")
     with t1:
         with guard("Evidence table"):
             _feature_table(ws, image_id, ia)
@@ -252,8 +259,11 @@ def _capture_box(event: Any, asset) -> None:
     xs, ys = b.get("x", []), b.get("y", [])
     if len(xs) < 2 or len(ys) < 2:
         return
-    row = {"type": "window", "x0": round(min(xs), 1), "y0": round(min(ys), 1), "x1": round(max(xs), 1),
-           "y1": round(max(ys), 1), "label": "", "storey": None, "block": "main", "roof_form": ""}
+    plan = S.is_plan_image(asset)
+    row = {"type": "building_outline" if plan else "window", "x0": round(min(xs), 1), "y0": round(min(ys), 1),
+           "x1": round(max(xs), 1), "y1": round(max(ys), 1), "label": "", "storey": None, "block": "main",
+           "roof_form": "", "ridge": "", "gable_visible": False, "length_m": None, "axis": "", "active": True,
+           "id": None}
     drafts = st.session_state.setdefault("ann_draft", {})
     rows = drafts.setdefault(asset.image_id, None)
     if rows is None:
@@ -333,7 +343,7 @@ def _feature_table(ws: S.Workspace, image_id: str, ia) -> None:
     feats = list(ia.features)
     rows = []
     for f in feats:
-        rejected = (not f.active) and any(h.reason == S.UI_REJECT_REASON for h in f.history)
+        rejected = is_user_rejection(f)
         superseded = (not f.active) and not rejected
         rows.append({"active": f.active, "type": f.feature_type.value, "label": f.label[:60],
                      "basis": f.basis.value, "method": f"{f.method} v{f.method_version}",
@@ -358,39 +368,91 @@ def _feature_table(ws: S.Workspace, image_id: str, ia) -> None:
 
 
 def _annotation_editor(ws: S.Workspace, asset) -> None:
-    st.caption("Annotate in image pixels (origin top-left). Minimum for a facade: a facade box (block 'main'), the "
-               "ground line, the eaves line, the ridge line and the openings (window / door / garage_door with "
-               "storey 0 = ground floor). Annotations are user-confirmed evidence and override overlapping "
-               "detections. Tip: enable 'Draw boxes' above the image and box-select to add rows.")
+    plan = S.is_plan_image(asset)
+    if plan:
+        st.caption("Floor plan: draw one **building_outline** box per rectangular block (block 'main', 'garage', "
+                   "'extension', ...; an outline left without a block is read as the whole building and only "
+                   "transfers the scale) and at least one **dimension** line along a dimensioned wall with its real "
+                   "**length_m** and **axis** (width = along the frontage, depth = front to rear; optional "
+                   "tolerance). The dimensions calibrate the plan; each outline then gives its block's width and "
+                   "depth in metres - evidence-based depth instead of an assumption. Set **front** to 'top' on an "
+                   "outline when the street side is at the top of the sheet. Pixels, origin top-left.")
+    else:
+        st.caption("Annotate in image pixels (origin top-left). Minimum for a facade: a facade box (block 'main'), the "
+                   "ground line, the eaves line, the ridge line and the openings (window / door / garage_door) with "
+                   "their **storey** (0 = ground floor; it is used as entered) and **block**. **Roof form**, **ridge** "
+                   "(parallel / perpendicular to this view) and **gable visible** belong on a **roof** row: with a "
+                   "visible gable the roof box is read as the gable triangle (base = box bottom, apex = top centre), "
+                   "so its pitch is measured. Annotations are user-confirmed evidence and override overlapping "
+                   "detections; untick 'active' to keep a row without using it. Tip: enable 'Draw boxes' above the "
+                   "image and box-select to add rows.")
     drafts = st.session_state.setdefault("ann_draft", {})
     rows = drafts.get(asset.image_id)
     if rows is None:
         rows = S.annotation_rows(ws, asset.image_id)
-    cols = ["type", "x0", "y0", "x1", "y1", "label", "storey", "block", "roof_form"]
-    df = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
-    for c in ("x0", "y0", "x1", "y1", "storey"):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    cols = S.PLAN_COLUMNS if plan else S.ELEVATION_COLUMNS
+    df = pd.DataFrame([{c: r.get(c) for c in cols} for r in rows], columns=cols) if rows else \
+        pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
+    for c in ("x0", "y0", "x1", "y1", "storey", "length_m", "tolerance_m", "storeys"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c, default in (("active", True), ("gable_visible", False)):
+        if c in df.columns:
+            df[c] = pd.Series([default if v is None or v is pd.NA or (isinstance(v, float) and v != v) else bool(v)
+                               for v in df[c]], index=df.index, dtype=bool)
+    types = list(S.PLAN_ANNOTATION_TYPES if plan else S.ANNOTATION_TYPES)
+    config: dict[str, Any] = {
+        "type": st.column_config.SelectboxColumn("type", options=types, required=True),
+        "x0": st.column_config.NumberColumn("x0", format="%.1f"),
+        "y0": st.column_config.NumberColumn("y0", format="%.1f"),
+        "x1": st.column_config.NumberColumn("x1", format="%.1f"),
+        "y1": st.column_config.NumberColumn("y1", format="%.1f"),
+        "label": st.column_config.TextColumn("label", max_chars=120),
+        "block": st.column_config.TextColumn("block", max_chars=30, help="e.g. main, garage, extension"),
+        "active": st.column_config.CheckboxColumn("active", default=True,
+                                                  help="Unticked: kept (with a 'rejected' history record) but not "
+                                                       "used - it supersedes, calibrates and contributes nothing."),
+        "id": None,  # stable feature id (hidden): never the row position
+    }
+    if plan:
+        config.update({
+            "length_m": st.column_config.NumberColumn("length (m)", min_value=0.0, max_value=S.MAX_PLAN_DIMENSION_M,
+                                                      format="%.3f", help="Dimension rows: the real length in metres"),
+            "axis": st.column_config.SelectboxColumn("axis", options=list(S.PLAN_AXES),
+                                                     help="Dimension rows: width (along the frontage) or depth"),
+            "tolerance_m": st.column_config.NumberColumn("± (m)", min_value=0.0, format="%.3f",
+                                                         help="Dimension rows: tolerance of the dimension (default "
+                                                              "0.02 m)"),
+            "storeys": st.column_config.NumberColumn("storeys", min_value=1, max_value=6, step=1, format="%d",
+                                                     help="Outline rows: storeys of that block, if the plan shows "
+                                                          "them"),
+            "front": st.column_config.SelectboxColumn("front", options=list(S.PLAN_FRONT),
+                                                      help="Outline rows: edge of the sheet facing the street "
+                                                           "(blank = bottom)"),
+        })
+    else:
+        config.update({
+            "storey": st.column_config.NumberColumn("storey", min_value=0, max_value=9, step=1, format="%d",
+                                                    help="Openings only: 0 = ground floor"),
+            "roof_form": st.column_config.SelectboxColumn("roof form", options=list(S.ROOF_FORMS),
+                                                          help="Roof rows only"),
+            "ridge": st.column_config.SelectboxColumn("ridge", options=list(S.RIDGE_CHOICES),
+                                                      help="Roof rows only: ridge parallel or perpendicular to this "
+                                                           "view (a gable facing you = perpendicular)"),
+            "gable_visible": st.column_config.CheckboxColumn("gable visible", default=False,
+                                                             help="Roof rows only: the gable triangle is visible "
+                                                                  "(box base = eaves, apex = top centre)"),
+        })
     edited = st.data_editor(
         df, key=f"ann_{asset.image_id}_{st.session_state.get('ann_ver', 0)}", num_rows="dynamic", hide_index=True,
-        width="stretch",
-        column_config={
-            "type": st.column_config.SelectboxColumn("type", options=list(S.ANNOTATION_TYPES), required=True),
-            "x0": st.column_config.NumberColumn("x0", format="%.1f"),
-            "y0": st.column_config.NumberColumn("y0", format="%.1f"),
-            "x1": st.column_config.NumberColumn("x1", format="%.1f"),
-            "y1": st.column_config.NumberColumn("y1", format="%.1f"),
-            "label": st.column_config.TextColumn("label", max_chars=120),
-            "storey": st.column_config.NumberColumn("storey", min_value=0, max_value=9, step=1, format="%d"),
-            "block": st.column_config.TextColumn("block", max_chars=30, help="e.g. main, garage, extension"),
-            "roof_form": st.column_config.SelectboxColumn("roof form", options=list(S.ROOF_FORMS)),
-        })
+        width="stretch", column_config=config)
     c1, c2, _ = st.columns([1, 1, 3])
     if c1.button("Apply annotations", key=f"ann_apply_{asset.image_id}", type="primary"):
-        recs = edited.where(pd.notna(edited), None).to_dict(orient="records")
+        recs = edited.astype(object).where(pd.notna(edited), None).to_dict(orient="records")
         errors = S.set_annotations(ws, asset.image_id, recs)
         if errors:
             for e in errors[:8]:
-                st.error(e)
+                st.error(md_escape(e))
         else:
             drafts.pop(asset.image_id, None)
             st.session_state["ann_ver"] = st.session_state.get("ann_ver", 0) + 1
@@ -406,7 +468,7 @@ def _calibration_panel(ws: S.Workspace) -> None:
     p = ws.project
     cal = p.calibration
     if ws.calibration_error:
-        st.error(ws.calibration_error)
+        st.error(md_escape(ws.calibration_error))
     if cal is None:
         st.info("No facade measurements yet, so there is no scale. Add annotations (facade box, ground / eaves "
                 "lines) or an image with a detection fixture.")
@@ -415,6 +477,13 @@ def _calibration_panel(ws: S.Workspace) -> None:
     lo, hi = tv.bounds()
     rel = tv.relative_spread()
     method = cal.method.replace("_", " ")
+    conflict = S.reference_conflict(cal)
+    if conflict is not None:
+        factor, ref_v, cue_v = conflict
+        html(callout(f"The reference implies <b>{ref_v * 1000:.3f} mm/px</b>, but the labelled prior cues of the same "
+                     f"image imply <b>{cue_v * 1000:.3f} mm/px</b> - {factor:.1f}x apart. Wrong endpoints, the wrong "
+                     "feature or the wrong unit are the usual causes. The twin is not rebuilt automatically while this "
+                     "conflict stands.", title="Reference conflicts with the prior scale cues", tone="danger"))
     c1, c2 = st.columns([1.15, 1])
     with c1:
         html(f'<div class="hbv-cards" style="grid-template-columns:repeat(3,1fr)">'
@@ -438,7 +507,7 @@ def _calibration_panel(ws: S.Workspace) -> None:
                                         "implied mm/px": st.column_config.NumberColumn(format="%.3f")})
         with st.expander("Calibration notes"):
             for n in cal.notes:
-                st.markdown(f"- {esc(n)}")
+                st.markdown(f"- {md_escape(n)}")
     with c2:
         if cal.method != "reference_measurement":
             hint = next((n for n in cal.notes if "Most useful" in n), "Confirm one real dimension, e.g. the "
@@ -455,61 +524,131 @@ def _calibration_panel(ws: S.Workspace) -> None:
                              tone="neutral"))
         if p.references:
             r = p.references[0]
+            target = r.feature_id or (f"pixel endpoints ({r.p0[0]:.0f},{r.p0[1]:.0f})-({r.p1[0]:.0f},{r.p1[1]:.0f})"
+                                      if r.p0 and r.p1 else "main front facade width")
+            img = ws.image(r.image_id)
             html(callout(f"{r.real_length:g} {esc(r.unit)} ± {r.tolerance:g} {esc(r.unit)} · {esc(r.description)} · "
-                         f"source: {esc(r.source)} · target: {esc(r.feature_id or 'pixel endpoints')}",
-                         title="Reference in use (user-confirmed)", tone="info"))
+                         f"source: {esc(r.source)} · image: {esc(img.original_filename if img else r.image_id)} · "
+                         f"target: {esc(target)}"
+                         + (f" ({esc(r.feature_type)}, {r.feature_span_px:.0f} px when confirmed)"
+                            if r.feature_type and r.feature_span_px else ""),
+                         title="Reference in use (user-confirmed)" if not ws.calibration_error
+                         else "Reference NOT in use (see the error above)",
+                         tone="info" if not ws.calibration_error else "danger"))
             st.button("Remove reference", key="cal_clear", on_click=_cb_clear_ref, type="tertiary")
         _reference_form(ws)
 
 
+def _ref_placeholder(asset, feat) -> str:
+    """Placeholder (never a default value) for the reference description, from the chosen feature and view."""
+    if feat is not None and feat.feature_type.value == "facade":
+        if asset is not None and asset.view.value in ("left", "right"):
+            return "e.g. measured side wall length (front to rear corner)"
+        if asset is not None and asset.view.value == "rear":
+            return "e.g. measured rear wall width"
+        return "e.g. measured frontage width (corner to corner)"
+    if feat is not None:
+        return f"e.g. measured {feat.feature_type.value.replace('_', ' ')} width"
+    return "what you measured, and how"
+
+
 def _reference_form(ws: S.Workspace) -> None:
+    """Reference measurement entry.  Nothing is pre-filled for a real project (no fictional 'survey' values);
+    the image and measuring mode sit outside the form so the feature list always follows the chosen image."""
+    from ...demo.build_demo import DEMO_PROJECT_ID, FRONTAGE_M, FRONTAGE_TOLERANCE_M
+
     p = ws.project
     analysis = p.analysis
     primary = analysis.primary_image_id if analysis else None
     img_ids = [a.image_id for a in p.images]
-    with st.form("ref_form", border=True):
-        st.markdown("**Confirm a reference dimension**")
-        img = st.selectbox("Image", img_ids, index=img_ids.index(primary) if primary in img_ids else 0,
-                           format_func=lambda i: ws.image(i).original_filename if ws.image(i) else i)
-        mode = st.radio("Measure", ["Feature width (box)", "Pixel endpoints"], horizontal=True)
-        feats = [f for a in analysis.analyses if a.image_id == img for f in a.features
-                 if f.active and f.bbox is not None] if analysis else []
-        feats.sort(key=lambda f: (f.feature_type.value != "facade", f.feature_id))
-        fid = st.selectbox("Feature (its box width is the reference span)", [f.feature_id for f in feats] or [""],
-                           format_func=lambda i: next((f"{f.feature_type.value} · {f.label[:40]} · "
-                                                       f"{f.width_px():.0f} px" for f in feats if f.feature_id == i), "-"))
-        cc = st.columns(4)
-        x0 = cc[0].number_input("x0 px", value=0.0, step=1.0)
-        y0 = cc[1].number_input("y0 px", value=0.0, step=1.0)
-        x1 = cc[2].number_input("x1 px", value=100.0, step=1.0)
-        y1 = cc[3].number_input("y1 px", value=0.0, step=1.0)
-        c1, c2, c3 = st.columns([1.2, 0.8, 1])
-        length = c1.number_input("Real length", value=9.60, min_value=0.0, step=0.01, format="%.3f")
-        unit = c2.selectbox("Unit", REF_UNITS)
-        tol = c3.number_input("Tolerance ±", value=0.02, min_value=0.0, step=0.005, format="%.3f")
-        desc = st.text_input("Description", value="measured frontage width (corner to corner)", max_chars=200)
-        ok = st.form_submit_button("Apply calibration", type="primary")
-    if ok:
-        try:
-            kwargs: dict[str, Any] = dict(image_id=img, real_length=float(length), unit=unit, tolerance=float(tol),
-                                          description=desc.strip()[:200], source="user (UI)")
-            if mode.startswith("Feature"):
-                if not fid:
-                    st.error("Choose a feature with a box, or use pixel endpoints.")
-                    return
-                kwargs["feature_id"] = fid
+    if not img_ids:
+        return
+    demo = p.project_id == DEMO_PROJECT_ID
+    st.markdown("**Confirm a reference dimension**")
+    if st.session_state.get("ref_img") not in img_ids:
+        st.session_state["ref_img"] = primary if primary in img_ids else img_ids[0]
+    img = st.selectbox("Image", img_ids, key="ref_img",
+                       format_func=lambda i: ws.image(i).original_filename if ws.image(i) else i)
+    mode = st.radio("Measure", ["Feature width (box)", "Pixel endpoints"], horizontal=True, key="ref_mode")
+    asset = ws.image(img)
+    feats = [f for a in analysis.analyses if a.image_id == img for f in a.features
+             if f.active and f.bbox is not None] if analysis else []
+    feats.sort(key=lambda f: (f.feature_type.value != "facade", f.feature_id))
+    by_id = {f.feature_id: f for f in feats}
+    with st.form(f"ref_form_{img}", border=True):
+        fid: Optional[str] = None
+        xy: list[Optional[float]] = [None] * 4
+        if mode.startswith("Feature"):
+            if feats:
+                fid = st.selectbox("Feature (its box width is the reference span)", list(by_id), key=f"ref_feat_{img}",
+                                   format_func=lambda i: f"{by_id[i].feature_type.value} · {by_id[i].label[:40]} · "
+                                                         f"{by_id[i].width_px():.0f} px")
             else:
-                kwargs["p0"], kwargs["p1"] = (float(x0), float(y0)), (float(x1), float(y1))
-            ref = ReferenceMeasurement(**kwargs)
-        except ValidationError as e:
-            st.error(f"Reference not valid: {e.errors()[0].get('msg')}")
-            return
-        err = S.set_reference(ws, ref)
-        if err:
-            st.error(err)
+                st.caption("This image has no active feature with a box - use pixel endpoints or annotate a box.")
         else:
-            ws.say("success", "Calibration applied: every scaled dimension now carries the reference tolerance.")
-            st.rerun()
+            w, h = (asset.width_px, asset.height_px) if asset else (0, 0)
+            st.caption(f"End points of the measured length in image pixels (0-{w} x 0-{h}, origin top-left).")
+            cc = st.columns(4)
+            for j, name in enumerate(("x0", "y0", "x1", "y1")):
+                xy[j] = cc[j].number_input(f"{name} px", value=None, min_value=0.0, step=1.0, key=f"ref_{name}_{img}",
+                                           placeholder="px")
+        c1, c2, c3 = st.columns([1.2, 0.8, 1])
+        length = c1.number_input("Real length", value=FRONTAGE_M if demo else None, min_value=0.0, step=0.01,
+                                 format="%.3f", placeholder="measured", key=f"ref_len_{img}")
+        unit = c2.selectbox("Unit", REF_UNITS, key=f"ref_unit_{img}")
+        tol = c3.number_input("Tolerance ±", value=FRONTAGE_TOLERANCE_M if demo else None, min_value=0.0, step=0.005,
+                              format="%.3f", placeholder="same unit", key=f"ref_tol_{img}",
+                              help="Accuracy of your measurement, in the same unit (e.g. 0.02 m for a tape measure).")
+        desc = st.text_input("Description", value="measured frontage width (corner to corner)" if demo else "",
+                             max_chars=200, key=f"ref_desc_{img}",
+                             placeholder=_ref_placeholder(asset, by_id.get(fid) if fid else None))
+        force = st.checkbox("Use anyway if it conflicts with the prior scale cues (2x or more)", key=f"ref_force_{img}",
+                            help="Only when you are sure the door / wall-height cues are wrong for this building.")
+        ok = st.form_submit_button("Apply calibration", type="primary")
+    if demo:
+        st.caption("Demo project: the fictional survey frontage (9.60 m ± 0.02 m) is pre-filled. New projects start "
+                   "empty - enter a dimension you actually measured.")
+    if not ok:
+        return
+    problems = []
+    if length is None or length <= 0:
+        problems.append("enter the real length you measured")
+    if tol is None:
+        problems.append("enter the tolerance of your measurement")
+    if not (desc or "").strip():
+        problems.append("describe what was measured")
+    kwargs: dict[str, Any] = {}
+    if mode.startswith("Feature"):
+        if not fid or fid not in by_id:
+            problems.append("choose a feature of this image with a box, or use pixel endpoints")
+        else:
+            kwargs["feature_id"] = fid
+    else:
+        if any(v is None for v in xy):
+            problems.append("enter all four pixel coordinates")
+        else:
+            x0, y0, x1, y1 = (float(v) for v in xy)  # type: ignore[arg-type]
+            if asset is not None and (max(x0, x1) > asset.width_px or max(y0, y1) > asset.height_px):
+                problems.append(f"the end points must lie inside the image ({asset.width_px} x {asset.height_px} px)")
+            elif ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5 < 20:
+                problems.append("the end points must be at least 20 px apart")
+            else:
+                kwargs["p0"], kwargs["p1"] = (x0, y0), (x1, y1)
+    if problems:
+        st.error("Reference not applied: " + "; ".join(problems) + ".")
+        return
+    try:
+        ref = ReferenceMeasurement(image_id=img, real_length=float(length), unit=unit, tolerance=float(tol),
+                                   description=desc.strip()[:200], source="user (UI)", **kwargs)
+    except ValidationError as e:
+        st.error(f"Reference not valid: {md_escape(e.errors()[0].get('msg'))}")
+        return
+    err = S.set_reference(ws, ref, allow_conflict=bool(force))
+    if err:
+        st.error(md_escape(err))
+    else:
+        ws.say("success", "Calibration applied: every scaled dimension now carries the reference tolerance.")
+        st.rerun()
 
 
 def _unknowns(ws: S.Workspace) -> None:
@@ -542,12 +681,19 @@ def _hypotheses(ws: S.Workspace) -> None:
     hyps = p.hypotheses
     section_title("Geometry hypotheses", sub="competing hidden-footprint readings of the same evidence")
     status = S.twin_status(ws)
+    if status == "orphaned" and p.twin is not None:
+        html(callout(f"Twin v{p.twin.version} was built from {esc(p.twin.source_hypothesis_id)}, but the images it "
+                     "was measured from have been removed. It is kept as a manual model: its scale method, dimensions "
+                     "and evidence links refer to evidence that is no longer in the project.",
+                     title="Evidence removed - twin kept as a manual model", tone="warn"))
     if status == "stale" and p.twin is not None:
         n = S.user_geometry_edits(p.twin)
+        why = (" The reference measurement conflicts with the prior scale cues, so the twin was not rebuilt "
+               "automatically." if S.reference_conflict(p.calibration) is not None else "")
         html(callout(f"The evidence or calibration changed after the twin was built (twin v{p.twin.version} from "
-                     f"{esc(p.twin.source_hypothesis_id)}, {n} geometry edit(s)). Quantities and costs still describe "
-                     "that twin. Rebuild to follow the updated hypothesis (edits are not carried over; the assembly "
-                     "selection is kept).", title="Twin based on earlier evidence", tone="danger"))
+                     f"{esc(p.twin.source_hypothesis_id)}, {n} geometry edit(s)).{why} Quantities and costs still "
+                     "describe that twin. Rebuild to follow the updated hypothesis (edits are not carried over; the "
+                     "assembly selection is kept).", title="Twin based on earlier evidence", tone="danger"))
         if p.selected_hypothesis_id:
             st.button(f"Rebuild twin from {p.selected_hypothesis_id}", key="rebuild_twin", on_click=_cb_build,
                       args=(p.selected_hypothesis_id,))

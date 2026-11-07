@@ -4,7 +4,10 @@ Uploaded files are untrusted.  :func:`ingest_image` therefore:
 
 1. rejects payloads over ``MAX_BYTES`` (25 MB) before touching them;
 2. detects the format from the *content* with Pillow, restricted to
-   PNG / JPEG / WebP / TIFF / BMP (the filename extension is ignored);
+   PNG / JPEG / WebP / TIFF / BMP (the filename extension is ignored; a
+   multi-picture JPEG - Pillow format ``MPO``, written by many phones and
+   cameras - is a JPEG: ``image/jpeg``, first frame analysed, original bytes
+   kept);
 3. checks width x height against ``MAX_PIXELS`` (50 MP) and ``MAX_SIDE``
    from the header *before* any pixel data is decoded (decompression-bomb
    guard; Pillow's own bomb warnings are escalated to errors);
@@ -22,6 +25,13 @@ Uploaded files are untrusted.  :func:`ingest_image` therefore:
 orientation is applied), matching :func:`load_image_array`, which returns an
 EXIF-transposed RGB ``uint8`` array; all pixel coordinates in detections refer
 to that array.
+
+Loading (:func:`load_image_array`) reads a preserved original only from a
+content-addressed file ``<sha256>.<ext>`` (``ImageAsset.stored_path`` from a
+loaded project is untrusted: any other name, or a path outside ``store_dir``
+when one is given, is ignored), with a size cap, and re-checks the sha256.
+16-bit / 32-bit images are scaled to 8 bits in row chunks (integer / float32
+arithmetic) so the 50 MP limit also bounds decode memory.
 
 The module never executes or interprets image content (text in images is not
 read), and never writes outside ``store_dir``.
@@ -53,11 +63,20 @@ MAX_SIDE = 30_000
 ALLOWED_FORMATS: dict[str, tuple[str, str]] = {
     "PNG": ("image/png", "png"),
     "JPEG": ("image/jpeg", "jpg"),
+    # Multi-picture JPEG (an MPF index: stereo / preview / depth frames written by many phones and cameras).
+    # The file *is* a JPEG whose first frame is the photo; only that frame is analysed.
+    "MPO": ("image/jpeg", "jpg"),
     "WEBP": ("image/webp", "webp"),
     "TIFF": ("image/tiff", "tif"),
     "BMP": ("image/bmp", "bmp"),
 }
 MEDIA_TYPE_EXTENSIONS: dict[str, str] = {mt: ext for mt, ext in ALLOWED_FORMATS.values()}
+#: Pillow decoders tried when opening (MPO files are opened by the JPEG decoder, which reports ``MPO``).
+OPEN_FORMATS: tuple[str, ...] = ("PNG", "JPEG", "WEBP", "TIFF", "BMP")
+#: Extensions a preserved original may have (content-addressed ``<sha256>.<ext>``).
+STORED_EXTENSIONS = frozenset(MEDIA_TYPE_EXTENSIONS.values())
+#: Rows decoded per chunk when scaling >8-bit images to 8 bits (bounds the temporaries).
+_DECODE_CHUNK_ROWS = 512
 
 #: name -> (tag id, IFD) of the EXIF fields we keep.
 SAFE_EXIF_TAGS: dict[str, tuple[int, str]] = {
@@ -109,7 +128,7 @@ def _open_restricted(data: bytes) -> Image.Image:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            return Image.open(io.BytesIO(data), formats=list(ALLOWED_FORMATS))
+            return Image.open(io.BytesIO(data), formats=list(OPEN_FORMATS))
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ImageRejected(f"image dimensions exceed the decompression-bomb limit ({exc})") from exc
     except Exception as exc:  # UnidentifiedImageError, OSError, SyntaxError, ...
@@ -266,14 +285,46 @@ def ingest_path(path: Path | str, *, kind: ImageKind = ImageKind.UNKNOWN,
 
 
 # --------------------------------------------------------------- loading
+def _to_uint8(arr: np.ndarray) -> np.ndarray:
+    """Scale a >8-bit single-channel array to ``uint8`` (0 .. max -> 0 .. 255), chunk by chunk.
+
+    Integer images are scaled with integer arithmetic and float images in ``float32``, a block of
+    rows at a time, so the temporaries stay a few MB whatever the image size (a full-resolution
+    ``float64`` copy of a 49 MP 16-bit image would need ~1.2 GB).
+    """
+    out = np.empty(arr.shape, dtype=np.uint8)
+    if arr.size == 0:
+        return out
+    is_int = np.issubdtype(arr.dtype, np.integer)
+    top_f = 0.0
+    for r0 in range(0, arr.shape[0], _DECODE_CHUNK_ROWS):  # largest finite value, chunk by chunk
+        blk = arr[r0:r0 + _DECODE_CHUNK_ROWS]
+        m = blk.max() if is_int else np.max(blk, where=np.isfinite(blk), initial=0.0)
+        top_f = max(top_f, float(m))
+    for r0 in range(0, arr.shape[0], _DECODE_CHUNK_ROWS):
+        blk = arr[r0:r0 + _DECODE_CHUNK_ROWS]
+        if is_int and top_f > 0:
+            b = np.clip(blk.astype(np.int64), 0, None)
+            out[r0:r0 + _DECODE_CHUNK_ROWS] = (b * 255 // int(top_f)).astype(np.uint8)
+        else:
+            b = np.nan_to_num(blk.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+            if top_f > 0:
+                b *= np.float32(255.0 / top_f)
+            np.clip(b, 0, 255, out=b)
+            out[r0:r0 + _DECODE_CHUNK_ROWS] = b.astype(np.uint8)
+    return out
+
+
 def decode_rgb(data: bytes, *, max_pixels: int = MAX_PIXELS) -> np.ndarray:
-    """Decode validated image bytes to an EXIF-transposed RGB ``uint8`` array."""
+    """Decode validated image bytes to an EXIF-transposed RGB ``uint8`` array.
+
+    16-bit / 32-bit single-channel images are scaled to 8 bits without a full-resolution
+    floating-point copy (see :func:`_to_uint8`).
+    """
     im = _full_decode(data, max_pixels)
     im = ImageOps.exif_transpose(im) or im
     if im.mode in ("I;16", "I;16B", "I;16L", "I", "F"):
-        arr = np.asarray(im, dtype=np.float64)
-        top = float(arr.max()) if arr.size else 1.0
-        arr = np.clip(arr / (top if top > 0 else 1.0) * 255.0, 0, 255).astype(np.uint8)
+        arr = _to_uint8(np.asarray(im))
         return np.repeat(arr[..., None], 3, axis=2)
     if im.mode == "P" or im.mode == "LA" or (im.mode == "L" and "transparency" in im.info):
         im = im.convert("RGBA")
@@ -282,18 +333,44 @@ def decode_rgb(data: bytes, *, max_pixels: int = MAX_PIXELS) -> np.ndarray:
     return np.ascontiguousarray(np.asarray(im, dtype=np.uint8))
 
 
+def _content_addressed(path: Path, asset: ImageAsset) -> bool:
+    """``path`` (after resolving links) is a regular file named ``<sha256>.<allowed ext>`` of this asset."""
+    try:
+        real = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    stem, dot, ext = real.name.rpartition(".")
+    return bool(dot) and stem == asset.sha256 and ext in STORED_EXTENSIONS and real.is_file()
+
+
 def stored_image_path(asset: ImageAsset, store_dir: Path | str | None = None) -> Path:
-    """Locate the preserved original for ``asset`` (``store_dir`` first, then ``stored_path``)."""
+    """Locate the preserved original for ``asset`` (``store_dir`` first, then ``stored_path``).
+
+    ``ImageAsset.stored_path`` comes from project state (untrusted when a project is loaded): it is
+    used only when it names a content-addressed file ``<sha256>.<ext>`` of this asset - and, when
+    ``store_dir`` is given, one inside ``store_dir`` - so a crafted path (``/proc/self/environ``, a
+    file elsewhere on the server) is never opened.
+    """
     cands: list[Path] = []
+    root: Optional[Path] = None
     if store_dir is not None:
+        root = Path(store_dir)
         ext = MEDIA_TYPE_EXTENSIONS.get(asset.media_type)
         if ext:
-            cands.append(Path(store_dir) / f"{asset.sha256}.{ext}")
-        cands.extend(sorted(Path(store_dir).glob(f"{asset.sha256}.*")))
+            cands.append(root / f"{asset.sha256}.{ext}")
+        cands.extend(sorted(root.glob(f"{asset.sha256}.*")))
     if asset.stored_path:
-        cands.append(Path(asset.stored_path))
+        sp = Path(asset.stored_path)
+        inside = True
+        if root is not None:
+            try:
+                sp.resolve().relative_to(root.resolve())
+            except (ValueError, OSError, RuntimeError):
+                inside = False
+        if inside:
+            cands.append(sp)
     for c in cands:
-        if c.is_file():
+        if _content_addressed(c, asset):
             return c
     raise FileNotFoundError(f"stored original for {asset.image_id} not found")
 
@@ -301,18 +378,21 @@ def stored_image_path(asset: ImageAsset, store_dir: Path | str | None = None) ->
 def load_image_array(asset: ImageAsset, store_dir: Path | str | None = None) -> np.ndarray:
     """Load the preserved original as an EXIF-transposed RGB ``uint8`` array.
 
-    The stored bytes are re-hashed and must match ``asset.sha256``.
+    The stored bytes are read with a size cap (``MAX_BYTES``; ``st_size`` is not trusted) and
+    re-hashed: they must match ``asset.sha256``.
     """
     path = stored_image_path(asset, store_dir)
-    if path.stat().st_size > MAX_BYTES:
+    with open(path, "rb") as fh:
+        data = fh.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
         raise ImageRejected("stored file exceeds the size limit")
-    data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != asset.sha256:
         raise ImageRejected(f"stored file for {asset.image_id} does not match its sha256")
     return decode_rgb(data)
 
 
 __all__ = [
-    "MAX_BYTES", "MAX_PIXELS", "MAX_SIDE", "ALLOWED_FORMATS", "SAFE_EXIF_TAGS", "ImageRejected",
+    "MAX_BYTES", "MAX_PIXELS", "MAX_SIDE", "ALLOWED_FORMATS", "STORED_EXTENSIONS", "SAFE_EXIF_TAGS",
+    "ImageRejected",
     "sanitize_filename", "ingest_image", "ingest_path", "decode_rgb", "stored_image_path", "load_image_array",
 ]

@@ -32,7 +32,9 @@ bases propagate through :func:`weakest_basis`):
 
 Assumptions: both views are near fronto-parallel elevations; eaves and ridge
 are level and the same physical lines in both views; ground is level across
-the building.  Notes record when these are doubtful.
+the building.  Notes record when these are doubtful.  ``analyse_images`` passes
+only measured views: concept references (AI concept, rendering, sketch) are
+never linked, so they supply no depth, pitch or scale link.
 
 :class:`ColmapSfMReconstructor` documents the interface for true multi-view
 reconstruction (COLMAP / pycolmap).  It is unavailable by default; an

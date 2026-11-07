@@ -26,16 +26,29 @@ first FRONT facade observation).  Three methods, in order of preference:
    is transferred to the primary image through ``multiview.relative_scales``
    when the views are linked (its uncertainty is added in quadrature).
    Prior scale cues are still evaluated and attached as a *cross-check only*.
+   A reference whose feature is no longer in use is never measured from the
+   stale box: when the feature was superseded by a user annotation (its
+   history says ``superseded by user annotation X``; for a facade, X must be
+   the active facade of the same block) the reference is re-targeted to X and
+   a note says so; a rejected feature raises ``ValueError``.
 
 2. ``dimensioned_plan`` - a ``FLOOR_PLAN`` image whose ``DIMENSION`` features carry
-   ``attributes={"length_m": x}``.  Each dimension gives a plan scale (line
-   length, else the longer bbox side); they are combined by inverse-variance
-   weighting in log space.  The plan scale is transferred to the primary front
-   elevation through the plan's ``BUILDING_OUTLINE`` width (assumed to be the
-   visible frontage, i.e. the span of all front-visible blocks).  If it cannot
-   be transferred the plan result is only used when there is no front
-   elevation at all; otherwise it is reported in the notes and the prior cues
-   are used.
+   ``attributes={"length_m": x}`` (optionally ``"axis": "width" | "depth"`` and
+   ``"block"``).  Each dimension gives a plan scale (line length, else the
+   bbox extent along its axis / the longer side); they are combined by
+   inverse-variance weighting in log space.  The plan scale is transferred to
+   the primary front elevation through the plan's ``BUILDING_OUTLINE`` boxes:
+   an outline tagged with a block (``attributes["block"]``) is matched to that
+   block's facade width (the main block when drawn); a single untagged outline
+   is matched to the span of all front-visible blocks (or, with several front
+   blocks, to whichever of the main facade / the whole span the prior cues make
+   closer).  If it cannot be transferred the plan result is only used when
+   there is no front elevation at all; otherwise it is reported in the notes
+   and the prior cues are used.  :func:`plan_evidence` also returns every
+   outlined block's width and depth in metres (hidden depth becomes evidence:
+   ``INFERRED`` from the plan scale, or the dimension's own basis when a
+   ``depth`` dimension *is* that block's depth) for ``twin.hypotheses``.
+   Inactive features contribute nothing.
 
 3. ``prior_cues`` - labelled priors from the :class:`AssumptionLibrary`: door
    leaf height, garage door height, and wall-plate height
@@ -249,6 +262,8 @@ class ResolvedReference:
     #: Block hint of the facade whose full width the reference spans (else None).
     facade_block_hint: Optional[str] = None
     evidence_ids: tuple[str, ...] = field(default_factory=tuple)
+    #: Calibration notes produced while resolving (e.g. re-targeting to a superseding annotation).
+    notes: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def is_facade_width(self) -> bool:
@@ -260,6 +275,43 @@ def _to_metres(value: float, unit: str, what: str) -> float:
         return convert(float(value), unit, "m")
     except UnitError as exc:
         raise ValueError(f"reference {what} unit '{unit}' is not a length unit: {exc}") from None
+
+
+_SUPERSEDED_PREFIX = "superseded by user annotation "
+
+
+def _active_successor(analysis: AnalysisResult, feat: DetectedFeature, image_id: str,
+                      facades: Sequence[FacadeObservation]) -> tuple[DetectedFeature, str]:
+    """The feature in use in place of the inactive ``feat`` (the user annotation that superseded it).
+
+    A reference keeps measuring the *same physical thing* the user confirmed: when its feature was
+    superseded by a user annotation of the same type (for a facade: the active facade of the same
+    block), the reference is re-targeted to that annotation and a note says so.  A rejected feature, or
+    one whose successor is no longer in use, raises ``ValueError`` (the caller falls back to prior cues
+    and shows the error) - it is never silently measured from the stale box.
+    """
+    seen = {feat.feature_id}
+    cur = feat
+    for _ in range(8):
+        succ_id = next((h.reason[len(_SUPERSEDED_PREFIX):].strip() for h in reversed(cur.history)
+                        if h.field == "active" and h.reason.startswith(_SUPERSEDED_PREFIX)), None)
+        if not succ_id or succ_id in seen:
+            break
+        seen.add(succ_id)
+        nxt = find_feature(analysis, succ_id, image_id)
+        if nxt is None or nxt.feature_type != feat.feature_type:
+            break
+        if nxt.active:
+            if feat.feature_type == FeatureType.FACADE:
+                blk = (str(feat.attributes.get("block") or "main")).strip().lower()
+                ok = any(succ_id in f.feature_ids[:1] and f.block_hint == blk for f in facades)
+                if not ok:
+                    break
+            return nxt, (f"Reference feature {feat.feature_id} was superseded by user annotation {succ_id}; the "
+                         f"confirmed length is applied to {succ_id} (the box now in use).")
+        cur = nxt
+    raise ValueError(f"reference feature '{feat.feature_id}' is no longer in use (rejected or superseded by the user); "
+                     "confirm the reference again on a feature in use")
 
 
 def resolve_reference(analysis: AnalysisResult, reference: ReferenceMeasurement, *,
@@ -308,6 +360,11 @@ def resolve_reference(analysis: AnalysisResult, reference: ReferenceMeasurement,
     elif reference.feature_id:
         fid = reference.feature_id
         feat = find_feature(analysis, fid, reference.image_id)
+        rnotes: tuple[str, ...] = ()
+        if feat is not None and not feat.active:
+            feat, rnote = _active_successor(analysis, feat, reference.image_id, facades)
+            rnotes = (rnote,)
+            fid = feat.feature_id
         if feat is not None:
             px = feat.width_px()
             if px is None:
@@ -319,7 +376,7 @@ def resolve_reference(analysis: AnalysisResult, reference: ReferenceMeasurement,
                         hint = f.block_hint
                         break
             res = ResolvedReference(reference.image_id, float(px), length_sigma(feat.pixel_uncertainty), real_m,
-                                    tol_m, f"feature:{fid}", hint, (fid,))
+                                    tol_m, f"feature:{fid}", hint, (fid,), rnotes)
         else:
             name = fid.split(":", 1)[1] if fid.startswith("facade:") else fid
             fac = next((f for f in facades if f.block_hint == name), None)
@@ -471,27 +528,41 @@ def combine_cues(cues: Sequence[ScaleCue], image_id: str) -> tuple[TrackedValue,
 # =============================================================================
 # Dimensioned plan
 # =============================================================================
+PLAN_AXES = ("width", "depth")
+#: Default tolerance (m) of a plan dimension without ``tolerance_m`` (same default as a reference).
+PLAN_DIM_TOLERANCE_M = 0.02
+
+
+def _plan_dim_px(f: DetectedFeature) -> float:
+    """Pixel length of a plan dimension: its line length, else the bbox extent along its ``axis``."""
+    if f.line is not None:
+        return math.hypot(f.line[2] - f.line[0], f.line[3] - f.line[1])
+    if f.bbox is not None:
+        w, h = f.bbox[2] - f.bbox[0], f.bbox[3] - f.bbox[1]
+        axis = f.attributes.get("axis")
+        return w if axis == "width" else h if axis == "depth" else max(w, h)
+    return 0.0
+
+
+def _plan_images(analysis: AnalysisResult) -> list[str]:
+    return [img.image_id for img in analysis.images
+            if img.kind == ImageKind.FLOOR_PLAN and not analysis.is_concept_image(img.image_id)]
+
+
 def _plan_scale(analysis: AnalysisResult, A: AssumptionLibrary) -> Optional[dict[str, Any]]:
     best: Optional[dict[str, Any]] = None
     feats_by_img = {a.image_id: [f for f in a.features if f.active] for a in analysis.analyses}
-    for img in analysis.images:
-        if img.kind != ImageKind.FLOOR_PLAN:
-            continue
+    for iid in _plan_images(analysis):
         cues: list[ScaleCue] = []
         notes: list[str] = []
-        for f in feats_by_img.get(img.image_id, []):
+        for f in feats_by_img.get(iid, []):
             if f.feature_type != FeatureType.DIMENSION or "length_m" not in f.attributes:
                 continue
             length = _finite_positive(f.attributes.get("length_m"))
             if length is None or length > MAX_REFERENCE_M:
                 notes.append(f"Plan dimension {f.feature_id}: invalid length_m ignored.")
                 continue
-            if f.line is not None:
-                px = math.hypot(f.line[2] - f.line[0], f.line[3] - f.line[1])
-            elif f.bbox is not None:
-                px = max(f.bbox[2] - f.bbox[0], f.bbox[3] - f.bbox[1])
-            else:
-                px = 0.0
+            px = _plan_dim_px(f)
             if not (0 < px <= MAX_PIXELS):
                 notes.append(f"Plan dimension {f.feature_id}: no measurable pixel length; ignored.")
                 continue
@@ -507,8 +578,8 @@ def _plan_scale(analysis: AnalysisResult, A: AssumptionLibrary) -> Optional[dict
                                               distribution=Distribution.NORMAL, source="dimensioned_plan",
                                               evidence_ids=[f.feature_id])))
         if cues and (best is None or len(cues) > len(best["cues"])):
-            best = {"image_id": img.image_id, "cues": cues, "notes": notes,
-                    "outline": next((f for f in feats_by_img.get(img.image_id, [])
+            best = {"image_id": iid, "cues": cues, "notes": notes,
+                    "outline": next((f for f in feats_by_img.get(iid, [])
                                      if f.feature_type == FeatureType.BUILDING_OUTLINE and f.bbox), None)}
     if best is None:
         return None
@@ -527,6 +598,243 @@ def _plan_scale(analysis: AnalysisResult, A: AssumptionLibrary) -> Optional[dict
         e = max(e, 0.5 * spread)
     best["value"], best["e"] = v, e
     return best
+
+
+# =============================================================================
+# Floor-plan evidence: outline + dimensions -> block width / depth
+# =============================================================================
+@dataclass(frozen=True)
+class PlanBlock:
+    """One block drawn on a dimensioned floor plan (metres; x along the frontage, y front to rear)."""
+
+    block: str
+    outline_id: str
+    bbox_px: tuple[float, float, float, float]
+    width: TrackedValue
+    depth: TrackedValue
+    #: False for an outline without a ``block`` attribute (it may enclose several front blocks).
+    tagged: bool = True
+    #: Storeys entered on the outline (``attributes["storeys"]``), else None.
+    storeys: Optional[TrackedValue] = None
+    #: The outline polygon is not a rectangle (an L-shape drawn as one outline): its bbox depth is not a
+    #: block depth.
+    irregular: bool = False
+
+
+@dataclass
+class PlanEvidence:
+    """Block dimensions read from a dimensioned FLOOR_PLAN image (see :func:`plan_evidence`)."""
+
+    image_id: str
+    #: Plan scale (m per plan pixel, INFERRED).
+    scale: TrackedValue
+    #: "plan dimensions" (``length_m`` annotations) or "reference measurement" (a reference on the plan).
+    scale_source: str
+    blocks: dict[str, PlanBlock] = field(default_factory=dict)
+    #: Edge of the plan image that is the front of the building ("bottom" unless an outline says "top").
+    front_edge: str = "bottom"
+    notes: list[str] = field(default_factory=list)
+
+    def block_depth(self, block: str) -> Optional[TrackedValue]:
+        b = self.blocks.get(block)
+        return None if b is None or b.irregular or not b.tagged else b.depth
+
+    def origin(self, block: str, ref: str = "main") -> Optional[tuple[float, float]]:
+        """``(x, y)`` (m) of ``block``'s front-left corner relative to ``ref``'s, as seen from the front."""
+        if block not in self.blocks or ref not in self.blocks or self.scale.value is None:
+            return None
+        s = float(self.scale.value)
+        mb, bb = self.blocks[ref].bbox_px, self.blocks[block].bbox_px
+        if self.front_edge == "top":  # viewer at the top of the sheet: plan x is mirrored
+            return (mb[2] - bb[2]) * s, (bb[1] - mb[1]) * s
+        return (bb[0] - mb[0]) * s, (mb[3] - bb[3]) * s
+
+
+def _plan_length(px: float, pu: float, scale: TrackedValue, plan_id: str, evidence: Sequence[str],
+                 note: str) -> TrackedValue:
+    v = px * float(scale.value)
+    hw = min(math.hypot(_rel_half(scale), length_band(pu) / px if px else 0.0), MAX_HALF_WIDTH)
+    return TrackedValue(value=v, unit="m", basis=Basis.INFERRED, low=v * (1 - hw), high=v * (1 + hw),
+                        distribution=Distribution.NORMAL, correlation_group=scale_group(plan_id),
+                        source="floor plan outline x plan scale",
+                        evidence_ids=list(dict.fromkeys([*evidence, *scale.evidence_ids])), note=note)
+
+
+def _direct_dimension(f: DetectedFeature, length: float) -> TrackedValue:
+    tol = _finite_positive(f.attributes.get("tolerance_m"))
+    tol = min(tol, 0.25 * length) if tol is not None else PLAN_DIM_TOLERANCE_M
+    basis = f.basis if f.basis in (Basis.OBSERVED, Basis.USER_CONFIRMED) else Basis.INFERRED
+    return TrackedValue(value=length, unit="m", basis=basis, low=length - tol, high=length + tol,
+                        distribution=Distribution.UNIFORM, source="plan dimension", evidence_ids=[f.feature_id],
+                        note=f"Dimension {f.label or f.feature_id} on the floor plan ({basis.value}), +/-{tol:.3f} m.")
+
+
+def _norm_name(v: Any) -> Optional[str]:
+    if not isinstance(v, str):
+        return None
+    t = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in v.strip().lower()).strip("_")
+    return t[:40] or None
+
+
+def plan_evidence(analysis: AnalysisResult, calibration: Optional[ScaleCalibration] = None, *,
+                  assumptions: Optional[AssumptionLibrary] = None) -> Optional[PlanEvidence]:
+    """Block widths and depths (metres) from a dimensioned floor plan, or ``None``.
+
+    Shared annotation contract: a ``FLOOR_PLAN`` image carries ``BUILDING_OUTLINE`` boxes (one per block,
+    ``attributes["block"]``, default ``main``) and ``DIMENSION`` features with ``attributes={"length_m": x,
+    "axis": "width" | "depth", "block": b}``.
+
+    * The plan scale comes from the dimensions (inverse-variance combination, see :func:`_plan_scale`) or,
+      without any, from a ``reference_measurement`` calibration made on the plan image.
+    * Each outline gives its block's width (x extent) and depth (y extent) = pixels x plan scale,
+      ``INFERRED`` (ranges: scale and outline pixel errors in quadrature; correlation group of the plan).
+    * A dimension with ``axis`` ``width`` / ``depth`` and a ``block`` *is* that block's width / depth:
+      its basis is the dimension's own (``USER_CONFIRMED`` for an annotation, ``OBSERVED`` for a detected
+      dimension label), with ``attributes["tolerance_m"]`` (default 0.02 m) as a uniform range.
+    * The front of the building is assumed at the bottom edge of the plan (``attributes["front"] = "top"``
+      on an outline flips it); ``PlanEvidence.origin`` places blocks relative to the main block.
+    * An outline without a ``block`` attribute may enclose several front blocks; it is kept (``tagged``
+      False) for the scale transfer but gives no per-block depth.  Inactive features contribute nothing.
+    """
+    A = assumptions or AssumptionLibrary()
+    plan = _plan_scale(analysis, A)
+    scale_tv: Optional[TrackedValue] = None
+    source = "plan dimensions"
+    notes: list[str] = []
+    plan_id: Optional[str] = None
+    if plan is not None:
+        plan_id = plan["image_id"]
+        v, e = plan["value"], plan["e"]
+        scale_tv = TrackedValue(value=v, unit=SCALE_UNIT, basis=Basis.INFERRED, low=v * (1 - e), high=v * (1 + e),
+                                distribution=Distribution.NORMAL, correlation_group=scale_group(plan_id),
+                                source="dimensioned_plan",
+                                evidence_ids=[c.feature_id for c in plan["cues"] if c.feature_id],
+                                note=f"Plan scale from {len(plan['cues'])} dimension(s) (INFERRED).")
+        notes += plan["notes"]
+    elif calibration is not None and calibration.method == "reference_measurement" \
+            and calibration.image_id in _plan_images(analysis) and calibration.metres_per_pixel.value:
+        plan_id = calibration.image_id
+        scale_tv = calibration.metres_per_pixel
+        source = "reference measurement"
+    if plan_id is None or scale_tv is None or not scale_tv.value:
+        return None
+    feats = [f for a in analysis.analyses if a.image_id == plan_id for f in a.features if f.active]
+    ev = PlanEvidence(image_id=plan_id, scale=scale_tv, scale_source=source, notes=notes)
+    pu_default = float(A.pixel_measurement_error_px)
+    direct: dict[tuple[str, str], TrackedValue] = {}
+    for f in feats:
+        if f.feature_type != FeatureType.DIMENSION:
+            continue
+        axis = f.attributes.get("axis")
+        length = _finite_positive(f.attributes.get("length_m"))
+        if axis in PLAN_AXES and length is not None and length <= MAX_REFERENCE_M:
+            key = (_norm_name(f.attributes.get("block")) or "main", axis)
+            direct.setdefault(key, _direct_dimension(f, length))
+    untagged_seen = False
+    for f in feats:
+        if f.feature_type != FeatureType.BUILDING_OUTLINE or f.bbox is None:
+            continue
+        name = _norm_name(f.attributes.get("block"))
+        tagged = name is not None
+        if not tagged:
+            if untagged_seen or any(_norm_name(g.attributes.get("block")) == "main" for g in feats
+                                    if g.feature_type == FeatureType.BUILDING_OUTLINE):
+                ev.notes.append(f"Plan outline {f.feature_id} has no block name; ignored (tag each outline with "
+                                "its block).")
+                continue
+            untagged_seen, name = True, "main"
+        if name in ev.blocks:
+            ev.notes.append(f"More than one plan outline for block '{name}'; using {ev.blocks[name].outline_id}.")
+            continue
+        x0, y0, x1, y1 = (float(v) for v in f.bbox)
+        if x1 - x0 <= 0 or y1 - y0 <= 0:
+            continue
+        pu = float(f.pixel_uncertainty) if f.pixel_uncertainty else pu_default
+        irregular = False
+        if f.polygon and len(f.polygon) >= 4:
+            xs, ys = [p[0] for p in f.polygon], [p[1] for p in f.polygon]
+            area = 0.5 * abs(sum(xs[i] * ys[i - 1] - xs[i - 1] * ys[i] for i in range(len(xs))))
+            irregular = area < 0.9 * (x1 - x0) * (y1 - y0)
+        width = direct.get((name, "width")) or _plan_length(
+            x1 - x0, pu, scale_tv, plan_id, [f.feature_id], f"Width of plan outline {f.feature_id} x plan scale.")
+        depth = direct.get((name, "depth")) or _plan_length(
+            y1 - y0, pu, scale_tv, plan_id, [f.feature_id], f"Depth of plan outline {f.feature_id} x plan scale.")
+        st = f.attributes.get("storeys")
+        storeys = None
+        if isinstance(st, int) and not isinstance(st, bool) and 1 <= st <= 6:
+            sb = Basis.USER_CONFIRMED if f.basis == Basis.USER_CONFIRMED else Basis.INFERRED
+            storeys = TrackedValue(value=float(st), unit="storeys", basis=sb, distribution=Distribution.FIXED,
+                                   source="floor plan outline", evidence_ids=[f.feature_id])
+        if f.attributes.get("front") == "top":
+            ev.front_edge = "top"
+        ev.blocks[name] = PlanBlock(block=name, outline_id=f.feature_id, bbox_px=(x0, y0, x1, y1), width=width,
+                                    depth=depth, tagged=tagged, storeys=storeys, irregular=irregular)
+        if irregular:
+            ev.notes.append(f"Plan outline {f.feature_id} ('{name}') is not rectangular: its depth is not used; "
+                            "draw one outline box per rectangular block.")
+    for (blk, axis), tv in direct.items():
+        if blk not in ev.blocks:
+            ev.notes.append(f"Plan dimension {tv.evidence_ids[0]} ({axis} of '{blk}') has no outline for that block.")
+    return ev
+
+
+def _front_pairs(ev: PlanEvidence, fronts: Sequence[FacadeObservation]) -> list[tuple[PlanBlock, FacadeObservation]]:
+    by_hint = {f.block_hint: f for f in fronts if f.left_x_px is not None and f.width_px.value}
+    return [(b, by_hint[k]) for k, b in ev.blocks.items() if b.tagged and k in by_hint]
+
+
+def transfer_plan_scale(analysis: AnalysisResult, ev: PlanEvidence, target: Optional[str],
+                        assumptions: Optional[AssumptionLibrary] = None) -> Optional[tuple[TrackedValue, list[str]]]:
+    """Plan scale transferred to the front elevation ``target`` (m per elevation pixel), or ``None``.
+
+    The plan width of a block (direct dimension, else outline x plan scale) is matched to the same
+    block's facade width in the elevation (the main block when drawn, else the widest matched block).
+    An untagged single outline is matched to the span of all front blocks - or, with several front
+    blocks, to whichever of the main facade / the whole span the elevation's prior cues make closer.
+    """
+    A = assumptions or AssumptionLibrary()
+    fronts = front_facades(analysis, target)
+    measurable = [f for f in fronts if f.left_x_px is not None and f.width_px.value]
+    if not measurable or target is None or target == ev.image_id:
+        return None
+    pu = float(A.pixel_measurement_error_px)
+    notes: list[str] = []
+    pairs = _front_pairs(ev, measurable)
+    if pairs:
+        pb, fac = next(((b, f) for b, f in pairs if b.block == "main"), max(pairs, key=lambda t: t[1].width_px.value))
+        width_m, span, e_span, what = pb.width, float(fac.width_px.value), px_band(fac.width_px, pu) / float(
+            fac.width_px.value), f"'{pb.block}' plan width matched to its facade"
+    elif len(ev.blocks) == 1:
+        pb = next(iter(ev.blocks.values()))
+        x0 = min(f.left_x_px for f in measurable)
+        x1 = max(f.left_x_px + f.width_px.value for f in measurable)
+        span_all = x1 - x0
+        main = main_facade(measurable)
+        span, what = span_all, "plan outline width matched to the frontage span of all front blocks"
+        if len(measurable) > 1 and main is not None:
+            cues, _ = prior_scale_cues(analysis, target, A)
+            if cues:
+                s_prior = combine_cues(cues, target)[0].value
+                w_out = float(pb.width.value)
+                if abs(math.log(w_out / (main.width_px.value * s_prior))) < abs(math.log(w_out / (span_all * s_prior))):
+                    span, what = float(main.width_px.value), ("untagged plan outline matched to the main facade "
+                                                              "(closer than the whole frontage under the prior cues)")
+        width_m, e_span = pb.width, length_band(pu) / span
+    else:
+        return None
+    if not width_m.value or span <= 0:
+        return None
+    e_w = _rel_half(width_m)
+    e_persp = perspective_error(analysis, target, A)
+    hw = min(math.sqrt(e_w ** 2 + e_span ** 2 + e_persp ** 2), MAX_HALF_WIDTH)
+    val = float(width_m.value) / span
+    notes.append(f"Plan scale {ev.scale.value:.5f} m/px ({ev.scale_source}); {what}: {width_m.value:.2f} m "
+                 f"({width_m.basis.value}) over {span:.1f} px of the front elevation.")
+    tv = TrackedValue(value=val, unit=SCALE_UNIT, basis=Basis.INFERRED, low=val * (1 - hw), high=val * (1 + hw),
+                      distribution=Distribution.NORMAL, correlation_group=scale_group(target), source="dimensioned_plan",
+                      evidence_ids=list(dict.fromkeys([*ev.scale.evidence_ids, *width_m.evidence_ids])),
+                      note="Derived from plan dimension annotations and observed pixels (INFERRED).")
+    return tv, notes
 
 
 # =============================================================================
@@ -564,6 +872,7 @@ def _from_reference(analysis: AnalysisResult, reference: ReferenceMeasurement, p
     notes = [f"Reference {rr.real_m:.3f} m +/- {rr.tolerance_m:.3f} m over {rr.pixels:.1f} px ({rr.target}); "
              f"errors: pixels {e_px:.2%}, tolerance {e_tol:.2%}, perspective {e_persp:.2%} -> +/-{hw:.2%} "
              "(NORMAL, low/high = P5/P95)."]
+    notes += list(rr.notes)
     if rr.is_facade_width:
         notes.append(f"The reference spans the full width of the '{rr.facade_block_hint}' facade.")
     evidence = list(rr.evidence_ids)
@@ -604,36 +913,20 @@ def _from_plan(analysis: AnalysisResult, plan: dict[str, Any], primary: Optional
     v, e = plan["value"], plan["e"]
     notes = list(plan["notes"])
     target = primary if primary != plan["image_id"] and front_facades(analysis, primary) else next(
-        (f.image_id for f in analysis.facades if f.view == ViewDirection.FRONT and f.image_id != plan["image_id"]),
-        None)
+        (f.image_id for f in analysis.facades if f.view == ViewDirection.FRONT and f.image_id != plan["image_id"]
+         and not analysis.is_concept_image(f.image_id)), None)
     fronts = front_facades(analysis, target)
     primary = target if target is not None else primary
-    outline: Optional[DetectedFeature] = plan["outline"]
-    measurable = [f for f in fronts if f.left_x_px is not None and f.width_px.value]
-    if outline is not None and measurable:
-        ow = outline.bbox[2] - outline.bbox[0]
-        x0 = min(f.left_x_px for f in measurable)
-        x1 = max(f.left_x_px + f.width_px.value for f in measurable)
-        span = x1 - x0
-        if ow > 0 and span > 0:
-            frontage = ow * v
-            pu = float(A.pixel_measurement_error_px)
-            e_out = length_band(outline.pixel_uncertainty) / ow
-            e_span = length_band(pu) / span
-            e_persp = perspective_error(analysis, primary, A)
-            hw = min(math.sqrt(e ** 2 + e_out ** 2 + e_span ** 2 + e_persp ** 2), MAX_HALF_WIDTH)
-            val = frontage / span
-            notes.append(f"Plan scale {v:.5f} m/px ({len(plan['cues'])} dimension(s), +/-{e:.2%}); plan outline "
-                         f"width {frontage:.2f} m transferred to the front elevation span of {span:.1f} px. "
-                         "Assumes the outline's horizontal extent is the visible frontage of all front blocks.")
-            notes.append(RECOMMEND_CHECK_PLAN)
-            tv = TrackedValue(value=val, unit=SCALE_UNIT, basis=Basis.INFERRED, low=val * (1 - hw),
-                              high=val * (1 + hw), distribution=Distribution.NORMAL,
-                              correlation_group=scale_group(primary), source="dimensioned_plan",
-                              evidence_ids=[c.feature_id for c in plan["cues"] if c.feature_id] + [outline.feature_id],
-                              note="Derived from plan dimension annotations and observed pixels (INFERRED).")
-            return ScaleCalibration(image_id=primary, method="dimensioned_plan", metres_per_pixel=tv,
-                                    cues=plan["cues"], notes=notes)
+    ev = plan_evidence(analysis, assumptions=A)
+    moved = transfer_plan_scale(analysis, ev, target, A) if ev is not None else None
+    if moved is not None:
+        tv, tnotes = moved
+        notes += [n for n in (ev.notes if ev else []) if n not in notes] + tnotes
+        notes.append(f"Plan scale {v:.5f} m/px from {len(plan['cues'])} dimension(s), +/-{e:.2%}. Assumes the plan "
+                     "outline's horizontal extent is the matched frontage.")
+        notes.append(RECOMMEND_CHECK_PLAN)
+        return ScaleCalibration(image_id=target, method="dimensioned_plan", metres_per_pixel=tv,
+                                cues=plan["cues"], notes=notes)
     if primary is None or primary == plan["image_id"] or not fronts:
         notes.append(f"Plan scale {v:.5f} m/px from {len(plan['cues'])} dimension(s); applies to the plan image only.")
         notes.append(RECOMMEND_CHECK_PLAN)
@@ -675,6 +968,8 @@ def prior_cue_calibration(analysis: AnalysisResult, image_id: Optional[str], *,
 
 
 __all__ = [
+    "PlanBlock",
+    "PlanEvidence",
     "ResolvedReference",
     "ENDPOINT_PAIR_FACTOR",
     "SCALE_UNIT",
@@ -686,6 +981,7 @@ __all__ = [
     "length_sigma",
     "main_facade",
     "perspective_error",
+    "plan_evidence",
     "primary_image_id",
     "prior_cue_calibration",
     "prior_scale_cues",
@@ -693,4 +989,5 @@ __all__ = [
     "relative_scale",
     "resolve_reference",
     "scale_group",
+    "transfer_plan_scale",
 ]

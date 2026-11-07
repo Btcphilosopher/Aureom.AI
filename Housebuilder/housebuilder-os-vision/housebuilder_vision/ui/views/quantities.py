@@ -91,6 +91,8 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     with c2:
         with guard("Unresolved items"):
             _unresolved(boq, ev)
+    with guard("Geometry summary"):
+        _geometry_summary(ws, ev, system)
     with guard("Areas by storey"):
         _areas(ev, system)
     with st.expander("Measurement conventions"):
@@ -120,9 +122,14 @@ def _boq_table(ws: S.Workspace, ev: S.Evaluation, system: str) -> None:
              and (not q or q.lower() in f"{ln.description} {ln.material_id} {ln.trade} {ln.line_id}".lower())]
     df = _rows(lines, system)
     if df.empty:
+        st.session_state.pop("boq_sel_line", None)
         st.info("No lines match the filters.")
+        _trace_panel(ws, ev, None, system)
         return
-    event = st.dataframe(_style_basis(df), key="boq_table", hide_index=True, width="stretch",
+    # The table is keyed by the filters and the BoQ, so a filter / edit resets its row selection (a stored row
+    # *position* would otherwise point at another line); the selected line itself is remembered by its id.
+    table_key = "boq_table_" + S.combine(repr((el, stt, bs, q)), f"{boq.twin_id}:{boq.twin_version}")[:12]
+    event = st.dataframe(_style_basis(df), key=table_key, hide_index=True, width="stretch",
                          height=min(390, 40 + 35 * len(df)),
                          on_select="rerun", selection_mode="single-row", column_config=NUM_COLS,
                          column_order=["element", "description", "status", "installed", "unit", "cutting %",
@@ -132,8 +139,25 @@ def _boq_table(ws: S.Workspace, ev: S.Evaluation, system: str) -> None:
                "cutting and waste losses are kept separate; purchased = packs × pack size (purchase units); "
                "surplus = purchased − required.")
     rows = list(getattr(getattr(event, "selection", None), "rows", []) or []) if event is not None else []
-    sel_id = df.iloc[rows[0]]["line_id"] if rows and rows[0] < len(df) else None
+    sel_id = resolve_selection(st.session_state.get("boq_sel_line"), st.session_state.get("boq_sel_key"), table_key,
+                               rows, list(df["line_id"]))
+    st.session_state["boq_sel_line"], st.session_state["boq_sel_key"] = sel_id, table_key
     _trace_panel(ws, ev, sel_id, system)
+
+
+def resolve_selection(prev_line_id: Optional[str], prev_key: Optional[str], key: str, rows: list[int],
+                      line_ids: list[str]) -> Optional[str]:
+    """The BoQ line to trace, by *id*.
+
+    A row selected in the current table wins.  When the table was re-keyed (filters or the BoQ changed, which
+    resets its selection), the previously selected line is kept only if it is still listed; otherwise (or when
+    the user cleared the selection) nothing is traced - a row position is never carried to another line.
+    """
+    if rows:
+        return line_ids[rows[0]] if 0 <= rows[0] < len(line_ids) else None
+    if key != prev_key and prev_line_id in line_ids:
+        return prev_line_id
+    return None
 
 
 def _trace_panel(ws: S.Workspace, ev: S.Evaluation, line_id: Optional[str], system: str) -> None:
@@ -206,6 +230,27 @@ def _unresolved(boq, ev: S.Evaluation) -> None:
     if items:
         html(callout("<ul>" + "".join(f"<li>{esc(i)}</li>" for i in items[:40]) + "</ul>",
                      title=f"Cost items without a usable rate ({len(items)})", tone="danger"))
+
+
+def _geometry_summary(ws: S.Workspace, ev: S.Evaluation, system: str) -> None:
+    """Gross / net external wall, glazing, door, garage-door, separating-wall, roof and floor areas with their basis."""
+    from ...io.export import geometry_rows
+
+    g = ev.boq.geometry
+    section_title("Geometry summary", sub="areas the quantities are measured from; basis = weakest of the twin values "
+                                          "each depends on")
+    _cols, rows = geometry_rows(g, ws.project.twin)
+    out = []
+    for r in rows:
+        v, u = fmt.disp(r["value"], r["unit"], system)
+        out.append({"metric": r["metric"], "value": v, "unit": fmt.unit_label(u), "basis": r["basis"],
+                    "definition": r["definition"]})
+    st.dataframe(_style_basis(pd.DataFrame(out)), hide_index=True, width="stretch", height=38 + 35 * len(out),
+                 column_config={"value": st.column_config.NumberColumn(format="%.2f"),
+                                "definition": st.column_config.TextColumn(width="large")})
+    st.caption(f"External wall thickness {g.external_wall_thickness_m:.3f} m (selected assembly). Each opening is "
+               "deducted once from the wall piece containing it: net = gross − openings. Exported as "
+               "geometry_summary.csv.")
 
 
 def _areas(ev: S.Evaluation, system: str) -> None:

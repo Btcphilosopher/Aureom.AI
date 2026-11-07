@@ -18,19 +18,50 @@ cannot show plan depth, so the hypotheses differ in what is hidden:
     (``RoofSpec.observed_rise_m``) and ``twin.builder.apply_twin_edit``
     re-derives the other value when either is edited.
 ``H-B`` "L-shaped: shallower main + single-storey rear extension"
-    ``main depth = max(0.6 * width, depth_A - 1.2 m)`` (assumed), pitch implied
-    by the same observed rise ``atan(2 * rise / depth)``, plus a heated
-    single-storey flat-roofed extension (0.5 x main width by 3.60 m, assumed)
-    attached at the rear-left corner (rear-right when the left side was seen in
-    another view).  For the demo house: 9.60 x 7.20 m + 4.80 x 3.60 m.
+    ``main depth = max(0.6 * width, depth_A - 1.2 m)`` (assumed, always with a
+    range, never deeper than H-A), pitch implied by the same observed rise
+    ``atan(2 * rise / depth)``, plus a heated single-storey flat-roofed
+    extension (0.5 x main width by 3.60 m, assumed) attached at the rear-left
+    corner (rear-right when the left side was seen in another view).  For the
+    demo house: 9.60 x 7.20 m + 4.80 x 3.60 m.  When H-A's depth is already
+    within 0.30 m of the 0.6 x width floor there is no shallower variant: H-B
+    is then "Rectangular main + hidden single-storey rear extension" (H-A's
+    main block plus the assumed extension).  Names and descriptions state the
+    actual comparison.
 ``H-C`` "Deep plan / shallow pitch" (uncalibrated runs only)
     depth from the *low* pitch bound (clipped to the depth/width prior maximum),
-    pitch implied by the observed rise.
+    pitch implied by the observed rise; omitted when it is not deeper than H-A.
 
 When a linked side elevation (``multiview.linked_measurements``) shows the
 block depth and/or gable pitch, the depth is no longer hidden: H-A uses the
 observed depth (narrow range) and only one alternative is kept (a hidden rear
 extension), so fewer hypotheses are produced.
+
+When a dimensioned floor plan (``calibration.plan_evidence``) outlines a block,
+that block's depth (and width, when a ``width`` dimension gives it directly)
+comes from the plan: ``INFERRED`` from the plan scale, or ``USER_CONFIRMED`` /
+``OBSERVED`` when a ``depth`` dimension is the depth itself.  The hidden-depth
+hypotheses then collapse: only H-A (depth from the plan, pitch implied by the
+front-view rise) - plus H-B "As drawn on the floor plan" when the plan outlines
+extra blocks (an extension), placed from the plan (front edge at the bottom of
+the sheet unless an outline says ``front: top``) with assumed height and flat
+roof.  Hypotheses are returned in plausibility order.
+
+Geometry source and scale.  The twin is built from the measured front
+elevation: a calibration made on a concept reference (AI concept, rendering,
+sketch) never makes the concept the geometry source while a measured front
+elevation exists (a warning note says the calibration did not reach it).  The
+scale actually in force - the calibration itself, transferred through a
+multi-view link or the floor-plan outline, or the front image's prior cues -
+is the hypothesis' ``calibration_method`` (so a reference on an unlinked image
+is labelled ``prior_cues``, not ``reference_measurement``).
+
+Oblique views.  When the perspective estimate reports a non-fronto-parallel
+front view with facade obliqueness ``theta`` (5-60 deg), the one-sided
+foreshortening bias is removed (weak-perspective approximation): with a scale
+from vertical cues every horizontal length is divided by ``cos(theta)``; with a
+horizontal reference every height is multiplied by ``cos(theta)``.  The
+symmetric perspective error stays in the scale range.
 
 Provenance rules
 ----------------
@@ -41,8 +72,13 @@ Provenance rules
   dimensioned plan and ``ASSUMED`` when it comes from prior cues.  When the
   reference *is* the main facade width, the main width is ``USER_CONFIRMED``
   (value = reference, range = tolerance).
-* Storeys come from the observation; floor-to-floor = (eaves - FFL) / storeys
-  when calibrated, otherwise the prior.  FFL is always the prior
+* Storeys come from the observation (held fixed in a hypothesis; a storey range
+  in the evidence is reported in the notes); floor-to-floor = (eaves - FFL) /
+  storeys when calibrated, otherwise the prior.  Its range is taken at the
+  nominal storey count and clipped to 2.0-4.5 m (an uncertain or untrusted
+  storey range cannot produce implausible storey heights), and the measured
+  wall-plate height is stored as ``Block.observed_eaves_m`` (storeys edits
+  keep the plate on it, see ``twin.builder``).  FFL is always the prior
   (``ASSUMED``), so the floor-to-floor and every opening sill (bottom above
   ground - FFL - storey x floor-to-floor) take ``ASSUMED`` too (weakest basis;
   the notes say which part was observed).  A hidden rear extension copies the
@@ -70,7 +106,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional
 
 from ..core.models import (
@@ -82,37 +118,46 @@ from ..core.models import (
     HiddenSideAssumptions,
     Opening,
     OpeningKind,
+    ReferenceMeasurement,
     RoofForm,
     RoofSpec,
     ScaleCalibration,
     Side,
     ViewDirection,
 )
-from ..core.provenance import Basis, Distribution, TrackedValue, assumed, weakest_basis
+from ..core.provenance import BASIS_RANK, Basis, Distribution, TrackedValue, assumed, weakest_basis
 from ..core.settings import AssumptionLibrary, ProjectSettings
 from ..geometry.footprint import GeometryError, Rect, validate_rects
 from .builder import block_coupling
 from .calibration import (
+    PlanEvidence,
     find_feature,
     front_facades,
     length_band,
     main_facade,
+    plan_evidence,
     prior_cue_calibration,
     primary_image_id,
     px_band,
     relative_scale,
     resolve_reference,
     scale_group,
+    transfer_plan_scale,
 )
 
 #: Subjective prior weights (not calibrated probabilities).
 PLAUSIBILITY_UNCALIBRATED = {"H-A": 0.50, "H-B": 0.35, "H-C": 0.15}
 PLAUSIBILITY_CALIBRATED = {"H-A": 0.60, "H-B": 0.40}
 PLAUSIBILITY_DEPTH_OBSERVED = {"H-A": 0.75, "H-B": 0.25}
+#: With a dimensioned floor plan: rectangular plan drawn (H-A only), or extension block(s) drawn (H-B).
+PLAUSIBILITY_PLAN_RECT = {"H-A": 0.90}
+PLAUSIBILITY_PLAN_EXTENSION = {"H-A": 0.20, "H-B": 0.80}
 
 SNAP_GAP_M = 0.30
 MIN_DEPTH_FRACTION = 0.60  # of main width
 H_B_DEPTH_REDUCTION_M = 1.20
+#: A depth variant closer than this to H-A's depth is not a distinct hypothesis.
+H_B_MIN_DISTINCT_M = 0.30
 EXT_WIDTH_FRACTION = (0.50, 0.40, 0.70)
 EXT_DEPTH_M = (3.60, 3.00, 4.50)
 GARAGE_DEPTH_M = (6.00, 5.00, 7.00)
@@ -208,6 +253,10 @@ class _Scale:
     method: str
     calibrated: bool
     evidence: tuple[str, ...] = ()
+    #: Oblique-view correction factors for horizontal / vertical pixel lengths (1 = none; see
+    #: :func:`_oblique_factors`).
+    h_factor: float = 1.0
+    v_factor: float = 1.0
 
     @classmethod
     def from_calibration(cls, cal: ScaleCalibration, image_id: Optional[str] = None) -> "_Scale":
@@ -221,14 +270,24 @@ class _Scale:
                    evidence=tuple(tv.evidence_ids))
 
     def linked(self, k: TrackedValue) -> "_Scale":
-        """Scale for another image whose pixels convert to this image's pixels by ``k``."""
+        """Scale for another image whose pixels convert to this image's pixels by ``k``.
+
+        ``k`` comes from shared *heights*, so the linked image's pixels are on this image's vertical
+        scale (its own obliqueness is not known: no further correction)."""
         ek = 0.5 * (_hi(k) - _lo(k)) / k.value
         return _Scale(self.image_id, self.value * k.value, math.hypot(self.rel_lo, ek), math.hypot(self.rel_hi, ek),
-                      weakest_basis(self.basis, k.basis), self.group, self.method, self.calibrated, self.evidence)
+                      weakest_basis(self.basis, k.basis), self.group, self.method, self.calibrated, self.evidence,
+                      self.v_factor, self.v_factor)
 
     def m(self, px: float, band: float, *, px_basis: Basis = Basis.OBSERVED, evidence: Iterable[str] = (),
-          note: str = "", source: str = SOURCE) -> TrackedValue:
-        """Pixels -> metres with scale and pixel errors combined in quadrature."""
+          note: str = "", source: str = SOURCE, horizontal: bool = False) -> TrackedValue:
+        """Pixels -> metres with scale and pixel errors combined in quadrature.
+
+        ``horizontal`` marks a length along the facade (width, offset, overhang) as opposed to a height;
+        the oblique-view factor of that direction is applied to the value (the symmetric perspective
+        error stays in the scale's range)."""
+        f = self.h_factor if horizontal else self.v_factor
+        px, band = px * f, band * f
         v = px * self.value
         e = abs(band / px) if px else 0.0
         a = v * (1.0 - math.hypot(self.rel_lo, e))
@@ -239,12 +298,73 @@ class _Scale:
                    evidence=evidence, note=note)
 
 
+#: Facade obliqueness (deg) range in which the 1/cos correction of :func:`_oblique_factors` is applied.
+OBLIQUE_CORRECTION_DEG = (5.0, 60.0)
+
+
+def _reference_direction(ref: Optional[ReferenceMeasurement]) -> Optional[str]:
+    """``horizontal`` / ``vertical`` direction of a reference length on its image (None if mixed)."""
+    if ref is None:
+        return None
+    if ref.p0 is not None and ref.p1 is not None:
+        dx, dy = abs(ref.p1[0] - ref.p0[0]), abs(ref.p1[1] - ref.p0[1])
+        if dy <= 0.05 * max(dx, 1e-9):
+            return "horizontal"
+        if dx <= 0.05 * max(dy, 1e-9):
+            return "vertical"
+        return None
+    return "horizontal"  # a feature's / facade's width (``DetectedFeature.width_px``) is horizontal
+
+
+def _oblique_factors(analysis: AnalysisResult, image_id: str, direction: Optional[str]
+                     ) -> tuple[float, float, Optional[str]]:
+    """Correction of the one-sided foreshortening bias in an oblique front view.
+
+    A facade turned by ``theta`` from the image plane shows its horizontal lengths shortened by
+    ``cos(theta)`` while heights are not (weak-perspective approximation).  With a scale from *vertical*
+    cues (door / wall-plate heights) every horizontal length is therefore ~``cos(theta)`` short: it is
+    divided by ``cos(theta)``.  With a scale from a *horizontal* reference (the frontage) the scale
+    itself absorbs the shortening and heights come out ~``1/cos(theta)`` high: they are multiplied by
+    ``cos(theta)``.  Applied only when the perspective estimate reports a non-fronto-parallel view with
+    ``theta`` in :data:`OBLIQUE_CORRECTION_DEG`; the symmetric perspective error remains in the range.
+    Returns ``(h_factor, v_factor, note)``.
+    """
+    persp = next((a.perspective for a in analysis.analyses if a.image_id == image_id), None)
+    if persp is None or persp.is_near_fronto_parallel is not False or persp.facade_obliqueness_deg is None \
+            or direction is None:
+        return 1.0, 1.0, None
+    th = abs(float(persp.facade_obliqueness_deg))
+    if not (math.isfinite(th) and OBLIQUE_CORRECTION_DEG[0] <= th <= OBLIQUE_CORRECTION_DEG[1]):
+        return 1.0, 1.0, None
+    c = math.cos(math.radians(th))
+    if direction == "vertical":
+        return 1.0 / c, 1.0, (f"Oblique view: facade obliqueness {th:.1f} deg (perspective estimate, inferred); the "
+                              f"scale comes from vertical cues, so horizontal pixel lengths are divided by cos = "
+                              f"{c:.3f} (foreshortening bias removed; the perspective error stays in the range).")
+    return 1.0, c, (f"Oblique view: facade obliqueness {th:.1f} deg (perspective estimate, inferred); the scale comes "
+                    f"from a horizontal length, so heights are multiplied by cos = {c:.3f} (foreshortening bias "
+                    "removed; the perspective error stays in the range).")
+
+
+def _with_oblique(analysis: AnalysisResult, sc: _Scale, direction: Optional[str], notes: list[str]) -> _Scale:
+    h, v, note = _oblique_factors(analysis, sc.image_id, direction)
+    if note is None:
+        return sc
+    notes.append(note)
+    return replace(sc, h_factor=h, v_factor=v)
+
+
 def _effective_scale(analysis: AnalysisResult, cal: ScaleCalibration, front_img: str,
-                     A: AssumptionLibrary) -> tuple[_Scale, list[str]]:
+                     A: AssumptionLibrary, plan: Optional[PlanEvidence] = None) -> tuple[_Scale, list[str]]:
+    """Scale of the front image: the calibration itself, transferred through a multi-view link or the floor
+    plan outline, else the front image's prior cues.  ``_Scale.method`` says which one is in force (it is
+    the hypothesis' / twin's ``calibration_method``)."""
     notes: list[str] = []
     usable = cal.metres_per_pixel.value is not None and cal.metres_per_pixel.value > 0
     if usable and cal.image_id == front_img:
-        return _Scale.from_calibration(cal), notes
+        direction = {"reference_measurement": _reference_direction(cal.reference), "dimensioned_plan": "horizontal",
+                     "prior_cues": "vertical"}.get(cal.method)
+        return _with_oblique(analysis, _Scale.from_calibration(cal), direction, notes), notes
     if usable:
         k = relative_scale(analysis, cal.image_id)
         if k is not None and (analysis.primary_image_id in (None, front_img)):
@@ -256,14 +376,24 @@ def _effective_scale(analysis: AnalysisResult, cal: ScaleCalibration, front_img:
                          f"multi-view relative scale.")
             return _Scale(front_img, s.value, s.rel_lo, s.rel_hi, s.basis, scale_group(front_img), s.method,
                           s.calibrated, s.evidence), notes
+        if plan is not None and plan.image_id == cal.image_id:
+            moved = transfer_plan_scale(analysis, plan, front_img, A)
+            if moved is not None:
+                tv, tnotes = moved
+                notes += tnotes
+                notes.append(f"Reference measured on the floor plan {cal.image_id}; transferred to the front image "
+                             f"{front_img} through the plan outline.")
+                sc = _Scale.from_calibration(ScaleCalibration(image_id=front_img, method="dimensioned_plan",
+                                                              metres_per_pixel=tv))
+                return _with_oblique(analysis, sc, "horizontal", notes), notes
         notes.append(f"Calibration applies to {cal.image_id}, not to the front image {front_img}; prior cues of "
-                     "the front image are used instead.")
+                     "the front image are used instead (scale: prior_cues, ASSUMED).")
     fallback = prior_cue_calibration(analysis, front_img, assumptions=A)
     if fallback.metres_per_pixel.value is None:
         raise ValueError("No usable scale for the front elevation (no calibration and no prior scale cue). "
                          "Add a reference measurement, e.g. the confirmed frontage width.")
     notes.extend(n for n in fallback.notes if n.startswith("Warning"))
-    return _Scale.from_calibration(fallback, front_img), notes
+    return _with_oblique(analysis, _Scale.from_calibration(fallback, front_img), "vertical", notes), notes
 
 
 # =============================================================================
@@ -279,6 +409,7 @@ class _Vol:
     storeys: TrackedValue
     ftf: TrackedValue
     ffl: TrackedValue
+    eaves: Optional[TrackedValue]
     form: RoofForm
     ridge_axis: str
     pitch_obs: Optional[TrackedValue]
@@ -318,26 +449,36 @@ def _storeys(obs: FacadeObservation, default: int) -> TrackedValue:
 
 
 def _ftf(obs: FacadeObservation, scale: _Scale, storeys: TrackedValue, ffl: TrackedValue,
-         A: AssumptionLibrary, pu: float) -> tuple[TrackedValue, Optional[str]]:
+         A: AssumptionLibrary, pu: float) -> tuple[TrackedValue, Optional[str], Optional[TrackedValue]]:
+    """Floor-to-floor from the calibrated eaves height: ``(plate - FFL) / n``, else the prior.
+
+    The range is taken at the nominal storey count ``n`` (storey counts are held fixed in one twin and in
+    the uncertainty simulation; another count is another scenario) and clipped to
+    :data:`FTF_PLAUSIBLE`, so an untrusted or uncertain storey range cannot produce implausible storey
+    heights.  Also returns the wall-plate height above ground in metres (stored on the block as
+    ``observed_eaves_m``) when it was measured with a calibrated scale.
+    """
     prior = A.floor_to_floor_m
     eh = obs.eaves_height_px
     if not scale.calibrated or eh.value is None or eh.value <= 0:
-        return _copy_prior(prior), None
-    plate = scale.m(eh.value, px_band(eh, pu), px_basis=eh.basis)
+        return _copy_prior(prior), None, None
+    plate = scale.m(eh.value, px_band(eh, pu), px_basis=eh.basis, evidence=eh.evidence_ids or obs.feature_ids[:1],
+                    note="Wall-plate (eaves) height above ground measured in the front view.")
     n = storeys.value
     v = (plate.value - ffl.value) / n
-    lo = (_lo(plate) - _hi(ffl)) / (storeys.high or n)
-    hi = (_hi(plate) - _lo(ffl)) / (storeys.low or n)
+    lo = max(FTF_PLAUSIBLE[0], (_lo(plate) - _hi(ffl)) / n)
+    hi = min(FTF_PLAUSIBLE[1], (_hi(plate) - _lo(ffl)) / n)
     if not (FTF_PLAUSIBLE[0] <= v <= FTF_PLAUSIBLE[1]):
         return _copy_prior(prior), (f"{obs.block_hint}: floor-to-floor from the eaves height would be {v:.2f} m "
-                                    "(implausible); the prior is used. Check storeys / eaves detection.")
+                                    "(implausible); the prior is used. Check storeys / eaves detection."), plate
     basis = weakest_basis(scale.basis, eh.basis, storeys.basis, ffl.basis, Basis.INFERRED)
     tv = _tv(v, "m", basis, lo, hi,
              group=scale.group, evidence=eh.evidence_ids,
              note=(f"(eaves {plate.value:.2f} m - assumed FFL {ffl.value:.2f} m) / {int(n)} storey(s). The wall-plate "
                    f"height above ground is {plate.basis.value} from the image; the value is {basis.value} because "
-                   "the FFL is an assumed prior (its range is folded into this range)."))
-    return tv, None
+                   "the FFL is an assumed prior (its range is folded into this range, at the nominal storey "
+                   f"count, within {FTF_PLAUSIBLE[0]:.1f}-{FTF_PLAUSIBLE[1]:.1f} m)."))
+    return tv, None, plate
 
 
 def _roof_overhang(analysis: AnalysisResult, obs: FacadeObservation, scale: _Scale,
@@ -369,7 +510,7 @@ def _roof_overhang(analysis: AnalysisResult, obs: FacadeObservation, scale: _Sca
     if not vals:
         return None
     px = sum(vals) / len(vals)
-    tv = scale.m(px, band, evidence=ids,
+    tv = scale.m(px, band, evidence=ids, horizontal=True,
                  note="Overhang beyond the wall ends measured from the roof outline in the front view.")
     if tv.value > MAX_OVERHANG_M:
         return None
@@ -386,15 +527,19 @@ def _volume(analysis: AnalysisResult, obs: FacadeObservation, *, is_main: bool, 
         width = confirmed_width
     elif obs.width_px.value:
         width = scale.m(obs.width_px.value, px_band(obs.width_px, pu), px_basis=obs.width_px.basis,
-                        evidence=obs.width_px.evidence_ids or obs.feature_ids[:1],
+                        evidence=obs.width_px.evidence_ids or obs.feature_ids[:1], horizontal=True,
                         note=f"Facade width {obs.width_px.value:.1f} px x scale.")
     else:
         raise ValueError(f"facade '{hint}' has no measured width; cannot build a block from it")
     storeys = _storeys(obs, 2 if is_main else 1)
     ffl = _copy_prior(A.ground_floor_level_m, "Not observable from the elevation.")
-    ftf, fnote = _ftf(obs, scale, storeys, ffl, A, pu)
+    ftf, fnote, eaves_m = _ftf(obs, scale, storeys, ffl, A, pu)
     if fnote:
         notes.append(fnote)
+    st = obs.storeys
+    if st.value is not None and st.low is not None and st.high is not None and st.high > st.low:
+        notes.append(f"{hint}: storeys {int(storeys.value)} ({st.basis.value}; the evidence allows "
+                     f"{int(st.low)}-{int(st.high)}) - confirm the storey count; it is held fixed in this hypothesis.")
     # roof form
     raw = (obs.roof_form or "").strip().lower()
     form = _FORMS.get(raw)
@@ -448,7 +593,7 @@ def _volume(analysis: AnalysisResult, obs: FacadeObservation, *, is_main: bool, 
     if not is_main and role == BlockRole.WING:
         name = f"Wing ({hint[:30]})"
     return _Vol(facade=obs, block_id=block_id, role=role, name=name, width=width, storeys=storeys, ftf=ftf,
-                ffl=ffl, form=form, ridge_axis=ridge_axis, pitch_obs=pitch_obs, rise=rise,
+                ffl=ffl, eaves=eaves_m, form=form, ridge_axis=ridge_axis, pitch_obs=pitch_obs, rise=rise,
                 rise_factor=rise_factor, eaves_overhang=eaves, verge_overhang=verge, high_side=high_side,
                 left_px=obs.left_x_px, notes=notes)
 
@@ -473,11 +618,12 @@ def _openings(analysis: AnalysisResult, obs: FacadeObservation, vol: _Vol, side:
         fb = feat.basis if feat is not None else Basis.OBSERVED
         band = length_band(pu)  # every opening dimension is a difference of two edges
         ev = [o.feature_id]
-        width = scale.m(x1 - x0, band, px_basis=fb, evidence=ev, note="Opening width from its bounding box.")
+        width = scale.m(x1 - x0, band, px_basis=fb, evidence=ev, horizontal=True,
+                        note="Opening width from its bounding box.")
         height = scale.m(y1 - y0, band, px_basis=fb, evidence=ev, note="Opening height from its bounding box.")
         if obs.left_x_px is not None:
             off_px = max(0.0, x0 - obs.left_x_px)
-            offset = scale.m(off_px, band, px_basis=fb, evidence=ev,
+            offset = scale.m(off_px, band, px_basis=fb, evidence=ev, horizontal=True,
                              note="From the wall's left end (as seen from outside) to the opening's left edge.")
         else:
             offset = TrackedValue(value=None, unit="m", basis=Basis.UNKNOWN,
@@ -531,7 +677,8 @@ def _pitch_from_rise(vol: _Vol, depth: TrackedValue, basis: Basis, note: str) ->
 
 
 def _option_a(vol: _Vol, A: AssumptionLibrary, depth_obs: Optional[TrackedValue],
-              pitch_known: Optional[TrackedValue], scale: _Scale) -> _DepthPitch:
+              pitch_known: Optional[TrackedValue], scale: _Scale, *,
+              depth_source: str = "a linked side elevation") -> _DepthPitch:
     w = vol.width
     ratio, prior = A.depth_to_width_ratio, A.roof_pitch_deg
     clip_lo, clip_hi = ratio.low * w.value, ratio.high * w.value
@@ -544,11 +691,11 @@ def _option_a(vol: _Vol, A: AssumptionLibrary, depth_obs: Optional[TrackedValue]
                 notes.append(f"Consistency: pitch implied by the front-view rise and the observed depth is "
                              f"{implied:.1f} deg; observed {pitch.value:.1f} deg.")
         elif vol.rise is not None and vol.form != RoofForm.FLAT:
-            pitch = _pitch_from_rise(vol, depth_obs, Basis.INFERRED,
-                                     "Implied by the observed rise and the observed depth (scale cancels).")
+            pitch = _pitch_from_rise(vol, depth_obs, weakest_basis(vol.rise.basis, depth_obs.basis, Basis.INFERRED),
+                                     f"Implied by the front-view rise and the depth seen in {depth_source}.")
         else:
             pitch = _copy_prior(prior)
-        notes.append(f"Main depth {depth_obs.value:.2f} m observed in a linked side elevation (not hidden).")
+        notes.append(f"Main depth {depth_obs.value:.2f} m ({depth_obs.basis.value}) from {depth_source} (not hidden).")
         return _DepthPitch(depth_obs, pitch, notes)
     if vol.rise is not None and pitch_known is not None and vol.form != RoofForm.FLAT:
         f, r, p = vol.rise_factor, vol.rise, pitch_known
@@ -604,25 +751,39 @@ def _option_a(vol: _Vol, A: AssumptionLibrary, depth_obs: Optional[TrackedValue]
 
 
 def _option_b(vol: _Vol, a: _DepthPitch, A: AssumptionLibrary, pitch_known: Optional[TrackedValue],
-              scale: _Scale) -> _DepthPitch:
+              scale: _Scale) -> tuple[_DepthPitch, bool]:
+    """H-B main block: shallower than H-A when that is distinct, else H-A's depth.
+
+    Returns ``(option, shallower)``.  The shallower depth is ``max(0.6 x width, depth_A - 1.2 m)``; it is
+    never deeper than H-A.  When H-A's depth is already within :data:`H_B_MIN_DISTINCT_M` of the
+    depth/width floor no shallower variant exists, and H-B keeps H-A's main block (``shallower`` False:
+    the alternative is then only the hidden rear extension).  The assumed depth always has a range.
+    """
     w = vol.width.value
     floor = MIN_DEPTH_FRACTION * w
-    v = max(floor, a.depth.value - H_B_DEPTH_REDUCTION_M)
-    lo = max(floor, _lo(a.depth) - H_B_DEPTH_REDUCTION_M)
-    hi = max(lo, _hi(a.depth) - H_B_DEPTH_REDUCTION_M)
+    a_v = float(a.depth.value)
+    if a_v - floor < H_B_MIN_DISTINCT_M:
+        note = (f"H-A's main depth {a_v:.2f} m is at or below the depth/width prior minimum ({floor:.2f} m = "
+                f"{MIN_DEPTH_FRACTION:.2f} x width) + {H_B_MIN_DISTINCT_M:.2f} m: no distinct shallower variant; the "
+                "main block is kept as in H-A.")
+        return _DepthPitch(a.depth.model_copy(deep=True), a.pitch.model_copy(deep=True), [note]), False
+    v = max(floor, a_v - H_B_DEPTH_REDUCTION_M)
+    lo = min(v, max(floor, _lo(a.depth) - H_B_DEPTH_REDUCTION_M))
+    hi = max(_hi(a.depth) - H_B_DEPTH_REDUCTION_M, 1.10 * v)
     depth = _tv(v, "m", Basis.ASSUMED, lo, hi, group=scale.group,
                 note=(f"Shallower main block assumed: max({MIN_DEPTH_FRACTION:.1f} x width, H-A depth - "
-                      f"{H_B_DEPTH_REDUCTION_M:.2f} m)."))
+                      f"{H_B_DEPTH_REDUCTION_M:.2f} m) = {v:.2f} m (H-A {a_v:.2f} m)."))
     notes = []
     if vol.rise is not None and pitch_known is None and vol.form != RoofForm.FLAT:
         pitch = _pitch_from_rise(vol, depth, Basis.ASSUMED,
                                  "Implied by the observed rise and the ASSUMED shallower depth.")
-        notes.append(f"Main depth {v:.2f} m assumed; implied pitch {pitch.value:.1f} deg keeps the observed rise "
-                     f"{vol.rise.value:.2f} m.")
+        notes.append(f"Main depth {v:.2f} m assumed (H-A {a_v:.2f} m); implied pitch {pitch.value:.1f} deg "
+                     f"({'steeper than' if pitch.value > a.pitch.value + 0.05 else 'as'} H-A's "
+                     f"{a.pitch.value:.1f} deg) keeps the observed rise {vol.rise.value:.2f} m.")
     else:
         pitch = a.pitch.model_copy(deep=True)
-        notes.append(f"Main depth {v:.2f} m assumed (shallower than H-A).")
-    return _DepthPitch(depth, pitch, notes)
+        notes.append(f"Main depth {v:.2f} m assumed (shallower than H-A's {a_v:.2f} m).")
+    return _DepthPitch(depth, pitch, notes), True
 
 
 def _option_c(vol: _Vol, A: AssumptionLibrary, pitch_known: Optional[TrackedValue], scale: _Scale) -> _DepthPitch:
@@ -674,7 +835,8 @@ def _block(vol: _Vol, x0: TrackedValue, depth: TrackedValue, pitch: TrackedValue
                  width=vol.width.model_copy(deep=True), depth=depth.model_copy(deep=True),
                  storeys=vol.storeys.model_copy(deep=True), floor_to_floor=vol.ftf.model_copy(deep=True),
                  ground_floor_level=vol.ffl.model_copy(deep=True), roof=_roof(vol, pitch), heated=heated,
-                 visible_sides=list(vol.visible_sides), notes=notes)
+                 visible_sides=list(vol.visible_sides), notes=notes,
+                 observed_eaves_m=vol.eaves.model_copy(deep=True) if vol.eaves is not None else None)
 
 
 def _place(vols: list[_Vol], main: _Vol, scale: _Scale, pu: float) -> tuple[dict[str, TrackedValue], list[str]]:
@@ -690,21 +852,21 @@ def _place(vols: list[_Vol], main: _Vol, scale: _Scale, pu: float) -> tuple[dict
         prev, cur = order[j - 1], order[j]
         px0, pw = xs[prev.block_id], prev.width
         edge = px0.value + pw.value
-        gap = (cur.left_px - main.left_px) * scale.value - edge if have_x else 0.0
+        gap = (cur.left_px - main.left_px) * scale.value * scale.h_factor - edge if have_x else 0.0
         if gap < SNAP_GAP_M:
             xs[cur.block_id] = _tv(edge, "m", weakest_basis(px0.basis, pw.basis, Basis.INFERRED),
                                    _lo(px0) + _lo(pw), _hi(px0) + _hi(pw), group=scale.group,
                                    note=f"Snapped to the right edge of '{prev.block_id}' (gap {gap:+.2f} m < "
                                         f"{SNAP_GAP_M:.2f} m).")
         else:
-            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu),
+            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu), horizontal=True,
                                        note="Offset of the facade's left edge from the main block's left edge.")
             notes.append(f"'{cur.block_id}' is {gap:.2f} m from '{prev.block_id}'; kept as a detached volume.")
     for j in range(im - 1, -1, -1):
         nxt, cur = order[j + 1], order[j]
         nx0, cw = xs[nxt.block_id], cur.width
         if have_x:
-            right = (cur.left_px - main.left_px) * scale.value + cw.value
+            right = (cur.left_px - main.left_px) * scale.value * scale.h_factor + cw.value
             gap = nx0.value - right
         else:
             gap = 0.0
@@ -713,7 +875,7 @@ def _place(vols: list[_Vol], main: _Vol, scale: _Scale, pu: float) -> tuple[dict
                                    _lo(nx0) - _hi(cw), _hi(nx0) - _lo(cw), group=scale.group,
                                    note=f"Snapped to the left edge of '{nxt.block_id}' (gap {gap:+.2f} m).")
         else:
-            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu),
+            xs[cur.block_id] = scale.m(cur.left_px - main.left_px, length_band(pu), horizontal=True,
                                        note="Offset of the facade's left edge from the main block's left edge.")
             notes.append(f"'{cur.block_id}' is {gap:.2f} m from '{nxt.block_id}'; kept as a detached volume.")
     return xs, notes
@@ -782,29 +944,81 @@ def _hidden(A: AssumptionLibrary) -> HiddenSideAssumptions:
 # =============================================================================
 # Public entry point
 # =============================================================================
+def _plan_extra_block(plan: PlanEvidence, name: str, main_block: Block, used: set[str],
+                      A: AssumptionLibrary) -> Optional[Block]:
+    """A block drawn on the floor plan but not seen in the front view (e.g. a rear extension)."""
+    pb = plan.blocks[name]
+    org = plan.origin(name, "main")
+    if org is None or pb.irregular or not pb.tagged:
+        return None
+    s_tv = plan.scale
+    grp = s_tv.correlation_group
+    ox = TrackedValue(value=main_block.origin_x.value + org[0], unit="m", basis=Basis.INFERRED,
+                      distribution=Distribution.FIXED, correlation_group=grp, source="floor plan",
+                      evidence_ids=[pb.outline_id, plan.blocks["main"].outline_id],
+                      note="Offset from the main block's front-left corner on the floor plan.")
+    oy = ox.model_copy(update={"value": main_block.origin_y.value + org[1]})
+    role = BlockRole.GARAGE if "garage" in name else BlockRole.EXTENSION
+    storeys = pb.storeys.model_copy(deep=True) if pb.storeys is not None else assumed(
+        1.0, "storeys", source=SOURCE, note="Storeys of a block seen only on the plan: single storey assumed.")
+    mf, mg = main_block.floor_to_floor, main_block.ground_floor_level
+    ftf = mf.model_copy(update={"basis": Basis.ASSUMED, "evidence_ids": [], "source": SOURCE,
+                                "note": f"Assumed equal to the main block's floor-to-floor {mf.value:.2f} m."}, deep=True)
+    ffl = mg.model_copy(update={"basis": Basis.ASSUMED, "evidence_ids": [], "source": SOURCE,
+                                "note": f"Assumed equal to the main block's FFL {mg.value:.2f} m."}, deep=True)
+    flat = assumed(0.10, "m", low=0.0, high=0.25, source=SOURCE, note="Flat roof edge overhang assumed.")
+    roof = RoofSpec(form=RoofForm.FLAT, pitch_deg=assumed(0.0, "deg", source=SOURCE, note="Flat roof (assumed)."),
+                    ridge_axis="x", eaves_overhang_m=flat, verge_overhang_m=flat.model_copy(deep=True),
+                    parapet_height_m=assumed(0.0, "m", source=SOURCE, note="No parapet assumed."))
+    return Block(block_id=_safe_id(name, used), name=f"{'Garage' if role == BlockRole.GARAGE else 'Extension'} "
+                 f"({name[:30]}, from the floor plan)", role=role, origin_x=ox, origin_y=oy,
+                 width=pb.width.model_copy(deep=True), depth=pb.depth.model_copy(deep=True), storeys=storeys,
+                 floor_to_floor=ftf, ground_floor_level=ffl, roof=roof, heated=role != BlockRole.GARAGE,
+                 visible_sides=[], notes="Plan footprint from the dimensioned floor plan; height, roof and heating "
+                                         "assumed (not visible in the front view).")
+
+
 def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCalibration, *,
                                  assumptions: Optional[AssumptionLibrary] = None,
                                  settings: Optional[ProjectSettings] = None) -> list[GeometryHypothesis]:
     """Competing hidden-footprint hypotheses (see module docstring).
 
     Returns 2 hypotheses when the scale is calibrated (reference / plan) or the
-    main depth is observed in a linked side view, 3 when uncalibrated.  Raises
+    main depth is observed in a linked side view, 3 when uncalibrated; with a
+    dimensioned floor plan showing the main block, 1 (rectangular plan drawn) or
+    2 (extension block drawn).  Hypotheses are ordered by plausibility.  Raises
     ``ValueError`` when there is no front facade observation or no usable scale.
     ``settings`` is accepted for interface symmetry; geometry is SI throughout.
     """
     A = assumptions or AssumptionLibrary()
     pu = float(A.pixel_measurement_error_px)
     primary = primary_image_id(analysis)
-    front_img = calibration.image_id if front_facades(analysis, calibration.image_id) else primary
+    common: list[str] = []
+    # --- geometry source: the measured front elevation.  A calibration on a concept reference never makes
+    # the concept the geometry source while a measured front elevation exists (SPEC-1).
+    cal_img = calibration.image_id
+    concept_cal = analysis.is_concept_image(cal_img)
+    real_front = any(f.view == ViewDirection.FRONT and not analysis.is_concept_image(f.image_id)
+                     for f in analysis.facades)
+    if front_facades(analysis, cal_img) and not (concept_cal and real_front):
+        front_img = cal_img
+    else:
+        front_img = primary
     fronts = front_facades(analysis, front_img)
-    if not fronts:
-        for f in analysis.facades:
+    if not fronts or (analysis.is_concept_image(front_img) and real_front):
+        for f in sorted(analysis.facades, key=lambda f: analysis.is_concept_image(f.image_id)):
             if f.view == ViewDirection.FRONT:
                 front_img, fronts = f.image_id, front_facades(analysis, f.image_id)
                 break
     if not fronts:
         raise ValueError("No front facade observation: hypotheses need a measured front elevation.")
-    scale, common = _effective_scale(analysis, calibration, front_img, A)
+    if concept_cal and front_img != cal_img:
+        common.append(f"Warning: the reference measurement is on the concept reference {cal_img}; the twin is built "
+                      f"from the measured elevation {front_img} (concept geometry is never the geometry source). "
+                      "Confirm a dimension on that elevation to calibrate it.")
+    plan = plan_evidence(analysis, calibration, assumptions=A)
+    scale, snotes = _effective_scale(analysis, calibration, front_img, A, plan)
+    common += snotes
     main_obs = main_facade(fronts)
 
     # --- confirmed main width (reference = main facade width)
@@ -826,6 +1040,18 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
                 note=("Main frontage confirmed by the reference measurement. "
                       + calibration.reference.description[:200]).strip())
 
+    # --- floor-plan blocks matched to the front blocks (an untagged single outline = the only front block)
+    plan_blocks: dict[str, str] = {}  # facade block hint -> plan block name
+    if plan is not None:
+        common += [n for n in plan.notes if n not in common]
+        for f in fronts:
+            if f.block_hint in plan.blocks and plan.blocks[f.block_hint].tagged:
+                plan_blocks[f.block_hint] = f.block_hint
+        if not plan_blocks and len(fronts) == 1 and len(plan.blocks) == 1:
+            only = next(iter(plan.blocks.values()))
+            if not only.tagged:
+                plan_blocks[fronts[0].block_hint] = only.block
+
     # --- volumes per front facade
     used_ids: set[str] = set()
     vols: list[_Vol] = []
@@ -836,8 +1062,17 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
             common.append(f"Facade '{obs.block_hint}' has no measured width; not modelled.")
             continue
         bid = _safe_id("main" if is_main else obs.block_hint, used_ids)
+        width_override = confirmed if is_main else None
+        pb = plan.blocks.get(plan_blocks[obs.block_hint]) if plan is not None and obs.block_hint in plan_blocks \
+            else None
+        if pb is not None and pb.width.value and (width_override is None or
+                                                  BASIS_RANK[pb.width.basis] > BASIS_RANK[width_override.basis]):
+            elev_basis = scale.basis if width_override is None else width_override.basis
+            if BASIS_RANK[pb.width.basis] > BASIS_RANK[weakest_basis(elev_basis, obs.width_px.basis)]:
+                width_override = pb.width.model_copy(update={"note": (pb.width.note + " Width from the floor plan.")
+                                                             .strip()}, deep=True)
         vol = _volume(analysis, obs, is_main=is_main, block_id=bid, scale=scale, A=A,
-                      confirmed_width=confirmed if is_main else None)
+                      confirmed_width=width_override)
         vols.append(vol)
         if is_main:
             main_vol = vol
@@ -850,6 +1085,7 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
     linked = analysis.multiview.linked_measurements if analysis.multiview is not None else {}
     hint_to_vol = {v.facade.block_hint: v for v in vols}
     depth_obs: dict[str, TrackedValue] = {}
+    depth_src: dict[str, str] = {}
     pitch_side: dict[str, TrackedValue] = {}
     for hint, v in hint_to_vol.items():
         d = linked.get(f"{hint}.depth_front_px_equiv")
@@ -857,14 +1093,25 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
             depth_obs[v.block_id] = scale.m(d.value, px_band(d, pu), px_basis=weakest_basis(d.basis, Basis.INFERRED),
                                             evidence=d.evidence_ids,
                                             note="Depth seen in a linked side elevation (front-scale pixels x scale).")
+            depth_src[v.block_id] = "a linked side elevation"
         p = linked.get(f"{hint}.pitch_side_view_deg")
         if p is not None and p.value is not None and 0 < p.value < 75:
             pitch_side[v.block_id] = p.model_copy(update={"low": max(PITCH_LIMITS[0], _lo(p)),
                                                           "high": min(PITCH_LIMITS[1], _hi(p))}, deep=True)
+        # floor-plan depth (evidence-based: INFERRED from the plan scale, or the dimension's own basis)
+        if plan is not None and hint in plan_blocks:
+            pb = plan.blocks[plan_blocks[hint]]
+            if not pb.irregular and pb.depth.value and pb.depth.value > 0:
+                if v.block_id in depth_obs:
+                    sv = depth_obs[v.block_id].value
+                    common.append(f"{hint}: depth {pb.depth.value:.2f} m on the floor plan vs {sv:.2f} m in the linked "
+                                  "side elevation; the plan is used.")
+                depth_obs[v.block_id] = pb.depth.model_copy(deep=True)
+                depth_src[v.block_id] = f"the dimensioned floor plan {plan.image_id}"
     side_openings: list[Opening] = []
     for f in analysis.facades:
         side = _SIDE_OF_VIEW.get(f.view)
-        if side is None or f.image_id == front_img:
+        if side is None or f.image_id == front_img or analysis.is_concept_image(f.image_id):
             continue
         v = hint_to_vol.get(f.block_hint)
         if v is None:
@@ -893,29 +1140,73 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
 
     # --- options for the main block
     m_depth_obs = depth_obs.get(main_vol.block_id)
+    m_from_plan = m_depth_obs is not None and depth_src.get(main_vol.block_id, "").startswith("the dimensioned")
     m_pitch_known = pitch_side.get(main_vol.block_id) or main_vol.pitch_obs
-    opt_a = _option_a(main_vol, A, m_depth_obs, m_pitch_known, scale)
-    options: list[tuple[str, str, str, _DepthPitch, bool]] = [
-        ("H-A", "Rectangular plan", "Single rectangular main block; hidden depth from the observed roof rise and "
-         "the pitch prior (or observed in a side view).", opt_a, False)]
-    if m_depth_obs is not None:
+    opt_a = _option_a(main_vol, A, m_depth_obs, m_pitch_known, scale,
+                      depth_source=depth_src.get(main_vol.block_id, "a linked side elevation"))
+    seen_sides = set(main_vol.visible_sides)
+    at_right = Side.LEFT in seen_sides and Side.RIGHT not in seen_sides
+    corner = "rear-right" if at_right else "rear-left"
+    # (id, name, description, option, extension: "assumed" | "plan" | None)
+    options: list[tuple[str, str, str, _DepthPitch, Optional[str]]] = []
+    plan_extra = [n for n in (plan.blocks if plan is not None else {}) if n not in plan_blocks.values()
+                  and n != "main" and plan.blocks[n].tagged and not plan.blocks[n].irregular] if m_from_plan else []
+    if m_from_plan:
+        if plan_extra:
+            options.append(("H-A", "Rectangular plan (plan extension omitted)",
+                            "Main block with the depth drawn on the floor plan; the extension block(s) drawn on the "
+                            f"plan ({', '.join(plan_extra)}) are left out.", opt_a, None))
+            options.append(("H-B", "As drawn on the floor plan (main + extension)",
+                            "Main block and the extension block(s) drawn on the dimensioned floor plan; their height "
+                            "and roof are assumed (single storey, flat roof).",
+                            _DepthPitch(opt_a.depth, opt_a.pitch, ["Main depth and extension footprint from the floor "
+                                                                    "plan."]), "plan"))
+            weights = PLAUSIBILITY_PLAN_EXTENSION
+        else:
+            options.append(("H-A", "Rectangular plan (from the floor plan)",
+                            "Single rectangular main block with the depth drawn on the dimensioned floor plan; no "
+                            "extension is drawn, so no extension hypothesis is generated.", opt_a, None))
+            weights = PLAUSIBILITY_PLAN_RECT
+        common.append(f"Floor plan {plan.image_id}: main depth {opt_a.depth.value:.2f} m ({opt_a.depth.basis.value}) "
+                      "is evidence-based; the hidden-depth hypotheses collapse"
+                      + (f" to the plan's footprint ({', '.join(plan_extra)} drawn)." if plan_extra else
+                         " (rectangular footprint drawn)."))
+    else:
+        options.append(("H-A", "Rectangular plan", "Single rectangular main block; hidden depth from the observed "
+                        "roof rise and the pitch prior (or observed in a side view).", opt_a, None))
+    if m_from_plan:
+        pass
+    elif m_depth_obs is not None:
         options.append(("H-B", "Rectangular main + hidden single-storey rear extension",
                         "Observed main depth plus an assumed single-storey flat-roofed rear extension on a side "
                         "not seen in any view.", _DepthPitch(opt_a.depth, opt_a.pitch,
                                                              ["Main depth as observed; rear extension assumed."]),
-                        True))
+                        "assumed"))
         weights = PLAUSIBILITY_DEPTH_OBSERVED
     else:
-        options.append(("H-B", "L-shaped: shallower main + single-storey rear extension",
-                        "Shallower main block with the same observed rise (steeper implied pitch) plus an assumed "
-                        "single-storey flat-roofed rear extension at the rear-left.",
-                        _option_b(main_vol, opt_a, A, m_pitch_known, scale), True))
+        opt_b, shallower = _option_b(main_vol, opt_a, A, m_pitch_known, scale)
+        if shallower:
+            steeper = opt_b.pitch.value > opt_a.pitch.value + 0.05
+            options.append(("H-B", "L-shaped: shallower main + single-storey rear extension",
+                            f"Shallower main block ({opt_b.depth.value:.2f} m vs {opt_a.depth.value:.2f} m in H-A"
+                            + ("; steeper implied pitch, same observed rise" if steeper else "") + ") plus an assumed "
+                            f"single-storey flat-roofed rear extension at the {corner}.", opt_b, "assumed"))
+        else:
+            options.append(("H-B", "Rectangular main + hidden single-storey rear extension",
+                            "Main block as in H-A (its depth is at or below the depth/width prior minimum) plus an "
+                            f"assumed single-storey flat-roofed rear extension at the {corner}.", opt_b, "assumed"))
         if scale.calibrated:
             weights = PLAUSIBILITY_CALIBRATED
         else:
-            options.append(("H-C", "Deep plan / shallow pitch",
-                            "Single rectangular main block at the deep end of the prior with a shallow pitch "
-                            "(same observed rise).", _option_c(main_vol, A, m_pitch_known, scale), False))
+            opt_c = _option_c(main_vol, A, m_pitch_known, scale)
+            if opt_c.depth.value > opt_a.depth.value + H_B_MIN_DISTINCT_M:
+                options.append(("H-C", "Deep plan / shallow pitch",
+                                f"Single rectangular main block at the deep end of the prior ({opt_c.depth.value:.2f} m "
+                                f"vs {opt_a.depth.value:.2f} m in H-A) with a shallower pitch (same observed rise).",
+                                opt_c, None))
+            else:
+                common.append(f"H-C (deep plan) not generated: its depth {opt_c.depth.value:.2f} m is not deeper than "
+                              f"H-A's {opt_a.depth.value:.2f} m.")
             weights = PLAUSIBILITY_UNCALIBRATED
 
     # --- side blocks (garage, front-visible extension / wing)
@@ -926,7 +1217,7 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
             continue
         if v.block_id in depth_obs:
             depth = depth_obs[v.block_id]
-            dnote = f"{v.name}: depth {depth.value:.2f} m observed in a linked side elevation."
+            dnote = f"{v.name}: depth {depth.value:.2f} m from {depth_src.get(v.block_id, 'a linked side elevation')}."
         elif v.role == BlockRole.GARAGE:
             dv, dlo, dhi = GARAGE_DEPTH_M
             depth = assumed(dv, "m", low=dlo, high=dhi, source=SOURCE, note="Garage depth assumed (hidden).")
@@ -944,8 +1235,8 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
         heated = v.role != BlockRole.GARAGE
         side_blocks.append(_block(v, xs[v.block_id], depth, pitch, heated=heated, notes=dnote))
         side_notes.append(dnote)
-        if pitch.basis == Basis.OBSERVED:
-            side_notes.append(f"{v.name}: pitch {pitch.value:.1f} deg observed from the visible gable.")
+        if pitch.basis in (Basis.OBSERVED, Basis.USER_CONFIRMED):
+            side_notes.append(f"{v.name}: pitch {pitch.value:.1f} deg {pitch.basis.value} from the visible gable.")
 
     hidden_sides = sorted({f"{v.block_id}:{s.value}" for v in vols for s in Side if s not in v.visible_sides})
     evidence = list(dict.fromkeys([*scale.evidence, *[i for v in vols for i in v.facade.feature_ids],
@@ -962,39 +1253,55 @@ def generate_geometry_hypotheses(analysis: AnalysisResult, calibration: ScaleCal
         "Geometry only: no structural, compliance or survey claim; construction assemblies are chosen separately "
         "and never inferred from appearance.",
     ]
+    unmodelled = list(analysis.unmodelled_features)
+    if unmodelled:
+        base_notes.append(f"{len(unmodelled)} observed element(s) are not modelled (quantities and costs exclude "
+                          "them): " + "; ".join(unmodelled[:5]) + (" ..." if len(unmodelled) > 5 else ""))
 
     out: list[GeometryHypothesis] = []
-    for hid, name, desc, opt, with_ext in options:
+    for hid, name, desc, opt, ext_kind in options:
         main_block = _block(main_vol, xs[main_vol.block_id], opt.depth, opt.pitch, heated=True,
                             notes="; ".join(opt.notes))
         rise_note = _attach_rise(main_block, main_vol)
         blocks = [main_block] + [b.model_copy(deep=True) for b in side_blocks]
         notes = list(opt.notes) + ([rise_note] if rise_note else []) + side_notes + base_notes
-        if with_ext:
-            seen = set(main_vol.visible_sides)
-            at_right = Side.LEFT in seen and Side.RIGHT not in seen
+        if ext_kind == "assumed":
             ext_id = _safe_id("rear_ext", {b.block_id for b in blocks}, fallback="rear_ext")
             ext = _extension(main_block, ext_id, at_right, A)
             blocks.append(ext)
-            corner = "rear-right" if at_right else "rear-left"
             notes.append(f"Rear extension {ext.width.value:.2f} x {ext.depth.value:.2f} m, single storey, flat roof, "
                          f"heated, at the {corner} corner: entirely ASSUMED (hidden in all views).")
-            if Side.REAR in seen or (Side.LEFT in seen and Side.RIGHT in seen):
+            if Side.REAR in seen_sides or (Side.LEFT in seen_sides and Side.RIGHT in seen_sides):
                 notes.append("Warning: the extension would probably have been visible in the available side/rear "
                              "views; this hypothesis is unlikely.")
+        elif ext_kind == "plan":
+            used = {b.block_id for b in blocks}
+            for n in plan_extra:
+                eb = _plan_extra_block(plan, n, main_block, used, A)
+                if eb is not None:
+                    blocks.append(eb)
+                    notes.append(f"{eb.name}: {eb.width.value:.2f} x {eb.depth.value:.2f} m from the floor plan; height, "
+                                 "roof and heating assumed.")
         try:
             validate_rects([Rect(b.block_id, b.origin_x.value, b.origin_y.value, b.origin_x.value + b.width.value,
                                  b.origin_y.value + b.depth.value) for b in blocks])
         except GeometryError as exc:
+            if ext_kind == "plan":
+                common.append(f"{hid} (as drawn on the plan) skipped: the plan blocks do not form a valid footprint "
+                              f"with the front blocks ({exc}).")
+                continue
             raise ValueError(f"hypothesis {hid} produced an invalid footprint: {exc}") from exc
         openings = [o.model_copy(deep=True) for o in front_ops + side_openings]
         notes.append(f"Plausibility {weights[hid]:.2f} is a subjective prior weight, not a calibrated probability.")
         out.append(GeometryHypothesis(
             hypothesis_id=hid, name=name, description=desc, plausibility=weights[hid], blocks=blocks,
             openings=openings, hidden=_hidden(A), evidence_ids=evidence,
-            notes=notes + list(dict.fromkeys(common)), calibration_method=calibration.method))
+            notes=notes + list(dict.fromkeys(common)), calibration_method=scale.method,
+            unmodelled_elements=unmodelled))
+    out.sort(key=lambda h: -h.plausibility)  # stable: H-A first unless the plan shows the extension
     return out
 
 
 __all__ = ["generate_geometry_hypotheses", "PLAUSIBILITY_CALIBRATED", "PLAUSIBILITY_UNCALIBRATED",
-           "PLAUSIBILITY_DEPTH_OBSERVED", "GARAGE_DEPTH_M", "EXT_DEPTH_M", "EXT_WIDTH_FRACTION", "SNAP_GAP_M"]
+           "PLAUSIBILITY_DEPTH_OBSERVED", "PLAUSIBILITY_PLAN_RECT", "PLAUSIBILITY_PLAN_EXTENSION", "GARAGE_DEPTH_M",
+           "EXT_DEPTH_M", "EXT_WIDTH_FRACTION", "SNAP_GAP_M", "OBLIQUE_CORRECTION_DEG", "H_B_MIN_DISTINCT_M"]

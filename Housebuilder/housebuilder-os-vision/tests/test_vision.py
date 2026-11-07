@@ -489,12 +489,13 @@ def test_vlm_drops_malicious_keys_and_clamps():
     ext = parse_vlm_json(json.dumps(payload))
     dumped = ext.model_dump()
     assert "structural_system" not in dumped and "instructions" not in dumped
-    assert ext.storeys == 10 and ext.window_count_visible == 0 and ext.door_count_visible == 100
+    # review round 2 (VIS-5): out-of-range counts are discarded, not clamped into plausible-looking values
+    assert ext.storeys is None and ext.window_count_visible is None and ext.door_count_visible is None
     assert ext.roof_form is None
     assert ext.likely_external_finishes[0] == "brick-like [31m"  # control characters stripped
     assert len(ext.likely_external_finishes) == 2 and all(len(s) <= 120 for s in ext.likely_external_finishes)
     assert any("unexpected field" in c for c in ext.caveats)
-    assert any("clamped" in c for c in ext.caveats)
+    assert any("storeys value 57" in c and "discarded" in c for c in ext.caveats)
     with pytest.raises(VLMOutputError):
         parse_vlm_json("Sure! Here is the JSON: {")
     with pytest.raises(VLMOutputError):
@@ -527,7 +528,9 @@ def test_vlm_in_analysis_cross_checks_storeys(front_asset, store):
     ia = res.analyses[0]
     assert ia.vlm is not None and ia.vlm.storeys == 3
     main = _facade(res, "main")
-    assert main.storeys.value == 2 and main.storeys.high == 3 and main.storeys.basis == Basis.INFERRED
+    # review round 2 (VIS-5): the VLM is a cross-check only - it never widens the measured range
+    assert main.storeys.value == 2 and main.storeys.high is None and main.storeys.basis == Basis.INFERRED
+    assert "VLM cross-check" in main.storeys.note
     assert any("VLM storey count 3" in w for w in res.warnings)
     assert res.model_versions["anthropic:messages:structured-output"] == MODEL_ID
 

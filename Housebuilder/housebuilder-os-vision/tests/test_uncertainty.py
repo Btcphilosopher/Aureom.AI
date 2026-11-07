@@ -245,21 +245,29 @@ def test_attachments_are_the_twin_editors_attachment_tree(cal):
 
 
 def test_hidden_rule_openings_follow_the_glazing_ratio(cal):
+    """Each storey's rule windows track (ratio x that storey's exposed wall - its rule doors), relative to the
+    base (UNC-10: rule doors are deducted only on the storey that carries them)."""
     model = model_for(cal)
     rear = next(rs for rs in model.rule_sides if rs.side == Side.REAR)
-
-    def rear_glazing(ratio):
-        _, ops = model._geometry(U._Sample(ratios={"rear_glazing_ratio": ratio}))
-        return sum(ops[k].width * ops[k].height for k in rear.windows)
-
-    base = sum(model.base_op[k].width * model.base_op[k].height for k in rear.windows)
-    assert rear_glazing(cal.twin.hidden.rear_glazing_ratio.value) == pytest.approx(base)
-    lo, hi = rear_glazing(0.12), rear_glazing(0.35)
-    assert lo < base < hi
-    # rule-window area tracks (ratio x hidden wall area - rule doors), relative to the base
+    assert set(rear.storeys) == {0, 1}
+    assert rear.storeys[1][1] == 0.0 and rear.storeys[0][1] == pytest.approx(rear.door_area)  # door on the GF
     r0 = cal.twin.hidden.rear_glazing_ratio.value
-    wall = (rear.base_target + rear.door_area) / r0
-    assert hi / lo == pytest.approx((0.35 * wall - rear.door_area) / (0.12 * wall - rear.door_area), rel=1e-9)
+
+    def glazing(ratio, storey):
+        _, ops = model._geometry(U._Sample(ratios={"rear_glazing_ratio": ratio}))
+        return sum(ops[k].width * ops[k].height for k in rear.storeys[storey][0])
+
+    for st, (wins, door, t0) in rear.storeys.items():
+        base = sum(model.base_op[k].width * model.base_op[k].height for k in wins)
+        assert glazing(r0, st) == pytest.approx(base)
+        lo, hi = glazing(0.17, st), glazing(0.35, st)
+        assert lo < base < hi
+        wall = (t0 + door) / r0
+        assert hi / lo == pytest.approx((0.35 * wall - door) / (0.17 * wall - door), rel=1e-9)
+    # first floor: no rule doors, so its glazing is proportional to the ratio; a low ratio is taken up on the
+    # ground floor by the patio door, but never removes the first-floor windows
+    assert glazing(0.35, 1) / glazing(0.12, 1) == pytest.approx(0.35 / 0.12, rel=1e-9)
+    assert glazing(0.12, 0) == 0.0 and glazing(0.12, 1) > 0.0
 
 
 def test_ground_classes_switch_foundations(cal):
@@ -336,12 +344,21 @@ def test_outputs_sensitivity_and_information_value(full500):
     shares = [r["variance_share"] for r in info]
     assert shares == sorted(shares, reverse=True)
     assert info[0]["group"] == "hidden_geometry"
-    assert info[0]["resolving_action"] == "Upload a side/rear elevation or a dimensioned floor plan"
+    # SPEC-4 / UI-9: the action names evidence the engine can use for a hidden depth (a linked side
+    # elevation, a floor plan with outline + measured dimension, or a depth entered in the twin)
+    assert info[0]["resolving_action"] == RESOLVING_ACTIONS["hidden_geometry"]
+    assert "side elevation" in info[0]["resolving_action"] and "measured dimension" in info[0]["resolving_action"]
+    assert "rear" not in info[0]["resolving_action"]
     by_group = {r["group"]: r for r in info}
     assert by_group["scale"]["variance_share"] < 0.05  # frontage confirmed: scale is resolved
+    # UNC-12: the frontage is already measured, so the scale action is not "confirm the frontage"
+    assert by_group["scale"]["resolving_action"] == U.SCALE_ACTION_CALIBRATED
     for r in info:
-        assert r["resolving_action"] == RESOLVING_ACTIONS[r["group"]]
+        assert r["group_action"] == RESOLVING_ACTIONS[r["group"]]
+        if r["group"] not in ("scale", "hidden_geometry"):
+            assert r["resolving_action"] == RESOLVING_ACTIONS[r["group"]]
         assert 0.0 <= r["p10_p90_width_accounted"] <= r["p10_p90_width"] + 1e-9
+        assert r["variance_share_se"] >= 0.0 and r["rank_range"][0] <= r["rank"] <= r["rank_range"][1]
     assert "not statistically calibrated" in res.interval_type
     assert any("No averaging" in n for n in res.notes)
     assert any("rho = " in n and "unit_prices 0.5" in n for n in res.notes)

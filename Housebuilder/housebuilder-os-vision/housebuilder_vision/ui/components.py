@@ -21,7 +21,7 @@ import streamlit as st
 from ..core.provenance import TrackedValue
 from . import fmt
 from .state import Workspace, get_workspace
-from .theme import badge, esc
+from .theme import badge, esc, md_escape
 
 log = logging.getLogger("housebuilder_vision.ui")
 
@@ -38,20 +38,25 @@ def guard(context: str) -> Iterator[None]:
     except Exception as exc:  # noqa: BLE001 - the UI must stay usable; details go to the server log
         log.exception("UI section '%s' failed", context)
         msg = str(exc).strip().splitlines()[0][:400] if str(exc).strip() else ""
-        st.error(f"{context} could not be shown - {type(exc).__name__}{': ' + msg if msg else ''}. "
-                 "The rest of the page still works; adjust the inputs above and try again.")
+        st.error(md_escape(f"{context} could not be shown - {type(exc).__name__}{': ' + msg if msg else ''}. "
+                           "The rest of the page still works; adjust the inputs above and try again."))
 
 
 def show_flash(ws: Workspace) -> None:
-    """Render and clear messages queued by callbacks."""
+    """Render and clear messages queued by callbacks.
+
+    Messages may quote untrusted text (file names, rate-book warnings, feature labels), so they are
+    markdown-escaped: links, images and emphasis from an upload are shown literally, never rendered.
+    """
     msgs, ws.flash = ws.flash, []
     for level, text in msgs:
+        body = md_escape(text)
         if level == "error":
-            st.error(text)
+            st.error(body)
         elif level == "warning":
-            st.warning(text)
+            st.warning(body)
         else:
-            st.toast(text)
+            st.toast(body)
 
 
 def value_meta(tv: Optional[TrackedValue], system: str = "metric", *, nd: int = 2, extra: str = "") -> str:

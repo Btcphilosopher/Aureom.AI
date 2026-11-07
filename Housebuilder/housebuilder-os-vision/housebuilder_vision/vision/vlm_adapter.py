@@ -27,11 +27,15 @@ Trust boundary:
 * ``stop_reason == "refusal"`` is checked before reading content; a refusal
   yields a :class:`VLMExtraction` with a caveat and no data.
 * The first text block is parsed with ``json.loads`` and re-validated here:
-  unknown keys are dropped, counts are clamped to the model ranges, strings
-  are sanitised and length-limited, enums are normalised; the SHA-256 of the
-  raw text is stored for audit.
+  unknown keys are dropped, counts outside the model ranges are *discarded*
+  (``None`` plus a caveat - an absurd value such as 99 storeys is evidence of
+  a hallucination or of instructions painted in the image, so it is not
+  clamped into a plausible-looking one), strings are sanitised and
+  length-limited, enums are normalised; the SHA-256 of the raw text is stored
+  for audit.
 * Output is always ``INFERRED`` (``VLMExtraction`` carries no observed
-  geometry) and is used only to cross-check detections.  The prompt forbids
+  geometry) and is used only to cross-check detections: the analysis adds
+  warnings and notes and never changes a measured value or its range.  The prompt forbids
   guessing structure, insulation, foundations, services or compliance, and
   the analysis never uses VLM output for those regardless.
 
@@ -161,15 +165,15 @@ def _as_int(v: Any) -> Optional[int]:
 
 
 def _clamp(name: str, v: Any, lo: int, hi: int, caveats: list[str]) -> Optional[int]:
+    """Integer in ``[lo, hi]``; a non-numeric or out-of-range value is discarded (``None`` + caveat)."""
     i = _as_int(v)
     if i is None:
         if v is not None:
             caveats.append(f"Ignored non-numeric value for {name}.")
         return None
     if i < lo or i > hi:
-        c = min(max(i, lo), hi)
-        caveats.append(f"{name} value {i} outside [{lo}, {hi}]; clamped to {c}.")
-        return c
+        caveats.append(f"{name} value {i} outside [{lo}, {hi}]; discarded (implausible model output).")
+        return None
     return i
 
 

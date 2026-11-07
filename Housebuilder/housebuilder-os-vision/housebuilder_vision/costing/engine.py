@@ -110,6 +110,7 @@ __all__ = [
     "COST_CONVENTIONS",
     "RULE_COST_KEYS",
     "COST_PARAMETER_FALLBACKS",
+    "INCOMPLETE_WARNING",
     "estimate_construction_cost",
     "cost_lines_table",
     "boundary_table",
@@ -117,6 +118,10 @@ __all__ = [
 
 _LAYERS = list(CostLayer)
 L1, L2, L3, L4, L5, L6, L7, L8, L9 = _LAYERS
+
+#: Start of the first estimate warning when items of layers 1-5 are unpriced (the boundary amounts are then
+#: lower bounds - e.g. after a currency switch without an FX rate, or a pricing date before every rate).
+INCOMPLETE_WARNING = "INCOMPLETE ESTIMATE"
 
 #: Cost keys priced by derived rules (not emitted by the take-off) and their units.
 RULE_COST_KEYS: dict[str, str] = {
@@ -264,6 +269,25 @@ class _State:
     used: dict[tuple[str, str], ResolvedRate] = field(default_factory=dict)
     #: order-level material purchases (one per priced (mat: cost key, purchase unit))
     orders: list[MaterialOrder] = field(default_factory=list)
+    #: cost layer of each entry of ``unresolved`` (boundaries count the items in their layers)
+    unresolved_layers: list[CostLayer] = field(default_factory=list)
+    #: currency of the CostParameters money amounts and its factor to ``currency`` (None: no FX rate -> unpriced)
+    param_currency: str = ""
+    param_fx: Optional[float] = 1.0
+
+    def unresolve(self, text: str, layer: CostLayer) -> None:
+        """List an item that could not be priced (never priced as zero) under its cost layer."""
+        self.unresolved.append(text)
+        self.unresolved_layers.append(layer)
+
+    def param_money(self, amount: float) -> Optional[float]:
+        """A CostParameters money amount in the estimate currency (None when it cannot be converted)."""
+        return None if self.param_fx is None else float(amount) * self.param_fx
+
+    def param_src(self) -> str:
+        if self.param_fx is None or self.param_currency == self.currency:
+            return ""
+        return f" converted {self.param_currency}->{self.currency} at FX ×{self.param_fx:g}"
 
     def add(self, *, line_id: str, layer: CostLayer, description: str, amount: float, cost_key: Optional[str] = None,
             quantity: Optional[float] = None, unit: str = "", rr: Optional[ResolvedRate] = None,
@@ -439,7 +463,7 @@ def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rul
     for ln in boq.lines:
         if ln.status == QuantityStatus.UNRESOLVED:
             reason = (ln.notes or ln.formula or "no reason given").removeprefix("UNRESOLVED: ")
-            st.unresolved.append(f"{ln.line_id} ({ln.description}): quantity unresolved - {reason}; not priced")
+            st.unresolve(f"{ln.line_id} ({ln.description}): quantity unresolved - {reason}; not priced", L1)
             continue
         ck = ln.cost_key
         if ck:
@@ -448,8 +472,8 @@ def _price_quantity_lines(st: _State, boq: BillOfQuantities, res: _Resolver, rul
             note = "Labelled allowance (not measured)." if ln.status == QuantityStatus.ALLOWANCE else ""
             order = orders.get((ck, unit)) if ck.startswith("mat:") else None
             if qty is None:
-                st.unresolved.append(f"{ln.line_id} ({ln.description}): no quantity on a {ln.status.value} line; "
-                                     "not priced")
+                st.unresolve(f"{ln.line_id} ({ln.description}): no quantity on a {ln.status.value} line; "
+                             "not priced", cost_key_layer(ck) or L1)
             elif order is not None:
                 need = _purchase_need(ln) or 0.0
                 if need > 0:
@@ -549,11 +573,22 @@ def _material_waste_volume(ln: QuantityLine, mat: MaterialSpec) -> Optional[floa
 
 
 def _log_rate(st: _State, res: _Resolver, ck: str, unit: str, fallback: float, fallback_name: str
-              ) -> tuple[Optional[ResolvedRate], float, str]:
+              ) -> tuple[Optional[ResolvedRate], Optional[float], str]:
+    """Rate for a logistics / preliminaries key, else the CostParameters fallback in the estimate currency.
+
+    The fallback is entered in ``CostParameters.currency``: it is converted with the project FX rate, and
+    without one it is NOT used (value ``None``; the caller lists the item as unresolved) - a GBP 1,800 /
+    week fallback is never re-labelled as EUR 1,800 / week.
+    """
     rr = res.get(ck, unit)
     if rr.found:
         return rr, rr.value, f"rate {rr.rate.rate_id}"
-    return None, float(fallback), f"CostParameters.{fallback_name} (fallback: no usable '{ck}' rate; assumption)"
+    val = st.param_money(fallback)
+    if val is None:
+        return None, None, (f"no usable '{ck}' rate, and the fallback CostParameters.{fallback_name} = "
+                            f"{st.param_currency} {fallback:,.2f} has no FX rate {st.param_currency}->{st.currency}")
+    return None, val, (f"CostParameters.{fallback_name} (fallback: no usable '{ck}' rate; assumption"
+                       f"{st.param_src()})")
 
 
 def _delivery_line_id(cost_key: str) -> str:
@@ -584,8 +619,8 @@ def _delivery_charges(st: _State) -> None:
             if r.delivery_charge is None:
                 what = ("own transport to site (collection)" if t == DeliveryTreatment.COLLECTION
                         else "carriage to site")
-                st.unresolved.append(f"{ck}: rate '{r.rate_id}' is {label} but has no delivery_charge; {what} not "
-                                     "priced - enter a delivery charge per order or use a delivered rate")
+                st.unresolve(f"{ck}: rate '{r.rate_id}' is {label} but has no delivery_charge; {what} not "
+                             "priced - enter a delivery charge per order or use a delivered rate", L4)
                 continue
             amount = float(r.delivery_charge) * rr.money_factor
             item = ck.split(":", 1)[1]
@@ -640,12 +675,15 @@ def _logistics(st: _State, boq: BillOfQuantities, res: _Resolver, params: CostPa
     if loads > 0:
         ck, unit = COST_PARAMETER_FALLBACKS["cost_per_delivery_load"]
         rr, val, src = _log_rate(st, res, ck, unit, params.cost_per_delivery_load, "cost_per_delivery_load")
-        amount = loads * val
-        st.add(line_id="4:log.delivery_loads", layer=L4, description="Delivery loads - site receipt and handling",
-               amount=amount, cost_key=ck, quantity=float(loads), unit="load", rr=rr,
-               rate_value=val, basis=weakest_basis(loads_basis, rr.basis if rr else Basis.ASSUMED),
-               formula=f"{loads_txt}; × {cur} {val:.2f}/load ({src}) = {cur} {amount:.2f}",
-               notes="Supplier carriage is in the rates unless charged separately (delivery charges below).")
+        if val is None:
+            st.unresolve(f"delivery loads ({loads} load(s)): {src}; not priced", L4)
+        else:
+            amount = loads * val
+            st.add(line_id="4:log.delivery_loads", layer=L4, description="Delivery loads - site receipt and handling",
+                   amount=amount, cost_key=ck, quantity=float(loads), unit="load", rr=rr,
+                   rate_value=val, basis=weakest_basis(loads_basis, rr.basis if rr else Basis.ASSUMED),
+                   formula=f"{loads_txt}; × {cur} {val:.2f}/load ({src}) = {cur} {amount:.2f}",
+                   notes="Supplier carriage is in the rates unless charged separately (delivery charges below).")
     # ---- waste skips
     vol = 0.0
     no_data: list[str] = []
@@ -665,6 +703,9 @@ def _logistics(st: _State, boq: BillOfQuantities, res: _Resolver, params: CostPa
         skips = math.ceil(vol * bulk / skip_v - 1e-9)
         ck, unit = COST_PARAMETER_FALLBACKS["cost_per_skip"]
         rr, val, src = _log_rate(st, res, ck, unit, params.cost_per_skip, "cost_per_skip")
+        if val is None:
+            st.unresolve(f"waste skips ({skips} skip(s)): {src}; not priced", L4)
+            return
         amount = skips * val
         st.add(line_id="4:log.skips", layer=L4, description="Waste skips (cutting and waste losses)", amount=amount,
                cost_key=ck, quantity=float(skips), unit="nr", rr=rr, rate_value=val,
@@ -685,11 +726,17 @@ def _prelims(st: _State, res: _Resolver, params: CostParameters, weeks: float, w
     cur = st.currency
     ck, unit = COST_PARAMETER_FALLBACKS["prelims_fixed_setup"]
     rr, val, src = _log_rate(st, res, ck, unit, params.prelims_fixed_setup, "prelims_fixed_setup")
-    st.add(line_id="5:prelim.setup", layer=L5, description="Site set-up (fixed preliminaries)", amount=val,
-           cost_key="prelim:setup", quantity=1.0, unit="sum", rr=rr, rate_value=val,
-           basis=rr.basis if rr else Basis.ASSUMED, formula=f"1 sum × {cur} {val:.2f} ({src})")
+    if val is None:
+        st.unresolve(f"site set-up (fixed preliminaries): {src}; not priced", L5)
+    else:
+        st.add(line_id="5:prelim.setup", layer=L5, description="Site set-up (fixed preliminaries)", amount=val,
+               cost_key="prelim:setup", quantity=1.0, unit="sum", rr=rr, rate_value=val,
+               basis=rr.basis if rr else Basis.ASSUMED, formula=f"1 sum × {cur} {val:.2f} ({src})")
     ck, unit = COST_PARAMETER_FALLBACKS["prelims_weekly_cost"]
     rr, val, src = _log_rate(st, res, ck, unit, params.prelims_weekly_cost, "prelims_weekly_cost")
+    if val is None:
+        st.unresolve(f"time-related preliminaries ({weeks:g} weeks): {src}; not priced", L5)
+        return
     amount = weeks * val
     st.add(line_id="5:prelim.weekly", layer=L5, description="Time-related preliminaries", amount=amount,
            cost_key="prelim:weekly", quantity=weeks, unit="week", rr=rr, rate_value=val,
@@ -733,11 +780,20 @@ def _layer9(st: _State, params: CostParameters, settings: ProjectSettings, rules
     cur = st.currency
     contract = _sum(st, _LAYERS[:8])
     entered = False
+    no_fx = f"is in {st.param_currency} and no FX rate {st.param_currency}->{cur} is set; not included"
     land = params.land_cost
     if land is not None:
-        st.add(line_id="9:land", layer=L9, description="Land (as entered)", amount=land, quantity=1.0, unit="sum",
-               rate_value=land, basis=Basis.USER_CONFIRMED, formula=f"{cur} {land:.2f} as entered")
-        entered = True
+        land_v = st.param_money(land)
+        if land_v is None:
+            st.unresolve(f"land: {no_fx}", L9)
+            land = None
+        else:
+            st.add(line_id="9:land", layer=L9, description="Land (as entered)", amount=land_v, quantity=1.0,
+                   unit="sum", rate_value=land_v, basis=Basis.USER_CONFIRMED,
+                   formula=f"{cur} {land_v:.2f} as entered" + (f" ({st.param_currency} {land:.2f}{st.param_src()})"
+                                                                if st.param_currency != cur else ""))
+            land = land_v
+            entered = True
     fr, fm = params.finance_rate_annual, params.finance_months
     if fr is not None and fm is not None:
         dd = rules.finance_drawdown_fraction
@@ -750,14 +806,20 @@ def _layer9(st: _State, params: CostParameters, settings: ProjectSettings, rules
                notes="Land drawn at start; build cost drawn evenly (average 50% outstanding) - assumption.")
         entered = True
     elif fr is not None or fm is not None:
-        st.unresolved.append("finance: both finance_rate_annual and finance_months are needed; finance not priced")
+        st.unresolve("finance: both finance_rate_annual and finance_months are needed; finance not priced", L9)
     for name, amt in sorted(params.taxes.items()):
         if not math.isfinite(float(amt)):
-            st.unresolved.append(f"tax '{name}': amount is not a finite number; not included")
+            st.unresolve(f"tax '{name}': amount is not a finite number; not included", L9)
             continue
-        st.add(line_id=f"9:tax.{_slug(name)}", layer=L9, description=f"{name} (as entered)", amount=float(amt),
-               quantity=1.0, unit="sum", rate_value=float(amt), basis=Basis.USER_CONFIRMED,
-               formula=f"{cur} {float(amt):.2f} as entered", notes="Entered by the user; not computed or verified.")
+        amt_v = st.param_money(float(amt))
+        if amt_v is None:
+            st.unresolve(f"tax '{name}': {no_fx}", L9)
+            continue
+        st.add(line_id=f"9:tax.{_slug(name)}", layer=L9, description=f"{name} (as entered)", amount=amt_v,
+               quantity=1.0, unit="sum", rate_value=amt_v, basis=Basis.USER_CONFIRMED,
+               formula=f"{cur} {amt_v:.2f} as entered" + (f" ({st.param_currency} {float(amt):.2f}{st.param_src()})"
+                                                         if st.param_currency != cur else ""),
+               notes="Entered by the user; not computed or verified.")
         entered = True
     if settings.include_vat:
         vr = settings.vat_rate
@@ -770,13 +832,16 @@ def _layer9(st: _State, params: CostParameters, settings: ProjectSettings, rules
         entered = True
     sf = params.sales_cost_fraction
     if sf is not None:
+        sv = None if params.sales_value is None else st.param_money(params.sales_value)
         if params.sales_value is None:
-            st.unresolved.append("sales costs: sales_cost_fraction entered without a sales_value; not priced")
+            st.unresolve("sales costs: sales_cost_fraction entered without a sales_value; not priced", L9)
+        elif sv is None:
+            st.unresolve(f"sales costs: the sales value {no_fx}", L9)
         else:
-            amount = sf * params.sales_value
+            amount = sf * sv
             st.add(line_id="9:sales_costs", layer=L9, description="Sales and marketing costs", amount=amount,
-                   quantity=params.sales_value, unit=cur, rate_value=sf, basis=Basis.ASSUMED,
-                   formula=f"{sf:.2%} × {cur} {params.sales_value:.2f} sales value = {cur} {amount:.2f}")
+                   quantity=sv, unit=cur, rate_value=sf, basis=Basis.ASSUMED,
+                   formula=f"{sf:.2%} × {cur} {sv:.2f} sales value = {cur} {amount:.2f}")
             entered = True
     return entered
 
@@ -799,6 +864,17 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
     """
     cur = settings.currency
     st = _State(currency=cur)
+    pcur = (params.currency or cur).strip().upper()
+    st.param_currency = pcur
+    if pcur != cur:
+        fx = settings.fx_rates.get(pcur)
+        st.param_fx = float(fx) if fx is not None and fx > 0 else None
+        st.warnings.append(
+            f"Commercial parameters (fallbacks, land, taxes, sales value) are in {pcur}, the estimate in {cur}: "
+            + (f"converted at FX 1 {pcur} = {st.param_fx:g} {cur}." if st.param_fx is not None else
+               f"no FX rate {pcur}->{cur} is set, so the fallbacks and layer-9 amounts are NOT priced (listed as "
+               "unresolved). Set the FX rate in the sidebar settings or re-enter them in "
+               f"{cur} (Costs -> Commercial parameters)."))
     idx = rate_index(rate_book)
     res = _Resolver(idx, settings)
     lib = library if library is not None else _default_library()
@@ -825,7 +901,8 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
         rr = res.get(ck, unit)
         why = "; ".join(rr.warnings) or "no rate"
         shown = ", ".join(refs[:6]) + (f" (+{len(refs) - 6} more)" if len(refs) > 6 else "")
-        st.unresolved.append(f"missing rate {ck} per {unit}: {len(refs)} item(s) not priced [{shown}] - {why}")
+        st.unresolve(f"missing rate {ck} per {unit}: {len(refs)} item(s) not priced [{shown}] - {why}",
+                     cost_key_layer(ck) or L1)
     _fees_to_margin(st, params)
     l9 = _layer9(st, params, settings, rules)
 
@@ -853,18 +930,28 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
                            "market prices.")
     st.warnings.extend(f"rate book: {w}" for w in rate_book.warnings[:20])
     _pricing_date_summary(st, settings)
+    _incomplete_summary(st, res, settings)
     _order_level_note(st)
     if params.sales_value is not None:
-        st.notes.append(f"Sales value {cur} {params.sales_value:.2f} is reported separately; it is not a cost and is "
-                        "not netted off any boundary.")
+        sv = st.param_money(params.sales_value)
+        if sv is None:
+            st.warnings.append(f"Sales value {st.param_currency} {params.sales_value:.2f} is not reported: no FX rate "
+                               f"{st.param_currency}->{cur} is set.")
+        else:
+            st.notes.append(f"Sales value {cur} {sv:.2f} is reported separately; it is not a cost and is not netted "
+                            "off any boundary.")
 
     # ---- boundaries
     boundaries: list[CostBoundary] = []
     for key, name, layers, definition, excludes in _BOUNDARY_DEFS:
         if key == "total_development_cost" and not l9:
             continue
+        in_b = set(layers)
+        bases = [ln.basis for ln in st.lines if ln.layer in in_b]
         boundaries.append(CostBoundary(key=key, name=name, layers=list(layers), amount=_sum(st, layers),
-                                       definition=definition, excludes=excludes))
+                                       definition=definition, excludes=excludes,
+                                       basis=weakest_basis(bases) if bases else Basis.UNKNOWN,
+                                       unresolved_count=sum(1 for lay in st.unresolved_layers if lay in in_b)))
     layer_totals = {layer.value: st.totals[layer] for layer in CostLayer}
     conventions = dict(COST_CONVENTIONS)
     conventions["programme_weeks"] = f"{weeks:g} weeks ({weeks_src})"
@@ -875,7 +962,8 @@ def estimate_construction_cost(boq: BillOfQuantities, rate_book: RateBook, param
         currency=cur, pricing_date=settings.pricing_date, location=settings.site_location,
         rate_book_name=rate_book.name, lines=st.lines, layer_totals=layer_totals, boundaries=boundaries,
         gia_m2=float(boq.geometry.gia_m2), unresolved_items=st.unresolved, warnings=_dedupe(st.warnings),
-        sales_value=params.sales_value, programme_weeks=weeks, conventions=conventions, notes=_dedupe(st.notes),
+        sales_value=None if params.sales_value is None else st.param_money(params.sales_value),
+        programme_weeks=weeks, conventions=conventions, notes=_dedupe(st.notes),
         material_orders=st.orders,
     )
 
@@ -895,6 +983,44 @@ def _pricing_date_summary(st: _State, settings: ProjectSettings) -> None:
                               f"rates priced the estimate ({'; '.join(pairs[:8])}"
                               + (f"; +{len(pairs) - 8} more" if len(pairs) > 8 else "")
                               + "). Move the pricing date forward if the newer rates should apply.")
+
+
+def _incomplete_summary(st: _State, res: _Resolver, settings: ProjectSettings) -> None:
+    """Prominent first warning when items of layers 1-5 are unpriced: the boundaries are then lower bounds.
+
+    Names the cause found in the rate resolutions (rates in another currency without an FX rate, rates dated
+    after the pricing date, no rate at all) so a currency switch or an early pricing date is not mistaken
+    for a cheap house.
+    """
+    direct = [lay for lay in st.unresolved_layers if lay in _LAYERS[:5]]
+    if not direct:
+        return
+    fx_keys, future_keys, other_keys = set(), set(), set()
+    for (ck, unit) in st.missing:
+        ws = res.get(ck, unit).warnings
+        if any("no fx rate" in w for w in ws):
+            fx_keys.add(ck)
+        elif any("after the pricing date" in w for w in ws):
+            future_keys.add(ck)
+        else:
+            other_keys.add(ck)
+    causes = []
+    if fx_keys:
+        curs = sorted({r.currency for ck in fx_keys for r in res.idx.candidates(ck) if r.currency != st.currency})
+        causes.append(f"{len(fx_keys)} cost key(s) only have rates in {', '.join(curs) or 'another currency'} and no FX "
+                      f"rate to {st.currency} is set (sidebar settings)")
+    if future_keys:
+        causes.append(f"{len(future_keys)} cost key(s) only have rates dated after the pricing date "
+                      f"{settings.pricing_date.isoformat()}")
+    if other_keys:
+        causes.append(f"{len(other_keys)} cost key(s) have no usable rate in the rate book")
+    if st.param_fx is None:
+        causes.append(f"the CostParameters fallbacks are in {st.param_currency} without an FX rate to {st.currency}")
+    priced = sum(1 for ln in st.lines if ln.layer in _LAYERS[:5])
+    st.warnings.insert(0, f"{INCOMPLETE_WARNING}: {len(direct)} item(s) in layers 1-5 are not priced "
+                          f"({priced} cost line(s) in those layers are)"
+                          + (f" - {'; '.join(causes)}" if causes else "")
+                          + ". Every cost boundary excludes them, so the amounts are lower bounds, not the cost.")
 
 
 def _order_level_note(st: _State) -> None:
@@ -943,5 +1069,6 @@ def boundary_table(estimate: CostEstimate) -> list[dict]:
     return [{
         "key": b.key, "name": b.name, "amount": b.amount,
         "per_m2_gia": b.amount / gia if gia > 0 else None, "layers": [layer.value for layer in b.layers],
-        "definition": b.definition, "excludes": b.excludes,
+        "definition": b.definition, "excludes": b.excludes, "basis": b.basis.value,
+        "unresolved_count": b.unresolved_count,
     } for b in estimate.boundaries]

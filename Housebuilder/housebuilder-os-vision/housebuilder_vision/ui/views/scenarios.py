@@ -33,7 +33,8 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     if p is None or p.twin is None or ev is None:
         html(callout("Build a twin first - scenarios are evaluated from it.", title="Scenarios", tone="neutral"))
         return
-    t1, t2, t3, t4 = st.tabs(["Build scenarios", "Repeat build", "Programme & logistics", "Carbon & heat loss"])
+    t1, t2, t3, t4 = st.tabs(["Build scenarios", "Repeat build", "Programme & logistics", "Carbon & heat loss"],
+                             key="scenarios_subtab", on_change="rerun")
     with t1:
         with guard("Build-scenario comparison"):
             _build_scenarios(ws, ev)
@@ -99,8 +100,12 @@ def _build_scenarios(ws: S.Workspace, ev: S.Evaluation) -> None:
     st.plotly_chart(scenario_multiples(outs, cur, height=420), key="sc_multi", theme=None,
                     config={"displaylogo": False})
     st.caption("Each scenario is one coherent house (one hypothesis, one assembly set); results are compared, never "
-               "averaged. Hypothesis plausibility is a subjective prior. Whiskers on cost (when shown) are P10-P90 of "
-               "assumed scenario uncertainty.")
+               "averaged. Hypothesis plausibility is a subjective prior. On the cost panel (when P10 / P90 are "
+               "included) the line is the P10-P90 range of assumed scenario uncertainty and the gold diamond its P50; "
+               "the bar is the deterministic estimate, which uses the modal (most likely) value of every input and "
+               "can sit near or even below P10 when the input ranges are skewed upwards.")
+    with guard("Questions that choose between scenarios"):
+        _scenario_spreads(comp, cur)
     with st.expander("Key assumptions per scenario"):
         for o in outs:
             st.markdown(f"**{esc(o.scenario_id)} · {esc(o.name)}**")
@@ -108,6 +113,36 @@ def _build_scenarios(ws: S.Workspace, ev: S.Evaluation) -> None:
                 st.markdown(f"- {esc(a)}")
         for nn in comp.notes:
             st.caption(nn)
+
+
+def _scenario_spreads(comp, cur: str) -> None:
+    """Hypothesis / construction / foundation / price-level spreads between scenarios and what resolves them.
+
+    These questions are kept as separate scenarios (never sampled into one house), so they never appear in
+    the simulation's "what to resolve next"; ``simulation.scenarios.scenario_spread_entries`` reports them.
+    """
+    try:
+        from ...simulation.scenarios import scenario_spread_entries
+    except ImportError:  # older engine without the helper
+        return
+    entries = scenario_spread_entries(comp, currency=cur)
+    if not entries:
+        return
+    section_title("Questions that choose between scenarios", sub="cost spread between scenarios that differ only "
+                                                                 "in that respect")
+    items = []
+    for i, e in enumerate(entries, 1):
+        lo, hi = e["low"], e["high"]
+        items.append(f'<div class="hbv-iv"><div class="hbv-iv-rank">{i}</div><div>'
+                     f'<div class="hbv-iv-act">{esc(e["resolving_action"])}</div>'
+                     f'<div class="hbv-small">{esc(e["label"])} · spread of the {esc(e["measure"])} '
+                     f'<span class="hbv-mono">{esc(fmt.money(e["spread"], cur))}</span></div>'
+                     f'<div class="hbv-range">{esc(lo["scenario_id"])} {esc(fmt.money(lo["cost"], cur))} '
+                     f'({esc(lo["alternative"])}) → {esc(hi["scenario_id"])} {esc(fmt.money(hi["cost"], cur))} '
+                     f'({esc(hi["alternative"])})</div></div></div>')
+    html('<div class="hbv-ivs">' + "".join(items) + "</div>")
+    st.caption("A spread between alternatives says which house is being priced; it is not a share of one house's "
+               "sampled variance, so it is listed here rather than in the simulation's ranking.")
 
 
 # =============================================================================

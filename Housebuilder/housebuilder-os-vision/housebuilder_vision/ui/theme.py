@@ -26,6 +26,7 @@ CSS and in ``.streamlit/config.toml``; the system sans/mono fallbacks are used o
 from __future__ import annotations
 
 import html
+import re
 from typing import Iterable, Optional
 
 from ..core.provenance import BASIS_LABEL, Basis
@@ -111,6 +112,17 @@ def hex_to_rgba(hexv: str, alpha: float) -> str:
 def esc(text) -> str:
     """HTML-escape untrusted text (feature labels, filenames, model output, notes)."""
     return html.escape("" if text is None else str(text), quote=True)
+
+
+_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+!|<>~$:.])")
+
+
+def md_escape(text) -> str:
+    """Escape untrusted text for Streamlit *markdown* (``st.markdown`` / ``st.warning`` / ``st.error`` /
+    ``st.toast``): link, image, emphasis, HTML, LaTeX and directive syntax is shown literally, so e.g.
+    ``[click](http://...)`` or ``![](http://...)`` from an uploaded rate book never becomes a live link or an
+    external image."""
+    return _MD_SPECIAL.sub(r"\\\1", "" if text is None else str(text))
 
 
 def badge(value, *, label: Optional[str] = None, title: Optional[str] = None) -> str:
@@ -228,6 +240,9 @@ code, pre, .hbv-num, [data-testid="stMetricValue"], [data-testid="stMetricDelta"
 .hbv-card-sub {{ font:400 .72rem/1.35 var(--hbv-mono); color:var(--hbv-ivory-muted); }}
 .hbv-card-def {{ font-size:.72rem; color:var(--hbv-ivory-muted); margin-top:.35rem; line-height:1.35; }}
 .hbv-card-ex {{ font-size:.68rem; color:var(--hbv-muted); margin-top:.25rem; line-height:1.3; }}
+.hbv-incomplete {{ color:#E8A9C7; }}
+.hbv-kpi-b {{ margin-top:.2rem; }}
+.hbv-kpi-b .hbv-badge {{ font-size:.6rem; }}
 /* KPI strip */
 .hbv-kpis {{ display:flex; flex-wrap:wrap; gap:0; border:1px solid var(--hbv-line); border-radius:4px;
   background:var(--hbv-surface); margin:.1rem 0 .5rem 0; }}
@@ -313,5 +328,5 @@ __all__ = [
     "FONT_SANS", "GOLD", "GOLD_BRIGHT", "GOOGLE_FONTS_URL", "GRAPHITE_BG", "GRAPHITE_RAISED", "GRAPHITE_SURFACE",
     "GRID", "HAIRLINE", "INK_MUTED", "IVORY", "IVORY_MUTED", "NEUTRAL_MARK", "SERIES", "SINGLE_SERIES",
     "TEMPLATE_NAME", "as_basis", "badge", "basis_colour", "basis_label", "basis_legend_html", "callout", "card",
-    "css_block", "esc", "hex_to_rgba", "plotly_template", "tag",
+    "css_block", "esc", "hex_to_rgba", "md_escape", "plotly_template", "tag",
 ]

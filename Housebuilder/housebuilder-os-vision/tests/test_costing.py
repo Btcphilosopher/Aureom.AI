@@ -316,7 +316,8 @@ def test_csv_limits_and_structure_errors():
     # unknown columns are ignored with a warning, formulas are kept as inert text
     text = _csv([dict(GOOD_ROW, notes="=HYPERLINK(1)")]).replace(CSV_HEADER, CSV_HEADER + ",extra", 1)
     book = load_rate_book_csv(io.StringIO(text), name="x")
-    assert len(book.rates) == 1 and book.rates[0].notes == "=HYPERLINK(1)"
+    # (review round 2, SPEC-8) the row states no tax treatment / uncertainty: the defaults are tagged on the notes
+    assert len(book.rates) == 1 and book.rates[0].notes.startswith("=HYPERLINK(1) [assumed defaults:")
     assert any("extra" in w for w in book.warnings)
 
 

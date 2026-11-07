@@ -79,11 +79,20 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     html(callout(f"{esc(twin.information_level)} Scale: <b>{esc(twin.calibration_method.replace('_', ' '))}</b> · "
                  f"source hypothesis <b>{esc(twin.source_hypothesis_id or '-')}</b> · version {twin.version} · "
                  f"hash <span class='hbv-mono'>{esc(S.fp(twin)[:12])}</span>", title="Information level", tone="info"))
-    if S.twin_status(ws) == "stale":
+    status = S.twin_status(ws)
+    if S.concept_source(ws) == "all":
+        html(callout("Every image this twin was measured from is an AI concept / rendering / sketch. Its dimensions "
+                     "are capped at inferred and describe an indicative concept - not an existing or measured "
+                     "building.", title="Built from a concept reference", tone="danger"))
+    if status == "stale":
         html(callout("The evidence or the calibration changed after this twin was built. Results below describe this "
                      "twin; rebuild it to follow the current hypothesis.", title="Twin based on earlier evidence",
                      tone="danger"))
         st.button(f"Rebuild twin from {p.selected_hypothesis_id}", key="tw_rebuild", on_click=_cb_rebuild)
+    elif status == "orphaned":
+        html(callout("The images this twin was measured from have been removed. It is kept as a manual model: its "
+                     "scale method, dimension bases and evidence links refer to evidence that is no longer in the "
+                     "project.", title="Evidence removed - twin kept as a manual model", tone="warn"))
     _coupling_callout(twin)
     left, right = st.columns([1.65, 1], gap="medium")
     with left:
@@ -92,7 +101,8 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     with right:
         with guard("Twin summary"):
             _summary(ws, ev)
-    tabs = st.tabs(["Blocks", "Roofs", "Openings", "Hidden sides", "Construction"])
+    tabs = st.tabs(["Blocks", "Roofs", "Openings", "Hidden sides", "Construction"], key="twin_subtab",
+                   on_change="rerun")
     sections = [_blocks, _roofs, _openings, _hidden, _construction]
     names = ["Block editor", "Roof editor", "Openings editor", "Hidden-side assumptions", "Construction assemblies"]
     for tab, fn, name in zip(tabs, sections, names, strict=True):
@@ -137,12 +147,21 @@ def _summary(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
 
         def a(v: float) -> str:
             return fmt.qty(v, "m2", system, 1)
-        items = [("GEA", a(g.gea_m2)), ("GIA", a(g.gia_m2)), ("Footprint", a(g.footprint_area_m2)),
-                 ("External wall (net)", a(g.external_wall_net_m2)), ("Roof surface", a(g.roof_surface_area_m2)),
-                 ("Glazed openings", a(g.window_area_m2))]
+        from ...io.export import geometry_bases
+
+        gb = geometry_bases(twin)
+        items = [("GEA", a(g.gea_m2), gb["plan"]), ("GIA", a(g.gia_m2), gb["gia"]),
+                 ("Footprint", a(g.footprint_area_m2), gb["plan"]),
+                 ("External wall (gross)", a(g.external_wall_gross_m2), gb["walls"]),
+                 ("External wall (net)", a(g.external_wall_net_m2), gb["net_walls"]),
+                 ("Roof surface", a(g.roof_surface_area_m2), gb["roof"]),
+                 ("Glazed openings", a(g.window_area_m2), gb["openings"]),
+                 ("Doors (incl. garage)", a(g.door_area_m2 + g.garage_door_area_m2), gb["openings"]),
+                 ("Separating walls", a(g.separating_wall_area_m2), gb["walls"])]
         html('<div class="hbv-cards" style="grid-template-columns:repeat(3,1fr)">' + "".join(
             f'<div class="hbv-card"><div class="hbv-card-k">{esc(k)}</div><div class="hbv-card-v" '
-            f'style="font-size:.98rem">{esc(v)}</div></div>' for k, v in items) + "</div>")
+            f'style="font-size:.98rem">{esc(v)}</div><div class="hbv-kpi-b">{badge(b)}</div></div>'
+            for k, v, b in items) + "</div>")
         st.caption(f"Wall thickness for GIA: external {g.external_wall_thickness_m * 1000:.0f} mm, between blocks "
                    f"{g.separating_wall_thickness_m * 1000:.0f} mm (from the selected assemblies).")
     rows = []

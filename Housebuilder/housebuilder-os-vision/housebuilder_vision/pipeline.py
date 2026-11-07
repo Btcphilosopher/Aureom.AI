@@ -27,6 +27,7 @@ Bundled demo prices are fictional.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from datetime import date, datetime
@@ -68,7 +69,7 @@ from .core.models import (
     SimulationResult,
     VisualFinish,
 )
-from .core.provenance import utcnow
+from .core.provenance import EditRecord, utcnow
 from .core.settings import AssumptionLibrary, ProjectSettings
 
 __all__ = [
@@ -93,6 +94,17 @@ __all__ = [
     "engine_run_versions",
     "REPEAT_BOUNDARIES",
     "VLM_ENV",
+    "ANNOTATION_METHOD",
+    "REJECT_REASON",
+    "RESTORE_REASON",
+    "ANNOTATION_CREATED",
+    "ANNOTATION_EDITED",
+    "is_user_rejection",
+    "manual_from_analysis",
+    "snapshot_reference",
+    "reference_target_problem",
+    "user_geometry_edits",
+    "same_twin_geometry",
 ]
 
 #: The engine functions exposed with run logging (names are the public contract).
@@ -175,6 +187,132 @@ def _log(run_log: RunLog, function: str, *, inputs: Any, outputs: Any, seed: Opt
     return rec
 
 
+# =============================================================================
+# User evidence shared by the UI and run_pipeline (annotations, rejections, references)
+# =============================================================================
+#: ``DetectedFeature.method`` of features annotated by a person (UI annotation editor / ``manual_features``).
+ANNOTATION_METHOD = "manual-annotation"
+#: ``EditRecord.reason`` of a user rejection / restoration of a feature (shared annotation contract).
+REJECT_REASON = "rejected"
+RESTORE_REASON = "restored"
+#: ``EditRecord.reason`` of annotation creation / edits written by the UI (kept across re-analysis).
+ANNOTATION_CREATED = "annotation created"
+ANNOTATION_EDITED = "annotation edited"
+#: Rejection reason written by earlier versions of the UI (still recognised when a project is loaded).
+LEGACY_REJECT_REASONS = ("rejected by the user in the Images view",)
+_USER_HISTORY_REASONS = frozenset({ANNOTATION_CREATED, ANNOTATION_EDITED, REJECT_REASON, RESTORE_REASON,
+                                   *LEGACY_REJECT_REASONS})
+
+
+def is_user_rejection(feature: DetectedFeature) -> bool:
+    """True for an inactive feature whose history records a user rejection."""
+    reasons = (REJECT_REASON, *LEGACY_REJECT_REASONS)
+    return (not feature.active) and any(h.reason in reasons for h in feature.history)
+
+
+def manual_from_analysis(analysis: Optional[AnalysisResult]) -> dict[str, list[DetectedFeature]]:
+    """The ``manual_features`` (user annotations and rejections) recorded in a stored analysis.
+
+    Used to re-run the analysis without losing the user's evidence (``run_pipeline``, loading a
+    saved project in the UI).  Annotations (``method == ANNOTATION_METHOD``) keep their user edit
+    history (creation, edits, rejections); a rejected detection is returned as an inactive copy
+    carrying only its first rejection record.  Engine-added records are dropped so they do not
+    accumulate across re-analyses.
+    """
+    out: dict[str, list[DetectedFeature]] = {}
+    if analysis is None:
+        return out
+    for a in analysis.analyses:
+        for f in a.features:
+            if f.method == ANNOTATION_METHOD:
+                seen: set[tuple] = set()
+                hist = []
+                for h in f.history:
+                    key = (h.timestamp.isoformat(), h.field, h.reason, repr(h.old_value), repr(h.new_value))
+                    if h.actor == "user" and h.reason in _USER_HISTORY_REASONS and key not in seen:
+                        seen.add(key)
+                        hist.append(h)
+            elif is_user_rejection(f):
+                hist = [h for h in f.history if h.reason in (REJECT_REASON, *LEGACY_REJECT_REASONS)][:1]
+            else:
+                continue
+            out.setdefault(a.image_id, []).append(f.model_copy(update={"history": hist}, deep=True))
+    return out
+
+
+def _find_feature(analysis: AnalysisResult, feature_id: str, image_id: str) -> Optional[DetectedFeature]:
+    """The feature with ``feature_id`` on ``image_id`` (an active one first; inactive ones too)."""
+    found = [f for a in analysis.analyses if a.image_id == image_id for f in a.features if f.feature_id == feature_id]
+    return next((f for f in found if f.active), found[0] if found else None)
+
+
+def _span_band(feature: DetectedFeature) -> float:
+    """+/- 2 sigma band of a length between two edges (sqrt(2) x the per-edge sigma, see README)."""
+    return 2.0 * math.sqrt(2.0) * float(feature.pixel_uncertainty)
+
+
+def snapshot_reference(analysis: Optional[AnalysisResult], ref: ReferenceMeasurement) -> ReferenceMeasurement:
+    """``ref`` with the type and pixel span of its target feature recorded (see :func:`reference_target_problem`).
+
+    Pixel-endpoint references and references without a resolvable feature are returned unchanged.
+    """
+    if analysis is None or not ref.feature_id or ref.p0 is not None:
+        return ref
+    feat = _find_feature(analysis, ref.feature_id, ref.image_id)
+    span = feat.width_px() if feat is not None else None
+    if feat is None or span is None:
+        return ref
+    return ref.model_copy(update={"feature_type": feat.feature_type.value, "feature_span_px": float(span)})
+
+
+def reference_target_problem(analysis: Optional[AnalysisResult], ref: ReferenceMeasurement) -> Optional[str]:
+    """Why ``ref`` no longer measures what it was confirmed on, or ``None``.
+
+    Only references with a snapshot (``feature_type`` / ``feature_span_px``, set by the UI through
+    :func:`snapshot_reference`) are checked: the target feature must still exist, have the same
+    type and a pixel span within its +/- 2 sigma band of the confirmed span.  A reference is never
+    silently moved to another feature (e.g. a different row of the annotation editor).
+    """
+    if analysis is None or not ref.feature_id or ref.p0 is not None:
+        return None
+    if ref.feature_type is None and ref.feature_span_px is None:
+        return None
+    fid = ref.feature_id
+    feat = _find_feature(analysis, fid, ref.image_id)
+    if feat is None:
+        return (f"reference feature '{fid}' no longer exists (annotation deleted or image re-analysed); confirm the "
+                "reference again")
+    if ref.feature_type and feat.feature_type.value != ref.feature_type:
+        return (f"reference feature '{fid}' is now a {feat.feature_type.value}, not the {ref.feature_type} the "
+                "reference was confirmed on; confirm the reference again")
+    span = feat.width_px()
+    if ref.feature_span_px is not None and span is not None:
+        band = max(_span_band(feat), 0.01 * ref.feature_span_px)
+        if abs(span - ref.feature_span_px) > band:
+            return (f"reference feature '{fid}' changed since the reference was confirmed (span "
+                    f"{ref.feature_span_px:.1f} px -> {span:.1f} px, beyond the +/-{band:.1f} px band); confirm the "
+                    "reference again")
+    return None
+
+
+def user_geometry_edits(twin: Optional[BuildingTwin]) -> int:
+    """Number of geometry edits made by a person (assembly changes and system / scenario follow-ups excluded)."""
+    if twin is None:
+        return 0
+    return sum(1 for r in twin.edit_log
+               if not r.target.startswith("assemblies") and not r.actor.lower().startswith(("system", "scenario")))
+
+
+def same_twin_geometry(a: BuildingTwin, b: BuildingTwin) -> bool:
+    """True when two twins describe the same model (ids, version, name, settings, source fingerprint and edit
+    logs ignored)."""
+    from .twin.builder import twin_hash
+
+    norm = {"version": a.version, "name": a.name, "settings": a.settings, "twin_id": a.twin_id,
+            "source_fingerprint": a.source_fingerprint}
+    return twin_hash(b.model_copy(update=norm)) == twin_hash(a)
+
+
 def registry_from_env(fixture_dir: Optional[Union[str, Path]] = None, *, enable_optional: bool = True):
     """Default adapter registry; the Claude VLM adapter is enabled only when ``HBV_ENABLE_VLM=1``.
 
@@ -243,10 +381,15 @@ def build_parametric_twin(hypothesis: GeometryHypothesis, *, selection: Assembly
                           settings: Optional[ProjectSettings] = None,
                           visual_finishes: Optional[Sequence[VisualFinish]] = None, twin_id: Optional[str] = None,
                           run_log: RunLog = None) -> BuildingTwin:
-    """Editable parametric twin from a hypothesis (``twin.builder.build_parametric_twin``)."""
+    """Editable parametric twin from a hypothesis (``twin.builder.build_parametric_twin``).
+
+    The twin records the hypothesis fingerprint (``BuildingTwin.source_fingerprint``) so a later
+    :func:`run_pipeline` can tell whether the evidence behind it changed.
+    """
     from .twin.builder import build_parametric_twin as _impl
 
     out = _impl(hypothesis, selection=selection, settings=settings, visual_finishes=visual_finishes, twin_id=twin_id)
+    out = out.model_copy(update={"source_fingerprint": fingerprint(hypothesis)})
     _log(run_log, "build_parametric_twin", inputs={"hypothesis": hypothesis, "selection": selection,
                                                    "settings": settings, "visual_finishes": visual_finishes,
                                                    "twin_id": twin_id},
@@ -470,9 +613,68 @@ def _library_for(project: Project, notes: list[str]) -> AssemblyLibrary:
     return lib
 
 
+def _keep_or_rebuild_twin(existing: BuildingTwin, hyp: GeometryHypothesis, settings: ProjectSettings,
+                          finishes: Sequence[VisualFinish], notes: list[str], warnings: list[str],
+                          log: RunLog) -> BuildingTwin:
+    """The twin ``run_pipeline`` uses when ``existing`` was built from the selected hypothesis ``hyp``.
+
+    The evidence changed when ``existing.source_fingerprint`` differs from the regenerated hypothesis's
+    fingerprint (twins without a recorded fingerprint: when an unedited twin differs from a fresh build).
+    Unchanged evidence -> ``existing``.  Changed evidence -> a rebuild from ``hyp`` with the existing assembly
+    selection when the twin has no user geometry edits (version + 1, assembly edit log kept, a
+    ``system:pipeline`` record added); otherwise ``existing`` is kept and a warning says it is based on
+    earlier evidence.
+    """
+    from .twin.builder import build_parametric_twin as _build
+
+    hyp_fp = fingerprint(hyp)
+    n_edits = user_geometry_edits(existing)
+    known = existing.source_fingerprint is not None
+    if known and existing.source_fingerprint == hyp_fp:
+        notes.append(f"Existing twin '{existing.twin_id}' v{existing.version} (from {hyp.hypothesis_id}) kept with its "
+                     f"{len(existing.edit_log)} edit(s): the evidence behind it is unchanged.")
+        return existing
+    if n_edits:
+        if known:
+            warnings.append(f"Twin based on earlier evidence: twin '{existing.twin_id}' v{existing.version} carries "
+                            f"{n_edits} user geometry edit(s) and was kept, but the evidence or calibration changed "
+                            f"since it was built (hypothesis {hyp.hypothesis_id} changed, calibration "
+                            f"'{hyp.calibration_method}'). Quantities and costs describe the kept twin; set "
+                            "project.twin = None to rebuild it from the updated hypothesis (edits are not carried "
+                            "over).")
+        else:
+            notes.append(f"Existing twin '{existing.twin_id}' v{existing.version} (from {hyp.hypothesis_id}) kept with "
+                         f"its {n_edits} geometry edit(s); it records no evidence fingerprint, so a change in the "
+                         "evidence since it was built cannot be detected - set project.twin = None to rebuild it.")
+        return existing
+    fresh = _build(hyp, selection=existing.assemblies, settings=settings, visual_finishes=finishes,
+                   twin_id=existing.twin_id).model_copy(update={"source_fingerprint": hyp_fp})
+    if same_twin_geometry(existing, fresh):
+        notes.append(f"Existing twin '{existing.twin_id}' v{existing.version} (from {hyp.hypothesis_id}) kept: the "
+                     "hypothesis yields the same model.")
+        return existing
+    keep_log = [r for r in existing.edit_log if r.target.startswith("assemblies") or r.actor.lower().startswith(
+        ("system", "scenario"))]
+    rec = EditRecord(actor="system:pipeline", target=existing.twin_id, field="rebuild",
+                     old_value={"version": existing.version, "calibration_method": existing.calibration_method},
+                     new_value={"calibration_method": fresh.calibration_method},
+                     reason=f"evidence or calibration changed; the unedited twin was rebuilt from {hyp.hypothesis_id} "
+                            "with its assembly selection kept")
+    twin = fresh.model_copy(update={"version": existing.version + 1, "edit_log": [*keep_log, rec]})
+    _log(log, "build_parametric_twin", inputs={"hypothesis": hyp, "selection": existing.assemblies,
+                                               "settings": settings, "visual_finishes": list(finishes or []),
+                                               "twin_id": existing.twin_id},
+         outputs=twin, note=f"{twin.twin_id} v{twin.version}: rebuilt from updated evidence ({hyp.hypothesis_id}, "
+                            f"calibration {twin.calibration_method})")
+    notes.append(f"Twin '{twin.twin_id}' rebuilt from the updated {hyp.hypothesis_id} (v{existing.version} -> "
+                 f"v{twin.version}): it had no geometry edits and the evidence or calibration changed.")
+    return twin
+
+
 def run_pipeline(project: Project, *, store_dir: Union[str, Path, None], simulate: bool = True, n_samples: int = 500,
                  registry: Any = None, scenario_samples: Optional[int] = None,
-                 crew_sizes: Optional[Mapping[str, float]] = None) -> PipelineResult:
+                 crew_sizes: Optional[Mapping[str, float]] = None,
+                 manual_features: Optional[Mapping[str, Sequence[DetectedFeature]]] = None) -> PipelineResult:
     """Run the full chain for ``project`` and return a :class:`PipelineResult`.
 
     Steps: analyse ``project.images`` (or reuse ``project.analysis`` when there are no images) ->
@@ -483,11 +685,23 @@ def run_pipeline(project: Project, *, store_dir: Union[str, Path, None], simulat
     every production scenario and boundary -> build-scenario comparison (``scenario_samples``
     each, default ``min(n_samples, 200)``, when ``simulate``).
 
-    The twin: an existing ``project.twin`` built from the selected hypothesis is kept (it may carry
-    user edits); otherwise a new twin is built from the hypothesis with the existing twin's assembly
-    selection (else the library defaults, all ASSUMED).  ``project`` is updated in place
-    (analysis, calibration, hypotheses, selected hypothesis, twin, library if empty, run log,
-    ``updated_at``); every engine call appends a :class:`RunRecord`.
+    User evidence: ``manual_features`` (``{image_id: [DetectedFeature]}``: annotations and
+    rejected detections) is passed to the analysis.  When it is ``None`` and the project has a
+    stored analysis, the annotations and rejections recorded there are re-used
+    (:func:`manual_from_analysis`), so a re-run never drops user evidence or restores a rejected
+    detection.  A reference measurement whose target feature changed since it was confirmed
+    (:func:`reference_target_problem`) raises ``ValueError`` instead of calibrating from another
+    feature.
+
+    The twin: an existing ``project.twin`` built from the selected hypothesis is kept when the
+    hypothesis still yields the same model, or when it carries user geometry edits (then a
+    ``"Twin based on earlier evidence"`` warning is returned when the evidence / calibration has
+    changed since it was built).  An existing twin *without* geometry edits is rebuilt from the
+    updated hypothesis with its assembly selection (and assembly edit log) kept.  Otherwise a new
+    twin is built from the hypothesis with the existing twin's assembly selection (else the library
+    defaults, all ASSUMED).  ``project`` is updated in place (analysis, calibration, hypotheses,
+    selected hypothesis, twin, library if empty, run log, ``updated_at``); every engine call
+    appends a :class:`RunRecord`.
     """
     from .quantities.library import default_selection
     from .twin.builder import visual_finishes_from_analysis
@@ -507,7 +721,13 @@ def run_pipeline(project: Project, *, store_dir: Union[str, Path, None], simulat
     t0 = time.perf_counter()
     if project.images:
         reg = registry if registry is not None else registry_from_env()
-        analysis = analyse_images(project.images, store_dir=store_dir, registry=reg, assumptions=A, run_log=log)
+        manual = manual_features if manual_features is not None else manual_from_analysis(project.analysis)
+        if manual_features is None and manual:
+            n_ann = sum(1 for v in manual.values() for f in v if f.method == ANNOTATION_METHOD)
+            notes.append(f"User evidence from the stored analysis re-used: {n_ann} annotation(s), "
+                         f"{sum(len(v) for v in manual.values()) - n_ann} rejected detection(s).")
+        analysis = analyse_images(project.images, store_dir=store_dir, registry=reg, manual_features=manual or None,
+                                  assumptions=A, run_log=log)
     elif project.analysis is not None:
         analysis = project.analysis
         notes.append("No images on the project: the stored analysis was reused.")
@@ -521,6 +741,10 @@ def run_pipeline(project: Project, *, store_dir: Union[str, Path, None], simulat
     if len(project.references) > 1:
         notes.append(f"{len(project.references)} reference measurements on the project; the first is used for "
                      "calibration, the others are kept for cross-checking.")
+    if reference is not None:
+        problem = reference_target_problem(analysis, reference)
+        if problem:
+            raise ValueError(f"reference measurement not usable: {problem}")
     calibration = calibrate_scale(analysis, reference, assumptions=A, run_log=log)
     hypotheses = generate_geometry_hypotheses(analysis, calibration, assumptions=A, settings=settings, run_log=log)
     lap("calibrate_and_hypotheses", t0)
@@ -534,14 +758,13 @@ def run_pipeline(project: Project, *, store_dir: Union[str, Path, None], simulat
     # ---- twin
     t0 = time.perf_counter()
     library = _library_for(project, notes)
+    finishes = visual_finishes_from_analysis(analysis)
     if project.twin is not None and project.twin.source_hypothesis_id == selected_id:
-        twin = project.twin
-        notes.append(f"Existing twin '{twin.twin_id}' v{twin.version} (from {selected_id}) kept with its "
-                     f"{len(twin.edit_log)} edit(s); clear project.twin to rebuild it from the hypothesis.")
+        twin = _keep_or_rebuild_twin(project.twin, hyp, settings, finishes, notes, warnings, log)
     else:
         selection = project.twin.assemblies if project.twin is not None else default_selection(library)
-        twin = build_parametric_twin(hyp, selection=selection, settings=settings,
-                                     visual_finishes=visual_finishes_from_analysis(analysis), run_log=log)
+        twin = build_parametric_twin(hyp, selection=selection, settings=settings, visual_finishes=finishes,
+                                     run_log=log)
     lap("twin", t0)
 
     # ---- quantities, simulations, cost

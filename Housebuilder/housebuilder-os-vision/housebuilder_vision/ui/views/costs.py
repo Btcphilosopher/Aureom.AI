@@ -23,7 +23,7 @@ from .. import fmt
 from .. import state as S
 from ..charts import histogram_cdf, layer_waterfall, tornado
 from ..components import cards, guard, html, section_title
-from ..theme import callout, card, esc
+from ..theme import badge, callout, card, esc, md_escape
 
 METRIC_LABELS = {"construction_incl_contingency": "Construction incl. contingency", "contract_sum": "Contract sum",
                  "gia_m2": "GIA", "external_wall_net_m2": "External wall (net)", "roof_surface_m2": "Roof surface",
@@ -54,7 +54,9 @@ def render(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
     with right:
         with guard("Layer table"):
             _layer_table(est)
-    t1, t2, t3, t4 = st.tabs(["Uncertainty", "Cost lines & rate provenance", "Rate book", "Commercial parameters"])
+    # stateful (keyed) sub-tabs: the chosen tab survives the reruns of an applied form or a flash message
+    t1, t2, t3, t4 = st.tabs(["Uncertainty", "Cost lines & rate provenance", "Rate book", "Commercial parameters"],
+                             key="costs_subtab", on_change="rerun")
     with t1:
         with guard("Uncertainty simulation"):
             _uncertainty(ws, ev)
@@ -85,7 +87,17 @@ def _pricing_notice(ws: S.Workspace, ev: S.Evaluation) -> None:
                  f"{esc(est.location)} · {esc(est.currency)} · "
                  + ("VAT added as a layer-9 line" if p.settings.include_vat else "all amounts net of VAT"))
     html(callout(" ".join(parts), title="Pricing basis", tone="warn" if fict else "info"))
+    from ...costing.engine import INCOMPLETE_WARNING
     from ...costing.rates import PRICING_DATE_WARNING
+
+    incomplete = [w for w in est.warnings if w.startswith(INCOMPLETE_WARNING)]
+    if incomplete:
+        html(callout(esc(incomplete[0].split(":", 1)[1].strip()) + " Every amount on this page is a lower bound until "
+                     "these items have usable rates.", title="Incomplete estimate - items not priced", tone="danger"))
+    if S.concept_source(ws) == "all":
+        html(callout("Every image the twin was measured from is an AI concept / rendering / sketch: these costs price "
+                     "an indicative concept, not an existing or measured building.",
+                     title="Priced from a concept reference", tone="danger"))
 
     excluded = [w for w in est.warnings if w.startswith(PRICING_DATE_WARNING) and "newer, higher-priority" in w]
     if excluded:
@@ -100,9 +112,14 @@ def _boundary_cards(ws: S.Workspace, ev: S.Evaluation) -> None:
     final = "total_development_cost" if any(b.key == "total_development_cost" for b in est.boundaries) else "contract_sum"
     for b in est.boundaries:
         per = b.amount / est.gia_m2 if est.gia_m2 > 0 else float("nan")
-        detail = (f'<div class="hbv-card-def">{esc(b.definition)}</div>'
+        incomplete = (f'<div class="hbv-card-ex hbv-incomplete"><b>Incomplete:</b> {b.unresolved_count} item(s) in '
+                      'these layers are not priced - the amount is a lower bound.</div>') if b.unresolved_count else ""
+        bdg = badge(b.basis, title="Weakest basis of the cost lines summed in this boundary")
+        detail = (f'<div style="margin:.15rem 0">{bdg}</div>' + incomplete
+                  + f'<div class="hbv-card-def">{esc(b.definition)}</div>'
                   f'<div class="hbv-card-ex"><b>Excludes:</b> {esc(b.excludes or "-")}</div>')
-        items.append(card(b.name, fmt.money(b.amount, cur), sub=f"{fmt.money(per, cur)} / m² GIA",
+        value = ("≥ " if b.unresolved_count else "") + fmt.money(b.amount, cur)
+        items.append(card(b.name, value, sub=f"{fmt.money(per, cur)} / m² GIA",
                           detail_html=detail, accent=b.key in ("construction_incl_contingency", final)))
     if est.sales_value is not None:
         items.append(card("Sales value (GDV)", fmt.money(est.sales_value, cur), sub="reported separately",
@@ -199,7 +216,7 @@ def _rate_book(ws: S.Workspace) -> None:
         if book.warnings:
             with st.expander(f"Load warnings ({len(book.warnings)})"):
                 for w in book.warnings[:60]:
-                    st.markdown(f"- {esc(w)}")
+                    st.markdown(f"- {md_escape(w[:400])}")
     with c2:
         gen = st.session_state.get("rb_gen", 0)
         up = st.file_uploader("Upload a rate book (CSV or JSON, columns = Rate fields)", type=["csv", "json"],
@@ -212,12 +229,15 @@ def _rate_book(ws: S.Workspace) -> None:
                 newb = load_rate_book_json(data, name=name) if up.name.lower().endswith(".json") \
                     else load_rate_book_csv(data, name=name)
             except RateBookError as e:
-                st.error(f"Rate book rejected: {e}")
+                st.error(md_escape(f"Rate book rejected: {e}"))
                 newb = None
             if newb is not None:
-                st.caption(f"Parsed {len(newb.rates)} valid rate(s) from '{esc(up.name)}'.")
-                for w in newb.warnings[:12]:
-                    st.warning(w)
+                st.caption(md_escape(f"Parsed {len(newb.rates)} valid rate(s) from '{up.name}'."))
+                if newb.warnings:
+                    html(callout("<ul>" + "".join(f"<li>{esc(w[:400])}</li>" for w in newb.warnings[:12]) + "</ul>"
+                                 + (f"<div class='hbv-small'>+{len(newb.warnings) - 12} more</div>"
+                                    if len(newb.warnings) > 12 else ""),
+                                 title=f"Load warnings ({len(newb.warnings)})", tone="warn"))
                 b1, b2 = st.columns(2)
                 if b1.button("Replace rate book", key="rb_replace", disabled=not newb.rates):
                     S.replace_rate_book(ws, newb)
@@ -269,10 +289,13 @@ def _rate_book(ws: S.Workspace) -> None:
             S.replace_rate_book(ws, newb)
             msg = f"Rate book updated ({len(newb.rates)} rates)."
             if newb.warnings:
-                msg += " " + " | ".join(newb.warnings[:5])
+                msg += " " + " | ".join(w[:300] for w in newb.warnings[:5])
             ws.say("warning" if newb.warnings else "success", msg)
             st.rerun()
-    st.download_button("Download rate book (CSV)", data=df.to_csv(index=False).encode("utf-8"),
+    from ...io.export import csv_bytes, rate_book_rows
+
+    # formula-injection guard: supplier text cells starting with = + - @ are prefixed with ' (io.export.csv_bytes)
+    st.download_button("Download rate book (CSV)", data=csv_bytes(*rate_book_rows(book)),
                        file_name="rate_book.csv", mime="text/csv", key="rb_dl")
 
 
@@ -303,7 +326,15 @@ def _rates_in_force(ws: S.Workspace) -> dict[str, tuple[bool, str]]:
 
 def _commercial(ws: S.Workspace, ev: S.Evaluation) -> None:
     cp = ws.project.cost_parameters
-    cur = ws.project.settings.currency
+    pcur = ws.project.settings.currency
+    cur = cp.currency or pcur  # the money amounts below stay in the currency they were entered in
+    if cur != pcur:
+        fx = ws.project.settings.fx_rates.get(cur)
+        html(callout(f"These amounts were entered in <b>{esc(cur)}</b>; the project is priced in <b>{esc(pcur)}</b>. "
+                     + (f"They are converted at 1 {esc(cur)} = {fx:g} {esc(pcur)}." if fx else
+                        f"No FX rate {esc(cur)} → {esc(pcur)} is set (sidebar), so the fallbacks, land, taxes and "
+                        "sales value are NOT priced (listed as unresolved)."),
+                     title="Commercial parameters in another currency", tone="warn" if fx else "danger"))
     in_force = _rates_in_force(ws)
 
     def fb_help(name: str) -> str:
@@ -413,7 +444,6 @@ def _applied_message(ws: S.Workspace, ev: S.Evaluation, before, in_force: dict[s
                      ) -> tuple[str, str]:
     """Flash message that reports what actually changed (never claims an effect that did not happen)."""
     after = ws.project.cost_parameters
-    cur = ws.project.settings.currency
     shadowed = [_FALLBACK_LABELS[k] for k, (used_rate, _) in in_force.items()
                 if used_rate and getattr(before, k) != getattr(after, k)]
     note = (f" Changed fallback(s) {', '.join(shadowed)} have no effect: the rate book's prelim: / log: rates are "
@@ -421,35 +451,84 @@ def _applied_message(ws: S.Workspace, ev: S.Evaluation, before, in_force: dict[s
     if after == before:
         return "info", "No commercial parameter changed."
     new_ev = S.evaluate(ws)
-    old_cs = ev.estimate.boundary("contract_sum").amount
-    new_cs = new_ev.estimate.boundary("contract_sum").amount if new_ev is not None else old_cs
-    if abs(new_cs - old_cs) < 0.005 and new_ev is not None and \
-            new_ev.estimate.layer_totals == ev.estimate.layer_totals:
+    changes = _boundary_changes(ev.estimate, new_ev.estimate if new_ev is not None else ev.estimate,
+                                ev.estimate.currency)
+    if not changes:
         return "warning", "Commercial parameters saved - the single-house estimate did not change." + note
-    return "success", (f"Commercial parameters applied - contract sum {fmt.money(old_cs, cur)} → "
-                       f"{fmt.money(new_cs, cur)}." + note)
+    return "success", "Commercial parameters applied - " + "; ".join(changes) + "." + note
+
+
+def _boundary_changes(old_est, new_est, cur: str) -> list[str]:
+    """What changed between two estimates: every boundary (incl. total development cost) and the sales value.
+
+    A boundary that appears or disappears is reported as 'none → x' / 'x → none'; when only layer 9 (land,
+    finance, taxes, sales) moved, the message says the contract sum is unchanged.
+    """
+    def amounts(est) -> dict[str, tuple[str, float]]:
+        out = {b.key: (b.name, b.amount) for b in est.boundaries}
+        if est.sales_value is not None:
+            out["sales_value"] = ("Sales value (GDV)", est.sales_value)
+        return out
+
+    a, b = amounts(old_est), amounts(new_est)
+    changes = []
+    for key in dict.fromkeys([*a, *b]):
+        name = (b.get(key) or a.get(key))[0]
+        va, vb = (a[key][1] if key in a else None), (b[key][1] if key in b else None)
+        if va is not None and vb is not None and abs(va - vb) < 0.005:
+            continue
+        fa = fmt.money(va, cur) if va is not None else "none"
+        fb = fmt.money(vb, cur) if vb is not None else "none"
+        changes.append(f"{name[0].lower() + name[1:]} {fa} → {fb}")
+    if changes and "contract_sum" in a and "contract_sum" in b \
+            and abs(a["contract_sum"][1] - b["contract_sum"][1]) < 0.005:
+        changes.append("contract sum unchanged")
+    return changes
 
 
 # =============================================================================
 # Uncertainty
 # =============================================================================
+def _sim_widget_keys(ws: S.Workspace, cfg, groups_all) -> dict[str, str]:
+    """Stable, keyed simulation widgets seeded from the project's simulation config.
+
+    Keyed widgets never take ``value=`` / ``default=`` from the config, so a submitted seed / sample count is
+    never replaced by the previous run's value (their widget identity does not change with the config).  When
+    the keys are missing (first visit, or Streamlit dropped them after the tab was closed) they are seeded from
+    the config of the last run - the full sample count, not a cap; 300 is only the first-visit default before
+    any simulation exists.
+    """
+    pid = ws.project.project_id
+    keys = {k: f"sim_{k}_{pid}" for k in ("n", "seed", "method", "groups")}
+    seeds = {"n": int(cfg.n_samples) if ws.simulation is not None else int(min(cfg.n_samples, 300)),
+             "seed": int(cfg.seed), "method": cfg.method if cfg.method in ("lhs", "mc") else "lhs",
+             "groups": [g for g in cfg.include_groups if g in groups_all]}
+    for k, key in keys.items():
+        if key not in st.session_state:
+            st.session_state[key] = seeds[k]
+    return keys
+
+
 def _uncertainty(ws: S.Workspace, ev: S.Evaluation) -> None:
     from ...simulation.uncertainty import GROUPS, INTERVAL_TYPE
 
     p = ws.project
     cfg = p.simulation_config
+    keys = _sim_widget_keys(ws, cfg, GROUPS)
     with st.form("sim_form", border=True):
         c = st.columns([1, 1, 1, 3])
-        n = c[0].number_input("Samples", value=int(min(cfg.n_samples, 300)), min_value=20, max_value=5000, step=50,
+        n = c[0].number_input("Samples", min_value=20, max_value=5000, step=50, key=keys["n"],
                               help="Each sample re-computes geometry → quantities → programme → logistics → cost for "
-                                   "one coherent house. ~500+ for stable rankings.")
-        seed = c[1].number_input("Seed", value=int(cfg.seed), min_value=0, max_value=2 ** 31 - 1, step=1)
-        method = c[2].selectbox("Sampling", ["lhs", "mc"], index=0 if cfg.method == "lhs" else 1,
+                                   "one coherent house. Use 500+ (1000 recommended) before acting on the ranking.")
+        seed = c[1].number_input("Seed", min_value=0, max_value=2 ** 31 - 1, step=1, key=keys["seed"])
+        method = c[2].selectbox("Sampling", ["lhs", "mc"], key=keys["method"],
                                 format_func=lambda m: "Latin hypercube" if m == "lhs" else "Monte Carlo")
-        groups = c[3].multiselect("Uncertainty groups", list(GROUPS),
-                                  default=[g for g in cfg.include_groups if g in GROUPS],
+        groups = c[3].multiselect("Uncertainty groups", list(GROUPS), key=keys["groups"],
                                   format_func=lambda g: GROUP_LABELS.get(g, g))
         run = st.form_submit_button("Run simulation", type="primary")
+    if int(n) < 500:
+        st.caption(f"{int(n)} samples: a quick look. P10 / P90 and the ranking of what to resolve next are noisy "
+                   "below ~500 samples - run 500+ (1000 recommended) before deciding.")
     if run:
         if not groups:
             st.error("Choose at least one uncertainty group.")
@@ -506,7 +585,9 @@ def _uncertainty(ws: S.Workspace, ev: S.Evaluation) -> None:
                         f'<div class="hbv-range">{esc(", ".join(i.get("top_inputs", [])[:3]))}</div></div></div>')
                 html('<div class="hbv-ivs">' + "".join(items) + "</div>")
                 st.caption("Variance share = first-order (binned) share of the cost variance per group; groups can "
-                           "overlap, so shares need not sum to 100%. Rankings stabilise from ~500 samples.")
+                           "overlap, so shares need not sum to 100%. Shares carry sampling noise of a few percentage "
+                           "points at a few hundred samples: treat close ranks as ties and use 1000+ samples before "
+                           "acting on the order.")
     c1, c2 = st.columns([1, 1], gap="medium")
     with c1:
         section_title("Sensitivity", sub="tornado of the strongest inputs")

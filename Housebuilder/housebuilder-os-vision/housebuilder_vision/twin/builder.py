@@ -43,8 +43,21 @@
   rise residual is logged (``rise_residual_m``) and reported by
   :func:`coupling_warnings`.  Derived values take ``weakest_basis(rise,
   other value)`` and actor ``system:coupling``.
+* **Storeys-eaves coupling.**  A block whose wall-plate height was measured in
+  a calibrated elevation carries ``Block.observed_eaves_m``.  A storeys edit
+  re-derives ``floor_to_floor = (observed eaves - FFL) / storeys`` (actor
+  ``system:coupling``, weakest basis of the eaves, the FFL and the count) so
+  the plate stays on the eaves seen in the image - unless the floor-to-floor
+  is ``USER_CONFIRMED`` / ``OBSERVED`` or the result is outside
+  :data:`FTF_PLAUSIBLE_M`; then both are kept, the residual is logged
+  (``eaves_residual_m``) and :func:`coupling_warnings` reports the plate that
+  no longer matches (also after FFL / floor-to-floor edits).
 * Storey reductions are refused while observed / user openings sit on a
   removed storey (they are named); rule-filled openings are regenerated.
+* Visual finishes come from measured images only: concept-reference facades
+  (AI concept / rendering / sketch) never colour the twin of the real building.
+  Observed but unmodelled elements (balcony, chimney, ...) are copied from the
+  hypothesis to ``BuildingTwin.unmodelled_elements``.
 * Opening assembly overrides: with ``library`` passed to
   :func:`apply_twin_edit`, an override must exist and belong to the opening
   kind's element (window / external door / garage door); without it the
@@ -160,10 +173,14 @@ def visual_finishes_from_analysis(analysis: AnalysisResult) -> list[VisualFinish
     """Visual finishes (appearance + colour guess) from the observed facade finishes.
 
     Basis ``INFERRED`` (``USER_CONFIRMED`` if the finish was confirmed).  These are
-    appearance only and never select a construction assembly.
+    appearance only and never select a construction assembly.  Facades of concept
+    references (AI concept / rendering / sketch: ``AnalysisResult.is_concept_image``)
+    are skipped: a concept's appearance is not evidence of the real building.
     """
     merged: dict[tuple[str, str], VisualFinish] = {}
     for fac in analysis.facades:
+        if analysis.is_concept_image(fac.image_id):
+            continue
         for fin in fac.finishes:
             appearance = _CTRL.sub(" ", fin.appearance or "").strip()[:120]
             if not appearance:
@@ -213,6 +230,7 @@ def build_parametric_twin(hypothesis: GeometryHypothesis, *, selection: Assembly
         visual_finishes=[v.model_copy(deep=True) for v in (visual_finishes or [])],
         source_hypothesis_id=hypothesis.hypothesis_id,
         calibration_method=hypothesis.calibration_method,
+        unmodelled_elements=list(hypothesis.unmodelled_elements),
     )
     _check_footprint(twin)
     return regenerate_hidden_openings(twin)
@@ -684,6 +702,11 @@ RISE_TOL_M = 1e-3
 RISE_REPORT_M = 0.01
 COUPLING_ACTOR = "system:coupling"
 COUPLING_SOURCE = "depth-pitch coupling (observed roof rise)"
+EAVES_COUPLING_SOURCE = "storeys-eaves coupling (observed wall-plate height)"
+#: Plate-vs-observed-eaves differences below this (m) are rounding, not reported.
+EAVES_TOL_M = 0.02
+#: Plausible floor-to-floor heights (m) for a re-derivation after a storeys edit (as in twin.hypotheses).
+FTF_PLAUSIBLE_M = (2.0, 4.5)
 _FIXED = (Basis.USER_CONFIRMED, Basis.OBSERVED)
 _PITCHED_RANGE = (0.0, 75.0)  # exclusive, as for pitch edits on pitched roofs
 _MAX_DIM = 200.0
@@ -766,14 +789,91 @@ def _residual_text(c: DepthPitchCoupling) -> str:
             f"{c.rise.value:.2f} m ({c.rise.basis.value}{rng}): residual {c.residual_m:+.3f} m, {where}")
 
 
-def coupling_warnings(twin: BuildingTwin) -> list[str]:
-    """Blocks whose roof does not reproduce their observed rise (both values fixed or not derivable).
+def plate_height(block: Block) -> Optional[float]:
+    """Wall-plate height above ground ``FFL + storeys x floor-to-floor`` (m), or None."""
+    ffl, n, ftf = block.ground_floor_level.value, block.storeys.value, block.floor_to_floor.value
+    if ffl is None or n is None or ftf is None:
+        return None
+    return float(ffl) + int(round(n)) * float(ftf)
 
-    ``Warning`` when the implied rise is outside the observed rise's range; ``Note`` when it is
-    inside but differs by at least :data:`RISE_REPORT_M` (smaller residuals of two independent
+
+def eaves_residual(block: Block) -> Optional[float]:
+    """Modelled wall plate minus the observed eaves height (m); None without an observed eaves."""
+    e, p = block.observed_eaves_m, plate_height(block)
+    if e is None or e.value is None or p is None:
+        return None
+    return p - float(e.value)
+
+
+def _eaves_within(block: Block, residual: float) -> bool:
+    lo, hi = block.observed_eaves_m.bounds()
+    p = float(block.observed_eaves_m.value) + residual
+    return lo is not None and hi is not None and lo - EAVES_TOL_M <= p <= hi + EAVES_TOL_M
+
+
+def _eaves_after_storeys(b: Block, n: int) -> list[EditRecord]:
+    """After a storeys edit: re-derive a non-confirmed floor-to-floor so the plate stays on the observed eaves.
+
+    ``floor_to_floor = (observed eaves - FFL) / n`` (actor ``system:coupling``, basis the weakest of the
+    eaves, the FFL and the edited count) when the floor-to-floor is neither ``USER_CONFIRMED`` nor
+    ``OBSERVED`` and the result lies in :data:`FTF_PLAUSIBLE_M`; otherwise both are kept and the
+    residual is logged (``coupling_warnings`` then reports it).
+    """
+    eaves, ftf, ffl = b.observed_eaves_m, b.floor_to_floor, b.ground_floor_level
+    if eaves is None or eaves.value is None or ffl.value is None:
+        return []
+    target = f"block:{b.block_id}"
+    v = (float(eaves.value) - float(ffl.value)) / n
+    blocked = None
+    if ftf.basis in _FIXED:
+        blocked = f"the floor-to-floor is {ftf.basis.value}"
+    elif not FTF_PLAUSIBLE_M[0] <= v <= FTF_PLAUSIBLE_M[1]:
+        blocked = (f"the implied floor-to-floor {v:.2f} m is outside {FTF_PLAUSIBLE_M[0]:.1f}-"
+                   f"{FTF_PLAUSIBLE_M[1]:.1f} m")
+    if blocked is None:
+        e_lo, e_hi = (x if x is not None else float(eaves.value) for x in eaves.bounds())
+        f_lo, f_hi = (x if x is not None else float(ffl.value) for x in ffl.bounds())
+        lo, hi = max(FTF_PLAUSIBLE_M[0], (e_lo - f_hi) / n), min(FTF_PLAUSIBLE_M[1], (e_hi - f_lo) / n)
+        basis = weakest_basis(eaves.basis, ffl.basis, b.storeys.basis)
+        note = (f"Derived: floor-to-floor = (observed eaves {eaves.value:.3f} m - FFL {ffl.value:.3f} m) / {n} "
+                f"storey(s) = {v:.3f} m (after the storeys were edited), so the wall plate stays on the eaves "
+                "seen in the image.")
+        new_tv = ftf.edited(v, actor=COUPLING_ACTOR, target=target, field="floor_to_floor", reason=note, basis=basis,
+                            low=min(lo, v) if hi - lo > 1e-12 else None, high=max(hi, v) if hi - lo > 1e-12 else None)
+        b.floor_to_floor = new_tv.model_copy(update={"source": EAVES_COUPLING_SOURCE, "note": note,
+                                                     "evidence_ids": list(dict.fromkeys([*eaves.evidence_ids,
+                                                                                         *ftf.evidence_ids]))})
+        return [EditRecord(actor=COUPLING_ACTOR, target=target, field="floor_to_floor", old_value=ftf.value,
+                           new_value=v, old_basis=ftf.basis, new_basis=basis, reason=note)]
+    res = eaves_residual(b)
+    reason = (f"Storeys-eaves coupling not applied ({blocked}): the wall plate {plate_height(b):.2f} m no longer "
+              f"matches the observed eaves {eaves.value:.2f} m (residual {res:+.3f} m).")
+    return [EditRecord(actor=COUPLING_ACTOR, target=target, field="eaves_residual_m", old_value=None,
+                       new_value=round(res, 4), old_basis=eaves.basis, new_basis=ftf.basis, reason=reason[:500])]
+
+
+def coupling_warnings(twin: BuildingTwin) -> list[str]:
+    """Blocks whose roof does not reproduce their observed rise (both values fixed or not derivable), and
+    blocks whose wall plate ``FFL + storeys x floor-to-floor`` no longer matches the observed eaves height.
+
+    ``Warning`` when the implied rise (plate) is outside the observed rise's (eaves') range; ``Note`` when
+    it is inside but differs by at least :data:`RISE_REPORT_M` (smaller residuals of two independent
     observations are measurement noise and not reported).
     """
     out = []
+    for b in twin.blocks:
+        res = eaves_residual(b)
+        if res is None or abs(res) < EAVES_TOL_M:
+            continue
+        within = _eaves_within(b, res)
+        lo, hi = b.observed_eaves_m.bounds()
+        rng = f", {lo:.2f}-{hi:.2f} m" if lo is not None and hi is not None and hi > lo else ""
+        out.append(f"{'Note' if within else 'Warning'}: '{b.block_id}' wall plate - FFL "
+                   f"{b.ground_floor_level.value:.2f} m + {int(round(b.storeys.value))} storey(s) x "
+                   f"{b.floor_to_floor.value:.2f} m = {plate_height(b):.2f} m, but the eaves seen in the image are at "
+                   f"{b.observed_eaves_m.value:.2f} m ({b.observed_eaves_m.basis.value}{rng}): residual {res:+.2f} m, "
+                   f"{'within' if within else 'outside'} the observed range. Check the storeys, the floor-to-floor "
+                   "or the FFL.")
     for c in depth_pitch_couplings(twin):
         if c.consistent or (c.within_observed_range and abs(c.residual_m) < RISE_REPORT_M):
             continue
@@ -962,6 +1062,8 @@ def _edit_block(t: BuildingTwin, e: TwinEdit, ctx: _EditContext) -> tuple[Any, A
                              f"exist ({', '.join(stranded[:8])}{more}); delete them or move them to a lower storey "
                              "first (rule-filled hidden-side openings are regenerated automatically)")
         b.storeys = _edit_tv(b.storeys, float(n), e, target, "storeys")
+        if old is None or int(round(old)) != n:
+            ctx.follow += _eaves_after_storeys(b, n)
         return old, n, True
     if f == "heated":
         v = _bool(e.value, f"{target}.heated")
@@ -1387,4 +1489,6 @@ __all__ = [
     "roof_span_field",
     "twin_hash",
     "visual_finishes_from_analysis",
+    "plate_height",
+    "eaves_residual",
 ]

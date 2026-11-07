@@ -27,7 +27,7 @@ All prices, supplier quotes and production economics bundled with the demo are *
 
 ```bash
 cd Housebuilder/housebuilder-os-vision
-pip install -r requirements.txt               # core engine, UI and tests (Python >= 3.10)
+pip install -r requirements.txt               # core engine, UI (Streamlit >= 1.55) and tests (Python >= 3.10)
 pip install -r requirements-optional.txt      # optional: OpenCV, IFC export, Claude VLM adapter
 
 python -m housebuilder_vision.demo.run_demo   # full fictional demo -> exports/demo (offline, < 1 min)
@@ -46,7 +46,10 @@ dimension ranges, the twin, the top bill-of-quantities lines, cost boundaries, P
 top uncertainty drivers and the next-best evidence, the build-scenario comparison and repeat-build
 tables at n = 1/10/25/50/100 for the factory-gate and installed boundaries (with the underlying
 marginal, the steps between n and n+1 and a single-house reconciliation) - and writes
-`project.json`, `results.json`, `twin.glb`, CSV tables, `twin.ifc` (when `ifcopenshell` is
+`project.json`, `results.json`, `twin.glb`, CSV tables (`quantities.csv`, `geometry_summary.csv` - gross /
+net wall, glazing, door, roof and floor areas with their basis - `costs.csv`, `cost_boundaries.csv` with
+each boundary's basis and completeness, `repeat_build.csv`, `simulation_summary.csv`,
+`scenario_comparison.csv`; every cell formula-injection safe), `twin.ifc` (when `ifcopenshell` is
 installed), `README.txt` and a sha256 `manifest.json`.
 
 The UI (`streamlit run app.py`) has five views: **Images** (upload, evidence, annotations,
@@ -94,11 +97,37 @@ output or manual annotation produces warnings, not geometry.  The bundled fixtur
 images; for other images annotate the facade, ground/eaves/ridge lines and openings (UI or
 `manual_features`, recorded as user-confirmed) or plug in a detector adapter (below).
 
+Annotation attributes the analysis reads (shared with the UI editor):
+
+* openings: `storey` (int 0-9, 0 = ground floor) and `block` - a user storey is authoritative over
+  window-row clustering, and the facade has at least max(storey) + 1 storeys (user-confirmed);
+* roofs: `roof_form` (`gable` / `hip` / `flat` / `monopitch`; on the block's facade it is used when no
+  roof says otherwise), `ridge` (`parallel` / `perpendicular` to the view) and `gable_visible` - a roof
+  box with `gable_visible` is read as the gable triangle (base = box bottom, apex at the top centre), so
+  its pitch is `atan(2 h / w)` with the annotation's basis;
+* floor plans (`ImageKind.FLOOR_PLAN`): `building_outline` boxes per block (`block`, default `main`) and
+  `dimension` lines with `length_m` (> 0), `axis` (`width` / `depth`) and `block`.  The dimensions set the
+  plan scale; each outline then gives its block's width and depth (inferred, or user-confirmed when a
+  `depth` dimension is the depth itself), which collapses the hidden-depth hypotheses: H-A only, plus
+  H-B "as drawn on the plan" when the plan outlines an extension block (front of the building at the
+  bottom of the sheet unless an outline has `front: top`);
+* balconies, chimneys and garage / extension boxes are listed as observed but not modelled (warnings,
+  unknowns, `AnalysisResult.unmodelled_features`, `BuildingTwin.unmodelled_elements`); annotate a
+  garage or extension's front wall as a facade with that `block` to model it.
+
+Manual features are validated like detector output (finite coordinates within 10 % of the image;
+invalid ones are dropped with a warning naming them).  An inactive (unticked) feature never
+supersedes, calibrates or contributes anything: an inactive copy of a detection is a rejection (the
+detection keeps its basis), an inactive annotation keeps its basis and records the rejection.  A
+reference whose feature was superseded by a user annotation follows that annotation (noted in the
+calibration); a reference on a rejected feature is refused.
+
 ## Workflow
 
 ```
 drop image(s) ─► evidence (detections, facades in pixels, unknowns, concept warnings)
-             ─► hypotheses from labelled prior scale cues (H-A rectangular, H-B L-shaped, H-C deep plan)
+             ─► hypotheses from labelled prior scale cues (H-A rectangular, H-B L-shaped, H-C deep plan;
+                 a dimensioned floor plan or a side elevation shows the depth -> fewer hypotheses)
              ─► calibrate: one confirmed dimension (e.g. the measured frontage) - hypotheses regenerate
              ─► choose a hypothesis ─► editable twin (hidden facades rule-filled, every value with a basis)
              ─► construction assemblies (assumed until confirmed) ─► quantities (traceable BoQ)
@@ -112,12 +141,21 @@ drop image(s) ─► evidence (detections, facades in pixels, unknowns, concept 
 `apply_construction_assemblies`, `calculate_quantities`, `estimate_construction_cost`,
 `calculate_incremental_cost`, `simulate_uncertainty`, `compare_build_scenarios`, `export_project` -
 plus `run_digital_simulations(twin, boq, library, settings)` and
-`run_pipeline(project, *, store_dir, simulate=True, n_samples=500) -> PipelineResult`.  With
+`run_pipeline(project, *, store_dir, simulate=True, n_samples=500, manual_features=None) -> PipelineResult`.  With
 `run_log=project` (or a list) every call appends a `RunRecord`: function name, sha256 of the
 canonical JSON of its inputs and outputs (timestamps removed, so equal inputs give equal hashes),
 seed, and versions (package, model schema, Python and libraries, image-analysis adapters, rate book).
-`run_pipeline` keeps an existing twin built from the selected hypothesis (with its edits) and
-updates the project in place.
+`run_pipeline` updates the project in place and never drops user evidence: without
+`manual_features` it re-uses the annotations and rejected detections recorded in the stored
+`project.analysis` (`pipeline.manual_from_analysis`, shared with the UI), so a re-run neither loses an
+annotated facade nor restores a rejected detection.  A reference measurement whose target feature changed
+type or span since it was confirmed raises `ValueError` (`pipeline.reference_target_problem`) instead of
+calibrating from another feature.  The twin: each twin records the fingerprint of the hypothesis it was
+built from (`BuildingTwin.source_fingerprint`).  When the regenerated hypothesis is unchanged the existing
+twin is kept; when the evidence or calibration changed (a new reference, a side view, new annotations)
+an unedited twin is rebuilt with its assembly selection (version + 1, `system:pipeline` record), while a
+twin with user geometry edits is kept and `PipelineResult.warnings` says it is "based on earlier
+evidence".
 
 ### Editing the twin
 
@@ -142,6 +180,11 @@ actor `system:reflow`, `system:coupling` or `system:assembly-check`.
   value takes the weakest basis of the rise and the edited value.  A user-confirmed or observed
   value is never overwritten: if both are fixed, both are kept, the implied-vs-observed rise
   residual is logged and the Twin view shows a warning (`coupling_warnings(twin)`).
+* **Storeys keep the wall plate on the observed eaves.**  A block whose wall-plate height was
+  measured with a calibrated scale stores it (`Block.observed_eaves_m`).  A storeys edit re-derives a
+  non-confirmed floor-to-floor `(eaves - FFL) / storeys` (`system:coupling`); when the floor-to-floor is
+  user-confirmed / observed or the result is outside 2.0-4.5 m, both are kept, the residual is logged
+  and `coupling_warnings(twin)` (Twin view) reports the plate that no longer matches the image.
 * Reducing a block's storeys is refused while observed or user openings sit on a removed storey
   (they are named); rule-filled hidden-side openings are regenerated.
 * An opening's assembly override is recorded as user-confirmed; with `library=` it must belong to
@@ -153,8 +196,8 @@ actor `system:reflow`, `system:coupling` or `system:assembly-check`.
 | Basis | Meaning | Examples |
 |---|---|---|
 | `observed` | Measured directly from image evidence | pixel widths, a pitch seen on a gable in elevation |
-| `inferred` | Derived by a rule or model from observations | metres from pixels with a calibrated scale, storeys from window rows, VLM output (always inferred, untrusted) |
-| `user_confirmed` | Entered or confirmed by a person - the strongest basis | the reference frontage, edited dimensions, chosen assemblies, supplier quotes |
+| `inferred` | Derived by a rule or model from observations | metres from pixels with a calibrated scale, storeys from window rows, depth from a dimensioned plan outline, every measurement and feature of a concept reference (AI concept / rendering / sketch), VLM output (always inferred, untrusted) |
+| `user_confirmed` | Entered or confirmed by a person - the strongest basis | the reference frontage, annotations (and storey indices, roof forms, gable pitches, plan dimensions entered on them), edited dimensions, chosen assemblies, supplier quotes |
 | `assumed` | A labelled default you may continue with | hidden depth, pitch prior, FFL (and the floor-to-floor and sill heights measured above it), hidden-facade glazing, assembly defaults, rate ranges |
 | `unknown` | Not recoverable from the evidence | dependent quantities are left UNRESOLVED, never invented |
 
@@ -218,7 +261,17 @@ Missing rates and unresolved quantities are listed in `unresolved_items` - never
 so are ex-works, separately charged and collection rates without a `delivery_charge` (carriage not
 priced).  `CostParameters` prelims weekly / set-up, cost per delivery load and cost per skip are
 **fallbacks**, used only when the rate book has no `prelim:weekly` / `prelim:setup` /
-`log:delivery_load` / `log:skip` rate (the Costs view shows which value is in force).
+`log:delivery_load` / `log:skip` rate (the Costs view shows which value is in force).  Their money
+amounts (and land, taxes, sales value) are in `CostParameters.currency` (the project currency when the
+project was created): after a currency change they are converted with `ProjectSettings.fx_rates`, and
+without an FX rate they are not priced (unresolved) - a GBP 1,800 / week fallback is never re-labelled
+EUR 1,800 / week.
+
+Every `CostBoundary` carries the weakest `basis` of the cost lines it sums and `unresolved_count`, the
+unresolved items in its layers.  When items of layers 1-5 are unpriced (e.g. every rate excluded by a
+currency without FX rate or by a pricing date before the rates' dates), the estimate's first warning
+starts with `INCOMPLETE ESTIMATE` and names the cause; the header, the boundary cards and
+`cost_boundaries.csv` show such amounts as lower bounds (`≥`, "incomplete").
 
 Rate resolution (`costing.rates.resolve_rate`; every adjustment is listed in its warnings):
 
@@ -277,30 +330,47 @@ per-house values from the timber-frame + brick variant); both are fictional.
 ## Uncertainty simulation
 
 `simulate_uncertainty(twin, library, rate_book, cost_params, settings, *, config, calibration,
-assumptions)` samples **one coherent house per sample** (one hypothesis, one assembly set) and
-recomputes geometry -> quantities -> programme -> logistics -> cost each time.  Inputs are
-discovered from the twin and the rate book and grouped: `scale` (values from the same image share
-one draw), `hidden_geometry` (assumed depths, pitch priors, overhangs, hidden glazing, bathrooms,
-partitions), `unit_prices` and `labour_rates` (each rate's own range), `labour_productivity`
-(0.85-1.30), `waste` (0.6-1.8 x waste fractions), `ground` (ground classes -> foundation option)
-and `lead_time` (window/door lead times -> programme -> preliminaries).  Latin hypercube or Monte
-Carlo sampling (seeded, reproducible), Gaussian copula with within-group correlation and
-configurable between-group correlation.  Coherence: attached blocks stay attached, the stored
-observed roof rise couples span and pitch (every sample starts from the observed rise, also after
-edits), hidden-facade openings follow their glazing rule.
+assumptions, fixed_foundation=None)` samples **one coherent house per sample** (one hypothesis, one
+assembly set) and recomputes geometry -> quantities -> programme -> logistics -> cost each time.
+Inputs are discovered from the twin and the rate book and grouped: `scale` (values from the same
+image share one draw; a user-confirmed tolerance is an independent measurement error), `hidden_geometry`
+(assumed depths, pitch priors, overhangs, FFL, hidden glazing, bathrooms, partitions; copies of one
+prior are one input), `unit_prices` and `labour_rates` (each rate's own range), `labour_productivity`
+(0.85-1.30), `waste` (0.6-1.8 x waste fractions), `ground` (ground classes -> foundation option; a
+class the selected option suits keeps it) and `lead_time` (window/door lead times -> programme ->
+preliminaries).  Latin hypercube or Monte Carlo sampling with one seeded stream per input (common
+random numbers: scenarios simulated with the same seed share the draws of their common inputs),
+Gaussian copula with within-group correlation and configurable between-group correlation (the notes
+report the correlations in force).  Coherence: attached blocks stay attached; the stored observed roof
+rise couples span and pitch (every sample starts from the observed rise, also after edits; a
+confirmed pitch is never re-derived; a hip's span never exceeds its other side); the observed wall
+plate couples floor-to-floor, FFL and sills (the FFL is not counted twice); hidden-facade openings
+follow their glazing rule storey by storey.
 
 Outputs: P5..P95 summaries (cost boundaries, GIA, wall and roof areas, concrete, labour hours,
 programme weeks, block dimensions), samples, Spearman sensitivities, first-order variance shares,
 results conditional on ground class, and an **information-value ranking** - for each group the
-action that would resolve it (e.g. "Upload a side/rear elevation or a dimensioned floor plan",
-"Commission a site/ground investigation", "Obtain supplier quotations") and the P10-P90 width it
-accounts for.  **Interval meaning:** assumed scenario uncertainty - labelled engineering
-assumptions propagated through the model, *not* statistics calibrated against outturn costs.
-Details: [`docs/UNCERTAINTY.md`](docs/UNCERTAINTY.md).
+action that would resolve its dominant input (e.g. "Confirm the hidden plan depth: upload a side
+elevation, or a floor plan with the building outline and one measured dimension, or enter the measured
+depth" - exactly the evidence the engine uses for a hidden depth - "Upload a rear elevation" for an
+assumed rear glazing ratio, "Commission a site/ground investigation", "Obtain supplier quotations",
+"Add a second measured dimension ..." once a reference measurement sets the scale), the P10-P90 width
+it accounts for, and a bootstrap standard error with the groups it is tied with (shares carry
+2-3 points of sampling noise at n = 500, so close ranks can swap between seeds).  **Interval
+meaning:** assumed scenario uncertainty - labelled engineering assumptions propagated through the
+model, *not* statistics calibrated against outturn costs - and conditional on the twin's hypothesis
+and assembly selection (stated in `interval_type`).  Details: [`docs/UNCERTAINTY.md`](docs/UNCERTAINTY.md).
 
 `compare_build_scenarios` evaluates each `BuildScenario` (hypothesis + assembly overrides +
-foundation option + price level) as a complete house with its own optional P10/P50/P90.  Results
-are never averaged across hypotheses or assemblies; hypothesis plausibility is a subjective prior.
+foundation option + price level) as a complete house with its own optional P10/P50/P90: a scenario's
+foundation option is held in its simulation, and `rate_multiplier` scales every rate, delivery charge
+and money fallback (prelims, delivery load, skip).  Results are never averaged across hypotheses or
+assemblies; hypothesis plausibility is a subjective prior.  Because that uncertainty stays in separate
+scenarios, `simulation.scenarios.scenario_spread_entries(comparison)` reports the cost spread between
+scenarios that differ only in the hypothesis ("Confirm the footprint: ..."), the construction method
+("Confirm the construction method / specification with the designer"), the foundation or the price
+level, and `combined_information_value(simulation, comparison)` ranks those entries together with the
+within-scenario groups by the money they account for.
 
 ## Simulations and their boundaries
 
@@ -329,7 +399,8 @@ Optional dependencies are imported lazily inside adapters; the core and the demo
     JSON output, refusal handling): needs `pip install anthropic`, `ANTHROPIC_API_KEY` and the opt-in
     **`HBV_ENABLE_VLM=1`** (read by `pipeline.registry_from_env()`; or
     `default_registry(enable_vlm=True)`).  It sends the image to an external API.  Its output is
-    always `inferred`, parsed with a strict schema, clamped, and only used as a cross-check.
+    always `inferred`, parsed with a strict schema (out-of-range counts are discarded, not clamped), and
+    only used as a cross-check: a disagreement is a warning, never a changed value or range.
   * **Depth / zero-shot detection** via `transformers` + `torch` (not in the requirements; install
     them yourself): `HuggingFaceZeroShotDetector` (openings only, no facade extents) and
     `TransformersDepthAdapter` (relative depth for context only).  They may download model weights,
@@ -344,8 +415,14 @@ Optional dependencies are imported lazily inside adapters; the core and the demo
   `load_rate_book_csv/json` (columns = `Rate` fields: `rate_id, cost_key, description, layer, unit,
   currency, value, location, effective_date, source, source_type, supplier, tax_treatment, vat_rate,
   delivery_treatment, delivery_charge, uncertainty_low, uncertainty_high, quote_reference,
-  valid_until, notes`).  Supplier quotes outrank manual, price-list, adapter and demo rates;
-  expired quotes are deprioritised.  No network calls are made.
+  valid_until, notes`; required: `rate_id, cost_key, layer, unit, value, effective_date, source,
+  source_type`).  Absent currency, tax treatment, delivery treatment, location or uncertainty is never
+  silent: each absent column / empty cell is a load warning, every supplier-quote / price-list row
+  without its currency or tax treatment is named, an absent tax treatment becomes `unknown` (not
+  `ex_vat`), and the defaulted currency / tax / uncertainty are tagged on the rate's notes
+  (`[assumed defaults: ...]`) so resolving it warns and gives an ASSUMED basis (remove the tag once
+  confirmed).  Supplier quotes outrank manual, price-list, adapter and demo rates; expired quotes are
+  deprioritised.  No network calls are made.
 * **Structural / energy / carbon data** (`simulation.adapters`): `StructuralAnalysisAdapter`,
   `EnergyAnalysisAdapter`, `EmbodiedCarbonDataAdapter` protocols; the defaults raise
   `AdapterNotConfigured`.  `StaticCarbonFactorAdapter` + `apply_carbon_factors(library, adapter)`
@@ -354,13 +431,21 @@ Optional dependencies are imported lazily inside adapters; the core and the demo
 ## Security and untrusted input
 
 * Uploads are validated before use: at most 25 MB and 50 megapixels, PNG / JPEG / WebP / TIFF / BMP
-  only, decoded with Pillow `verify()` and re-opened, content-addressed by sha256 (originals kept
-  unchanged), a safe EXIF subset only, sanitised filenames.
-* Detection fixtures, annotations, rate books (<= 5 MB, <= 20 000 rows) and model outputs are parsed
+  only (a multi-picture JPEG - Pillow `MPO`, written by many phones - is a JPEG; its first frame is
+  analysed), decoded with Pillow `verify()` and re-opened, content-addressed by sha256 (originals kept
+  unchanged), a safe EXIF subset only, sanitised filenames.  16-bit / 32-bit images are scaled to 8 bits
+  in row chunks, so decode memory stays bounded.  A preserved original is read only from a
+  content-addressed `<sha256>.<ext>` file (inside the store folder when one is given; a stored path from
+  a loaded project is otherwise ignored), with a size cap and a sha256 check.
+* Detection fixtures, annotations, rate books (<= 5 MB, <= 20 000 rows, <= 64 columns / keys per record,
+  JSON nesting errors reported, at most 20 unknown column names echoed) and model outputs are parsed
   with Pydantic, range-clamped and treated as data: nothing is `eval`'d or executed, and
-  instructions found in images or model output are never followed.
+  instructions found in images or model output are never followed.  Untrusted text shown in the UI
+  (file names, rate-book warnings, feature labels) is HTML- or markdown-escaped, so a link or image in
+  a supplier file never renders live.
 * Exports use fixed file names checked to stay inside the output folder, atomic writes, and CSV
-  formula-injection protection.  The SQLite store uses parameterised SQL and re-validates state on load.
+  formula-injection protection (`io.export.csv_bytes`, also used by the Costs view's "Download rate book
+  (CSV)": a supplier cell starting with `= + - @` is prefixed with `'`).  The SQLite store uses parameterised SQL and re-validates state on load.
 * Network access happens only through opt-in optional adapters: the Claude adapter
   (`HBV_ENABLE_VLM=1`) and, if you install `transformers`, model-weight downloads by the transformers
   adapters.  The engine, pricing, exports and the demo make no network calls.
@@ -417,6 +502,10 @@ docs/            ARCHITECTURE.md (module contracts), UNCERTAINTY.md (simulation 
 
 * Single-front-view geometry is near-fronto-parallel elevation modelling, not photogrammetry; hidden
   depth, rear and side facades come from labelled hypotheses and rules until evidence replaces them.
+  For a front view the perspective estimate reports as oblique (5-60 deg), the one-sided
+  foreshortening bias is removed with a weak-perspective `cos(theta)` correction (horizontal lengths
+  for a vertical-cue scale, heights for a horizontal reference); views labelled `front_*_oblique` are
+  still kept as evidence only (no facade measurements).
 * Footprints are unions of axis-aligned rectangular blocks; roofs are gable, hip, monopitch or flat
   with uniform pitch; valleys are not measured as separate linear items.
 * Assemblies, allowances, carbon factors, labour hours and crews are generic illustrative data.
@@ -433,19 +522,25 @@ streamlit run app.py          # from the project root; opens http://localhost:85
 ```
 
 A compact upload-and-inspect app (Streamlit, Aureom.AI graphite / ivory / gold theme in
-`.streamlit/config.toml`; code in `housebuilder_vision/ui/`).  The header shows live KPIs - GIA,
-construction cost incl. contingency, contract sum, cost / m², programme, heat-loss coefficient,
-embodied carbon - with the change caused by your last edit, plus tags for the twin version, the
-scale method, FICTIONAL prices and anything unresolved.  The provenance colours (user-confirmed,
-observed, inferred, assumed, unknown) are the same in every view and always carry a text label.
+`.streamlit/config.toml`; code in `housebuilder_vision/ui/`; needs Streamlit >= 1.55, tested with 1.67 -
+an older Streamlit gets a clear upgrade message).  The header shows live KPIs - GIA, construction cost
+incl. contingency, contract sum, cost / m², programme, heat-loss coefficient, embodied carbon - with
+the change caused by your last edit and, for GIA and the cost figures, a basis badge (the weakest basis
+of what they are derived from: block dimensions and wall assembly for GIA, the boundary's cost lines for
+costs); an incomplete estimate shows `≥` amounts.  Tags show the twin version, the scale method,
+"from concept reference (indicative)" when every image the twin was measured from is an AI concept /
+rendering / sketch, FICTIONAL prices, "incomplete - N item(s) unpriced", a reference that conflicts
+with the prior scale cues, a twin based on earlier evidence, and "evidence removed - twin kept as a
+manual model" after the last image is removed.  The provenance colours (user-confirmed, observed,
+inferred, assumed, unknown) are the same in every view and always carry a text label.
 
 | View | What you can do |
 |---|---|
-| **Images** | Drag and drop photos, renderings, AI concepts, sketches, floor plans or elevations and set each image's kind and view; uploads are validated by `vision.ingest` and rejections are shown with their reason.  Evidence overlay (hover: type, method + version, confidence, pixel uncertainty, evidence), feature table with an *active* toggle (rejecting a feature re-runs the analysis), manual annotation editor (type, x0..y1, label, storey, block, roof form; or box-select on the image), opt-in Claude cross-check (only shown when the adapter is available), calibration (feature width or pixel endpoints + real length, unit and tolerance) with a prompt for the most useful measurement and a "continue with labelled assumptions" option, unknowns and warnings (concept-reference caveat shown prominently), and hypothesis cards with dimension ranges, subjective plausibility and assumption labels → build the twin. |
-| **Twin** | 3D massing coloured by visual finish or by evidence basis; information-level banner; editors for blocks, roofs, openings, hidden-side assumptions, construction assemblies ("appearance does not establish structure") and the foundation option - each value with its basis badge and range, and the observed roof rise where one couples span and pitch (a warning appears when a roof no longer reproduces it).  Every edit goes through `apply_twin_edit` / `apply_construction_assemblies` and recalculates quantities and costs at once; attached blocks follow their parent and coupled values are re-derived (see *Editing the twin*); the edit log lists every change, including system follow-ups. |
-| **Quantities** | Bill of quantities with filters (element, status, basis, text); select a line to see its formula, measure and trace links while the 3D view highlights the wall pieces, blocks, roofs, openings or storeys it was measured from.  Allowances and unresolved items are listed separately; measurement conventions and GEA / GIA by storey. |
-| **Costs** | Boundary cards (amount, definition, exclusions; GDV shown separately), layer waterfall, cost lines with rate provenance (source, type, date, location, tax, delivery, validity, range), rate book upload (CSV / JSON, validated, warnings shown) and inline editing, a prominent warning when the pricing date excludes newer higher-priority rates, commercial parameters (prelim / log fallbacks labelled with the rate actually in force; fees with "recurs per house"; the "applied" message reports the real change), and the uncertainty simulation (samples, seed, groups → histogram + CDF with P10 / P50 / P90, quantiles, tornado, "what to resolve next", results by ground class, interval-type statement). |
-| **Scenarios** | Build-scenario comparison (table + small multiples: cost, cost / m², GIA, wall thickness, carbon, HLC, programme, labour), repeat-build economics (editable learning model and rate, tiers, factory / site step costs, houses per site, site overhead share; average, incremental and underlying marginal cost for the factory-gate and installed boundaries with markers at n = 1 / 10 / 25 / 50 / 100, the steps between n and n+1, their definitions and the single house vs installed C(1) reconciliation), programme Gantt (critical path in gold), deliveries, carbon by element and heat-loss breakdown - each with its assumptions and boundary. |
+| **Images** | Drag and drop photos, renderings, AI concepts, sketches, floor plans or elevations and set each image's kind and view; uploads are validated by `vision.ingest` and rejections are shown once with their reason (the uploader is cleared after every attempt).  Evidence overlay (hover any window, door, facade or line: type, method + version, confidence, pixel uncertainty, evidence), feature table with an *active* toggle (rejecting a feature re-runs the analysis and is recorded in its history; re-ticking a detection your annotation superseded tells you which annotation to untick), manual annotation editor (or box-select on the image) - every row keeps a stable hidden id (`usr:<image>:<uuid8>`, never the row position, so deleting a row never moves a reference) and each edit appends an EditRecord: elevations take type, x0..y1, label, *storey* (openings, 0 = ground, used as entered), *block*, and on roof rows *roof form*, *ridge* (parallel / perpendicular to the view) and *gable visible* (the box is read as the gable triangle, so its pitch is measured); floor plans take `building_outline` boxes per block (optional storeys, `front: top`) and `dimension` lines with *length (m)*, *axis* (width / depth) and *block*, which make the hidden depth evidence-based; an *active* column keeps a row without using it.  Opt-in Claude cross-check (only shown when the adapter is available).  Calibration: the image and the measuring mode sit outside the form, so the feature list always belongs to the chosen image; nothing is pre-filled for a real project (only the fictional demo shows its 9.60 m survey value); pixel endpoints must be entered, lie inside the image and be at least 20 px apart; a reference 2x or more away from the prior scale cues is refused unless you tick "use anyway", and then the twin is not rebuilt automatically; the reference card shows its target, image and the span it was confirmed on, and a reference whose annotation was edited or deleted is reported as not in use.  Prompt for the most useful measurement and a "continue with labelled assumptions" option, unknowns and warnings (concept-reference caveat shown prominently), and hypothesis cards with dimension ranges, subjective plausibility and assumption labels → build the twin. |
+| **Twin** | 3D massing coloured by visual finish or by evidence basis; information-level banner; editors for blocks, roofs, openings, hidden-side assumptions, construction assemblies ("appearance does not establish structure") and the foundation option - each value with its basis badge and range, and the observed roof rise where one couples span and pitch (a warning appears when a roof no longer reproduces it).  Every edit goes through `apply_twin_edit` / `apply_construction_assemblies` and recalculates quantities and costs at once; attached blocks follow their parent and coupled values are re-derived (see *Editing the twin*); the edit log lists every change, including system follow-ups.  Summary cards (GEA, GIA, footprint, gross and net external wall, roof surface, glazing, doors, separating walls) carry their basis; banners flag a twin built only from concept references and a twin whose evidence was removed. |
+| **Quantities** | Bill of quantities with filters (element, status, basis, text); select a line to see its formula, measure and trace links while the 3D view highlights the wall pieces, blocks, roofs, openings or storeys it was measured from - the selection is remembered by line id, so changing a filter never moves the trace to another line (it is cleared when the line is filtered out).  Allowances and unresolved items are listed separately; a geometry summary (gross and net external wall, glazing, door and garage-door areas, separating walls, roof plan / surface, floor and ceiling areas, GEA / GIA, heated volume, each with its basis; also `geometry_summary.csv`); measurement conventions and GEA / GIA by storey. |
+| **Costs** | Boundary cards (amount, basis badge, definition, exclusions; `≥` and "incomplete" when items in their layers are unpriced; GDV shown separately), layer waterfall, cost lines with rate provenance (source, type, date, location, tax, delivery, validity, range), rate book upload (CSV / JSON, validated, load warnings shown escaped) and inline editing, a formula-safe "Download rate book (CSV)", prominent warnings when the estimate is incomplete (with its cause) or the pricing date excludes newer higher-priority rates, a concept-reference notice, commercial parameters (shown in the currency they were entered in; prelim / log fallbacks labelled with the rate actually in force; fees with "recurs per house"; the "applied" message reports every boundary that changed, e.g. "total development cost none → £412,503; contract sum unchanged"), and the uncertainty simulation (samples, seed, method, groups as keyed widgets: every submission runs exactly what was entered, and returning to the tab shows the last run's settings - 300 samples only before the first run, with a note below 500 → histogram + CDF with P10 / P50 / P90, quantiles, tornado, "what to resolve next", results by ground class, interval-type statement). |
+| **Scenarios** | Build-scenario comparison (table + small multiples: cost, cost / m², GIA, wall thickness, carbon, HLC, programme, labour; with P10 / P90 included the cost panel draws the P10-P90 range as a line with a P50 diamond next to the deterministic bar, which uses modal values and can sit below P10; "questions that choose between scenarios" lists the hypothesis / construction / foundation / price-level cost spreads and the action that resolves each - `simulation.scenarios.scenario_spread_entries`), repeat-build economics (editable learning model and rate, tiers, factory / site step costs, houses per site, site overhead share; average, incremental and underlying marginal cost for the factory-gate and installed boundaries with markers at n = 1 / 10 / 25 / 50 / 100, the steps between n and n+1, their definitions and the single house vs installed C(1) reconciliation), programme Gantt (critical path in gold), deliveries, carbon by element and heat-loss breakdown - each with its assumptions and boundary. |
 
 The sidebar loads the fictional demo (optionally with the left elevation and an AI-concept
 example), creates a new project, saves / loads projects through `io.persistence.ProjectStore`

@@ -11,7 +11,7 @@ from ... import __version__
 from .. import fmt
 from .. import state as S
 from ..components import guard, html
-from ..theme import esc, tag
+from ..theme import badge, esc, tag
 
 CURRENCIES = ("GBP", "EUR", "USD", "AUD", "CAD", "NZD", "CHF", "SEK", "NOK", "DKK", "PLN")
 
@@ -238,32 +238,73 @@ def render_header(ws: S.Workspace, ev: Optional[S.Evaluation]) -> None:
         return (f'<div class="hbv-kpi-d" title="change caused by the last edit">Δ {"+" if d > 0 else "−"}'
                 f'{f(abs(d))}</div>')
 
+    from ...core.provenance import weakest_basis
+    from ...io.export import geometry_bases, is_fictional_rate
+
+    twin = p.twin
+    est = ev.estimate
+    bnd = {b.key: b for b in est.boundaries}
+    gia_basis = geometry_bases(twin)["gia"]
+
+    def money_kpi(key: str, value: float) -> str:
+        b = bnd.get(key)
+        return ("≥ " if b is not None and b.unresolved_count else "") + fmt.money(value, cur)
+
+    def basis_of(key: str):
+        b = bnd.get(key)
+        return b.basis if b is not None else None
+
+    cons_b = basis_of("construction_incl_contingency")
     gia_v, gia_u = fmt.disp(k["gia_m2"], "m2", system)
     items = [
-        ("GIA", f"{gia_v:,.1f} {fmt.unit_label(gia_u)}", delta("gia_m2", lambda d: f"{fmt.disp(d, 'm2', system)[0]:,.1f}")),
-        ("Construction incl. cont.", fmt.money(k["construction"], cur), delta("construction", lambda d: fmt.money(d, cur))),
-        ("Contract sum", fmt.money(k["contract_sum"], cur), delta("contract_sum", lambda d: fmt.money(d, cur))),
-        ("Cost / m² GIA", fmt.money(k["per_m2"], cur), delta("per_m2", lambda d: fmt.money(d, cur))),
-        ("Programme", f"{k['programme_weeks']:.1f} wk", delta("programme_weeks", lambda d: f"{d:.1f} wk")),
-        ("HLC", f"{k['hlc']:,.0f} W/K", delta("hlc", lambda d: f"{d:,.1f} W/K")),
-        ("Embodied carbon", f"{k['carbon'] / 1000:,.1f} tCO₂e", delta("carbon", lambda d: f"{d / 1000:,.2f} t")),
+        ("GIA", f"{gia_v:,.1f} {fmt.unit_label(gia_u)}",
+         delta("gia_m2", lambda d: f"{fmt.disp(d, 'm2', system)[0]:,.1f}"), gia_basis),
+        ("Construction incl. cont.", money_kpi("construction_incl_contingency", k["construction"]),
+         delta("construction", lambda d: fmt.money(d, cur)), cons_b),
+        ("Contract sum", money_kpi("contract_sum", k["contract_sum"]),
+         delta("contract_sum", lambda d: fmt.money(d, cur)), basis_of("contract_sum")),
+        ("Cost / m² GIA", money_kpi("construction_incl_contingency", k["per_m2"]),
+         delta("per_m2", lambda d: fmt.money(d, cur)), weakest_basis(cons_b, gia_basis) if cons_b else None),
+        ("Programme", f"{k['programme_weeks']:.1f} wk", delta("programme_weeks", lambda d: f"{d:.1f} wk"), None),
+        ("HLC", f"{k['hlc']:,.0f} W/K", delta("hlc", lambda d: f"{d:,.1f} W/K"), None),
+        ("Embodied carbon", f"{k['carbon'] / 1000:,.1f} tCO₂e", delta("carbon", lambda d: f"{d / 1000:,.2f} t"), None),
     ]
-    body = "".join(f'<div class="hbv-kpi"><div class="hbv-kpi-k">{esc(a)}</div><div class="hbv-kpi-v">{esc(b)}</div>{c}</div>'
-                   for a, b, c in items)
-    twin = p.twin
-    status = S.twin_status(ws)
-    from ...io.export import is_fictional_rate
+    def kpi_badge(name: str, bb) -> str:
+        if bb is None:
+            return ""
+        tip = f"{name}: weakest basis of the values it is derived from"
+        return f'<div class="hbv-kpi-b">{badge(bb, title=tip)}</div>'
 
+    body = "".join(f'<div class="hbv-kpi"><div class="hbv-kpi-k">{esc(a)}</div><div class="hbv-kpi-v">{esc(b)}</div>'
+                   + kpi_badge(a, bb) + f"{c}</div>" for a, b, c, bb in items)
+    status = S.twin_status(ws)
+    concept = S.concept_source(ws)
     fictional = sum(1 for r in p.rate_book.rates if is_fictional_rate(r))
+    scale_txt = f"scale: {twin.calibration_method.replace('_', ' ')}"
+    if status == "orphaned":
+        scale_txt += " (from removed evidence)"
     tags = [tag(f"twin v{twin.version} · {twin.source_hypothesis_id or 'manual'}", tone="gold"),
-            tag(f"scale: {twin.calibration_method.replace('_', ' ')}",
-                tone="neutral" if twin.calibration_method == "reference_measurement" else "warn")]
+            tag(scale_txt, tone="neutral" if twin.calibration_method == "reference_measurement" and status != "orphaned"
+                else "warn")]
+    if concept == "all":
+        tags.append(tag("from concept reference (indicative)", tone="danger",
+                        title="Every image the twin was measured from is an AI concept / rendering / sketch: no "
+                              "dimension describes an existing or measured building."))
+    elif concept == "scale":
+        tags.append(tag("scale from a concept reference", tone="danger",
+                        title="The calibration image is an AI concept / rendering / sketch."))
     if fictional:
         tags.append(tag("FICTIONAL demo prices", tone="warn", title="Rates with source_type fictional_demo"))
-    if ev.estimate.unresolved_items:
-        tags.append(tag(f"{len(ev.estimate.unresolved_items)} unresolved cost item(s)", tone="danger"))
+    if est.unresolved_items:
+        tags.append(tag(f"incomplete - {len(est.unresolved_items)} item(s) unpriced", tone="danger",
+                        title="Unresolved quantities / missing rates are not priced: the cost figures are lower "
+                              "bounds (Costs view)."))
+    if S.reference_conflict(p.calibration) is not None:
+        tags.append(tag("reference conflicts with scale cues", tone="danger"))
     if status == "stale":
         tags.append(tag("twin based on earlier evidence", tone="danger"))
+    elif status == "orphaned":
+        tags.append(tag("evidence removed - twin kept as a manual model", tone="warn"))
     html(f'<div class="hbv-kpis">{body}</div><div style="display:flex;gap:.35rem;flex-wrap:wrap;margin:-.15rem 0 .3rem 0">'
          + "".join(tags) + "</div>")
 

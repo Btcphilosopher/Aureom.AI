@@ -22,6 +22,7 @@ gable/monopitch infill above the plate).  Masonry below FFL is substructure.
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal, Optional
@@ -137,8 +138,25 @@ class DetectedFeature(_Model):
     @field_validator("bbox")
     @classmethod
     def _bbox_ok(cls, v):
+        if v is not None and not all(math.isfinite(c) for c in v):
+            raise ValueError("bbox coordinates must be finite numbers")
         if v is not None and (v[2] < v[0] or v[3] < v[1]):
             raise ValueError("bbox must be (x0, y0, x1, y1) with x1>=x0 and y1>=y0")
+        return v
+
+    @field_validator("line")
+    @classmethod
+    def _line_ok(cls, v):
+        # (additive) NaN / inf coordinates would pass every ordering check downstream
+        if v is not None and not all(math.isfinite(c) for c in v):
+            raise ValueError("line coordinates must be finite numbers")
+        return v
+
+    @field_validator("polygon")
+    @classmethod
+    def _polygon_ok(cls, v):
+        if v is not None and not all(math.isfinite(c) for p in v for c in p):
+            raise ValueError("polygon coordinates must be finite numbers")
         return v
 
     def width_px(self) -> Optional[float]:
@@ -290,9 +308,24 @@ class AnalysisResult(_Model):
     warnings: list[str] = Field(default_factory=list)
     model_versions: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
+    #: (additive) Images treated as concept references (AI concept / rendering / sketch by kind, fixture hint
+    #: or VLM): their measurements are capped at INFERRED and never used as evidence of the real building's
+    #: geometry or appearance (no multi-view links, no visual finishes, not the twin's geometry source).
+    concept_image_ids: list[str] = Field(default_factory=list)
+    #: (additive) Observed building parts the parametric twin does not model (balcony, chimney, unmodelled
+    #: garage / extension boxes), one text per feature; quantities exclude them.
+    unmodelled_features: list[str] = Field(default_factory=list)
 
     def all_features(self) -> list[DetectedFeature]:
         return [f for a in self.analyses for f in a.features if f.active]
+
+    def is_concept_image(self, image_id: Optional[str]) -> bool:
+        """(additive) True for a concept reference (``concept_image_ids``, else the image's kind)."""
+        if image_id is None:
+            return False
+        if image_id in self.concept_image_ids:
+            return True
+        return any(i.image_id == image_id and i.is_concept_reference for i in self.images)
 
 
 # =============================================================================
@@ -310,6 +343,12 @@ class ReferenceMeasurement(_Model):
     source: str = "user"
     #: Measurement tolerance of the real length, in ``unit``.
     tolerance: float = 0.02
+    #: (additive, UI / pipeline) Snapshot of the target feature when the reference was confirmed: its
+    #: feature type and pixel span.  When ``feature_id`` later resolves to a feature of another type, or one
+    #: whose span drifted beyond its pixel band, the reference is reported as not usable instead of silently
+    #: re-targeting (``pipeline.reference_target_problem``).  ``None`` = no snapshot (no check).
+    feature_type: Optional[str] = None
+    feature_span_px: Optional[float] = None
 
 
 class ScaleCue(_Model):
@@ -386,6 +425,11 @@ class Block(_Model):
     heated: bool = True
     visible_sides: list[Side] = Field(default_factory=list)
     notes: str = ""
+    #: (additive) Wall-plate (eaves) height above ground measured in an elevation with a calibrated scale,
+    #: with its evidence ids; ``None`` when not measured.  While set, ``ground_floor_level + storeys x
+    #: floor_to_floor`` should reproduce it: a storeys edit re-derives a non-confirmed floor-to-floor, and
+    #: ``twin.builder.coupling_warnings`` reports a plate that no longer matches.
+    observed_eaves_m: Optional[TrackedValue] = None
 
 
 class OpeningKind(str, Enum):
@@ -440,6 +484,9 @@ class GeometryHypothesis(_Model):
     evidence_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     calibration_method: str = "none"
+    #: (additive) Observed building parts not modelled as geometry (balcony, chimney, unmodelled garage /
+    #: extension boxes; ``AnalysisResult.unmodelled_features``): quantities and costs exclude them.
+    unmodelled_elements: list[str] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -700,6 +747,13 @@ class BuildingTwin(_Model):
     source_hypothesis_id: Optional[str] = None
     calibration_method: str = "none"
     edit_log: list[EditRecord] = Field(default_factory=list)
+    #: (additive, pipeline) Canonical SHA-256 of the hypothesis this twin was built from (set by
+    #: ``pipeline.build_parametric_twin``).  ``run_pipeline`` compares it with the regenerated hypothesis to
+    #: tell whether the evidence / calibration changed since the twin was built; ``None`` = not recorded.
+    source_fingerprint: Optional[str] = None
+    #: (additive) Observed building parts not modelled as geometry, copied from the hypothesis
+    #: (``GeometryHypothesis.unmodelled_elements``); the bill of quantities should list them as unresolved.
+    unmodelled_elements: list[str] = Field(default_factory=list)
     information_level: str = (
         "Conceptual parametric reconstruction from images and labelled assumptions. "
         "Not a measured survey, not a design, not construction-ready BIM."
@@ -1025,6 +1079,10 @@ class FeeItem(_Model):
 class CostParameters(_Model):
     """Project-level commercial assumptions (all labelled, all editable)."""
 
+    #: (additive) Currency of the money amounts below (fallbacks, land, taxes, sales value).  ``None`` = the
+    #: project currency (legacy).  When it differs from ``ProjectSettings.currency`` the amounts are
+    #: converted with ``ProjectSettings.fx_rates`` or, without an FX rate, left unpriced (unresolved).
+    currency: Optional[str] = None
     prelims_weekly_cost: float = 1800.0
     prelims_fixed_setup: float = 6500.0
     #: Programme length used for time-related prelims when no sequence is supplied.
@@ -1083,6 +1141,11 @@ class CostBoundary(_Model):
     amount: float
     definition: str
     excludes: str = ""
+    #: (additive, costing) Weakest basis of the cost lines summed in this boundary (ASSUMED when absent).
+    basis: Basis = Basis.ASSUMED
+    #: (additive, costing) Unresolved items (missing rates / quantities / charges) that belong to this
+    #: boundary's layers: when > 0 the amount is incomplete - a lower bound, not the cost.
+    unresolved_count: int = 0
 
 
 class MaterialOrder(_Model):
@@ -1520,6 +1583,13 @@ class ScenarioOutcome(_Model):
     cost_p50: Optional[float] = None
     cost_p90: Optional[float] = None
     key_assumptions: list[str] = Field(default_factory=list)
+    #: (additive) Assembly ids of the evaluated house, element -> assembly id (``AssemblySelection`` fields,
+    #: foundation included; per-block overrides as ``"<element>@<block>"``), so the between-scenario spread
+    #: can be attributed to the hypothesis, the construction method or the foundation
+    #: (``simulation.scenarios.scenario_spread_entries``).  Empty for outcomes saved before it existed.
+    assemblies: dict[str, str] = Field(default_factory=dict)
+    #: (additive) Price-level multiplier applied to every rate of this scenario.
+    rate_multiplier: float = 1.0
 
 
 class ScenarioComparison(_Model):

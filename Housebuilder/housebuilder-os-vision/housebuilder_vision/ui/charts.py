@@ -107,18 +107,58 @@ def feature_hover(f: DetectedFeature) -> str:
     return "<br>".join(parts)
 
 
+_BIG_FEATURES = ("facade", "roof", "finish_region", "building_outline", "garage", "extension")
+
+
+def _hover_points(f: DetectedFeature, width_px: int, height_px: int) -> list[tuple[float, float]]:
+    """Points that carry a feature's hover text (fills only show the trace name in plotly).
+
+    Openings and other small boxes: centre and corners; big shapes (facade, roof, finish regions, outlines):
+    corners and edge midpoints plus the centre; lines: five points along the line.  A box covering most of
+    the image (e.g. an 'other: image metadata' box) gets its corners only, so it never captures the hover of
+    the windows and doors inside it.
+    """
+    if f.line is not None:
+        x0, y0, x1, y1 = f.line
+        return [(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t) for t in (0.0, 0.25, 0.5, 0.75, 1.0)]
+    if f.polygon:
+        pts = [(float(x), float(y)) for x, y in f.polygon]
+        cx, cy = sum(x for x, _ in pts) / len(pts), sum(y for _, y in pts) / len(pts)
+        return pts + [(cx, cy)]
+    if f.bbox is None:
+        return []
+    x0, y0, x1, y1 = f.bbox
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    centre = (0.5 * (x0 + x1), 0.5 * (y0 + y1))
+    if (x1 - x0) * (y1 - y0) > 0.5 * max(1, width_px) * max(1, height_px) \
+            and f.feature_type.value not in _BIG_FEATURES:
+        return corners
+    if f.feature_type.value in _BIG_FEATURES:
+        mids = [(centre[0], y0), (x1, centre[1]), (centre[0], y1), (x0, centre[1])]
+        return corners + mids + [centre]
+    return corners + [centre]
+
+
 def overlay_figure(width_px: int, height_px: int, features: Sequence[DetectedFeature], *,
                    preview_uri: Optional[str] = None, scale: float = 1.0, show_inactive: bool = False,
                    selected_id: Optional[str] = None, height: int = 560) -> go.Figure:
-    """Image with every feature outlined in its basis colour + dash; hover gives the evidence."""
+    """Image with every feature outlined in its basis colour + dash; hover gives the evidence.
+
+    Outlines (and their faint fills) never take the hover; every feature instead has invisible hover
+    points (:func:`_hover_points`) in one trace drawn on top, so windows and doors inside a facade, roof or
+    image-wide box show their own type, method and version, confidence, pixel uncertainty and evidence.
+    Big shapes are drawn first and openings on top.
+    """
     fig = go.Figure()
     if preview_uri:
         fig.add_trace(go.Image(source=preview_uri, x0=0, y0=0, dx=1.0 / scale, dy=1.0 / scale, hoverinfo="skip",
                                name="image"))
     seen: set[str] = set()
     order = {b: i for i, b in enumerate(BASIS_ORDER)}
-    feats = sorted(features, key=lambda f: (f.active, f.feature_type.value in ("facade", "roof", "finish_region")),
-                   reverse=False)
+    feats = sorted(features, key=lambda f: (f.active, f.feature_type.value not in _BIG_FEATURES))
+    hx: list[float] = []
+    hy: list[float] = []
+    ht: list[str] = []
     for f in feats:
         if not f.active and not show_inactive:
             continue
@@ -131,7 +171,7 @@ def overlay_figure(width_px: int, height_px: int, features: Sequence[DetectedFea
         group = b.value if f.active else "inactive"
         name = basis_label(b) if f.active else "Inactive (rejected / superseded)"
         sel = f.feature_id == selected_id
-        big = f.feature_type.value in ("facade", "roof", "finish_region", "building_outline", "garage", "extension")
+        big = f.feature_type.value in _BIG_FEATURES
         fill_alpha = 0.0 if not closed else (0.05 if big else 0.13)
         fig.add_trace(go.Scatter(
             x=xs, y=ys, mode="lines", name=name, legendgroup=group, showlegend=group not in seen,
@@ -139,14 +179,22 @@ def overlay_figure(width_px: int, height_px: int, features: Sequence[DetectedFea
             line=dict(color=GOLD if sel else col, width=3.0 if sel else (1.3 if big else 1.8),
                       dash="dot" if not f.active else BASIS_DASH[b]),
             fill="toself" if closed else None, fillcolor=hex_to_rgba(col, fill_alpha) if closed else None,
-            hoveron="fills+points" if closed else "points", hovertext=feature_hover(f), hoverinfo="text",
-            opacity=0.75 if not f.active else 1.0))
+            hoverinfo="skip", opacity=0.75 if not f.active else 1.0))
         seen.add(group)
+        text = feature_hover(f)
+        for x, y in _hover_points(f, width_px, height_px):
+            hx.append(float(x))
+            hy.append(float(y))
+            ht.append(text)
+    if hx:
+        fig.add_trace(go.Scatter(x=hx, y=hy, mode="markers", name="evidence details", showlegend=False,
+                                 marker=dict(size=16, color="rgba(0,0,0,0)"), hovertext=ht,
+                                 hovertemplate="%{hovertext}<extra></extra>"))
     fig.update_xaxes(visible=False, range=[0, width_px], constrain="domain")
     fig.update_yaxes(visible=False, range=[height_px, 0], scaleanchor="x", scaleratio=1, constrain="domain")
     _base(fig, height=height, margin=dict(l=0, r=0, t=26, b=0), plot_bgcolor=GRAPHITE_SURFACE,
           legend=dict(orientation="h", y=1.0, yanchor="bottom", x=0, title=dict(text="Evidence basis ")),
-          dragmode="pan", hoverlabel=dict(align="left"))
+          dragmode="pan", hovermode="closest", hoverdistance=24, hoverlabel=dict(align="left"))
     return fig
 
 
@@ -539,6 +587,33 @@ SCENARIO_METRICS: tuple[tuple[str, str, float, str], ...] = (
 )
 
 
+def scenario_interval_traces(outs: Sequence[ScenarioOutcome], ids: Sequence[str], currency: str) -> list[go.Scatter]:
+    """P10-P90 interval segments and P50 markers of the simulated construction cost, one row per scenario.
+
+    Drawn as their own traces (not as error bars around the deterministic bar): the deterministic estimate
+    uses modal values and may lie below P10, which error bars cannot show (negative half-widths).
+    """
+    rows = [(i, o) for i, o in zip(ids, outs) if o.cost_p10 is not None and o.cost_p90 is not None]
+    if not rows:
+        return []
+    xs: list[Optional[float]] = []
+    ys: list[Optional[str]] = []
+    for i, o in rows:
+        lo, hi = sorted((float(o.cost_p10), float(o.cost_p90)))
+        xs += [lo, hi, None]
+        ys += [i, i, None]
+    seg = go.Scatter(x=xs, y=ys, mode="lines", line=dict(color=IVORY_MUTED, width=1.6), showlegend=False,
+                     hoverinfo="skip", name="P10-P90")
+    p50 = [(i, o) for i, o in rows if o.cost_p50 is not None]
+    mk = go.Scatter(
+        x=[float(o.cost_p50) for _, o in p50], y=[i for i, _ in p50], mode="markers", showlegend=False,
+        name="P50", marker=dict(symbol="diamond", size=7, color=GOLD, line=dict(width=0)),
+        customdata=[[float(o.cost_p10), float(o.cost_p90), float(o.construction_cost)] for _, o in p50],
+        hovertemplate=(f"P50 %{{x:,.0f}} {esc(currency)}<br>P10-P90 %{{customdata[0]:,.0f}} - "
+                       f"%{{customdata[1]:,.0f}}<br>deterministic %{{customdata[2]:,.0f}}<extra></extra>"))
+    return [seg, mk]
+
+
 def scenario_multiples(outcomes: Sequence[ScenarioOutcome], currency: str, *, height: int = 430) -> go.Figure:
     titles = [f"{t} ({u.replace('CUR', currency)})" for t, _, _, u in SCENARIO_METRICS]
     fig = make_subplots(rows=2, cols=4, subplot_titles=titles, shared_yaxes=True, horizontal_spacing=0.035,
@@ -548,19 +623,18 @@ def scenario_multiples(outcomes: Sequence[ScenarioOutcome], currency: str, *, he
     for idx, (_t, attr, k, unit) in enumerate(SCENARIO_METRICS):
         r, c = idx // 4 + 1, idx % 4 + 1
         vals = [float(getattr(o, attr)) * k for o in outs]
-        err = None
-        if attr == "construction_cost" and all(o.cost_p10 is not None and o.cost_p90 is not None for o in outs):
-            err = dict(type="data", symmetric=False, array=[o.cost_p90 - o.construction_cost for o in outs],
-                       arrayminus=[o.construction_cost - o.cost_p10 for o in outs], color=IVORY_MUTED, thickness=1.2,
-                       width=4)
         fmt = "{:,.0f}" if max(abs(v) for v in vals or [0]) >= 100 else "{:,.1f}"
         fig.add_trace(go.Bar(
-            y=ids, x=vals, orientation="h", marker=dict(color=SINGLE_SERIES, line=dict(width=0)), error_x=err,
+            y=ids, x=vals, orientation="h", marker=dict(color=SINGLE_SERIES, line=dict(width=0)),
             text=[fmt.format(v) for v in vals], textposition="inside", insidetextanchor="end",
             textfont=dict(size=9.5, color=IVORY, family="IBM Plex Mono"), showlegend=False,
             customdata=[esc(o.name) for o in outs],
-            hovertemplate="%{customdata}<br>%{x:,.2f} " + esc(unit.replace("CUR", currency)) + "<extra></extra>"),
+            hovertemplate="%{customdata}<br>deterministic %{x:,.2f} " + esc(unit.replace("CUR", currency))
+                          + "<extra></extra>"),
             row=r, col=c)
+        if attr == "construction_cost":
+            for tr in scenario_interval_traces(outs, ids, currency):
+                fig.add_trace(tr, row=r, col=c)
         fig.update_xaxes(rangemode="tozero", showticklabels=False, showgrid=False, row=r, col=c)
     for a in fig.layout.annotations:
         a.font = dict(size=10.5, color=IVORY_MUTED)
@@ -570,4 +644,4 @@ def scenario_multiples(outcomes: Sequence[ScenarioOutcome], currency: str, *, he
 
 __all__ = ["SCENARIO_METRICS", "carbon_chart", "feature_hover", "gantt", "hbar", "heat_loss_chart",
            "histogram_cdf", "layer_waterfall", "overlay_figure", "repeat_chart", "resolve_refs",
-           "scenario_multiples", "tornado", "twin_figure"]
+           "scenario_interval_traces", "scenario_multiples", "tornado", "twin_figure"]

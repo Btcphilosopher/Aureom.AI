@@ -23,32 +23,64 @@ Measurement conventions (per facade / block hint)
   into pixel lengths; it is reported in ``ImageAnalysis.perspective`` and
   included in the pitch uncertainty.
 * ``storeys`` (``INFERRED``): number of window rows (windows clustered by
-  vertical centre), cross-checked with storey lines (string courses/floor
-  bands) and with the wall height relative to a door (which uses the labelled
-  door-height and floor-to-floor *assumptions*); a VLM storey count, if
-  present, is only a cross-check.  When only the door-height check is
-  available the count is ``INFERRED`` if it is robust to the whole assumed
-  prior range, otherwise ``ASSUMED``.
-* ``apparent_pitch_deg`` (``OBSERVED``): only when a gable triangle is visible
-  in elevation: ``atan(2 * rise / base)``, with vertex pixel errors, slope
+  vertical centre; a row of doors / garage doors standing on the ground
+  entirely below the lowest window row counts as a storey too), cross-checked
+  with storey lines (string courses/floor bands) and with the wall height
+  relative to a door (which uses the labelled door-height and floor-to-floor
+  *assumptions*).  When only the door-height check is available the count is
+  ``INFERRED`` if it is robust to the whole assumed prior range, otherwise
+  ``ASSUMED``.  **User storey indices are authoritative:** an opening
+  annotation (``USER_CONFIRMED``) with an integer ``attributes["storey"]``
+  0-9 (0 = ground floor) keeps that index, and the storey count is at least
+  ``max(user storey) + 1`` (``USER_CONFIRMED``, capped at ``INFERRED`` for
+  concept references); when every window carries a user storey, window-row
+  clustering no longer changes the count (disagreements are warned).  A VLM
+  storey count, if present, is only a cross-check: it adds a warning / note
+  and never changes the value or its range.
+* ``apparent_pitch_deg``: only when a gable triangle is visible in
+  elevation: ``atan(2 * rise / base)``, with vertex pixel errors, slope
   asymmetry and perspective foreshortening propagated into ``low``/``high``.
-  Never computed from a hip end or from a roof band seen eaves-on.
-* Openings get a storey index from storey lines, or from midpoints between
-  window rows, and a ``block_hint`` from the ``block`` attribute or by
-  containment in the smallest enclosing facade box.
+  The triangle is the roof polygon (3 points, or more with
+  ``gable_visible=True``), or - for a roof *box* with ``gable_visible=True``
+  and no polygon (the UI annotation) - the box base with the apex at its
+  top-centre, i.e. ``atan(2 h / w)``.  The basis is the roof feature's basis
+  (``OBSERVED`` for detections, ``USER_CONFIRMED`` for annotations; capped
+  at ``INFERRED`` for concept references).  Never computed from a hip end or
+  from a roof band seen eaves-on.  Roof annotations may also carry
+  ``ridge`` / ``ridge_orientation`` (``parallel`` / ``perpendicular`` to the
+  view) and ``roof_form``; a ``roof_form`` on the block's facade annotation is
+  used when no roof feature states one.
+* Openings get a storey index from the user's ``storey`` attribute, else from
+  storey lines, or from midpoints between window rows, and a ``block_hint``
+  from the ``block`` attribute or by containment in the smallest enclosing
+  facade box.
+* Balconies, chimneys and garage / extension boxes are not modelled as
+  geometry; each active one is listed in the warnings and the unknowns
+  (quantities exclude it) and in ``AnalysisResult.unmodelled_features``.
 * Finishes are :class:`ObservedFinish` (appearance only, with the caveat that
   appearance does not establish structure or build-up).
 
 Provenance rules
 ----------------
 * Detections from fixtures/manual annotation are ``OBSERVED`` image evidence;
-  manual features supplied through ``manual_features`` are recorded as
-  ``USER_CONFIRMED`` and override overlapping detections (which are kept but
-  deactivated, with an :class:`EditRecord`).
+  manual features supplied through ``manual_features`` are validated like
+  detector output (finite coordinates within 10 % of the image, else dropped
+  with a warning naming them), recorded as ``USER_CONFIRMED`` and override
+  overlapping detections (which are kept but deactivated, with an
+  :class:`EditRecord`).  An *inactive* manual feature never supersedes,
+  calibrates or contributes anything: an inactive copy of a detection is a
+  rejection (the detection is deactivated and keeps its basis, method and
+  evidence; the rejection record is appended to its history), and an
+  inactive annotation keeps its basis and records the rejection (actor
+  ``user``, reason ``rejected``).
 * Concept references (AI concept, rendering, sketch — from ``ImageAsset.kind``,
   fixture metadata or the VLM) never yield ``OBSERVED`` measurements: their
-  bases are capped at ``INFERRED`` and a warning states that geometry may be
-  inconsistent and dimensions are indicative only.  For AI concepts simple
+  bases are capped at ``INFERRED`` - the facade measurements *and* the stored
+  features (an :class:`EditRecord` "concept reference: capped at inferred" is
+  added) - and a warning states that geometry may be inconsistent and
+  dimensions are indicative only.  Their ids are listed in
+  ``AnalysisResult.concept_image_ids``; concept views are never scale-linked
+  by the multi-view combination (no concept depth evidence).  For AI concepts simple
   internal inconsistencies are checked and recorded (misaligned window rows,
   overlapping openings, openings outside their facade, VLM-reported issues).
 * ``unknowns`` always lists what images cannot establish: structural system
@@ -120,6 +152,19 @@ _ROOF_SYNONYMS = {"gabled": "gable", "hipped": "hip", "mono-pitch": "monopitch",
 _ROOF_FORMS = {"gable", "hip", "flat", "monopitch"}
 _PARALLEL = {"parallel_to_view", "parallel", "along_facade", "horizontal", "x"}
 _PERPENDICULAR = {"perpendicular_to_view", "perpendicular", "end_on", "towards_viewer", "y"}
+_RIDGE_ATTRS = ("ridge_orientation", "ridge")
+
+#: Method recorded for manual annotations without a method of their own (also used by the UI editor).
+MANUAL_METHOD = "manual-annotation"
+#: Reason of the EditRecord added when a concept-reference feature's basis is capped.
+CONCEPT_CAP_REASON = "concept reference: capped at inferred"
+#: Reason of the EditRecord added to an inactive (unticked) annotation.
+REJECTED_REASON = "rejected"
+#: User storey indices accepted on opening annotations (0 = ground floor).
+MAX_USER_STOREY = 9
+#: Evidence of real building parts that the parametric twin does not model as geometry.
+UNMODELLED_TYPES: dict[FeatureType, str] = {FeatureType.BALCONY: "balcony", FeatureType.CHIMNEY: "chimney",
+                                            FeatureType.GARAGE: "garage", FeatureType.EXTENSION: "extension"}
 
 UNKNOWN_STRUCTURE = ("Structural system and structural material: not identifiable from appearance (a brick-like "
                      "facade may be a masonry cavity wall or a timber frame with a brick outer leaf).")
@@ -241,11 +286,25 @@ def _sig(f: Optional[DetectedFeature], default: float = 3.0) -> float:
 # =============================================================================
 # Feature hygiene and manual annotations
 # =============================================================================
+def _geometry_ok(asset: ImageAsset, f: DetectedFeature) -> bool:
+    """Every coordinate finite and the geometry within 10 % of the image on each side."""
+    coords: list[Any] = [*(f.bbox or ()), *(f.line or ()), *[c for p in (f.polygon or []) for c in p]]
+    try:
+        if not coords or not all(math.isfinite(float(v)) for v in coords):
+            return False
+    except (TypeError, ValueError):
+        return False
+    b = _bbox_of(f)
+    if b is None:
+        return False
+    mx, my = 0.10 * asset.width_px, 0.10 * asset.height_px
+    return not (b[0] < -mx or b[1] < -my or b[2] > asset.width_px + mx or b[3] > asset.height_px + my)
+
+
 def _sanitize_features(asset: ImageAsset, feats: Sequence[Any], source: str, warnings: list[str],
                        taken_ids: set[str]) -> list[DetectedFeature]:
     """Re-validate adapter output (untrusted): type, image id, bounds, unique ids."""
     out: list[DetectedFeature] = []
-    mx, my = 0.10 * asset.width_px, 0.10 * asset.height_px
     dropped = 0
     for f in feats or []:
         if not isinstance(f, DetectedFeature):
@@ -254,11 +313,7 @@ def _sanitize_features(asset: ImageAsset, feats: Sequence[Any], source: str, war
         if f.image_id != asset.image_id:
             dropped += 1
             continue
-        b = _bbox_of(f)
-        if b is None or not all(math.isfinite(v) for v in b):
-            dropped += 1
-            continue
-        if b[0] < -mx or b[1] < -my or b[2] > asset.width_px + mx or b[3] > asset.height_px + my:
+        if not _geometry_ok(asset, f):
             dropped += 1
             continue
         if f.feature_id in taken_ids:
@@ -305,21 +360,91 @@ def _supersedes(m: DetectedFeature, d: DetectedFeature, img_h: float) -> bool:
     return False
 
 
+def _sanitize_manual(asset: ImageAsset, manual: Sequence[Any], warnings: list[str]) -> list[DetectedFeature]:
+    """Validate manual features like adapter output (finite, within 10 % of the image), keeping their ids.
+
+    Features of another image, non-features, invalid geometry and repeated ids are dropped; the
+    warning names the dropped ids.
+    """
+    out: list[DetectedFeature] = []
+    bad: list[str] = []
+    seen: set[str] = set()
+    for f in manual or []:
+        if not isinstance(f, DetectedFeature):
+            bad.append("<not a feature>")
+            continue
+        if f.image_id != asset.image_id:
+            warnings.append(f"Manual feature {f.feature_id} refers to image {f.image_id}, not {asset.image_id}; "
+                            "ignored.")
+            continue
+        if not _geometry_ok(asset, f):
+            bad.append(f.feature_id)
+            continue
+        if f.feature_id in seen:
+            warnings.append(f"Manual feature id {f.feature_id} is repeated; only the first one is used.")
+            continue
+        seen.add(f.feature_id)
+        out.append(f)
+    if bad:
+        warnings.append(f"{len(bad)} manual feature(s) were invalid (non-finite coordinates, no geometry or outside "
+                        f"the image) and were ignored: {', '.join(bad[:10])}{' ...' if len(bad) > 10 else ''}.")
+    return out
+
+
+def _has_active_record(f: DetectedFeature) -> bool:
+    return any(h.field == "active" for h in f.history)
+
+
+def _reject_record(f: DetectedFeature, reason: str = REJECTED_REASON) -> EditRecord:
+    return EditRecord(actor="user", target=f.feature_id, field="active", old_value=True, new_value=False,
+                      old_basis=f.basis, new_basis=f.basis, reason=reason)
+
+
 def _merge_manual(asset: ImageAsset, detected: list[DetectedFeature], manual: Sequence[DetectedFeature],
-                  warnings: list[str]) -> list[DetectedFeature]:
+                  warnings: list[str]) -> tuple[list[DetectedFeature], set[str]]:
+    """Merge manual features into the detections; returns the features and the ids of real user annotations.
+
+    * An **inactive** manual feature whose id matches a detection is a *rejection* of that detection:
+      the detection is deactivated, keeps its basis, method and evidence, and gets the rejection
+      record (the manual copy's ``active`` record, else one with reason ``rejected``).
+    * Any other manual feature is a user annotation.  Active ones are ``USER_CONFIRMED`` (an
+      ``OBSERVED`` basis - or the ``INFERRED`` basis a concept-reference cap left on a stored
+      annotation - is promoted, with an EditRecord); an id matching a detection replaces it; otherwise
+      overlapping detections are superseded (deactivated with an EditRecord naming the annotation).
+    * An inactive (unticked) annotation keeps its basis, supersedes nothing and records the rejection
+      in its history (actor ``user``, reason ``rejected``).
+    """
     out = list(detected)
     ids = {f.feature_id: i for i, f in enumerate(out)}
+    user_ids: set[str] = set()
     for mf in manual:
-        if mf.image_id != asset.image_id:
-            warnings.append(f"Manual feature {mf.feature_id} refers to image {mf.image_id}, not {asset.image_id}; ignored.")
-            continue
         mf = mf.model_copy(deep=True)
-        if mf.basis == Basis.OBSERVED:
-            rec = EditRecord(actor="user", target=mf.feature_id, field="basis", old_basis=Basis.OBSERVED,
+        if mf.method in ("unknown", ""):
+            mf = mf.model_copy(update={"method": MANUAL_METHOD, "method_version": "user"})
+        if not mf.active and mf.feature_id in ids:  # rejection of a detection
+            old = out[ids[mf.feature_id]]
+            recs = [h for h in mf.history if h.field == "active"] or [_reject_record(old)]
+            known = {(h.field, h.reason, h.timestamp) for h in old.history}
+            new = [h for h in recs if (h.field, h.reason, h.timestamp) not in known]
+            out[ids[mf.feature_id]] = old.model_copy(update={"active": False, "history": [*old.history, *new]},
+                                                     deep=True)
+            continue
+        user_ids.add(mf.feature_id)
+        if not mf.active:
+            if not _has_active_record(mf):
+                mf = mf.model_copy(update={"history": [*mf.history, _reject_record(mf)]})
+            ids[mf.feature_id] = len(out)
+            out.append(mf)
+            continue
+        caps = [h for h in mf.history if h.reason == CONCEPT_CAP_REASON]
+        if caps and mf.basis == Basis.INFERRED and caps[-1].old_basis is not None:
+            # a stored concept-reference annotation: restore its own basis (the cap is re-applied on output)
+            mf = mf.model_copy(update={"basis": caps[-1].old_basis,
+                                       "history": [h for h in mf.history if h.reason != CONCEPT_CAP_REASON]})
+        if mf.basis == Basis.OBSERVED or (mf.basis == Basis.INFERRED and mf.method == MANUAL_METHOD):
+            rec = EditRecord(actor="user", target=mf.feature_id, field="basis", old_basis=mf.basis,
                              new_basis=Basis.USER_CONFIRMED, reason="manual annotation supplied by the user")
             mf = mf.model_copy(update={"basis": Basis.USER_CONFIRMED, "history": [*mf.history, rec]})
-        if mf.method in ("unknown", ""):
-            mf = mf.model_copy(update={"method": "manual-annotation", "method_version": "user"})
         if mf.feature_id in ids:
             old = out[ids[mf.feature_id]]
             rec = EditRecord(actor="user", target=mf.feature_id, field="feature", old_basis=old.basis,
@@ -331,7 +456,28 @@ def _merge_manual(asset: ImageAsset, detected: list[DetectedFeature], manual: Se
                 out[i] = _deactivate(d, mf)
         ids[mf.feature_id] = len(out)
         out.append(mf)
-    return out
+    return out, user_ids
+
+
+def superseded_by(f: DetectedFeature) -> Optional[str]:
+    """Id of the user annotation that superseded (deactivated) ``f``, from its history; else ``None``.
+
+    Lets a UI tell a user who re-ticks a superseded detection which annotation to untick or remove
+    (the annotation, not the detection, is what keeps it inactive)."""
+    prefix = "superseded by user annotation "
+    for h in reversed(f.history):
+        if h.field == "active" and h.reason.startswith(prefix):
+            return h.reason[len(prefix):].strip() or None
+    return None
+
+
+def _cap_concept_feature(f: DetectedFeature) -> DetectedFeature:
+    """Concept-reference feature with its basis capped at ``INFERRED`` (EditRecord added)."""
+    if BASIS_RANK[f.basis] <= BASIS_RANK[Basis.INFERRED]:
+        return f
+    rec = EditRecord(actor="system", target=f.feature_id, field="basis", old_basis=f.basis, new_basis=Basis.INFERRED,
+                     reason=CONCEPT_CAP_REASON)
+    return f.model_copy(update={"basis": Basis.INFERRED, "history": [*f.history, rec]}, deep=True)
 
 
 # =============================================================================
@@ -353,14 +499,37 @@ class _Ctx:
         return _cap(weakest_basis(list(bases)), self.concept)
 
 
+def _ridge_attr(f: DetectedFeature) -> Optional[str]:
+    """``parallel_to_view`` / ``perpendicular_to_view`` from a ``ridge_orientation`` or ``ridge`` attribute."""
+    for key in _RIDGE_ATTRS:
+        v = f.attributes.get(key)
+        if isinstance(v, str):
+            h = v.strip().lower()
+            if h in _PARALLEL:
+                return "parallel_to_view"
+            if h in _PERPENDICULAR:
+                return "perpendicular_to_view"
+    return None
+
+
 def _gable_pitch(roof: DetectedFeature, fu: float) -> Optional[tuple[float, float, str]]:
-    """(pitch deg, 1-sigma deg, note) from a visible gable triangle, else None."""
+    """(pitch deg, 1-sigma deg, note) from a visible gable triangle, else None.
+
+    The triangle is the roof polygon; a roof *box* with ``gable_visible=True`` and no polygon (the
+    UI annotation of a gable end) is read as the box base with the apex at the top-centre.
+    """
     if roof.attributes.get("gable_visible") is False:
         return None
     form = _roof_form_attr(roof)
     if form not in (None, "gable"):
         return None
     poly = roof.polygon
+    from_box = False
+    if not poly and roof.bbox is not None and roof.attributes.get("gable_visible") is True \
+            and _ridge_attr(roof) != "parallel_to_view":
+        x0, y0, x1, y1 = (float(v) for v in roof.bbox)
+        poly = [(x0, y1), (0.5 * (x0 + x1), y0), (x1, y1)]
+        from_box = True
     if not poly or len(poly) < 3:
         return None
     if len(poly) > 3 and roof.attributes.get("gable_visible") is not True:
@@ -389,6 +558,8 @@ def _gable_pitch(roof: DetectedFeature, fu: float) -> Optional[tuple[float, floa
     note = (f"atan(2 x rise / base) on the visible gable: rise {rise:.1f} px, base {base:.1f} px; "
             f"half-slopes {math.degrees(th_l):.1f}/{math.degrees(th_r):.1f} deg. Low/high = +/- 2 sigma "
             f"(vertex error {e:.1f} px, perspective {fu:.0%}, asymmetry).")
+    if from_box:
+        note += " Gable triangle taken from the roof box (base = box bottom, apex at the top-centre)."
     return math.degrees(th), math.degrees(s), note
 
 
@@ -408,6 +579,39 @@ def _cluster_rows(windows: list[tuple[DetectedFeature, Box]]) -> list[list[tuple
         else:
             rows[-1].append(item)
     return rows
+
+
+def _user_storey(f: DetectedFeature) -> Optional[int]:
+    """Storey index 0-9 entered by the user on an opening annotation (``USER_CONFIRMED`` features only)."""
+    if f.basis != Basis.USER_CONFIRMED:
+        return None
+    v = f.attributes.get("storey")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, float) and not (math.isfinite(v) and v.is_integer()):
+        return None
+    i = int(v)
+    return i if 0 <= i <= MAX_USER_STOREY else None
+
+
+def _ground_door_row(rows: list[list[tuple[DetectedFeature, Box]]], openings: list[tuple[DetectedFeature, Box, str]],
+                     ground_y: float) -> Optional[float]:
+    """Boundary (px) between a row of doors standing on the ground and the lowest window row.
+
+    Returns ``None`` unless at least one door / garage door / patio door stands on the ground line
+    (bottom within 15 % of its height of it) with its head entirely below the lowest window row's
+    lowest sill (a ground floor with doors only, e.g. glazed doors or an integral garage, under
+    first-floor windows).  Ground-floor windows beside a door overlap its height and do not trigger it.
+    """
+    if not rows:
+        return None
+    lowest_sill = max(b[3] for _, b in rows[0])
+    tops = [b[1] for _, b, k in openings
+            if k in ("door", "garage_door", "patio_door") and b[3] >= ground_y - 0.15 * (b[3] - b[1])
+            and b[1] > lowest_sill + 0.05 * (b[3] - b[1])]
+    if not tops:
+        return None
+    return 0.5 * (min(tops) + lowest_sill)
 
 
 def _storeys_from_height(eaves_h: Optional[float], openings: list[tuple[DetectedFeature, Box, str]],
@@ -542,32 +746,36 @@ def _build_facade(ctx: _Ctx, block: str, fac: DetectedFeature, boxes: dict[str, 
         if res is not None:
             gable_roof, pitch = r, res
             break
+    facade_form = _roof_form_attr(fac)
     if forms:
         roof_form = forms[0] if len(set(forms)) == 1 else "mixed"
     elif gable_roof is not None:
         roof_form = "gable"
-    if roof_form is not None:
+    if roof_form is None and facade_form is not None:  # roof form entered on the block's facade annotation
+        roof_form = facade_form
+        roof_basis = ctx.basis(fac.basis) if fac.basis == Basis.USER_CONFIRMED else ctx.basis(fac.basis,
+                                                                                               Basis.INFERRED)
+    elif roof_form is not None:
         src_roofs = roofs if roof_form != "gable" or gable_roof is None else [gable_roof]
         if gable_roof is not None and roof_form == "gable":
-            roof_basis = ctx.basis(gable_roof.basis, Basis.OBSERVED)
+            roof_basis = ctx.basis(gable_roof.basis)
+        elif src_roofs and all(r.basis == Basis.USER_CONFIRMED for r in src_roofs):
+            roof_basis = ctx.basis(Basis.USER_CONFIRMED)  # the form was entered by the user
         else:
             roof_basis = ctx.basis(*[r.basis for r in src_roofs], Basis.INFERRED)
     if gable_roof is not None:
         val, s_deg, note = pitch
         lo, hi = max(0.1, val - 2.0 * s_deg), min(89.9, val + 2.0 * s_deg)
-        pitch_tv = TrackedValue(value=val, unit="deg", basis=ctx.basis(gable_roof.basis, Basis.OBSERVED),
+        # basis = the roof feature's basis (OBSERVED detection, USER_CONFIRMED annotation; concept cap)
+        pitch_tv = TrackedValue(value=val, unit="deg", basis=ctx.basis(gable_roof.basis),
                                 low=min(lo, val), high=max(hi, val), distribution=Distribution.TRIANGULAR,
                                 source=f"{gable_roof.method} {gable_roof.method_version}",
                                 evidence_ids=[gable_roof.feature_id], note=note)
         ridge_axis = "perpendicular_to_view"
     for r in roofs:
-        hint = r.attributes.get("ridge_orientation")
-        if isinstance(hint, str):
-            h = hint.strip().lower()
-            if h in _PARALLEL:
-                ridge_axis = ridge_axis or "parallel_to_view"
-            elif h in _PERPENDICULAR:
-                ridge_axis = ridge_axis or "perpendicular_to_view"
+        hint = _ridge_attr(r)
+        if hint is not None:
+            ridge_axis = ridge_axis or hint
 
     # ---- ridge
     ridge_line = _pick_line(by_type[FeatureType.RIDGE_LINE], block, fb, min([y0, *[_bbox_of(r)[1] for r in roofs]]), boxes)
@@ -611,6 +819,8 @@ def _build_facade(ctx: _Ctx, block: str, fac: DetectedFeature, boxes: dict[str, 
         roof_level = [(f, b) for f, b in windows if _center(b)[1] < ey - 0.25 * (b[3] - b[1])]
         windows = [(f, b) for f, b in windows if (f, b) not in roof_level]
     rows = _cluster_rows(windows)
+    door_row = _ground_door_row(rows, op_feats, gy)
+    user_storey = {f.feature_id: s for f, _, _ in op_feats if (s := _user_storey(f)) is not None}
 
     # ---- storey lines (strictly between ground and eaves)
     slines = []
@@ -627,51 +837,81 @@ def _build_facade(ctx: _Ctx, block: str, fac: DetectedFeature, boxes: dict[str, 
     ids += [l.feature_id for l, _ in slines]
     if slines:
         boundaries = sorted((yl for _, yl in slines), reverse=True)
-    elif len(rows) >= 2:
-        boundaries = []
+    else:
+        boundaries = [door_row] if door_row is not None else []
         for k in range(len(rows) - 1):
             lower_top = min(b[1] for _, b in rows[k])
             upper_bottom = max(b[3] for _, b in rows[k + 1])
             boundaries.append(0.5 * (lower_top + upper_bottom))
-    else:
-        boundaries = []
 
     def storey_of(b: Box) -> int:
         cy = _center(b)[1]
         return int(sum(1 for yb in boundaries if yb > cy))
 
-    openings = [ObservedOpening(feature_id=f.feature_id, kind=kind, bbox_px=b, storey_index=storey_of(b),
-                                block_hint=block) for f, b, kind in op_feats]
+    # user storey indices are authoritative over the row / storey-line estimate
+    openings: list[ObservedOpening] = []
+    mismatch: list[str] = []
+    for f, b, kind in op_feats:
+        est, s = storey_of(b), user_storey.get(f.feature_id)
+        if s is not None and boundaries and s != est:
+            mismatch.append(f"{f.feature_id} (user {s}, estimate {est})")
+        openings.append(ObservedOpening(feature_id=f.feature_id, kind=kind, bbox_px=b,
+                                        storey_index=s if s is not None else est, block_hint=block))
+    if mismatch:
+        ctx.warnings.append(f"{block}: the storey entered by the user differs from the window-row / storey-line "
+                            f"estimate for {', '.join(mismatch[:6])}{' ...' if len(mismatch) > 6 else ''}; the "
+                            "user's storey is used.")
 
     # ---- storeys
     hest = _storeys_from_height(eaves_h.value, op_feats, ctx.assumptions)
-    n_rows = len(rows)
+    n_user = max(user_storey.values()) + 1 if user_storey else None
+    rows_superseded = bool(user_storey) and bool(windows) and all(f.feature_id in user_storey for f, _ in windows)
+    n_rows = 0 if rows_superseded else len(rows) + (1 if door_row is not None and rows else 0)
     n_lines = len(slines) + 1 if slines else None
+    heur = [v for v in (n_rows or None, n_lines) if v]
+    user_wins = n_user is not None and n_user >= max(heur, default=0)
     notes: list[str] = []
-    evidence = [f.feature_id for f, _ in windows] + [l.feature_id for l, _ in slines]
-    if n_rows or n_lines:
-        vals = [v for v in (n_rows or None, n_lines) if v]
-        value = max(vals)
-        lo, hi = min(vals), max(vals)
+    evidence = ([fid for fid in user_storey] if n_user else []) + [f.feature_id for f, _ in windows] + \
+        [l.feature_id for l, _ in slines]
+    if n_user or heur:
+        if user_wins:
+            value = lo = hi = n_user
+            notes.append(f"storey indices entered by the user (highest {n_user - 1} -> {n_user} storeys)")
+        else:
+            value, lo, hi = max(heur), min(heur), max(heur)
         if n_rows:
-            notes.append(f"{n_rows} window row(s)")
+            notes.append(f"{n_rows} window row(s)" + (" incl. a ground-floor door row" if door_row is not None
+                                                       else ""))
+        elif rows_superseded and rows:
+            notes.append(f"{len(rows)} window row(s) not used (every window carries a user storey)")
         if n_lines:
             notes.append(f"{len(slines)} storey line(s) -> {n_lines} storeys")
-        if n_rows and n_lines and n_rows != n_lines:
+        if user_wins and heur and max(heur) != n_user:
+            ctx.warnings.append(f"{block}: window rows / storey lines suggest {max(heur)} storey(s); the storey "
+                                f"indices entered by the user give {n_user} (used).")
+        if not user_wins and n_rows and n_lines and n_rows != n_lines:
             ctx.warnings.append(f"{block}: window rows ({n_rows}) and storey lines ({n_lines}) disagree; "
                                 f"using {value} with range {lo}-{hi}.")
         if hest is not None:
             notes.append(hest["note"])
             if hest["robust"] and hest["value"] != value:
-                ctx.warnings.append(f"{block}: wall-height check suggests {hest['value']} storeys vs {value} from "
-                                    "window rows/storey lines; range widened.")
-                lo, hi = min(lo, hest["value"]), max(hi, hest["value"])
-        basis = ctx.basis(*[f.basis for f, _ in windows], *[l.basis for l, _ in slines], Basis.INFERRED)
+                if user_wins:
+                    ctx.warnings.append(f"{block}: wall-height check suggests {hest['value']} storeys vs {value} "
+                                        "from the storey indices entered by the user (kept).")
+                else:
+                    ctx.warnings.append(f"{block}: wall-height check suggests {hest['value']} storeys vs {value} "
+                                        "from window rows/storey lines; range widened.")
+                    lo, hi = min(lo, hest["value"]), max(hi, hest["value"])
+        if user_wins:
+            basis = ctx.basis(Basis.USER_CONFIRMED)
+            source = "storey indices entered by the user"
+        else:
+            basis = ctx.basis(*[f.basis for f, _ in windows], *[l.basis for l, _ in slines], Basis.INFERRED)
+            source = "window-row clustering / storey lines"
         storeys = TrackedValue(value=float(value), unit="storeys", basis=basis,
                                low=float(lo) if hi > lo else None, high=float(hi) if hi > lo else None,
                                distribution=Distribution.TRIANGULAR if hi > lo else Distribution.FIXED,
-                               source="window-row clustering / storey lines", evidence_ids=evidence,
-                               note="; ".join(notes))
+                               source=source, evidence_ids=list(dict.fromkeys(evidence)), note="; ".join(notes))
     elif hest is not None:
         basis = ctx.basis(Basis.INFERRED if hest["robust"] else Basis.ASSUMED)
         lo, hi = hest["low"], hest["high"]
@@ -719,7 +959,7 @@ def _build_facade(ctx: _Ctx, block: str, fac: DetectedFeature, boxes: dict[str, 
 
     # ---- AI-concept consistency checks
     if ctx.ai_concept:
-        _concept_checks(ctx, block, fb, rows, op_feats)
+        _concept_checks(ctx, block, fb, rows, op_feats, {o.feature_id: o.storey_index for o in openings})
 
     return FacadeObservation(
         image_id=a.image_id, view=ctx.view, block_hint=block, storeys=storeys, width_px=width,
@@ -729,10 +969,13 @@ def _build_facade(ctx: _Ctx, block: str, fac: DetectedFeature, boxes: dict[str, 
         feature_ids=list(dict.fromkeys(ids)))
 
 
-def _concept_checks(ctx: _Ctx, block: str, fb: Box, rows: list, op_feats: list) -> None:
+def _concept_checks(ctx: _Ctx, block: str, fb: Box, rows: list, op_feats: list,
+                    storey_of: Optional[Mapping[str, Optional[int]]] = None) -> None:
     for k, row in enumerate(rows):
         if len(row) < 2:
             continue
+        idx = sorted(i for i in ((storey_of or {}).get(f.feature_id) for f, _ in row) if i is not None)
+        storey = idx[len(idx) // 2] if idx else k
         hs = [b[3] - b[1] for _, b in row]
         med = float(np.median(hs))
         heads = [b[1] for _, b in row]
@@ -741,7 +984,7 @@ def _concept_checks(ctx: _Ctx, block: str, fb: Box, rows: list, op_feats: list) 
         tol = max(0.25 * med, 6.0)
         if spread_h > tol or spread_s > tol:
             ctx.inconsistencies.append(
-                f"{block}: window heads/sills in row {k} (storey {k}) vary by {spread_h:.0f}/{spread_s:.0f} px "
+                f"{block}: window heads/sills in row {k} (storey {storey}) vary by {spread_h:.0f}/{spread_s:.0f} px "
                 f"({spread_h / med:.1f}/{spread_s / med:.1f} window heights); rows are not aligned across the facade.")
     for i in range(len(op_feats)):
         for j in range(i + 1, len(op_feats)):
@@ -784,14 +1027,14 @@ def _vlm_crosscheck(asset: ImageAsset, facades: list[FacadeObservation], feature
     out = list(facades)
     tallest = max(range(len(out)), key=lambda i: out[i].storeys.value or 0)
     st = out[tallest].storeys
+    # VLM output is untrusted (hallucination, text painted in the image): it is a cross-check only and
+    # never changes the value, its range or its distribution - a disagreement is a warning to check.
     if vlm.storeys and st.value is not None and int(st.value) != vlm.storeys:
-        lo = min(st.low if st.low is not None else st.value, float(vlm.storeys))
-        hi = max(st.high if st.high is not None else st.value, float(vlm.storeys))
-        warnings.append(f"{out[tallest].block_hint}: VLM storey count {vlm.storeys} differs from detections "
-                        f"({int(st.value)}); range widened.")
+        warnings.append(f"{out[tallest].block_hint}: VLM storey count {vlm.storeys} (inferred, untrusted) differs "
+                        f"from detections ({int(st.value)}); not used - check the storeys.")
         out[tallest] = out[tallest].model_copy(update={"storeys": st.model_copy(update={
-            "low": lo, "high": hi, "distribution": Distribution.TRIANGULAR,
-            "note": (st.note + "; " if st.note else "") + f"VLM cross-check (inferred): {vlm.storeys}"})})
+            "note": (st.note + "; " if st.note else "") + f"VLM cross-check (inferred, not used) disagrees: "
+                                                           f"{vlm.storeys}"})})
     elif vlm.storeys and st.value is not None:
         out[tallest] = out[tallest].model_copy(update={"storeys": st.model_copy(update={
             "note": (st.note + "; " if st.note else "") + f"VLM cross-check (inferred) agrees: {vlm.storeys}"})})
@@ -833,6 +1076,72 @@ def _label(asset: ImageAsset) -> str:
     return f"{asset.original_filename} ({asset.image_id})"
 
 
+def _plan_depth_blocks(images: Sequence[ImageAsset], analyses: Sequence[ImageAnalysis], concept: Mapping[str, bool],
+                       front_blocks: set[str]) -> set[str]:
+    """Blocks whose depth is drawn on a dimensioned floor plan (an outline box on a FLOOR_PLAN image that
+    also carries a dimension with a valid ``length_m``): tagged outlines by their ``block``, a single
+    untagged outline as ``main`` when ``main`` is the only front block."""
+    out: set[str] = set()
+    feats = {a.image_id: [f for f in a.features if f.active] for a in analyses}
+    for img in images:
+        if img.kind != ImageKind.FLOOR_PLAN or concept.get(img.image_id):
+            continue
+        fs = feats.get(img.image_id, [])
+        dims = [f for f in fs if f.feature_type == FeatureType.DIMENSION and isinstance(
+            f.attributes.get("length_m"), (int, float)) and not isinstance(f.attributes.get("length_m"), bool)
+            and math.isfinite(f.attributes["length_m"]) and f.attributes["length_m"] > 0]
+        outlines = [f for f in fs if f.feature_type == FeatureType.BUILDING_OUTLINE and f.bbox is not None]
+        if not dims or not outlines:
+            continue
+        tagged = {_norm_block(f.attributes.get("block")) for f in outlines} - {None}
+        out |= tagged
+        if not tagged and len(outlines) == 1 and front_blocks == {"main"}:
+            out.add("main")
+    return out
+
+
+def _misplaced_roof_forms(features: Sequence[DetectedFeature]) -> list[str]:
+    """Warnings for a ``roof_form`` attribute on a feature that is neither a roof nor a facade (ignored there)."""
+    out = []
+    for f in features:
+        if f.active and f.feature_type not in (FeatureType.ROOF, FeatureType.FACADE) and \
+                f.attributes.get("roof_form") not in (None, ""):
+            out.append(f"Roof form on {f.feature_type.value} {f.feature_id} is ignored: enter it on the roof (or the "
+                       "block's facade) annotation.")
+    return out
+
+
+def _unmodelled(features: Sequence[DetectedFeature], facades: Sequence[FacadeObservation]
+                ) -> list[tuple[DetectedFeature, str]]:
+    """Active balcony / chimney / garage / extension evidence the twin does not model, with a warning text.
+
+    A garage or extension box is modelled when a facade of that block exists (facade with the same
+    ``block`` attribute or block name, or a facade box overlapping it); otherwise the user is told how
+    to model it.  Balconies and chimneys are never modelled as geometry.
+    """
+    out: list[tuple[DetectedFeature, str]] = []
+    fac_boxes = [(_norm_block(f.attributes.get("block")) or "main", _bbox_of(f)) for f in features
+                 if f.active and f.feature_type == FeatureType.FACADE and _bbox_of(f) is not None]
+    hints = {f.block_hint for f in facades}
+    for f in features:
+        name = UNMODELLED_TYPES.get(f.feature_type)
+        if not f.active or name is None:
+            continue
+        if f.feature_type in (FeatureType.GARAGE, FeatureType.EXTENSION):
+            blk = _norm_block(f.attributes.get("block")) or name
+            b = _bbox_of(f)
+            covered = blk in hints and any(k == blk for k, _ in fac_boxes) or \
+                (b is not None and any(_iou(b, fb) > 0.3 for _, fb in fac_boxes))
+            if covered:
+                continue
+            out.append((f, f"{name} {f.feature_id} observed but not modelled as a block: annotate its front wall as a "
+                            f"facade with block '{blk}' to model it; quantities and costs exclude it until then."))
+        else:
+            out.append((f, f"{name} {f.feature_id} observed - not modelled; quantities and costs exclude it (add an "
+                            "allowance if it matters)."))
+    return out
+
+
 def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None,
                    registry: Optional[AdapterRegistry] = None,
                    settings: ProjectSettings | AssumptionLibrary | None = None,
@@ -870,6 +1179,7 @@ def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None
     analyses: list[ImageAnalysis] = []
     facades: list[FacadeObservation] = []
     concept_flags: dict[str, bool] = {}
+    unmodelled: list[str] = []
     for asset in uniq:
         iw: list[str] = []
         rgb = None
@@ -902,7 +1212,7 @@ def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None
             runs += rr.runs
             vlm = rr.first if isinstance(rr.first, VLMExtraction) else None
         if manual.get(asset.image_id):
-            features = _merge_manual(asset, features, manual[asset.image_id], iw)
+            features, _ = _merge_manual(asset, features, _sanitize_manual(asset, manual[asset.image_id], iw), iw)
         for run in runs:
             if run.status == "ok":
                 model_versions[run.adapter] = run.version
@@ -950,6 +1260,12 @@ def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None
             img_facades = _vlm_crosscheck(asset, img_facades, features, vlm, iw)
             if concept and ai_concept:
                 iw += [f"AI-concept inconsistency (VLM-reported, inferred): {m}" for m in vlm.geometry_inconsistencies]
+        iw += _misplaced_roof_forms(features)
+        for f, text in _unmodelled(features, img_facades):
+            iw.append(text)
+            unmodelled.append(f"{_label(asset)} {f.feature_id}: {text}")
+        if concept:  # stored evidence of a concept reference is never presented as observed / user-confirmed
+            features = [_cap_concept_feature(f) for f in features]
         facades += img_facades
         analyses.append(ImageAnalysis(image_id=asset.image_id, features=features, perspective=perspective,
                                       depth=depth, vlm=vlm, adapters=runs, warnings=iw))
@@ -965,11 +1281,17 @@ def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None
     if primary is None:
         primary = next((f.image_id for f in facades), uniq[0].image_id if uniq else None)
 
-    # ---- multi-view linking
+    # ---- multi-view linking (measured views only: concept references never supply depth or scale links)
     multiview = None
-    if facades and registry.adapters(Capability.MULTIVIEW) and len({f.image_id for f in facades}) > 1:
-        rr = registry.run(Capability.MULTIVIEW, uniq, facades, primary_image_id=primary,
-                          load_rgb=lambda a: load_image_array(a, store_dir), seed=seed)
+    linkable = [f for f in facades if not concept_flags.get(f.image_id)]
+    concept_others = sorted({f"{f.view.value} ({f.image_id})" for f in facades if concept_flags.get(f.image_id)
+                             and f.view in ELEVATION_VIEWS - {ViewDirection.FRONT}})
+    if concept_others:
+        warnings.append("Concept-reference view(s) " + ", ".join(concept_others) + " are not scale-linked to the "
+                        "measured views: concept geometry is not used as depth or pitch evidence.")
+    if linkable and registry.adapters(Capability.MULTIVIEW) and len({f.image_id for f in linkable}) > 1:
+        rr = registry.run(Capability.MULTIVIEW, [a for a in uniq if not concept_flags.get(a.image_id)], linkable,
+                          primary_image_id=primary, load_rgb=lambda a: load_image_array(a, store_dir), seed=seed)
         multiview = rr.first
         for run in rr.runs:
             if run.status == "ok":
@@ -998,22 +1320,31 @@ def analyse_images(images: Sequence[ImageAsset], *, store_dir: Path | str | None
             txt += f" ({'; '.join(extras)})"
         unknowns.append(txt + ". Openings and finishes there must be assumed or confirmed.")
     linked = multiview.linked_measurements if multiview is not None else {}
+    plan_blocks = _plan_depth_blocks(uniq, analyses, concept_flags, {f.block_hint for f in real
+                                                                     if f.view == ViewDirection.FRONT})
     for block in sorted({f.block_hint for f in real}):
         bf = [f for f in real if f.block_hint == block]
-        if f"{block}.depth_front_px_equiv" not in linked:
+        if block in plan_blocks:
+            pass  # depth drawn on a dimensioned floor plan (twin.calibration.plan_evidence)
+        elif f"{block}.depth_front_px_equiv" not in linked:
             unknowns.append(f"Plan depth of block '{block}': not observable in the available views (no linked side "
-                            "elevation); hidden-footprint hypotheses are required.")
+                            "elevation or dimensioned floor plan outline); hidden-footprint hypotheses are required.")
         if not any(f.apparent_pitch_deg is not None for f in bf) and not any(f.roof_form == "flat" for f in bf):
             unknowns.append(f"Roof pitch of block '{block}': no gable end is seen in elevation, so the pitch is not "
                             "directly measurable.")
+    for u in unmodelled:
+        unknowns.append(f"Not modelled: {u}")
     if uniq and all(concept_flags.get(a.image_id) for a in uniq):
         warnings.append("All images are concept references: no evidence of an existing or measured building; all "
                         "geometry is indicative.")
 
     return AnalysisResult(images=uniq, analyses=analyses, facades=facades, multiview=multiview,
                           primary_image_id=primary, unknowns=unknowns, warnings=warnings,
-                          model_versions=model_versions)
+                          model_versions=model_versions,
+                          concept_image_ids=[a.image_id for a in uniq if concept_flags.get(a.image_id)],
+                          unmodelled_features=unmodelled)
 
 
-__all__ = ["analyse_images", "ANALYSIS_VERSION", "BASE_UNKNOWNS", "UNKNOWN_STRUCTURE", "UNKNOWN_INSULATION",
+__all__ = ["analyse_images", "superseded_by", "ANALYSIS_VERSION", "CONCEPT_CAP_REASON", "MANUAL_METHOD",
+           "REJECTED_REASON", "UNMODELLED_TYPES", "BASE_UNKNOWNS", "UNKNOWN_STRUCTURE", "UNKNOWN_INSULATION",
            "UNKNOWN_FOUNDATIONS", "UNKNOWN_SERVICES", "UNKNOWN_ENGINEERING", "UNKNOWN_LAYOUT"]

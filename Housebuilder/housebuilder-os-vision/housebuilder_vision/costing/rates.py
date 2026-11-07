@@ -14,7 +14,22 @@ every cell stripped and length-capped, every row validated into a ``Rate``.
 Invalid rows are skipped and reported in ``RateBook.warnings`` with their row
 number; ``strict=True`` raises :class:`RateBookError` listing every bad row
 instead.  Uncertainty fractions are clamped to ``[-1, 0]`` / ``[0, 5]`` with a
-warning; non-finite numbers are rejected.
+warning; non-finite numbers are rejected.  At most :data:`MAX_COLUMNS` columns
+(CSV header) / keys per JSON record are accepted, unknown column names are
+reported (at most 20 named), and JSON nesting beyond Python's recursion limit is
+a :class:`RateBookError`, never an uncaught exception.
+
+Required metadata (requirement: unit, currency, location, effective date, source,
+tax and delivery treatment, uncertainty): ``rate_id, cost_key, layer, unit, value,
+effective_date, source, source_type`` are required columns.  Currency, tax
+treatment, delivery treatment, location and the uncertainty range may be absent,
+but never silently: each absent column / empty cell is reported in the load
+warnings, every supplier-quote / price-list row lacking its currency or tax
+treatment is named, an absent tax treatment becomes ``unknown`` (not ``ex_vat``)
+and the defaulted currency / tax / uncertainty are recorded on the rate's
+``notes`` as ``[assumed defaults: ...]`` (:data:`DEFAULTS_TAG`).  Resolving such a
+rate warns and weakens its basis to ASSUMED (remove the tag from the notes once
+the value is confirmed).
 
 Resolution
 ----------
@@ -53,7 +68,9 @@ Resolution
 
 Provenance: ``ResolvedRate.basis`` is the rate's basis (:data:`RATE_SOURCE_BASIS`; expired
 quotes ASSUMED), weakened to ASSUMED when an assumed factor changed the value (escalation,
-regional factor, VAT stripped at the project rate, working-time conversion).
+regional factor, VAT stripped at the project rate, working-time conversion), when its tax
+treatment is ``unknown`` (used as entered, assumed net of VAT) or when its currency was not
+stated in its source (:data:`DEFAULTS_TAG`).
 
 Pricing date: a rate dated after the pricing date is excluded; when it outranks the rate that
 is used instead (e.g. a new supplier quote excluded and a FICTIONAL demo rate used), the
@@ -100,6 +117,9 @@ __all__ = [
     "MAX_FILE_BYTES",
     "MAX_ROWS",
     "MAX_CELL_CHARS",
+    "MAX_COLUMNS",
+    "DEFAULTS_TAG",
+    "METADATA_DEFAULTS",
     "RATE_COLUMNS",
     "KNOWN_COST_KEY_PREFIXES",
     "TIME_BASED_COST_KEY_PREFIXES",
@@ -117,6 +137,7 @@ __all__ = [
     "merge_rate_books",
     "rate_book_to_dataframe",
     "rate_basis",
+    "defaulted_fields",
     "cost_key_layer",
 ]
 
@@ -126,6 +147,21 @@ MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 20_000
 #: Maximum characters in any one cell.
 MAX_CELL_CHARS = 2_000
+#: Maximum number of CSV columns / keys per JSON record (the ``Rate`` model has 21 fields).
+MAX_COLUMNS = 64
+#: Unknown column names listed by name in the load warning (the rest are counted).
+MAX_UNKNOWN_NAMED = 20
+#: Marker appended to ``Rate.notes`` listing metadata defaulted at load because the source did not state it.
+DEFAULTS_TAG = "[assumed defaults:"
+#: Rate metadata that may be absent in a source (reported, never silent) and what an absence means.
+METADATA_DEFAULTS: dict[str, str] = {
+    "currency": "assumed GBP (the model default) - each rate is tagged and resolves as ASSUMED",
+    "tax_treatment": "set to 'unknown' (used as entered, assumed net of VAT; warned and ASSUMED when resolved)",
+    "delivery_treatment": "'unknown' (assumed included in the rate; warned in the estimate)",
+    "location": "blank (a supplier quote is treated as quoted for the site; other rates take the regional factor)",
+    "uncertainty_low": "the default -10% (assumed)",
+    "uncertainty_high": "the default +10% (assumed)",
+}
 #: CSV / JSON columns = ``Rate`` fields, in model order.
 RATE_COLUMNS: tuple[str, ...] = tuple(Rate.model_fields)
 _REQUIRED_COLUMNS = ("rate_id", "cost_key", "layer", "unit", "value", "effective_date", "source", "source_type")
@@ -280,6 +316,49 @@ def _clean_record(raw: dict[str, Any], row_no: int, warnings: list[str]) -> dict
     return rec
 
 
+def _defaulted_metadata(rec: dict[str, Any]) -> list[str]:
+    """Metadata fields (:data:`METADATA_DEFAULTS`) absent from a cleaned record."""
+    return [k for k in METADATA_DEFAULTS if k not in rec]
+
+
+def _apply_metadata_defaults(rec: dict[str, Any], missing: list[str]) -> dict[str, Any]:
+    """Absent tax treatment -> ``unknown``; tag defaulted currency / tax / uncertainty on the notes."""
+    if not missing:
+        return rec
+    rec = dict(rec)
+    parts = []
+    if "currency" in missing:
+        parts.append(f"currency={Rate.model_fields['currency'].default}")
+    if "tax_treatment" in missing:
+        rec["tax_treatment"] = TaxTreatment.UNKNOWN.value
+        parts.append("tax_treatment=unknown")
+    if "uncertainty_low" in missing or "uncertainty_high" in missing:
+        lo = rec.get("uncertainty_low", Rate.model_fields["uncertainty_low"].default)
+        hi = rec.get("uncertainty_high", Rate.model_fields["uncertainty_high"].default)
+        parts.append(f"uncertainty={lo:+.2f}/{hi:+.2f}")
+    if parts:
+        notes = str(rec.get("notes") or "")
+        if DEFAULTS_TAG not in notes:
+            tag = f"{DEFAULTS_TAG} {'; '.join(parts)} - not stated in the source; remove this note once confirmed]"
+            rec["notes"] = f"{notes} {tag}".strip()
+    return rec
+
+
+def defaulted_fields(rate: Rate) -> dict[str, str]:
+    """Metadata the rate's source did not state (parsed from its :data:`DEFAULTS_TAG` note), e.g.
+    ``{"currency": "GBP"}``."""
+    i = rate.notes.find(DEFAULTS_TAG)
+    if i < 0:
+        return {}
+    body = rate.notes[i + len(DEFAULTS_TAG):].split("]", 1)[0].split(" - ", 1)[0]
+    out: dict[str, str] = {}
+    for part in body.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k:
+            out[k.strip()] = v.strip()
+    return out
+
+
 def _validation_reason(e: ValidationError) -> str:
     parts = []
     for err in e.errors()[:4]:
@@ -301,6 +380,9 @@ def rate_book_from_records(records: Iterable[dict[str, Any]], *, name: str, stri
     errors: list[str] = []
     seen: set[str] = set()
     unknown_cols: set[str] = set()
+    absent: dict[str, int] = {k: 0 for k in METADATA_DEFAULTS}
+    unstated: list[str] = []
+    n_records = 0
     for i, raw in enumerate(records):
         row_no = first_row_number + i
         if i >= MAX_ROWS:
@@ -308,9 +390,18 @@ def rate_book_from_records(records: Iterable[dict[str, Any]], *, name: str, stri
         if not isinstance(raw, dict):
             errors.append(f"row {row_no}: not a record")
             continue
-        unknown_cols |= {str(k) for k in raw if k not in Rate.model_fields}
+        if len(raw) > MAX_COLUMNS:
+            errors.append(f"row {row_no}: {len(raw)} fields (at most {MAX_COLUMNS})")
+            continue
+        n_records += 1
+        if len(unknown_cols) <= MAX_COLUMNS:
+            unknown_cols |= {str(k)[:60] for k in raw if k not in Rate.model_fields}
         try:
             rec = _clean_record(raw, row_no, warnings)
+            missing = _defaulted_metadata(rec)
+            for k in missing:
+                absent[k] += 1
+            rec = _apply_metadata_defaults(rec, missing)
             rate = Rate.model_validate(rec)
         except ValidationError as e:
             errors.append(f"row {row_no}: {_validation_reason(e)}")
@@ -323,8 +414,26 @@ def rate_book_from_records(records: Iterable[dict[str, Any]], *, name: str, stri
             continue
         seen.add(rate.rate_id)
         rates.append(rate)
+        crit = [k for k in ("currency", "tax_treatment") if k in missing]
+        if crit and rate.source_type in (RateSourceType.SUPPLIER_QUOTE, RateSourceType.PRICE_LIST):
+            unstated.append(f"row {row_no}: {rate.source_type.value} '{rate.rate_id}' does not state its "
+                            f"{' or '.join(c.replace('_', ' ') for c in crit)} - check the source (assumed "
+                            + ", ".join("GBP" if c == "currency" else "tax unknown" for c in crit) + ")")
+    meta: list[str] = []
+    for k, n in absent.items():
+        if not n:
+            continue
+        where = "not given for any rate" if n >= n_records else f"empty in {n} row(s)"
+        meta.append(f"{k} {where}: {METADATA_DEFAULTS[k]}")
+    if len(unstated) > MAX_UNKNOWN_NAMED:
+        unstated = unstated[:MAX_UNKNOWN_NAMED] + [f"... and {len(unstated) - MAX_UNKNOWN_NAMED} more supplier / "
+                                                   "price-list row(s) without currency or tax treatment"]
+    warnings[0:0] = meta + unstated
     if unknown_cols:
-        warnings.insert(0, f"ignored unknown column(s): {', '.join(sorted(unknown_cols))}")
+        names = sorted(unknown_cols)
+        shown = ", ".join(names[:MAX_UNKNOWN_NAMED])
+        more = f" ... and {len(names) - MAX_UNKNOWN_NAMED} more" if len(names) > MAX_UNKNOWN_NAMED else ""
+        warnings.insert(0, f"ignored unknown column(s): {shown}{more}")
     if errors and strict:
         raise RateBookError(f"{len(errors)} invalid row(s) in rate book '{name}': " + " | ".join(errors))
     warnings.extend(f"skipped invalid {e}" for e in errors)
@@ -336,6 +445,19 @@ def rate_book_from_records(records: Iterable[dict[str, Any]], *, name: str, stri
 # =============================================================================
 # Loaders
 # =============================================================================
+def _check_header(text: str) -> None:
+    """Reject a CSV whose header has more than :data:`MAX_COLUMNS` columns before pandas parses it."""
+    import csv
+
+    try:
+        header = next(csv.reader(io.StringIO(text)), [])
+    except csv.Error as e:
+        raise RateBookError(f"could not parse rate book CSV header: {e}") from None
+    if len(header) > MAX_COLUMNS:
+        raise RateBookError(f"rate book CSV has {len(header)} columns; at most {MAX_COLUMNS} are accepted "
+                            f"(the Rate fields are: {', '.join(RATE_COLUMNS)})")
+
+
 def load_rate_book_csv(path_or_buffer: PathOrBuffer, *, name: Optional[str] = None,
                        strict: bool = False) -> RateBook:
     """Load a rate book from CSV (columns = ``Rate`` fields; header row required).
@@ -353,6 +475,7 @@ def load_rate_book_csv(path_or_buffer: PathOrBuffer, *, name: Optional[str] = No
         raise RateBookError(f"rate book is not valid UTF-8 text: {e}") from None
     if not text.strip():
         raise RateBookError("rate book is empty")
+    _check_header(text)
     try:
         df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False, na_filter=False,
                          skipinitialspace=True, comment=None, nrows=MAX_ROWS + 1)
@@ -380,8 +503,10 @@ def load_rate_book_json(path_or_buffer: PathOrBuffer, *, name: Optional[str] = N
     data = _read_limited(path_or_buffer)
     try:
         obj = json.loads(data.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise RateBookError(f"could not parse rate book JSON: {e}") from None
+    except RecursionError:
+        raise RateBookError("could not parse rate book JSON: nested too deeply") from None
+    except (UnicodeDecodeError, ValueError) as e:  # JSONDecodeError is a ValueError
+        raise RateBookError(f"could not parse rate book JSON: {str(e)[:200]}") from None
     notes = ""
     if isinstance(obj, dict):
         rows = obj.get("rates")
@@ -628,7 +753,11 @@ def resolve_rate_detailed(book: Union[RateBook, RateIndex], cost_key: str, unit:
             adjustments.append(f"VAT stripped ÷{1.0 + vr:g}")
         money /= (1.0 + vr)
     elif rate.tax_treatment == TaxTreatment.UNKNOWN:
+        assumed_factor = True
         warnings.append(f"rate '{rate.rate_id}' has unknown tax treatment; used as entered (assumed net of VAT)")
+    if "currency" in defaulted_fields(rate):
+        assumed_factor = True
+        warnings.append(f"rate '{rate.rate_id}': its source does not state the currency; {rate.currency} assumed")
     if fx != 1.0:
         money *= fx
         adjustments.append(f"fx {rate.currency}->{settings.currency} ×{fx:g}")

@@ -16,7 +16,7 @@ dependencies = [
   "pandas>=2.1",
   "trimesh>=4.0",
   "pillow>=10.0",
-  "streamlit>=1.36",
+  "streamlit>=1.55",
   "plotly>=5.20",
 ]
 

@@ -4,6 +4,6 @@ scipy>=1.11
 pandas>=2.1
 trimesh>=4.0
 pillow>=10.0
-streamlit>=1.36
+streamlit>=1.55  # st.tabs(on_change=...) lazy tabs, width="stretch", type="tertiary", theme keys; tested with 1.67
 plotly>=5.20
 pytest>=7.4

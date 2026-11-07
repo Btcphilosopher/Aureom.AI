@@ -17,15 +17,32 @@ from .components import guard, html, show_flash
 from .theme import css_block
 from .views import costs, images, quantities, scenarios, sidebar, twin
 
+#: Oldest Streamlit with every API the UI uses (lazy ``st.tabs(on_change="rerun")`` + ``tab.open``,
+#: ``width="stretch"``, ``type="tertiary"``, ``st.segmented_control``, the config.toml theme keys).
+MIN_STREAMLIT = (1, 55)
 TABS = ("Images", "Twin", "Quantities", "Costs", "Scenarios")
 TAB_KEY = "main_tab"
 _RENDER = {"Images": images.render, "Twin": twin.render, "Quantities": quantities.render, "Costs": costs.render,
            "Scenarios": scenarios.render}
 
 
+def streamlit_too_old(version: str = st.__version__) -> bool:
+    """True when the installed Streamlit predates :data:`MIN_STREAMLIT`."""
+    import re
+
+    parts = [int(x) for x in re.findall(r"\d+", version)[:2]]
+    return tuple(parts + [0] * (2 - len(parts))) < MIN_STREAMLIT
+
+
 def main() -> None:
     st.set_page_config(page_title="Housebuilder.OS Vision · Aureom.AI", page_icon=":material/home_work:",
                        layout="wide", initial_sidebar_state="expanded")
+    if streamlit_too_old():
+        need = ".".join(map(str, MIN_STREAMLIT))
+        st.error(f"Housebuilder.OS Vision needs Streamlit {need} or newer; Streamlit {st.__version__} is installed. "
+                 f"Upgrade with:  pip install -U \"streamlit>={need}\"  "
+                 "(or pip install -r requirements.txt --upgrade).")
+        st.stop()
     logging.getLogger("housebuilder_vision").setLevel(logging.INFO)
     html(css_block())
     ws = S.get_workspace()
@@ -46,4 +63,4 @@ def main() -> None:
     show_flash(ws)
 
 
-__all__ = ["TABS", "TAB_KEY", "main"]
+__all__ = ["MIN_STREAMLIT", "TABS", "TAB_KEY", "main", "streamlit_too_old"]
