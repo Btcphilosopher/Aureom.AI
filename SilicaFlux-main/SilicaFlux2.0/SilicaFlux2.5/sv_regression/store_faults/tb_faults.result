@@ -1,9 +1,0 @@
-CHECK PASS directed program failure reported in status
-CHECK PASS failed program flags page and block
-CHECK PASS directed erase failure reported in status
-CHECK PASS erase failure is sticky (worn block)
-CHECK PASS stuck-at-0 cell (byte 0 bit 3) reads 0
-INFO fresh-stress raw bit errors: 0->1 16, 1->0 22 over 128 page reads; 0 program fails
-CHECK PASS statistical fault reads completed (exact values verified by Python co-simulation)
-CHECK PASS protocol errors = 0 (expected 0 deliberate)
-SUMMARY phase faults pass 7 fail 0 proto 0 timing 0 simtime_ns 40497020

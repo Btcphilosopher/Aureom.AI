@@ -1,8 +1,0 @@
-[NANDLAB tgt0 1060000] PROTOCOL: command 90 before the power-on RESET
-[NANDLAB tgt0 1160000] PROTOCOL: address cycle ignored (reset pending or target busy)
-[NANDLAB tgt0 8576620000] PROTOCOL: erase issued to factory-bad block 5 (lun 0)
-[NANDLAB tgt0 23718619600] PROTOCOL: data output beyond page+spare (column 528) returns FFh
-[NANDLAB tgt0 23772429600] PROTOCOL: data byte at column 528 beyond page+spare ignored
-[NANDLAB tgt0 30518789600] TIMING: tWP = 10.000 ns < 50.000 ns (mode 0)
-[TB] phase fresh: 78 passed, 0 failed
-- /tmp/claude-0/-home-user-Aureom-AI/837992ab-b428-5ab6-ac32-76c9b1914f5f/scratchpad/silicaflux-nandlab/tb/tb_nand_flash_model.sv:544: Verilog $finish
