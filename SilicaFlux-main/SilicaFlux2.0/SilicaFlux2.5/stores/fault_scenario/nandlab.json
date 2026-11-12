@@ -1,0 +1,162 @@
+{
+  "model": "SilicaFlux NANDLab",
+  "version": "0.1.0",
+  "project": "Aureom.AI | SilicaFlux-STORE | Project 52",
+  "store_format": "NLSF v1",
+  "geometry_fingerprint": "a3df62736ef5d148",
+  "created_utc": "2026-11-11T22:23:30Z",
+  "config": {
+    "name": "slc_tiny",
+    "description": "Small SLC-like test device (illustrative).",
+    "geometry": {
+      "channels": 2,
+      "packages_per_channel": 1,
+      "targets_per_package": 2,
+      "dies_per_target": 2,
+      "luns_per_die": 1,
+      "planes_per_lun": 2,
+      "blocks_per_plane": 32,
+      "pages_per_block": 16,
+      "page_data_bytes": 512,
+      "page_spare_bytes": 16,
+      "bits_per_cell": 1,
+      "viz_wordline_layers": 8,
+      "viz_string_select_lines": 2
+    },
+    "timing": {
+      "timing_mode": 0,
+      "t_r_ns": 25000.0,
+      "t_prog_ns": 200000.0,
+      "t_bers_ns": 2000000.0,
+      "t_rst_idle_ns": 5000.0,
+      "t_rst_prog_ns": 10000.0,
+      "t_rst_erase_ns": 500000.0,
+      "t_rst_poweron_ns": 1000000.0,
+      "t_feat_ns": 1000.0,
+      "t_reject_ns": 2000.0,
+      "t_ccs_ns": 500.0,
+      "prog_time_wear_speedup": 0.2,
+      "prog_time_floor": 0.6,
+      "erase_time_wear_slowdown": 1.0,
+      "fail_time_factor": 3.0,
+      "timing_checks": true,
+      "timing_fatal": false
+    },
+    "policy": {
+      "max_programs_per_page": 4,
+      "sequential_page_program": true,
+      "invalid_transition_policy": "reject",
+      "factory_bad_erase": "fail_keep_marker",
+      "require_reset_after_power_on": true,
+      "bad_block_marker_byte": 0
+    },
+    "ident": {
+      "manufacturer_id": 0,
+      "device_id": 90,
+      "id_byte3": 0,
+      "id_byte4": 21,
+      "id_byte5": 0,
+      "manufacturer": "SILICAFLUX",
+      "model": "NANDLAB-SLC-TWIN",
+      "max_bad_blocks_per_lun": -1,
+      "ecc_bits_required": 4
+    },
+    "faults": {
+      "profile": "stress",
+      "seed": 104576800834898,
+      "rated_endurance_cycles": 100000.0,
+      "endurance_hard_limit_factor": 3.0,
+      "rber_fresh": 2e-05,
+      "rber_wear_at_rated": 0.002,
+      "wear_exponent": 2.0,
+      "retention_rber_ref": 0.001,
+      "retention_ref_hours": 1000.0,
+      "retention_exponent": 1.0,
+      "retention_wear_gain": 50.0,
+      "read_disturb_rber_ref": 0.001,
+      "read_disturb_ref_reads": 1000.0,
+      "read_disturb_wear_gain": 10.0,
+      "read_noise_rber": 2e-05,
+      "interrupted_rber": 0.02,
+      "prog_fail_fresh": 0.002,
+      "prog_fail_at_rated": 0.05,
+      "prog_fail_exponent": 3.0,
+      "erase_fail_fresh": 0.005,
+      "erase_fail_at_rated": 0.1,
+      "erase_fail_exponent": 3.0,
+      "erase_fail_sticky": true,
+      "prog_fail_partial_fraction": 0.5,
+      "erase_fail_partial_fraction": 0.7,
+      "factory_bad_block_rate": 0.05,
+      "factory_bad_blocks": [],
+      "retry_gain": 0.5,
+      "retry_max_level": 7,
+      "activation_energy_ev": 1.1,
+      "reference_temp_c": 40.0,
+      "operating_temp_c": 40.0
+    },
+    "directed": {
+      "force_prog_fail": [
+        [
+          0,
+          1,
+          46,
+          3
+        ]
+      ],
+      "force_erase_fail": [
+        [
+          0,
+          0,
+          45
+        ]
+      ],
+      "stuck_bits": [
+        [
+          0,
+          1,
+          12,
+          2,
+          70,
+          0
+        ]
+      ]
+    },
+    "latency": {
+      "scheduler": "interleave",
+      "ecc_codeword_bytes": 512,
+      "ecc_bits_per_codeword": 4,
+      "max_read_retries": 6,
+      "retry_sequence": [
+        1,
+        2,
+        3,
+        -1,
+        -2,
+        4,
+        5
+      ],
+      "t_dbsy_ns": 500.0,
+      "controller_overhead_ns": 0.0
+    },
+    "store": {
+      "fsync": false,
+      "persist_read_counts": true
+    },
+    "_sources": {
+      "geometry": "model_choice (small SLC-like test device; edit freely)",
+      "timing.timing_mode / interface table": "onfi_timing",
+      "timing.t_r_ns, t_prog_ns, t_bers_ns, t_rst_*": "illustrative_datasheet",
+      "timing.t_feat_ns, t_ccs_ns": "illustrative_datasheet",
+      "timing.prog_time_wear_speedup, erase_time_wear_slowdown, fail_time_factor": "illustrative_model",
+      "timing.t_reject_ns": "model_choice",
+      "policy.*": "model_choice (configurable program restrictions)",
+      "ident.manufacturer_id": "model_choice (0x00 is not a valid JEP106 code)",
+      "ident.*": "model_choice",
+      "faults.activation_energy_ev": "jedec_ea",
+      "faults.* (all other)": "illustrative_model",
+      "latency.*": "model_choice / illustrative_model"
+    },
+    "_note": "All reliability and timing values are illustrative unless replaced with calibrated device data. See MODEL_LIMITATIONS.md."
+  }
+}

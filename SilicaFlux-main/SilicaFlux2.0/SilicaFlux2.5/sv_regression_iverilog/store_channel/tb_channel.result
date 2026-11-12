@@ -1,0 +1,14 @@
+CHECK PASS target 0 power-on RESET (1000000.000 ns)
+CHECK PASS target 1 power-on RESET (1000000.000 ns)
+CHECK PASS target 0 status via shared bus
+CHECK PASS target 1 READ ID over shared DQ
+CHECK PASS program on target 1
+CHECK PASS same address on target 0 still erased (CE# isolation)
+CHECK PASS target 1 read-back over shared bus (no contention, no X)
+CHECK PASS shared R/B# low while target 0 erases
+CHECK PASS target 1 ready while shared R/B# still low (target 0 erasing)
+CHECK PASS target 1 serves a read while target 0 is busy
+CHECK PASS target 0 erase completes
+CHECK PASS no protocol errors on either target
+CHECK PASS no AC timing violations
+SUMMARY phase channel pass 13 fail 0

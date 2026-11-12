@@ -1,0 +1,14 @@
+CHECK PASS R/B# low while unpowered
+CHECK PASS RESET required after power-up
+CHECK PASS power-on RESET after VCC loss busy 1000000.000 ns (expect 1000000.000)
+CHECK PASS page flagged PROG_INTERRUPTED
+CHECK PASS power-cut program: 859 of 2132 intended 0s written
+CHECK PASS re-program completes the interrupted page
+CHECK PASS block flagged MARGINAL + ERASE_INTERRUPTED
+CHECK PASS interrupted erase counts as a P/E cycle
+CHECK PASS power-cut erase: partially erased (3165 of 4224 bits are 1)
+CHECK PASS re-erase after interrupted erase
+CHECK PASS re-erase clears the block and marginal flags
+CHECK PASS idle power cycle preserves data
+CHECK PASS protocol errors = 2 (expected 2 deliberate)
+SUMMARY phase powercut pass 13 fail 0 proto 2 timing 0 simtime_ns 8577061

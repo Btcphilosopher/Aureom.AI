@@ -1,0 +1,79 @@
+CHECK PASS command before power-on RESET flagged
+CHECK PASS power-on RESET busy 1000000.000 ns (expect 1000000.000)
+CHECK PASS status after reset = e0 (expect E0)
+CHECK PASS READ ID 00h bytes
+CHECK PASS READ ID 20h = 'ONFI'
+CHECK PASS READ PARAMETER PAGE busy 25000.000 ns (expect 25000.000)
+CHECK PASS parameter page signature
+CHECK PASS parameter page CRC-16 (copy 0)
+CHECK PASS parameter page page/spare size
+CHECK PASS parameter page block/LUN geometry
+CHECK PASS redundant parameter page copies
+CHECK PASS fresh page reads all 1s (lun0 blk1 pg0)
+CHECK PASS page READ (tR) busy 25000.000 ns (expect 25000.000)
+CHECK PASS fresh last page of last block reads all 1s
+CHECK PASS factory bad-block scan finds exactly the configured blocks (2 found)
+CHECK PASS ground truth: lun0 blk5 factory bad
+CHECK PASS PROGRAM to factory-bad block fails
+CHECK PASS failed PROGRAM runs to max time busy 600000.000 ns (expect 600000.000)
+CHECK PASS ERASE of factory-bad block fails
+CHECK PASS factory bad-block marker survives erase attempt
+CHECK PASS PROGRAM status e0
+CHECK PASS PROGRAM (tPROG) busy 200000.000 ns (expect 200000.000)
+CHECK PASS read-after-program returns programmed data+spare
+CHECK PASS partial program #1 (data area)
+CHECK PASS partial program #2 (spare area)
+CHECK PASS data area intact after spare program
+CHECK PASS CHANGE READ COLUMN (05h-E0h) returns spare
+CHECK PASS page program count = 2
+CHECK PASS PROGRAM with CHANGE WRITE COLUMN (85h)
+CHECK PASS 85h ranges programmed, unloaded bytes remain FFh
+CHECK PASS PROGRAM requesting 0->1 is rejected (FAIL)
+CHECK PASS rejected PROGRAM busy 2000.000 ns (expect 2000.000)
+CHECK PASS rejected PROGRAM leaves cells unchanged
+CHECK PASS compatible re-program #3
+CHECK PASS compatible re-program #4
+CHECK PASS 5th program exceeds NOP=4 -> rejected
+CHECK PASS page program count capped at NOP
+CHECK PASS out-of-order first program (pg5 before pg3) rejected
+CHECK PASS program lun0 blk3 (plane 1)
+CHECK PASS program lun1 blk2
+CHECK PASS ERASE status
+CHECK PASS ERASE (tBERS) busy 2000000.000 ns (expect 2000000.000)
+CHECK PASS erased page 0 reads all 1s
+CHECK PASS erased page 1 reads all 1s
+CHECK PASS erase count incremented
+CHECK PASS neighbour block (other plane) untouched
+CHECK PASS same block number on other LUN untouched
+CHECK PASS program after erase
+CHECK PASS tPROG after 1 P/E cycle (wear-scaled) busy 199999.600 ns (expect 199999.600)
+CHECK PASS sequential program of all pages in a block
+CHECK PASS last byte of last page
+CHECK PASS read past end of page returns FFh
+CHECK PASS program with one byte beyond page+spare (byte ignored)
+CHECK PASS page holds exactly page+spare bytes
+CHECK PASS last block of last LUN programmable
+CHECK PASS PROGRAM with WP# low: FAIL, WP#=0 in status (61)
+CHECK PASS ERASE with WP# low fails
+CHECK PASS write-protected program changed nothing
+CHECK PASS write-protected erase changed nothing
+CHECK PASS status during tPROG shows busy (80)
+CHECK PASS status ready after tPROG
+CHECK PASS LUN0 still erasing while LUN1 program completed
+CHECK PASS R/B# low while any LUN busy
+CHECK PASS interleaved operations overlap and both succeed
+CHECK PASS interleaved program data correct
+CHECK PASS GET FEATURES timing mode = 0 after power-on
+CHECK PASS SET FEATURES (tFEAT) busy 1000.000 ns (expect 1000.000)
+CHECK PASS timing mode 1 selected
+CHECK PASS read in timing mode 1
+CHECK PASS read-retry level +2
+CHECK PASS read-retry level -2
+CHECK PASS RESET aborting PROGRAM (tRST) busy 10000.000 ns (expect 10000.000)
+CHECK PASS aborted page flagged PROG_INTERRUPTED
+CHECK PASS aborted program: 1072 of 2088 intended 0s written, no stray 0s
+CHECK PASS erase block 11 before restart
+CHECK PASS no AC timing violations from the compliant BFM
+CHECK PASS short WE# pulse detected by timing checker
+CHECK PASS protocol errors = 5 (expected 5 deliberate)
+SUMMARY phase fresh pass 78 fail 0 proto 5 timing 1 simtime_ns 30518890

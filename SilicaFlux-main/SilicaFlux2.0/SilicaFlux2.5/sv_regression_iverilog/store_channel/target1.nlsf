@@ -1,0 +1,11 @@
+NLSF 1 512 16 16 64 2 2 00005f1caf10c552 1 ;
+M model SilicaFlux-NANDLab ;
+M version 0.1.0 ;
+M creator sv ;
+M config 8c9045f807860baf ;
+C 0 ;
+
+P 0 3 0 1 00 0.0020566300000000003 b4 23 51 00 f1 c1 17 d6 0e bd fc bc 09 ac 8f ed 13 b6 65 d6 2d 2c a4 86 72 0e 8d 96 d1 38 0c 78 2e 43 91 94 c4 6d 2f 8f bb e1 cd 46 13 d6 fd 0a 1d 69 32 36 53 a9 3f 67 88 d5 a4 ee da 28 ca 73 5a c6 9a ec 78 f0 d6 ac eb da 85 e3 39 d2 86 db 92 44 cc 9d e8 53 e3 b4 f1 66 4e 1c 05 24 38 89 80 0c f7 a8 ad 7c 95 60 b9 62 fd 97 fb ab 04 89 e5 55 c6 92 7f d8 14 b0 fa 81 ee e8 a2 38 93 cc 7f 2a f0 67 f0 5b c8 a1 05 9c 7a 24 79 00 76 57 5d 68 3b cc e1 b1 29 1f 63 50 d5 c2 84 de 2a 8d 60 af 88 f4 39 81 72 c3 4e 4e 03 8d 76 19 89 f2 04 55 9b 80 3b 56 18 cb c5 19 38 78 87 cc 7f b9 f7 46 d2 65 ed 1d 66 18 0a 28 1b aa 2d c0 7e eb 00 c2 4a 90 a9 78 81 d6 8f 24 62 b5 9c a1 b0 ed 01 50 f1 11 df 74 30 18 b4 46 4d f8 bc 14 fd c7 25 1a aa 40 27 c2 0a 92 25 87 aa ce 8a e0 6f 0b d7 ba 6a b6 f7 47 23 d1 df f5 9f 42 28 86 ce e5 8b 4e be 91 04 e9 2d 5f 2b cf 17 e9 f4 25 5b be da 33 8b 25 e5 6d d1 44 a3 23 9e 00 2b 2a 58 3c cb e9 47 0f ef 7e 3e d8 27 44 6d 1a 82 d2 92 f2 42 4a e2 6b 7b 8e 50 cd 79 90 6c b1 22 cd ac 7a 02 78 8a c9 79 9b d0 fd 3c 1b 9e 08 ab 0f 3e 6d 25 2f 16 67 9f 4a b5 ed 4b 12 91 07 a5 42 84 3c ba 00 24 fb 61 49 64 e0 78 1d ae 2b 0e a8 4c cd 0a b3 48 7b de 6c 3d 56 b8 ba 93 d2 21 98 a5 55 e7 bc 99 b4 ca 21 b6 d8 7f f7 b0 96 2e 18 0b fe 6b 1d 95 55 49 cd a6 22 41 b4 26 62 65 3d 2f d5 7d 9e 71 5c 5e 9e d7 86 ad 10 ee 6d a7 c7 e7 80 78 c0 35 b2 1b 20 15 d6 92 6e e9 66 72 fc 8a 70 a8 47 1c 53 f9 e6 f4 87 8b 63 21 23 d7 7e ad 89 e0 3c 78 bb 68 08 d9 cf 40 7e 08 93 77 45 94 78 51 0d 8e 59 eb e6 92 db 93 5d 60 0d cd fc cd f7 04 05 56 d9 ae 25 88 7f fc b3 eb db 0e f8 56 30 ;
+R 0 3 1 ;
+R 0 3 2 ;
+C 0.0044156600000000001 ;
