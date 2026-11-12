@@ -1,6 +1,0 @@
-INFO after bake: 0->1 5587, 1->0 14
-CHECK PASS retention bake causes mostly 0->1 errors (5587 vs 14)
-INFO read retry: level0 362 errors, level+3 50 errors
-CHECK PASS read retry (+3) recovers most retention errors
-CHECK PASS protocol errors = 0 (expected 0 deliberate)
-SUMMARY phase faults_bake pass 3 fail 0 proto 0 timing 0 simtime_ns 6616450
