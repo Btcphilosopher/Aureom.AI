@@ -1,0 +1,90 @@
+# =============================================================================
+#  Albion region catalogue -- SINGLE SOURCE OF TRUTH for the memory map
+# -----------------------------------------------------------------------------
+#  tools/albion/build/gen_memmap.py reads this file plus a hardware profile
+#  (albion_*.yaml) and generates
+#     sf_albion_memmap_pkg.sv    SystemVerilog constants
+#     albion_memmap.h / .rs      C and Rust definitions (same numbers)
+#     MEMORY_MAP.md              human-readable map
+#  and REFUSES to generate anything when regions collide.
+#
+#  Rules (checked by the generator, tested with fixtures under
+#  tests/albion/fixtures/):
+#    * base and size are numbers; size is a power of two >= min_region_bytes;
+#    * base is aligned to size (so every region decodes with one base/mask
+#      compare, like all existing SilicaFlux decoders);
+#    * base + size <= 2**address_width;
+#    * enabled regions never overlap each other or any `reserved` window;
+#    * names are unique lower_snake_case.
+#
+#  The ADDRESS values below are a NEW 64-bit device map.  They are deliberately
+#  disjoint from the 32-bit windows of the existing SilicaFlux SoCs (see
+#  docs/albion/REPO_AUDIT.md): the legacy 4 GiB window at address 0 is reserved
+#  for a future SFB2 bridge adapter and is not populated.
+# =============================================================================
+version: 1
+address_width: 64
+min_region_bytes: 4096
+
+reserved:
+  - name: legacy_sfb2
+    base: 0x0000_0000_0000_0000
+    size: 0x0000_0001_0000_0000      # 4 GiB: SFB2 / SilicaFlux-V 32-bit address space
+    note: "reserved for a future SFB2 -> ALP bridge; no Albion region may overlap it"
+
+# attr keys: read write exec priv_only secure_only cacheable (bool), mem_type (normal_wb|normal_nc|device)
+regions:
+  - name: controlcore
+    base: 0x0000_0001_0000_0000
+    size: 0x0000_0000_1000_0000      # 256 MiB
+    asid: device
+    owner: "SilicaFlux ControlCore (Project 21): boot ROM, IMEM, DMEM, peripheral pages"
+    attr: {read: true, write: true, exec: true, priv_only: true, mem_type: normal_nc}
+  - name: sram
+    base: 0x0000_0001_1000_0000
+    size: 0x0000_0000_1000_0000      # 256 MiB
+    asid: device
+    owner: "SilicaFlux SRAM Wrapper Library / MemoryCore: shared device SRAM"
+    attr: {read: true, write: true, exec: true, cacheable: true, mem_type: normal_wb}
+  - name: dma
+    base: 0x0000_0001_2000_0000
+    size: 0x0000_0000_0010_0000      # 1 MiB
+    asid: config
+    owner: "SilicaFlux CloudDMA (Project 64) / DataFabric DMA: descriptor and control registers"
+    attr: {read: true, write: true, priv_only: true, mem_type: device}
+  - name: network
+    base: 0x0000_0001_3000_0000
+    size: 0x0000_0000_0100_0000      # 16 MiB
+    asid: config
+    owner: "SilicaFlux PacketCore (Project 62): queue and offload registers"
+    attr: {read: true, write: true, mem_type: device}
+  - name: virtio
+    base: 0x0000_0001_4000_0000
+    size: 0x0000_0000_0100_0000      # 16 MiB
+    asid: config
+    owner: "SilicaFlux VirtualIO (Project 63): virtio device windows"
+    attr: {read: true, write: true, mem_type: device}
+  - name: tensor_vector
+    base: 0x0000_0001_5000_0000
+    size: 0x0000_0000_1000_0000      # 256 MiB
+    asid: device
+    owner: "SilicaFlux TensorCore / HPC vector engines: command registers and tile scratchpads"
+    attr: {read: true, write: true, mem_type: normal_nc}
+  - name: security
+    base: 0x0000_0001_6000_0000
+    size: 0x0000_0000_0010_0000      # 1 MiB
+    asid: secure
+    owner: "SilicaFlux SecureStore (Project 59) / SecureBoot: key and policy registers"
+    attr: {read: true, write: true, priv_only: true, secure_only: true, mem_type: device}
+  - name: perf
+    base: 0x0000_0001_7000_0000
+    size: 0x0000_0000_0010_0000      # 1 MiB
+    asid: config
+    owner: "SilicaFlux performance counters (HPC Module 07)"
+    attr: {read: true, write: true, priv_only: true, mem_type: device}
+  - name: extmem
+    base: 0x0000_0040_0000_0000
+    size: 0x0000_0040_0000_0000      # 256 GiB window
+    asid: external
+    owner: "external-memory adapters (ExtMem bridge Project 24, HBMCore): off-chip memory window"
+    attr: {read: true, write: true, exec: true, cacheable: true, mem_type: normal_wb}

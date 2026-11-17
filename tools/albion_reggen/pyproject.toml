@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "albion-reggen"
+version = "1.0.0"
+description = "RegisterWorks: single-source register definitions -> SystemVerilog (ALP v1), C, Rust and documentation for SilicaFlux"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=5.4"]
+
+[project.optional-dependencies]
+test = ["jsonschema>=4"]
+
+[project.scripts]
+albion-reggen = "albion_reggen.cli:main"
+
+[tool.setuptools]
+packages = ["albion_reggen"]

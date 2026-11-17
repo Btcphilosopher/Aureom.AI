@@ -1,0 +1,39 @@
+{
+  "definition_hash": "322ccd28a62e3936e355677a25425f8609977deab94841f7ce2049bcd96525ba",
+  "generator": "albion_reggen",
+  "generator_version": "1.0.0",
+  "inputs": {
+    "clkrst.yaml": "016914a87b1b521b70804bf2ba8173f52520f0f4e1a219710d297c55acde2036",
+    "dma.yaml": "07df4cf98e8267712d1528459192b0ea4f30cc94ce6d8d1ad7950575a8b729a1",
+    "intc.yaml": "a2ee8f8f38eb6230696a405e8eba4fb2d81f5cf451e1c175752141c14cbbdffb",
+    "perf.yaml": "13813fffa0733de79763a326b51ebe2d89f4f9ddba1447f0f08924333e75c801",
+    "silicaflux_regs.yaml": "95a3d77e282ede109bfb11ef2fbfd13d2188d02066acb6cac72bbcc017edee15",
+    "sramc.yaml": "0178852aba3f6c949d6d323b7cefaa6a6214dc3cb378fe6c42aae10e131e3aac",
+    "sysid.yaml": "f35674171bc10d80fcc12f35a562e29f720bb1381199ad48c996025241a7b7ea",
+    "tensor.yaml": "1a8b6c26e4d96d7b69db73e00a4658e74bfbcbbfb12b484e2dac4c392780a480",
+    "vector.yaml": "8dc1ba161d446833fd376aea0fe12cfb815459b8d5997ef929964755ec8627e3"
+  },
+  "outputs": {
+    "docs/FIRMWARE_EXAMPLES.md": "9a9a6d7d7ae50f60ee67dc4df85bda2fb21beaf75abfc5298e7140404d3795d8",
+    "docs/HARDWARE_PORTS.md": "ea295d96e1e56beb6af5313205c5bf7694f06707df06d0308f7a173b8677a8a5",
+    "docs/MEMORY_MAP.md": "9ed4a731151c9df91d520280b5670baf59cbce2c1720fd08300ad81ffac8d47e",
+    "docs/REGISTERS.md": "74c6d9fcb3ec2fa3664f11dfac27c8566816cb2474c062ec622d9cbebe05f31d",
+    "docs/RESET_VALUES.md": "d027472625dd2c7c13ff7607bb68aa44b3192fdce35b6873c40400de1572a656",
+    "fw/c/sf_regs.h": "18fad2f7f3fa62c8457f1ab5fbe322d094b84e04d94c6fc503bce191c7d7ba59",
+    "fw/c/sf_regs_examples.h": "78915d63815d2dd2a7bc6b669961d2b34e791eb6e4ab787ff991eded3c44a71d",
+    "fw/rust/sf_regs.rs": "a0f4511d1fad19a984c1e2957d9dff89c0e6fe22a2bb7b0ff1f6b0063dcd65f7",
+    "fw/rust/sf_regs_examples.rs": "365fabc0b9a66855b3aff791af95a4bb086ea29809a7e2a236b4ae15c6decdf0",
+    "rtl/sf_reg_bank.sv": "924275126f20f98d8926525ed526499dacabbc21772b8a0591e34788441b2a8d",
+    "rtl/sf_reg_decoder.sv": "69a3934dfbc0eb2d5ba6f82a273f9f22ff1adf67d35da4a78603dfe9cbe8ba3d",
+    "rtl/sf_reg_interface.sv": "53f152f6a6a5c45ea3dd41dc80d971bc0a6a1047311712b520b9a1737c133524",
+    "rtl/sf_reg_pkg.sv": "6247e1229b7a4bd7248e139661fdb80de202cc6d22fa1ba8198e859494238caa",
+    "verif/tb_addr_dump.sv": "5e7f9dde274e43dd2c572e4a4265491902e1aa7f3f3893792d2ca88f2dfaa8b4",
+    "verif/tb_sf_reg_bank.sv": "6192235bc0c8ce60c8c7761fb99dfbfd71c614e7287faac9fddce5a3a5b445ab"
+  },
+  "register_map": {
+    "name": "silicaflux_regs",
+    "version": "1.0"
+  },
+  "schema_version": 1,
+  "semantic_hash": "99481283139d2dc0690f688325c0631d115617fc66330be250e7a560f5e43d39"
+}

@@ -1,0 +1,86 @@
+# System identification.
+#
+# Backed by implemented RTL: every protocol number below is a constant of
+# sf_albion_pkg.sv (AlbionCore).  `python -m albion_reggen alpcheck` parses that
+# package and fails if ALP_VERSION, LIB_VERSION or the sf_caps_t layout/values
+# here differ from it.  REGMAP_HASH is computed by the generator: the same value
+# is placed in the RTL reset value, in sf_regs.h / sf_regs.rs (SF_REGS_MAP_HASH /
+# MAP_HASH) and in the documentation, so firmware can check that the hardware it
+# runs on was built from the register map it was compiled against.
+name: sysid
+description: System identification and register-map fingerprint
+region: sysctl
+base: 0x1_8000_0000
+size: 0x1000
+rtl:
+  status: constants
+  summary: >
+    Constants of the Albion Link Protocol package (sf_albion_pkg) plus the generator's own
+    register-map hash. No hardware state other than BUILD_ID, which the integrator supplies.
+  modules:
+    - module: sf_albion_pkg
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/albioncore-0.1.0.zip
+      path: albioncore-0.1.0/rtl/albion/sf_albion_pkg.sv
+      sha256: 0126952bb99f2b5d4546d258834f83df9f52c45c5a478d95c4e546e1a7fe25fc
+      ports: {}
+registers:
+  - name: ID
+    offset: 0x00
+    description: ASCII "SFLX"
+    access: ro
+    reset: 0x53464C58
+  - name: REGMAP_VERSION
+    offset: 0x04
+    description: Version of this register map (major.minor)
+    fields:
+      - {name: MINOR, bits: "15:0",  access: ro, reset: 0}
+      - {name: MAJOR, bits: "31:16", access: ro, reset: 1}
+  - name: ALP_VERSION
+    offset: 0x08
+    description: Albion Link Protocol version implemented by the register bank (SF_ALP_VERSION_*)
+    fields:
+      - {name: MAJOR, bits: "7:0",  access: ro, reset: 1}
+      - {name: MINOR, bits: "15:8", access: ro, reset: 0}
+  - name: LIB_VERSION
+    offset: 0x0C
+    description: AlbionCore library version the RTL was generated against (SF_ALBION_LIB_*)
+    fields:
+      - {name: MAJOR, bits: "7:0",   access: ro, reset: 0}
+      - {name: MINOR, bits: "15:8",  access: ro, reset: 1}
+      - {name: PATCH, bits: "23:16", access: ro, reset: 0}
+  - name: ALP_CAPS
+    offset: 0x10
+    width: 64
+    description: >
+      ALP capability word of this link target, laid out as sf_caps_t. MAX_OUTSTANDING is the
+      capacity of sf_reg_interface (2: it accepts a request in the cycle its predecessor's
+      response leaves); FEATURES is READ|WRITE (no atomics, no out-of-order, no ECC).
+    fields:
+      - {name: FEATURES,        bits: "15:0",  access: ro, reset: 0x0003}
+      - {name: MAX_OUTSTANDING, bits: "31:16", access: ro, reset: 2}
+      - {name: RSVD,            bits: "35:32", access: ro, reset: 0}
+      - {name: DOM_W,           bits: "39:36", access: ro, reset: 8}
+      - {name: TAG_W,           bits: "43:40", access: ro, reset: 8}
+      - {name: DATA_BYTES_LOG2, bits: "47:44", access: ro, reset: 4}
+      - {name: ADDR_W,          bits: "55:48", access: ro, reset: 64}
+      - {name: PROTO_MINOR,     bits: "59:56", access: ro, reset: 0}
+      - {name: PROTO_MAJOR,     bits: "63:60", access: ro, reset: 1}
+  - name: REGMAP_HASH
+    offset: 0x18
+    width: 64
+    description: >
+      First 8 bytes of the SHA-256 semantic hash of the register definition (addresses, widths,
+      access types, reset values, hardware options). Firmware compares it with SF_REGS_MAP_HASH.
+    access: ro
+    reset: $regmap_hash
+  - name: BUILD_ID
+    offset: 0x20
+    description: Build identifier supplied by the integrator (for example a source-control revision)
+    access: ro
+    hw: input
+examples:
+  - title: Check that the hardware matches the register map this firmware was built from
+    steps:
+      - {comment: "ID must read SFLX; REGMAP_HASH must equal SF_REGS_MAP_HASH (see sf_regs_hardware_matches)"}
+      - {expect: "REGMAP_VERSION.MAJOR", value: 1}
+      - {expect: "ALP_VERSION.MAJOR", value: 1}

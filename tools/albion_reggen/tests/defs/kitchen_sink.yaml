@@ -1,0 +1,151 @@
+# Test-only register map exercising EVERY schema feature, including combinations the real SilicaFlux
+# blocks do not use: both precedence settings on rw / w1c / w1s, hw-updated status (ro/update),
+# stored write-only (wo/out), read strobes, write gates, interrupts on a live ro input, 64-bit registers
+# (alone, in arrays, two per ALP word), several registers per 16-byte word, a register mixing rw and
+# w1c bits, and three regions with different attributes (non-privileged, privileged, secure-only).
+regdef_version: 1
+map: {name: kitchen_sink, version: "2.3"}
+peripherals:
+  - name: ks_a
+    description: Non-privileged peripheral (region tensor_vector, normal_nc)
+    region: tensor_vector
+    base: 0x1_5100_0000
+    size: 0x1000
+    rtl: {status: register_compatible}
+    registers:
+      - name: RWMIX
+        offset: 0x00
+        description: rw fields with hardware update under both precedences
+        fields:
+          - {name: F_HW,    bits: "7:0",   access: rw, hw: update, precedence: hw, reset: 0x11}
+          - {name: F_SW,    bits: "15:8",  access: rw, hw: update, precedence: sw, reset: 0x22}
+          - {name: F_PLAIN, bits: "23:16", access: rw, reset: 0xA5}
+          - {name: F_TOP,   bits: "31:24", access: rw}
+      - name: FLAGS
+        offset: 0x04
+        description: w1c and w1s flags, with and without hardware events, both precedences
+        reserved: ["31:24"]
+        fields:
+          - {name: C_HW,   bits: "3:0",   access: w1c, hw: event, precedence: hw, reset: 0x3}
+          - {name: C_SW,   bits: "7:4",   access: w1c, hw: event, precedence: sw, reset: 0x0}
+          - {name: C_NONE, bits: "11:8",  access: w1c, hw: none,  reset: 0xF}
+          - {name: S_HW,   bits: "15:12", access: w1s, hw: event, precedence: hw, reset: 0x0}
+          - {name: S_SW,   bits: "19:16", access: w1s, hw: event, precedence: sw, reset: 0x0}
+          - {name: S_NONE, bits: "23:20", access: w1s, hw: none,  reset: 0x5}
+      - name: STATUS
+        offset: 0x08
+        description: Constant, live and hardware-updated read-only fields
+        fields:
+          - {name: FIXED,  bits: "7:0",   access: ro, reset: 0x5A}
+          - {name: LIVE,   bits: "15:8",  access: ro, hw: input}
+          - {name: LATCH,  bits: "23:16", access: ro, hw: update, reset: 0x77}
+          - {name: LEVEL,  bit: 24,       access: ro, hw: input, interrupt: "IE.LVL"}
+          - {name: CAUGHT, bit: 25,       access: ro, hw: update, interrupt: "IE.CAUGHT"}
+      - name: IE
+        offset: 0x0C
+        fields:
+          - {name: LVL,    bit: 0, access: rw}
+          - {name: CAUGHT, bit: 1, access: rw}
+          - {name: EV0,    bit: 2, access: rw}
+          - {name: EV1,    bit: 3, access: rw}
+      - name: INTS
+        offset: 0x10
+        description: Interrupt status with w1c flags driven by hardware events
+        fields:
+          - {name: EV0, bit: 2, access: w1c, hw: event, interrupt: "IE.EV0"}
+          - {name: EV1, bit: 3, access: w1c, hw: event, precedence: sw, interrupt: "IE.EV1"}
+      - name: CMD
+        offset: 0x14
+        description: Pulse fields and a stored write-only field; every write also strobes
+        wr_strobe: true
+        fields:
+          - {name: GO,    bit: 0,      access: w1p}
+          - {name: STOP,  bit: 1,      access: w1p}
+          - {name: KEY,   bits: "23:8", access: wo, hw: out, reset: 0x1234}
+      - name: GATED
+        offset: 0x18
+        description: A write is refused unless the hardware gate is high
+        wr_strobe: true
+        write_gate: true
+        fields:
+          - {name: DATA, bits: "15:0", access: rw, reset: 0xBEEF}
+          - {name: KICK, bit: 16,      access: w1p}
+      - name: POPREAD
+        offset: 0x1C
+        description: A read has a side effect (FIFO pop)
+        rd_strobe: true
+        access: ro
+        hw: input
+      - name: MIXED
+        offset: 0x20
+        description: rw field and w1c flag in the same register (read-modify-write must not clear the flag)
+        fields:
+          - {name: EN,   bits: "3:0", access: rw, reset: 0x9}
+          - {name: FLAG, bit: 8,      access: w1c, hw: event, reset: 0}
+      - name: BOTH
+        offset: 0x24
+        description: Readable and writable, with a strobe for each direction
+        rd_strobe: true
+        wr_strobe: true
+        fields: [{name: V, bits: "7:0", access: rw, reset: 0x3C}]
+      - name: WORD
+        offset: 0x30
+        count: 4
+        description: Four registers sharing ONE 16-byte ALP word
+        access: rw
+        reset: 0xC0DE0000
+      - name: ARR
+        offset: 0x40
+        count: 3
+        stride: 8
+        description: Array with a stride larger than the register
+        fields:
+          - {name: LO, bits: "15:0",  access: rw, reset: 0x00AA}
+          - {name: HI, bits: "31:16", access: ro, hw: input}
+  - name: ks_c
+    description: Privileged peripheral with 64-bit registers (region dma)
+    region: dma
+    base: 0x1_2000_0000
+    size: 0x1000
+    rtl: {status: register_compatible}
+    registers:
+      - name: BIG
+        offset: 0x00
+        width: 64
+        description: A full 64-bit read/write field
+        access: rw
+        reset: 0x0123_4567_89AB_CDEF
+      - name: HALVES
+        offset: 0x08
+        width: 64
+        fields:
+          - {name: LOW,  bits: "31:0",  access: rw, reset: 0xFFFF_0000}
+          - {name: HIGH, bits: "63:32", access: ro, hw: input}
+      - name: CNT
+        offset: 0x10
+        width: 64
+        count: 4
+        description: Four 64-bit counters, two per ALP word
+        access: ro
+        hw: input
+      - name: SPLIT
+        offset: 0x40
+        width: 64
+        description: 64-bit register with 64-bit w1c flags and an enable
+        fields:
+          - {name: FLAGS, bits: "31:0",  access: w1c, hw: event, reset: 0}
+          - {name: MASK,  bits: "63:32", access: rw, reset: 0xFFFFFFFF}
+  - name: ks_s
+    description: Secure-only peripheral (region security)
+    region: security
+    base: 0x1_6000_0000
+    size: 0x1000
+    rtl: {status: register_compatible}
+    registers:
+      - {name: ID,  offset: 0x00, access: ro, reset: 0x53454355}
+      - {name: KEY, offset: 0x04, access: wo, hw: out, reset: 0x0}
+      - {name: VAL, offset: 0x08, access: rw, reset: 0x600D}
+      - name: GO
+        offset: 0x0C
+        wr_strobe: true
+        fields: [{name: START, bit: 0, access: w1p}]

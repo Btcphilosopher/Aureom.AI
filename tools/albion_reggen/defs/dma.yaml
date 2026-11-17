@@ -1,0 +1,187 @@
+# DMA controller registers.
+#
+# Attaches to the implemented SilicaFlux-HPC DMA adapter (Module 05), module hpc_dma_adapter:
+# descriptor channel (cmd_*), completion channel (cpl_*), status outputs, event pulses
+# (ev_*) and the 16 performance counters (perf_cnt, CNT_W = 32).
+# Fidelity decisions taken from the RTL:
+#   * cmd_abort is level-sensitive in the RTL (e_abort = cmd_abort && state == RUN): a one-cycle pulse
+#     could be lost between beats, so ABORT is a plain rw bit that software holds and then clears;
+#   * START and CPL_POP are write strobes whose hardware 'ready' gates the write (the write is
+#     refused with TARGET_ERR when cmd_ready / cpl_valid is low), as the adapter's own queue
+#     discipline requires. The strobe is a registered one-cycle pulse that follows the accepted write;
+#     this assumes the bank is the only producer on the descriptor channel (cmd_ready then cannot
+#     fall between the gate sample and the pulse).
+#   * the interrupt status bits are set by the adapter's one-cycle ev_* event outputs.
+name: dma
+description: DMA controller (descriptor, completion, status, interrupts, counters)
+region: dma
+base: 0x1_2000_0000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Bound to hpc_dma_adapter (SilicaFlux-HPC Module 05). Glue: none. The scratchpad and DataFabric
+    ports of the adapter are data paths and are not register-mapped.
+  modules:
+    - module: hpc_dma_adapter
+      role: attach
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-hpc-m05-dma-adapter.zip
+      path: silicaflux-hpc-m05-dma-adapter/rtl/hpc_dma_adapter.sv
+      sha256: 46c160af2e52de202e7c2165f0a1b7d347fa39c1c660a253791bf7baf451cf8b
+      ports:
+        cmd_valid: input
+        cmd_ready: output
+        cmd_src: input
+        cmd_dst: input
+        cmd_len: input
+        cmd_tag: input
+        cmd_abort: input
+        cpl_valid: output
+        cpl_ready: input
+        cpl_tag: output
+        cpl_err: output
+        cpl_code: output
+        cpl_err_addr: output
+        cpl_bytes: output
+        busy: output
+        active: output
+        cur_tag: output
+        ctl_state: output
+        eng_state: output
+        eng_bytes_done: output
+        fifo_level: output
+        ev_cpl: output
+        ev_cpl_err: output
+        ev_bus_err: output
+        ev_tag_err: output
+        perf_clear: input
+        perf_cnt: output
+registers:
+  - name: SRC
+    offset: 0x00
+    description: Descriptor source address (bytes)
+    access: rw
+    connect: {value: hpc_dma_adapter.cmd_src}
+  - name: DST
+    offset: 0x04
+    description: Descriptor destination address (bytes)
+    access: rw
+    connect: {value: hpc_dma_adapter.cmd_dst}
+  - name: LEN
+    offset: 0x08
+    description: Descriptor length in bytes
+    access: rw
+    connect: {value: hpc_dma_adapter.cmd_len}
+  - name: TAG
+    offset: 0x0C
+    description: Descriptor tag, echoed in the completion record
+    fields:
+      - {name: TAG, bits: "7:0", access: rw, reset: 0, connect: {value: hpc_dma_adapter.cmd_tag}}
+  - name: CTRL
+    offset: 0x10
+    description: Transfer control
+    fields:
+      - name: ABORT
+        bit: 0
+        access: rw
+        reset: 0
+        description: "Stop the active transfer at the next beat boundary. Level: hold it until the completion arrives, then clear it."
+        connect: {value: hpc_dma_adapter.cmd_abort}
+  - name: START
+    offset: 0x14
+    description: Submit the staged descriptor. Refused (TARGET_ERR) while the descriptor queue is full.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: hpc_dma_adapter.cmd_valid, gate: hpc_dma_adapter.cmd_ready}
+    fields:
+      - {name: GO, bits: "31:0", access: wo, hw: none, description: "Any write submits the descriptor; the value is ignored"}
+  - name: STATUS
+    offset: 0x18
+    description: Engine status
+    fields:
+      - {name: BUSY,       bit: 0,       access: ro, hw: input, description: A descriptor is queued or in progress, connect: {value: hpc_dma_adapter.busy}}
+      - {name: ACTIVE,     bit: 1,       access: ro, hw: input, description: The engine is executing a transfer, connect: {value: hpc_dma_adapter.active}}
+      - {name: CTL_STATE,  bits: "3:2",  access: ro, hw: input, description: "0 IDLE 1 CHECK 2 RUN", connect: {value: hpc_dma_adapter.ctl_state}}
+      - {name: ENG_STATE,  bits: "6:4",  access: ro, hw: input, description: DataFabric engine state, connect: {value: hpc_dma_adapter.eng_state}}
+      - {name: CUR_TAG,    bits: "15:8", access: ro, hw: input, description: Tag of the descriptor in progress, connect: {value: hpc_dma_adapter.cur_tag}}
+      - {name: FIFO_LEVEL, bits: "23:16", access: ro, hw: input, description: Buffered-engine data FIFO occupancy, connect: {value: hpc_dma_adapter.fifo_level}}
+  - name: BYTES_DONE
+    offset: 0x1C
+    description: Bytes acknowledged so far by the transfer in progress
+    access: ro
+    hw: input
+    connect: {value: hpc_dma_adapter.eng_bytes_done}
+  - name: CPL_STATUS
+    offset: 0x20
+    description: Head completion record
+    fields:
+      - {name: VALID, bit: 0,       access: ro, hw: input, connect: {value: hpc_dma_adapter.cpl_valid}}
+      - {name: ERR,   bit: 1,       access: ro, hw: input, description: Completion code is not NONE, connect: {value: hpc_dma_adapter.cpl_err}}
+      - {name: CODE,  bits: "7:4",  access: ro, hw: input, description: "0 NONE 1 ZERO_LENGTH 2 LENGTH 3 SRC_ALIGN 4 DST_ALIGN 5 SRC_OVERFLOW 6 DST_OVERFLOW 7 OVERLAP 8 READ_BUS 9 WRITE_BUS 10 ABORTED 11 REGION", connect: {value: hpc_dma_adapter.cpl_code}}
+      - {name: TAG,   bits: "15:8", access: ro, hw: input, connect: {value: hpc_dma_adapter.cpl_tag}}
+  - name: CPL_ERR_ADDR
+    offset: 0x24
+    description: Address associated with a bus or region error
+    access: ro
+    hw: input
+    connect: {value: hpc_dma_adapter.cpl_err_addr}
+  - name: CPL_BYTES
+    offset: 0x28
+    description: Bytes written and acknowledged (contiguous prefix)
+    access: ro
+    hw: input
+    connect: {value: hpc_dma_adapter.cpl_bytes}
+  - name: CPL_POP
+    offset: 0x2C
+    description: Release the head completion record. Refused (TARGET_ERR) when there is none.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: hpc_dma_adapter.cpl_ready, gate: hpc_dma_adapter.cpl_valid}
+    fields:
+      - {name: POP, bits: "31:0", access: wo, hw: none, description: "Any write pops the record; the value is ignored"}
+  - name: PERF_CTRL
+    offset: 0x30
+    description: Performance counter control
+    fields:
+      - {name: CLEAR, bit: 0, access: w1p, description: Write 1 to clear the counters, connect: {pulse: hpc_dma_adapter.perf_clear}}
+  - name: INT_ENABLE
+    offset: 0x34
+    description: Interrupt enables
+    fields:
+      - {name: CPL,     bit: 0, access: rw, reset: 0, description: Completion record produced}
+      - {name: CPL_ERR, bit: 1, access: rw, reset: 0, description: Completion record with an error code}
+      - {name: BUS_ERR, bit: 2, access: rw, reset: 0, description: Bus error response received}
+      - {name: TAG_ERR, bit: 3, access: rw, reset: 0, description: Response-ownership violation}
+  - name: INT_STATUS
+    offset: 0x38
+    description: Interrupt status (write 1 to clear; a same-cycle hardware event wins)
+    fields:
+      - {name: CPL,     bit: 0, access: w1c, interrupt: "INT_ENABLE.CPL",     connect: {event: hpc_dma_adapter.ev_cpl}}
+      - {name: CPL_ERR, bit: 1, access: w1c, interrupt: "INT_ENABLE.CPL_ERR", connect: {event: hpc_dma_adapter.ev_cpl_err}}
+      - {name: BUS_ERR, bit: 2, access: w1c, interrupt: "INT_ENABLE.BUS_ERR", connect: {event: hpc_dma_adapter.ev_bus_err}}
+      - {name: TAG_ERR, bit: 3, access: w1c, interrupt: "INT_ENABLE.TAG_ERR", connect: {event: hpc_dma_adapter.ev_tag_err}}
+  - name: PERF
+    offset: 0x40
+    count: 16
+    description: >
+      Performance counter i (hpc_dma_perf): 0 CYCLES, 1 ACTIVE, 2 BYTES_RD, 3 BYTES_WR, 4 READS, 5 WRITES,
+      6 REQ_STALL, 7 RSP_WAIT, 8 OUT_SUM, 9 OUT_MAX, 10 CPL_OK, 11 CPL_ERR, 12 BUS_ERR, 13 TAG_ERR, 14 SPM_REQ, 15 FAB_REQ
+    access: ro
+    hw: input
+    connect: {value: hpc_dma_adapter.perf_cnt}
+examples:
+  - title: Run one transfer and collect its completion
+    description: Stage a descriptor, submit it, wait for the completion record, check it and release it.
+    steps:
+      - {write: SRC, value: 0x20000000}
+      - {write: DST, value: 0x80000000}
+      - {write: LEN, value: 4096}
+      - {set: "TAG.TAG", value: 7}
+      - {write: START, value: 1}
+      - {poll: "CPL_STATUS.VALID", until: 1, max: 100000}
+      - {expect: "CPL_STATUS.ERR", value: 0}
+      - {write: CPL_POP, value: 1}
+  - title: Interrupt on completion
+    steps:
+      - {set: "INT_ENABLE.CPL", value: 1}
+      - {clear: "INT_STATUS.CPL"}

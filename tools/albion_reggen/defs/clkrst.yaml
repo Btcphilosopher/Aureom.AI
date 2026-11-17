@@ -1,0 +1,117 @@
+# Clock / reset status registers.
+#
+# Replaces the status part of the implemented clock-and-reset-tree register slave (sf_crt_regs, Project 35).
+# The offsets and the layout of every register below are those of sf_crt_regs's read mux, and the
+# status fields are wired to its snapshot vector snap_i (a coherent 128-bit word from the reference
+# domain) and to br_en_i / br_clk_req_i / wdog_irq_i.
+# NOT described (they need hardware behaviour the register generator does not model, so describing them
+# would be fiction): the keyed commands SW_RST (key 0x5AFE) and WDOG_KICK (key 0x57D0_6EED), the CDC-channel
+# commands CAUSE write-1-to-clear / WDOG_CTRL, and the local WDOG_LOAD shadow.
+# CLK_EN is 8 bits wide (the maximum NB); with NB < 8 the upper bits have no branch behind them.
+name: clkrst
+description: Clock and reset status
+region: sysctl
+base: 0x1_8000_2000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Status registers of sf_crt_regs. Glue: CONFIG comes from the build parameters (NB, NW, MC_EN) and STATUS.SNAP_SEEN
+    from sf_crt_regs's internal snap_seen_q; everything else is a slice of snap_i or a direct port.
+  modules:
+    - module: sf_crt_regs
+      role: replace
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-clocktree-p35.zip
+      path: silicaflux-clocktree/rtl/sf_crt_regs.sv
+      sha256: 828b12cdbd4926faff358111e0a654f51a2cc16d8eebd2b7633a9eae0976d0bc
+      ports:
+        snap_i: input
+        br_en_i: input
+        br_clk_req_i: input
+        wdog_irq_i: input
+        sw_clk_en_o: output
+registers:
+  - name: ID
+    offset: 0x00
+    description: ASCII "SFCT"
+    access: ro
+    reset: 0x53464354
+  - name: CONFIG
+    offset: 0x04
+    description: Build configuration of the clock/reset tree
+    fields:
+      - {name: MC_EN,   bit: 0,       access: ro, hw: input, description: Memory-controller domain present}
+      - {name: NW,      bits: "15:8", access: ro, hw: input, description: Number of watchdogs}
+      - {name: NB,      bits: "23:16", access: ro, hw: input, description: Number of gated branches}
+      - {name: VERSION, bits: "31:24", access: ro, hw: input, description: Clock/reset tree version}
+  - name: STATUS
+    offset: 0x08
+    description: Sequencer and clock status (from the coherent snapshot of the reference domain)
+    fields:
+      - {name: SEQ_STATE,   bits: "3:0", access: ro, hw: input, description: "0 OFF 1 WAIT_CLK 2 ROOT_ON 3 REL_FAB 4 REL_CC 5 REL_ACC 6 RUN 7 QUIESCE 8 ASSERT 9 CLK_LOST", connect: {value: "sf_crt_regs.snap_i[3:0]"}}
+      - {name: MC_STATE,    bits: "5:4", access: ro, hw: input, description: "0 OFF 1 REL 2 RUN", connect: {value: "sf_crt_regs.snap_i[5:4]"}}
+      - {name: RUN,         bit: 6,  access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[6]"}}
+      - {name: PLL_LOCKED,  bit: 7,  access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[7]"}}
+      - {name: CORE_CLK_OK, bit: 8,  access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[8]"}}
+      - {name: MC_CLK_OK,   bit: 9,  access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[9]"}}
+      - {name: WDOG_WARN,   bit: 10, access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[10]"}}
+      - {name: WDOG_EN,     bit: 11, access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[11]"}}
+      - {name: WDOG_LOCK,   bit: 12, access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[12]"}}
+      - {name: WDOG_RST_EN, bit: 13, access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[13]"}}
+      - {name: QTIMEOUT,    bit: 14, access: ro, hw: input, description: Sticky - a quiesce timed out, connect: {value: "sf_crt_regs.snap_i[14]"}}
+      - {name: CMD_DROP,    bit: 15, access: ro, hw: input, description: Sticky - a command was dropped, connect: {value: "sf_crt_regs.snap_i[15]"}}
+      - {name: WDOG_CFG_REJECTED, bit: 16, access: ro, hw: input, description: Sticky - a watchdog configuration was rejected, connect: {value: "sf_crt_regs.snap_i[16]"}}
+      - {name: DOMAINS_RELEASED, bits: "19:17", access: ro, hw: input, description: "Domain released {MC, CC, FAB}", connect: {value: "sf_crt_regs.snap_i[27:25]"}}
+      - {name: SNAP_SEEN,   bit: 31, access: ro, hw: input, description: A snapshot has been received since fabric reset}
+  - name: CAUSE
+    offset: 0x0C
+    description: >
+      Sticky reset causes (read-only here; clearing goes through a CDC command channel that this
+      register generator does not model). 0 POR, 1 external pin, 2 core clock absent, 3 PLL lock lost,
+      4 system watchdog, 5 block watchdog, 6 software SYSTEM, 7 software CONTROL, 8 software COMPUTE,
+      9 software MEMCTL, 10 memory-controller clock absent.
+    fields:
+      - {name: CAUSES, bits: "10:0", access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[42:32]"}}
+  - name: RST_INFO
+    offset: 0x10
+    description: Reset count, last cause and released branches
+    fields:
+      - {name: RESET_COUNT, bits: "15:0",  access: ro, hw: input, description: Resets since power-on (saturating), connect: {value: "sf_crt_regs.snap_i[63:48]"}}
+      - {name: LAST_CAUSE,  bits: "19:16", access: ro, hw: input, description: Highest-priority cause of the last reset event, connect: {value: "sf_crt_regs.snap_i[31:28]"}}
+      - {name: BRANCH_RELEASED, bits: "31:24", access: ro, hw: input, description: Branch release acknowledgements, connect: {value: "sf_crt_regs.snap_i[24:17]"}}
+  - name: CLK_EN
+    offset: 0x18
+    description: Software clock enable per gated branch (the hardware interlock overrides a 0 while a branch is busy)
+    fields:
+      - {name: BRANCH_EN, bits: "7:0", access: rw, reset: 0xFF, connect: {value: sf_crt_regs.sw_clk_en_o}}
+  - name: CLK_STAT
+    offset: 0x1C
+    description: Actual branch gate state and branch clock requests
+    fields:
+      - {name: GATE_EN,     bits: "7:0",  access: ro, hw: input, connect: {value: sf_crt_regs.br_en_i}}
+      - {name: CLK_REQUEST, bits: "15:8", access: ro, hw: input, connect: {value: sf_crt_regs.br_clk_req_i}}
+  - name: WDOG_CNT
+    offset: 0x2C
+    description: Current watchdog count (snapshot)
+    access: ro
+    hw: input
+    connect: {value: "sf_crt_regs.snap_i[95:64]"}
+  - name: CLK_MEAS
+    offset: 0x30
+    description: Clock-monitor edge counts per window (snapshot)
+    fields:
+      - {name: CORE_EDGES, bits: "15:0",  access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[111:96]"}}
+      - {name: MC_EDGES,   bits: "31:16", access: ro, hw: input, connect: {value: "sf_crt_regs.snap_i[127:112]"}}
+  - name: IRQ
+    offset: 0x34
+    description: Watchdog warning interrupt level (cleared by servicing the watchdog)
+    fields:
+      - {name: WDOG_WARN, bit: 0, access: ro, hw: input, connect: {value: sf_crt_regs.wdog_irq_i}}
+examples:
+  - title: Check that the system is running and the PLL is locked
+    steps:
+      - {poll: "STATUS.PLL_LOCKED", until: 1, max: 100000}
+      - {expect: "STATUS.RUN", value: 1}
+  - title: Gate off branch 2's software clock enable
+    steps:
+      - {set: "CLK_EN.BRANCH_EN", value: 0xFB}

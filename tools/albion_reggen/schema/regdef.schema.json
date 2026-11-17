@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aureom.ai/silicaflux/regdef/1/schema.json",
+  "title": "RegisterWorks register definition, schema version 1",
+  "description": "Structural schema for albion_reggen definitions. It checks shape, types, names and enumerations (useful in editors); the semantic rules - overlaps, widths, reset ranges, region fit, interrupt references, RTL bindings - are enforced by `python -m albion_reggen validate` and documented in docs/SCHEMA.md.",
+  "type": "object",
+  "required": ["regdef_version", "map", "peripherals"],
+  "additionalProperties": false,
+  "properties": {
+    "regdef_version": {"const": 1},
+    "map": {"$ref": "#/$defs/map"},
+    "peripherals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"oneOf": [{"$ref": "#/$defs/include"}, {"$ref": "#/$defs/peripheral"}]}
+    }
+  },
+  "$defs": {
+    "int": {
+      "description": "An integer, or a string holding one in decimal, 0x hex or 0b binary (underscores allowed; no leading zeros).",
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"type": "string", "pattern": "^(0b[01_]+|0x[0-9a-fA-F_]+|0|[1-9][0-9_]*)$"}
+      ]
+    },
+    "lowerName": {"type": "string", "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$", "maxLength": 40},
+    "upperName": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$", "maxLength": 40},
+    "text": {"type": "string"},
+    "include": {
+      "type": "object",
+      "required": ["include"],
+      "additionalProperties": false,
+      "properties": {"include": {"type": "string", "minLength": 1}}
+    },
+    "map": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/lowerName"},
+        "version": {"type": "string", "pattern": "^[0-9]{1,5}\\.[0-9]{1,5}$"},
+        "description": {"$ref": "#/$defs/text"},
+        "extra_regions": {"type": "array", "items": {"$ref": "#/$defs/region"}}
+      }
+    },
+    "region": {
+      "type": "object",
+      "required": ["name", "base", "size"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/lowerName"},
+        "base": {"$ref": "#/$defs/int"},
+        "size": {"$ref": "#/$defs/int"},
+        "asid": {"enum": ["device", "config", "external", "host", "secure"]},
+        "owner": {"$ref": "#/$defs/text"},
+        "attr": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read": {"type": "boolean"}, "write": {"type": "boolean"}, "exec": {"type": "boolean"},
+            "priv_only": {"type": "boolean"}, "secure_only": {"type": "boolean"}, "cacheable": {"type": "boolean"},
+            "mem_type": {"enum": ["normal_wb", "normal_nc", "device"]}
+          }
+        }
+      }
+    },
+    "connectMap": {
+      "type": "object",
+      "propertyNames": {"enum": ["value", "event", "pulse", "hw_we", "hw_wdata", "wr_strobe", "rd_strobe", "gate", "irq"]},
+      "additionalProperties": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*(\\[[^\\]\\s]+\\])?$"}
+    },
+    "rtlModule": {
+      "type": "object",
+      "required": ["module"],
+      "additionalProperties": false,
+      "properties": {
+        "module": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "role": {"enum": ["attach", "replace"]},
+        "archive": {"type": "string"},
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "ports": {"type": "object", "additionalProperties": {"enum": ["input", "output"]}}
+      }
+    },
+    "peripheral": {
+      "type": "object",
+      "required": ["name", "region", "base", "size", "registers"],
+      "additionalProperties": false,
+      "properties": {
+        "regdef_version": {"const": 1},
+        "name": {"$ref": "#/$defs/lowerName"},
+        "description": {"$ref": "#/$defs/text"},
+        "region": {"$ref": "#/$defs/lowerName"},
+        "base": {"$ref": "#/$defs/int"},
+        "size": {"$ref": "#/$defs/int"},
+        "priv_only": {"type": "boolean"},
+        "secure_only": {"type": "boolean"},
+        "connect": {"$ref": "#/$defs/connectMap"},
+        "rtl": {
+          "type": "object",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": {"enum": ["bound", "register_compatible", "constants"]},
+            "summary": {"$ref": "#/$defs/text"},
+            "modules": {"type": "array", "items": {"$ref": "#/$defs/rtlModule"}}
+          }
+        },
+        "registers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/register"}},
+        "examples": {"type": "array", "items": {"$ref": "#/$defs/example"}}
+      }
+    },
+    "register": {
+      "type": "object",
+      "required": ["name", "offset"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/upperName"},
+        "offset": {"$ref": "#/$defs/int"},
+        "width": {"enum": [32, 64]},
+        "count": {"type": "integer", "minimum": 1},
+        "stride": {"type": "integer", "minimum": 1},
+        "description": {"$ref": "#/$defs/text"},
+        "wr_strobe": {"type": "boolean"},
+        "rd_strobe": {"type": "boolean"},
+        "write_gate": {"type": "boolean"},
+        "reserved": {"type": "array", "items": {"type": ["string", "integer"]}},
+        "connect": {"$ref": "#/$defs/connectMap"},
+        "fields": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/field"}},
+        "access": {"enum": ["ro", "rw", "wo", "w1c", "w1s", "w1p"]},
+        "reset": {"$ref": "#/$defs/reset"},
+        "hw": {"enum": ["const", "input", "update", "none", "out", "event", "pulse"]},
+        "precedence": {"enum": ["hw", "sw"]},
+        "interrupt": {"$ref": "#/$defs/interrupt"}
+      },
+      "oneOf": [
+        {"required": ["fields"], "not": {"anyOf": [{"required": ["access"]}, {"required": ["reset"]}, {"required": ["hw"]}, {"required": ["precedence"]}, {"required": ["interrupt"]}]}},
+        {"required": ["access"], "not": {"required": ["fields"]}}
+      ]
+    },
+    "reset": {
+      "oneOf": [{"$ref": "#/$defs/int"}, {"type": "string", "pattern": "^\\$[a-z_]+$"}]
+    },
+    "interrupt": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*\\.[A-Z][A-Z0-9_]*$"},
+        {"type": "object", "required": ["enable"], "additionalProperties": false,
+         "properties": {"enable": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*\\.[A-Z][A-Z0-9_]*$"}}}
+      ]
+    },
+    "field": {
+      "type": "object",
+      "required": ["name", "access"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*(\\{i\\}[A-Z0-9_]*)?$|^[A-Z][A-Z0-9_{}]*$"},
+        "bit": {"type": "integer", "minimum": 0, "maximum": 63},
+        "bits": {"oneOf": [{"type": "string", "pattern": "^\\s*[0-9]+\\s*(:\\s*[0-9]+\\s*)?$"},
+                            {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 63}, "minItems": 2, "maxItems": 2},
+                            {"type": "integer", "minimum": 0, "maximum": 63}]},
+        "width": {"type": "integer", "minimum": 1, "maximum": 64},
+        "access": {"enum": ["ro", "rw", "wo", "w1c", "w1s", "w1p"]},
+        "reset": {"$ref": "#/$defs/reset"},
+        "hw": {"enum": ["const", "input", "update", "none", "out", "event", "pulse"]},
+        "precedence": {"enum": ["hw", "sw"]},
+        "interrupt": {"$ref": "#/$defs/interrupt"},
+        "description": {"$ref": "#/$defs/text"},
+        "connect": {"$ref": "#/$defs/connectMap"},
+        "repeat": {"type": "object", "required": ["count", "stride"], "additionalProperties": false,
+                   "properties": {"count": {"type": "integer", "minimum": 1}, "stride": {"type": "integer", "minimum": 1},
+                                  "first": {"type": "integer", "minimum": 0}}}
+      },
+      "oneOf": [{"required": ["bit"]}, {"required": ["bits"]}]
+    },
+    "example": {
+      "type": "object",
+      "required": ["title", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "description": {"$ref": "#/$defs/text"},
+        "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "write": {"type": "string"}, "read": {"type": "string"}, "expect": {"type": "string"}, "poll": {"type": "string"},
+        "set": {"type": "string"}, "trigger": {"type": "string"}, "clear": {"type": "string"}, "comment": {"type": "string"},
+        "value": {"$ref": "#/$defs/int"}, "until": {"$ref": "#/$defs/int"},
+        "max": {"type": "integer", "minimum": 1}, "index": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {"required": ["write"]}, {"required": ["read"]}, {"required": ["expect"]}, {"required": ["poll"]},
+        {"required": ["set"]}, {"required": ["trigger"]}, {"required": ["clear"]}, {"required": ["comment"]}
+      ]
+    }
+  }
+}

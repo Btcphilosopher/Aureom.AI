@@ -1,0 +1,108 @@
+# SRAM controller control/status registers.
+#
+# Attaches to the implemented SilicaFlux SRAMController (Project 73), module
+# sf_sram_subsystem: the bank drives its src_en / flush / perf_clr / perf_sel inputs and
+# reads its idle / sts_* / perf_val outputs.  Deliberate fidelity decisions:
+#   * flush is a LEVEL in the RTL ("stop accepting, cancel everything in a bank" while high),
+#     so it is a plain rw bit, not a pulse;
+#   * sts_rsp_overflow / sts_bank_proto are sticky until reset in the RTL (nothing can clear
+#     them), so they are read-only, not W1C;
+#   * perf_val is combinational on perf_sel, so software selects a counter then reads PERF_VAL.
+# NUM_MASTERS = 4, NUM_BANKS = 4, CNT_W = 32 (perf_sel is 7 bits: 16 + 16*4 + 8*4 = 112 counters).
+name: sramc
+description: SRAM controller control and status
+region: sysctl
+base: 0x1_8000_3000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Bound to sf_sram_subsystem (SilicaFlux SRAMController, Project 73) with NUM_MASTERS=4, NUM_BANKS=4,
+    CNT_W=32. Glue needed: none beyond wiring the named ports.
+  modules:
+    - module: sf_sram_subsystem
+      role: attach
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-sramcontroller-p73.zip
+      path: silicaflux-sramcontroller/rtl/sramc/sf_sram_subsystem.sv
+      sha256: 4b0f0d2c3bc9cdd0748f65ea85f5d95f41a93af5e17a49e6efa4eaa5120bd200
+      ports:
+        src_en: input
+        flush: input
+        idle: output
+        sts_rsp_overflow: output
+        sts_bank_proto: output
+        perf_clr: input
+        perf_sel: input
+        perf_val: output
+registers:
+  - name: CTRL
+    offset: 0x00
+    description: Master enables and flush
+    fields:
+      - name: SRC_EN
+        bits: "3:0"
+        access: rw
+        reset: 0xF
+        description: Per-master source enable (bit m = master m). A disabled master's requests are answered with the SRC error.
+        connect: {value: sf_sram_subsystem.src_en}
+      - name: FLUSH
+        bit: 8
+        access: rw
+        reset: 0
+        description: While 1 the controller accepts no new request and cancels accesses inside a bank (level; software clears it).
+        connect: {value: sf_sram_subsystem.flush}
+  - name: STATUS
+    offset: 0x08
+    description: Controller status
+    fields:
+      - name: IDLE
+        bit: 0
+        access: ro
+        hw: input
+        description: No transaction outstanding anywhere.
+        connect: {value: sf_sram_subsystem.idle}
+      - name: RSP_OVERFLOW
+        bit: 1
+        access: ro
+        hw: input
+        description: Sticky until reset - a response FIFO overflowed (documented unreachable).
+        connect: {value: sf_sram_subsystem.sts_rsp_overflow}
+      - name: BANK_PROTO
+        bit: 2
+        access: ro
+        hw: input
+        description: Sticky until reset - a bank answered with nothing outstanding or a tracker overflowed.
+        connect: {value: sf_sram_subsystem.sts_bank_proto}
+  - name: PERF_CTRL
+    offset: 0x10
+    description: Performance counter selection and clear
+    fields:
+      - name: SEL
+        bits: "6:0"
+        access: rw
+        reset: 0
+        description: Counter index presented on PERF_VAL (0 = first global counter; per-master and per-bank counters follow).
+        connect: {value: sf_sram_subsystem.perf_sel}
+      - name: CLEAR
+        bit: 8
+        access: w1p
+        description: Write 1 to clear all counters (one-cycle pulse).
+        connect: {pulse: sf_sram_subsystem.perf_clr}
+  - name: PERF_VAL
+    offset: 0x14
+    description: Value of the counter selected by PERF_CTRL.SEL (32 bits, wraps)
+    access: ro
+    hw: input
+    connect: {value: sf_sram_subsystem.perf_val}
+examples:
+  - title: Enable all masters, select a counter and read it
+    steps:
+      - {set: "CTRL.SRC_EN", value: 0xF}
+      - {set: "PERF_CTRL.SEL", value: 3}
+      - {trigger: "PERF_CTRL.CLEAR"}
+      - {read: "PERF_VAL"}
+  - title: Flush the controller and wait until it is idle
+    steps:
+      - {set: "CTRL.FLUSH", value: 1}
+      - {poll: "STATUS.IDLE", until: 1, max: 1000}
+      - {set: "CTRL.FLUSH", value: 0}

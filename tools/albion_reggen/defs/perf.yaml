@@ -1,0 +1,63 @@
+# Performance counters: observation window onto the implemented HPC performance counter bank
+# (Module 07, hpc_perf_counters; NUM_CNT = 23, CNT_W = 64).
+#
+# Attaches to the ports hpc_perf_counters exposes besides its own register page: freeze_i and snap_i
+# (hardware control inputs), irq_o and frozen_o (status), and cnt_o (the live 64-bit counter values,
+# "debug / trace"). Everything else -- CNT_EN, SAT, OVF, snapshot and latched-read windows, preload --
+# lives behind hpc_perf_counters's own rb_* register page and is NOT replaced or described here, because
+# no port exposes it. These are 64-bit registers: a 32-bit initiator reads two halves (the generated C and
+# Rust accessors use a high-low-high read for exactly this reason).
+name: perf
+description: Performance counter observation window
+region: perf
+base: 0x1_7000_0000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Bound to hpc_perf_counters (HPC Module 07) through its freeze_i / snap_i / irq_o / frozen_o / cnt_o ports.
+    The module's rb_* register page remains for configuration; this window is the coherent live view.
+  modules:
+    - module: hpc_perf_counters
+      role: attach
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-hpc-m07-perf-counters.zip
+      path: silicaflux-hpc-m07-perf-counters/rtl/hpc_perf_counters.sv
+      sha256: 1a8d83d2e8c7f866b49abbdf7dcd5bf51da8bb105b23ee3c9a7cd8ea570b20ea
+      ports:
+        freeze_i: input
+        snap_i: input
+        irq_o: output
+        frozen_o: output
+        cnt_o: output
+registers:
+  - name: CTRL
+    offset: 0x00
+    description: Hardware-side counter control
+    fields:
+      - {name: FREEZE,   bit: 0, access: rw,  reset: 0, description: "Stop counting (hardware freeze, effective in the same cycle)", connect: {value: hpc_perf_counters.freeze_i}}
+      - {name: SNAPSHOT, bit: 1, access: w1p, description: Trigger a coherent snapshot of every counter (one-cycle pulse), connect: {pulse: hpc_perf_counters.snap_i}}
+  - name: STATUS
+    offset: 0x04
+    description: Counter bank status
+    fields:
+      - {name: FROZEN, bit: 0, access: ro, hw: input, description: Counting is stopped this cycle by a freeze source, connect: {value: hpc_perf_counters.frozen_o}}
+      - {name: IRQ,    bit: 1, access: ro, hw: input, description: Overflow interrupt level (OVF and OVF_IE), connect: {value: hpc_perf_counters.irq_o}}
+  - name: CNT
+    offset: 0x100
+    width: 64
+    count: 23
+    description: >
+      Live counter i (64-bit): 0 CYCLES, 1 CMD_ACCEPTED, 2 CMD_COMPLETED, 3 VEC_ISSUED, 4 VEC_RETIRED, 5 FLOPS_RETIRED,
+      6 VEC_STALL, 7 DMA_ACTIVE, 8 DMA_BYTES_RD, 9 DMA_BYTES_WR, 10 SPM_READS, 11 SPM_WRITES, 12 SPM_CONFLICTS,
+      13 CMDQ_FULL, 14 OUT_BP, 15 HW_ERRORS, 16 VEC_BUSY, 17 VEC_OPND_STARVE, 18 CMD_INFLIGHT_SUM, 19 VEC_CMDQ_OCC_SUM,
+      20 DMA_OUT_SUM, 21 RED_ADDS, 22 VEC_CMD_COMPLETED
+    access: ro
+    hw: input
+    connect: {value: hpc_perf_counters.cnt_o}
+examples:
+  - title: Take a coherent snapshot while the bank is frozen
+    steps:
+      - {set: "CTRL.FREEZE", value: 1}
+      - {poll: "STATUS.FROZEN", until: 1, max: 1000}
+      - {read: CNT, index: 0}
+      - {set: "CTRL.FREEZE", value: 0}

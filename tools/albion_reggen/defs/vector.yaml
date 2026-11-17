@@ -1,0 +1,158 @@
+# Vector command interface: the hardware command queue and compute scheduler of the
+# SilicaFlux-HPC tile (Module 06), which dispatches vector (and DMA) work.
+#
+# This is a drop-in description of the implemented register slave hpc_cq_mmio: identical offsets,
+# access types and meaning, with the bank REPLACING that slave (role: replace). Its hardware side is
+# exactly hpc_cq_mmio's stream side, so each bank port maps to the same-direction port of hpc_cq_mmio.
+# Differences from the hand-written slave, stated once:
+#   * the register bus is ALP (128-bit word + byte enables) instead of rb_* (one 32-bit strobe);
+#   * a refused access is an ALP error status (TARGET_ERR for DOORBELL / CPL_POP, ACCESS_DENIED for a
+#     write to a read-only register) instead of rb_err; nothing else changes on a refusal;
+#   * strobes (cmd_valid_o, cpl_ready_o, ctrl_*_o) are registered one-cycle pulses that follow the accepted
+#     write, not combinational in the write cycle;
+#   * SUBMITTED (a counter in hpc_cq_mmio) and Q_FREE (QUEUE_DEPTH - q_count) are inputs here: the
+#     integrator keeps the counter (incremented on cmd_valid_o && cmd_ready_i) and subtracts.
+name: vector
+description: Vector/DMA command interface (hardware command queue and scheduler)
+region: tensor_vector
+base: 0x1_5000_1000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Replaces the register slave hpc_cq_mmio of hpc_command_queue (Module 06). Glue: SUBMITTED counter, Q_FREE
+    subtraction, INFO from the build parameters.
+  modules:
+    - module: hpc_cq_mmio
+      role: replace
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-hpc-m06-command-queue.zip
+      path: silicaflux-hpc-m06-command-queue/rtl/hpc_cq_mmio.sv
+      sha256: 653daf48c04639a77b2bf436b0af1d520a63fc224dbd6fdd31e8389976360cae
+      ports:
+        irq_o: output
+        cmd_valid_o: output
+        cmd_ready_i: input
+        cmd_desc_o: output
+        cpl_valid_i: input
+        cpl_ready_o: output
+        cpl_rec_i: input
+        ctrl_err_cont_o: output
+        ctrl_err_clear_o: output
+        ctrl_perf_clear_o: output
+        busy_i: input
+        q_count_i: input
+        q_full_i: input
+        q_empty_i: input
+        rob_count_i: input
+        err_sticky_i: input
+        dma_down_i: input
+        vec_down_i: input
+        ev_commit_err_i: input
+        ev_commit_irq_i: input
+        perf_cnt_i: input
+connect: {irq: hpc_cq_mmio.irq_o}
+registers:
+  - name: ID
+    offset: 0x000
+    description: ASCII "SFCQ"
+    access: ro
+    reset: 0x53464351
+  - name: INFO
+    offset: 0x004
+    description: Build configuration (from the instantiation parameters)
+    fields:
+      - {name: ABI_VERSION,  bits: "3:0",   access: ro, hw: input}
+      - {name: QUEUE_DEPTH,  bits: "15:8",  access: ro, hw: input}
+      - {name: ROB_DEPTH,    bits: "23:16", access: ro, hw: input}
+      - {name: OPSET_FULL,   bit: 24,       access: ro, hw: input}
+      - {name: OVERLAP_EN,   bit: 25,       access: ro, hw: input}
+      - {name: PERF_EN,      bit: 26,       access: ro, hw: input}
+  - name: CTRL
+    offset: 0x008
+    description: Control
+    fields:
+      - {name: ERR_CONT,   bit: 0, access: rw, reset: 0, description: "0 stop on error, 1 continue", connect: {value: hpc_cq_mmio.ctrl_err_cont_o}}
+      - {name: ERR_CLEAR,  bit: 1, access: w1p, description: Clear the sticky error, connect: {pulse: hpc_cq_mmio.ctrl_err_clear_o}}
+      - {name: PERF_CLEAR, bit: 2, access: w1p, description: Clear the performance counters, connect: {pulse: hpc_cq_mmio.ctrl_perf_clear_o}}
+  - name: STATUS
+    offset: 0x00C
+    description: Queue status
+    fields:
+      - {name: BUSY,       bit: 0,        access: ro, hw: input, connect: {value: hpc_cq_mmio.busy_i}}
+      - {name: ERR_STICKY, bit: 1,        access: ro, hw: input, connect: {value: hpc_cq_mmio.err_sticky_i}}
+      - {name: Q_FULL,     bit: 2,        access: ro, hw: input, connect: {value: hpc_cq_mmio.q_full_i}}
+      - {name: Q_EMPTY,    bit: 3,        access: ro, hw: input, connect: {value: hpc_cq_mmio.q_empty_i}}
+      - {name: CPL_VALID,  bit: 4,        access: ro, hw: input, connect: {value: hpc_cq_mmio.cpl_valid_i}}
+      - {name: DMA_DOWN,   bit: 5,        access: ro, hw: input, connect: {value: hpc_cq_mmio.dma_down_i}}
+      - {name: VEC_DOWN,   bit: 6,        access: ro, hw: input, connect: {value: hpc_cq_mmio.vec_down_i}}
+      - {name: Q_COUNT,    bits: "15:8",  access: ro, hw: input, connect: {value: hpc_cq_mmio.q_count_i}}
+      - {name: ROB_COUNT,  bits: "23:16", access: ro, hw: input, connect: {value: hpc_cq_mmio.rob_count_i}}
+      - {name: Q_FREE,     bits: "31:24", access: ro, hw: input, description: Doorbells that will be accepted now (glue)}
+  - name: INT_ENABLE
+    offset: 0x010
+    description: Interrupt enables
+    fields:
+      - {name: IRQ, bit: 0, access: rw, reset: 0, description: An FL_IRQ command committed}
+      - {name: ERR, bit: 1, access: rw, reset: 0, description: An ERROR or SKIPPED record committed}
+  - name: INT_STATUS
+    offset: 0x014
+    description: Interrupt status (write 1 to clear; a same-cycle hardware event wins)
+    fields:
+      - {name: IRQ, bit: 0, access: w1c, interrupt: "INT_ENABLE.IRQ", connect: {event: hpc_cq_mmio.ev_commit_irq_i}}
+      - {name: ERR, bit: 1, access: w1c, interrupt: "INT_ENABLE.ERR", connect: {event: hpc_cq_mmio.ev_commit_err_i}}
+  - name: SUBMITTED
+    offset: 0x018
+    description: Doorbells accepted since reset (glue counter)
+    access: ro
+    hw: input
+  - name: DESC
+    offset: 0x020
+    count: 8
+    description: Descriptor staging words 0..7 (kept after the doorbell)
+    access: rw
+    connect: {value: hpc_cq_mmio.cmd_desc_o}
+  - name: DOORBELL
+    offset: 0x040
+    description: Submit the staged descriptor. Refused (TARGET_ERR) while the queue is full; nothing is submitted.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: hpc_cq_mmio.cmd_valid_o, gate: hpc_cq_mmio.cmd_ready_i}
+    fields:
+      - {name: RING, bits: "31:0", access: wo, hw: none, description: "Any write submits the descriptor; the value is ignored"}
+  - name: CPL
+    offset: 0x050
+    count: 4
+    description: Head completion record words 0..3 (0 if there is none)
+    access: ro
+    hw: input
+    connect: {value: hpc_cq_mmio.cpl_rec_i}
+  - name: CPL_POP
+    offset: 0x060
+    description: Release the head record. Refused (TARGET_ERR) if there is none.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: hpc_cq_mmio.cpl_ready_o, gate: hpc_cq_mmio.cpl_valid_i}
+    fields:
+      - {name: POP, bits: "31:0", access: wo, hw: none, description: "Any write pops the record; the value is ignored"}
+  - name: PERF
+    offset: 0x080
+    count: 17
+    description: Performance counter i (hpc_cq_pkg PC_*), low 32 bits
+    access: ro
+    hw: input
+    connect: {value: hpc_cq_mmio.perf_cnt_i}
+examples:
+  - title: Submit one command and retire its record
+    description: The descriptor words are defined by the command ABI of the queue (hpc_cq_pkg); only the register sequence is shown.
+    steps:
+      - {comment: "stage a 256-bit descriptor in DESC[0..7] (ABI-defined words)"}
+      - {write: DESC, index: 0, value: 0x00000101}
+      - {write: DOORBELL, value: 1}
+      - {poll: "STATUS.CPL_VALID", until: 1, max: 100000}
+      - {read: CPL, index: 0}
+      - {write: CPL_POP, value: 1}
+  - title: Enable interrupts and clear a stale error
+    steps:
+      - {set: "INT_ENABLE.ERR", value: 1}
+      - {trigger: "CTRL.ERR_CLEAR"}
+      - {clear: "INT_STATUS.ERR"}

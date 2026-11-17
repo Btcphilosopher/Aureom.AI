@@ -1,0 +1,37 @@
+# SilicaFlux register map -- the single source of truth for the generated
+# RTL (sf_reg_*.sv), C and Rust firmware interfaces and documentation.
+#
+# Every peripheral below binds only to RTL that exists in this repository
+# (see each file's `rtl:` block; `python -m albion_reggen bindcheck` verifies
+# archive, SHA-256 and port names/directions).  Blocks whose RTL is missing are
+# not described.  Schema: docs/SCHEMA.md.
+regdef_version: 1
+
+map:
+  name: silicaflux_regs
+  version: "1.0"
+  description: >
+    Control and status registers of the SilicaFlux Albion platform: system
+    identification, interrupt controller, clock/reset status, SRAM controller,
+    DMA, tensor and vector command interfaces and performance counters.
+  extra_regions:
+    # The ALP catalogue (AlbionCore regions.yaml) has regions for dma, tensor_vector
+    # and perf but none for platform control registers.  This is a PROPOSAL; it obeys
+    # ALP-ADR-01 (power-of-two size, aligned base, no overlap with any catalogue
+    # region or the reserved legacy window) and is flagged as proposed in every document.
+    - name: sysctl
+      base: 0x1_8000_0000
+      size: 0x10_0000                # 1 MiB
+      asid: config
+      owner: "SilicaFlux system control: identification, interrupt controller, clock/reset status, SRAM controller registers"
+      attr: {read: true, write: true, priv_only: true, mem_type: device}
+
+peripherals:
+  - include: sysid.yaml
+  - include: intc.yaml
+  - include: clkrst.yaml
+  - include: sramc.yaml
+  - include: dma.yaml
+  - include: tensor.yaml
+  - include: vector.yaml
+  - include: perf.yaml

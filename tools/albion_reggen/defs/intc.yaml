@@ -1,0 +1,78 @@
+# Interrupt controller registers.
+#
+# REGISTER-COMPATIBLE with the implemented MCU-I interrupt controller (mcu_intc): same
+# offsets, access types, reset values and the 0x77777777 priority mask (priority = 3 bits per
+# nibble, the 4th bit reserved).  Honest integration status: mcu_intc embeds its register file
+# and exposes only the register bus (rb_*), src[] and irq_ext, so this bank cannot be wired to
+# it port-by-port without first splitting mcu_intc into "storage" and "priority network" --
+# that RTL change is NOT made here (implemented RTL is not modified).  What IS established:
+# the register semantics equal mcu_intc's, checked by the differential test
+# (tests/test_differential_intc.py) that drives this generated bank and the real mcu_intc
+# with the same accesses and compares every readable register.
+name: intc
+description: Interrupt controller (16 level sources, 7 priority levels, threshold, claim)
+region: sysctl
+base: 0x1_8000_1000
+size: 0x1000
+rtl:
+  status: register_compatible
+  summary: >
+    Register-compatible with mcu_intc (SilicaFlux MCU-I). The bank would replace mcu_intc's
+    register slave; PENDING / CLAIM / ACTIVE are the priority network's outputs and ENABLE /
+    SWPEND / THRESHOLD / PRIO* its configuration inputs. Needs the mcu_intc storage/network split.
+  modules:
+    - module: mcu_intc
+      role: replace
+      archive: SilicaFlux-main/SilicaFlux2.0/SilicaFlux2.5/silicaflux-mcu-i.zip
+      path: silicaflux-mcu-i/rtl/interrupts/mcu_intc.sv
+      sha256: c080a2e1e9634d97d2991c3d5783240d22a2dc0991b75ea9defd8f03ee1f8fa3
+      ports:
+        src: input
+        irq_ext: output
+registers:
+  - name: PENDING
+    offset: 0x00
+    description: Live source levels OR software-pending bits
+    fields:
+      - {name: SOURCES, bits: "15:0", access: ro, hw: input}
+  - name: ENABLE
+    offset: 0x04
+    description: Per-source interrupt enable
+    fields:
+      - {name: EN, bits: "15:0", access: rw, reset: 0}
+  - name: CLAIM
+    offset: 0x08
+    description: Highest-priority active source (lowest index wins ties); reading has no side effect
+    fields:
+      - {name: ID, bits: "7:0", access: ro, hw: input, description: "1 + source index; 0 = none"}
+  - name: SWPEND
+    offset: 0x0C
+    description: Software-set pending bits (software interrupts per source)
+    fields:
+      - {name: SW, bits: "15:0", access: rw, reset: 0}
+  - name: THRESHOLD
+    offset: 0x10
+    description: Only priorities greater than LEVEL interrupt
+    fields:
+      - {name: LEVEL, bits: "2:0", access: rw, reset: 0}
+  - name: ACTIVE
+    offset: 0x14
+    description: Pending and enabled and priority above threshold
+    fields:
+      - {name: ACT, bits: "15:0", access: ro, hw: input}
+  - name: PRIO0
+    offset: 0x20
+    description: Priority of sources 0..7, 3 bits each in a 4-bit nibble (0 = never)
+    fields:
+      - {name: "SRC{i}", bits: "2:0", repeat: {count: 8, stride: 4, first: 0}, access: rw, reset: 1, description: "Priority of source {i}"}
+  - name: PRIO1
+    offset: 0x24
+    description: Priority of sources 8..15, 3 bits each in a 4-bit nibble (0 = never)
+    fields:
+      - {name: "SRC{i}", bits: "2:0", repeat: {count: 8, stride: 4, first: 8}, access: rw, reset: 1, description: "Priority of source {i}"}
+examples:
+  - title: Enable source 3 at priority 5 and unmask everything above priority 2
+    steps:
+      - {set: "PRIO0.SRC3", value: 5}
+      - {set: "THRESHOLD.LEVEL", value: 2}
+      - {set: "ENABLE.EN", value: 0x8}

@@ -1,0 +1,191 @@
+# Tensor command interface: the register page of the TENSORCORE 08 tensor accelerator
+# (silicaflux_tensor_unit).
+#
+# A description of the implemented register slave tsu_regs: identical offsets, access types and meaning, with
+# the bank REPLACING that slave (role: replace) so each bank port maps to the same-direction port of
+# tsu_regs. Differences from the hand-written slave are those listed in vector.yaml (ALP instead of rb_*,
+# ALP error statuses instead of rb_err, registered strobes instead of combinational ones; SUBMITTED is an
+# input kept by the integrator). Glue also required: CPL words must be gated with cpl_valid
+# (tsu_regs returns 0 when there is no record), and STATUS is a packed word in tsu_regs that the bank takes
+# bit-slice by bit-slice.
+name: tensor
+description: Tensor accelerator command interface (GEMM descriptors, completions, counters)
+region: tensor_vector
+base: 0x1_5000_0000
+size: 0x1000
+rtl:
+  status: bound
+  summary: >
+    Replaces the register slave tsu_regs of silicaflux_tensor_unit (TENSORCORE 08). Glue: SUBMITTED counter,
+    build-parameter words (INFO, CAPS, OPBUF, MEM_LO, MEM_LAST, KMAX), CPL gating with cpl_valid.
+  modules:
+    - module: tsu_regs
+      role: replace
+      archive: SilicaFlux-main/silicaflux-tensorcore08.zip
+      path: silicaflux-tensorcore08/rtl/tsu_regs.sv
+      sha256: 44826e9f63e704594c101dadf6067e39d0197a72969aa5ef3684d3cf46bd6197
+      ports:
+        cq_in_valid: output
+        cq_in_ready: input
+        cq_in_data: output
+        cpl_valid: input
+        cpl_pop: output
+        cpl_data: input
+        ctrl_err_cont: output
+        ctrl_err_clear: output
+        ctrl_perf_clear: output
+        ctrl_abort: output
+        status: input
+        ev_irq: input
+        ev_err: input
+        ev_done: input
+        irq: output
+        perf_cnt: input
+        dma_perf_cnt: input
+connect: {irq: tsu_regs.irq}
+registers:
+  - name: ID
+    offset: 0x000
+    description: ASCII "SFTC"
+    access: ro
+    reset: 0x53465443
+  - name: INFO
+    offset: 0x004
+    description: Build configuration (from the instantiation parameters)
+    fields:
+      - {name: ABI_VERSION,               bits: "3:0",   access: ro, hw: input}
+      - {name: LOG2_QUEUE_DEPTH,          bits: "7:4",   access: ro, hw: input}
+      - {name: ARRAY_ROWS,                bits: "15:8",  access: ro, hw: input}
+      - {name: ARRAY_COLS,                bits: "23:16", access: ro, hw: input}
+      - {name: ENABLE_QUANTIZATION,       bit: 24,       access: ro, hw: input}
+      - {name: ENABLE_DOUBLE_BUFFERING,   bit: 25,       access: ro, hw: input}
+      - {name: PERF_EN,                   bit: 26,       access: ro, hw: input}
+  - name: CAPS
+    offset: 0x008
+    description: Datapath capabilities
+    fields:
+      - {name: TILE_K,     bits: "15:0",  access: ro, hw: input}
+      - {name: DATA_WIDTH, bits: "23:16", access: ro, hw: input}
+      - {name: ACC_WIDTH,  bits: "31:24", access: ro, hw: input}
+  - name: OPBUF
+    offset: 0x00C
+    description: Operand buffer size in bytes
+    access: ro
+    hw: input
+  - name: MEM_LO
+    offset: 0x010
+    description: First byte of the memory window the unit may access
+    access: ro
+    hw: input
+  - name: MEM_LAST
+    offset: 0x014
+    description: Last byte of the memory window the unit may access
+    access: ro
+    hw: input
+  - name: CTRL
+    offset: 0x018
+    description: Control
+    fields:
+      - {name: ERR_CONT,   bit: 0, access: rw,  reset: 0, description: "0 stop on error, 1 continue", connect: {value: tsu_regs.ctrl_err_cont}}
+      - {name: ERR_CLEAR,  bit: 1, access: w1p, description: Clear the sticky error, connect: {pulse: tsu_regs.ctrl_err_clear}}
+      - {name: PERF_CLEAR, bit: 2, access: w1p, description: Clear the performance counters, connect: {pulse: tsu_regs.ctrl_perf_clear}}
+      - {name: ABORT,      bit: 3, access: w1p, description: Abort the running command, connect: {pulse: tsu_regs.ctrl_abort}}
+  - name: STATUS
+    offset: 0x01C
+    description: Unit status
+    fields:
+      - {name: BUSY,       bit: 0,        access: ro, hw: input, connect: {value: "tsu_regs.status[0]"}}
+      - {name: ERR_STICKY, bit: 1,        access: ro, hw: input, connect: {value: "tsu_regs.status[1]"}}
+      - {name: Q_FULL,     bit: 2,        access: ro, hw: input, connect: {value: "tsu_regs.status[2]"}}
+      - {name: Q_EMPTY,    bit: 3,        access: ro, hw: input, connect: {value: "tsu_regs.status[3]"}}
+      - {name: CPL_VALID,  bit: 4,        access: ro, hw: input, connect: {value: "tsu_regs.status[4]"}}
+      - {name: ABORTING,   bit: 5,        access: ro, hw: input, connect: {value: "tsu_regs.status[5]"}}
+      - {name: HALTED,     bit: 6,        access: ro, hw: input, description: Quiesce timed out; a hard reset is needed, connect: {value: "tsu_regs.status[6]"}}
+      - {name: STATE,      bits: "11:8",  access: ro, hw: input, description: "Scheduler state: 0 IDLE 1 DECODE 2 PREP 3 RUN 4 QUIESCE 5 SRST 6 RECORD 7 FLUSH 8 HALT", connect: {value: "tsu_regs.status[11:8]"}}
+      - {name: QCOUNT,     bits: "23:16", access: ro, hw: input, connect: {value: "tsu_regs.status[23:16]"}}
+      - {name: QFREE,      bits: "31:24", access: ro, hw: input, connect: {value: "tsu_regs.status[31:24]"}}
+  - name: INT_ENABLE
+    offset: 0x020
+    description: Interrupt enables
+    fields:
+      - {name: IRQ,  bit: 0, access: rw, reset: 0}
+      - {name: ERR,  bit: 1, access: rw, reset: 0}
+      - {name: DONE, bit: 2, access: rw, reset: 0}
+  - name: INT_STATUS
+    offset: 0x024
+    description: Interrupt status (write 1 to clear; a same-cycle hardware event wins)
+    fields:
+      - {name: IRQ,  bit: 0, access: w1c, interrupt: "INT_ENABLE.IRQ",  connect: {event: tsu_regs.ev_irq}}
+      - {name: ERR,  bit: 1, access: w1c, interrupt: "INT_ENABLE.ERR",  connect: {event: tsu_regs.ev_err}}
+      - {name: DONE, bit: 2, access: w1c, interrupt: "INT_ENABLE.DONE", connect: {event: tsu_regs.ev_done}}
+  - name: SUBMITTED
+    offset: 0x028
+    description: Doorbells accepted since reset (glue counter)
+    access: ro
+    hw: input
+  - name: KMAX
+    offset: 0x02C
+    description: Largest legal K of this build
+    access: ro
+    hw: input
+  - name: DESC
+    offset: 0x040
+    count: 12
+    description: Descriptor staging words 0..11 (kept after the doorbell)
+    access: rw
+    connect: {value: tsu_regs.cq_in_data}
+  - name: DOORBELL
+    offset: 0x070
+    description: Submit the staged descriptor. Refused (TARGET_ERR) while the command queue is full.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: tsu_regs.cq_in_valid, gate: tsu_regs.cq_in_ready}
+    fields:
+      - {name: RING, bits: "31:0", access: wo, hw: none, description: "Any write submits the descriptor; the value is ignored"}
+  - name: CPL
+    offset: 0x080
+    count: 6
+    description: Head completion record words 0..5 (glue gates them with cpl_valid)
+    access: ro
+    hw: input
+    connect: {value: tsu_regs.cpl_data}
+  - name: CPL_POP
+    offset: 0x098
+    description: Release the head record. Refused (TARGET_ERR) if there is none.
+    wr_strobe: true
+    write_gate: true
+    connect: {wr_strobe: tsu_regs.cpl_pop, gate: tsu_regs.cpl_valid}
+    fields:
+      - {name: POP, bits: "31:0", access: wo, hw: none, description: "Any write pops the record; the value is ignored"}
+  - name: PERF
+    offset: 0x100
+    count: 20
+    description: >
+      Performance counter i (saturating 32-bit): 0 CYCLES, 1 BUSY, 2 CMD_ACCEPT, 3 CMD_DONE, 4 CMD_ERR, 5 GEMM_OK,
+      6 TILES, 7 CHUNKS, 8 MACS, 9 COMPUTE_CYC, 10 DMA_ACTIVE, 11 OVERLAP, 12 RD_WORDS, 13 WR_WORDS, 14 BUS_STALL,
+      15 DESC, 16 Q_FULL, 17 CPL_STALL, 18 SAT, 19 ABORTS
+    access: ro
+    hw: input
+    connect: {value: tsu_regs.perf_cnt}
+  - name: DMA_PERF
+    offset: 0x200
+    count: 18
+    description: Tensor DMA adapter counter j (TDMA_PC_*)
+    access: ro
+    hw: input
+    connect: {value: tsu_regs.dma_perf_cnt}
+examples:
+  - title: Submit a staged GEMM descriptor and retire the completion
+    description: The 12 descriptor words are defined by the tensor command ABI (tsu_defs.svh); only the register sequence is shown.
+    steps:
+      - {comment: "stage the 384-bit descriptor in DESC[0..11] (ABI-defined words)"}
+      - {write: DESC, index: 0, value: 0x00000001}
+      - {write: DOORBELL, value: 1}
+      - {poll: "INT_STATUS.DONE", until: 1, max: 1000000}
+      - {read: CPL, index: 0}
+      - {write: CPL_POP, value: 1}
+      - {clear: "INT_STATUS.DONE"}
+  - title: Abort a running command
+    steps:
+      - {trigger: "CTRL.ABORT"}
+      - {poll: "STATUS.ABORTING", until: 0, max: 100000}
