@@ -1,0 +1,11 @@
+backend/.venv/
+backend/var/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+*.log
+.env

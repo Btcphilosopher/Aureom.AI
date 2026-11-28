@@ -1,0 +1,20 @@
+"""Import centralisé de tous les modèles (métadonnées Alembic)."""
+from horizon.modules.accounts.models import *  # noqa: F401,F403
+from horizon.modules.approvals.models import *  # noqa: F401,F403
+from horizon.modules.audit.models import *  # noqa: F401,F403
+from horizon.modules.beneficiaries.models import *  # noqa: F401,F403
+from horizon.modules.decisions.models import *  # noqa: F401,F403
+from horizon.modules.documents.models import *  # noqa: F401,F403
+from horizon.modules.financing.models import *  # noqa: F401,F403
+from horizon.modules.forecasting.models import *  # noqa: F401,F403
+from horizon.modules.fx.models import *  # noqa: F401,F403
+from horizon.modules.identity.models import *  # noqa: F401,F403
+from horizon.modules.integrations.models import *  # noqa: F401,F403
+from horizon.modules.jobs.models import *  # noqa: F401,F403
+from horizon.modules.ledger.models import *  # noqa: F401,F403
+from horizon.modules.organizations.models import *  # noqa: F401,F403
+from horizon.modules.payments.models import *  # noqa: F401,F403
+from horizon.modules.reconciliation.models import *  # noqa: F401,F403
+from horizon.modules.reports.models import *  # noqa: F401,F403
+from horizon.modules.trade.models import *  # noqa: F401,F403
+from horizon.core.db import Base  # noqa: F401
