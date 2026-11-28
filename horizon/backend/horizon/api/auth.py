@@ -63,6 +63,13 @@ def demo_users(db: Session = Depends(get_db)):
 me_router = APIRouter(prefix="/v1", tags=["Identité"])
 
 
+@me_router.get("/directory", summary="Annuaire minimal de l'organisation (nom, fonction) — sans rôles ni coordonnées")
+def directory(p: Principal = Depends(get_principal)):
+    rows = p.db.scalars(select(User).where(User.organization_id == p.org_id, User.is_active.is_(True))
+                        .order_by(User.full_name)).all()
+    return {"data": [{"id": str(u.id), "full_name": u.full_name, "title": u.title} for u in rows]}
+
+
 @me_router.get("/me")
 def me(p: Principal = Depends(get_principal)):
     db = p.db

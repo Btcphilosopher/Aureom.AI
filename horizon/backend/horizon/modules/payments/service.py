@@ -149,7 +149,7 @@ def create_batch(db: Session, principal, data: dict, idempotency_key: str | None
     items = data.get("payments") or []
     if not items:
         raise DomainError("EMPTY_BATCH", "Un lot doit contenir au moins un paiement", 422)
-    kind = data.get("kind", "SUPPLIER_BATCH" if len(items) > 1 else "SINGLE")
+    kind = data.get("kind") or ("SUPPLIER_BATCH" if len(items) > 1 else "SINGLE")
     if kind not in KINDS:
         raise DomainError("INVALID_KIND", "Type de lot inconnu", 422)
     if kind == "SINGLE" and len(items) != 1:
@@ -300,15 +300,16 @@ def validate_batch(db: Session, batch: PaymentBatch) -> list[dict]:
             continue
         b = db.get(Beneficiary, p.beneficiary_id)
         cur = db.get(BeneficiaryVersion, b.current_version_id)
+        if cur.review_status == "PENDING" and b.approved_version_id is not None and b.status != "SUSPENDED":
+            issues.append({"code": "BENEFICIARY_CHANGE_PENDING", "blocking": True, "line": p.line_no,
+                           "payment_id": str(p.id), "beneficiary_id": str(b.id),
+                           "message": f"Modification de « {cur.name} » en attente de revue"})
+            continue
         if b.status != "ACTIVE" or b.approved_version_id is None:
             issues.append({"code": "BENEFICIARY_NOT_APPROVED", "blocking": True, "line": p.line_no,
                            "payment_id": str(p.id), "beneficiary_id": str(b.id),
                            "message": f"Bénéficiaire « {cur.name} » : {b.status} — revue requise"})
             continue
-        if cur.review_status == "PENDING":
-            issues.append({"code": "BENEFICIARY_CHANGE_PENDING", "blocking": True, "line": p.line_no,
-                           "payment_id": str(p.id), "beneficiary_id": str(b.id),
-                           "message": f"Modification de « {cur.name} » en attente de revue"})
     available = ledger.booked_balance(db, acc.id) - ledger.reserved_amount(db, acc.id)
     if available < batch.total_minor:
         issues.append({"code": "FUNDS_INSUFFICIENT_INDICATIVE", "blocking": False,

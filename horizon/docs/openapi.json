@@ -1,0 +1,5504 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "HORIZON API",
+  "description": "\n**HORIZON — Banque d'entreprise et trésorerie** · ENVIRONNEMENT DE DÉMONSTRATION\n\nConcept indépendant. Données synthétiques. Aucun service bancaire réel, aucun accès à un système bancaire,\naucun déplacement de fonds. Ce prototype n'est pas un produit officiel d'un établissement bancaire.\n\n* Versionnement : préfixe `/v1` + en-tête optionnel `Horizon-API-Version` (valeur prise en charge : `2026-11-01`).\n* Erreurs structurées : `{\"error\": {\"code\", \"message\", \"details\", \"request_id\"}}`.\n* Pagination : `limit` (1–200) et `cursor` opaque ; réponse `{\"data\": [...], \"page\": {...}}`.\n* Idempotence : en-tête `Idempotency-Key` sur la création de lots.\n* Authentification : session après MFA (TOTP) ; cookie `HttpOnly` + en-tête `X-Horizon-CSRF: 1`, ou jeton Bearer.\n",
+  "version": "2026-11-01"
+ },
+ "paths": {
+  "/v1/auth/login": {
+   "post": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Étape 1 : identifiants (fictifs) → défi MFA",
+    "operationId": "login_v1_auth_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoginIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/auth/mfa": {
+   "post": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Étape 2 : code TOTP → session",
+    "operationId": "mfa_v1_auth_mfa_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MfaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/auth/step-up": {
+   "post": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Réauthentification pour action sensible",
+    "operationId": "step_up_v1_auth_step_up_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/StepUpIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/auth/logout": {
+   "post": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Logout",
+    "operationId": "logout_v1_auth_logout_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/auth/demo-users": {
+   "get": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Utilisateurs fictifs (environnement de démonstration uniquement)",
+    "operationId": "demo_users_v1_auth_demo_users_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/me": {
+   "get": {
+    "tags": [
+     "Identité"
+    ],
+    "summary": "Me",
+    "operationId": "me_v1_me_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/overview": {
+   "get": {
+    "tags": [
+     "Comptes et registre",
+     "Vue d'ensemble"
+    ],
+    "summary": "Indicateurs calculés et leurs justifications",
+    "operationId": "get_overview_v1_overview_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/accounts": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "List Accounts",
+    "operationId": "list_accounts_v1_accounts_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/consolidation": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Consolidation multidevise avec taux datés",
+    "operationId": "consolidation_v1_consolidation_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/accounts/{account_id}": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Get Account",
+    "operationId": "get_account_v1_accounts__account_id__get",
+    "parameters": [
+     {
+      "name": "account_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Account Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/accounts/{account_id}/transactions": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Écritures du registre affectant le compte",
+    "operationId": "account_transactions_v1_accounts__account_id__transactions_get",
+    "parameters": [
+     {
+      "name": "account_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Account Id"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/accounts/{account_id}/balance-history": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Balance History",
+    "operationId": "balance_history_v1_accounts__account_id__balance_history_get",
+    "parameters": [
+     {
+      "name": "account_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Account Id"
+      }
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 365,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/ledger/entries": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Journal général",
+    "operationId": "ledger_entries_v1_ledger_entries_get",
+    "parameters": [
+     {
+      "name": "journal",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Journal"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/ledger/trial-balance": {
+   "get": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Balance générale (contrôle d'équilibre par devise)",
+    "operationId": "trial_balance_v1_ledger_trial_balance_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/ledger/entries/{entry_id}/reverse": {
+   "post": {
+    "tags": [
+     "Comptes et registre"
+    ],
+    "summary": "Contrepassation liée (les écritures sont immuables)",
+    "operationId": "reverse_v1_ledger_entries__entry_id__reverse_post",
+    "parameters": [
+     {
+      "name": "entry_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Entry Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReverseIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/beneficiaries": {
+   "get": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "List Beneficiaries",
+    "operationId": "list_beneficiaries_v1_beneficiaries_get",
+    "parameters": [
+     {
+      "name": "entity_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "format": "uuid"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Entity Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Create Beneficiary",
+    "operationId": "create_beneficiary_v1_beneficiaries_post",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BeneficiaryIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/beneficiaries/validate-iban": {
+   "post": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Contrôle de format (ne prouve pas l'existence)",
+    "operationId": "validate_iban_v1_beneficiaries_validate_iban_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/beneficiaries/{bene_id}": {
+   "get": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Get Beneficiary",
+    "operationId": "get_beneficiary_v1_beneficiaries__bene_id__get",
+    "parameters": [
+     {
+      "name": "bene_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Bene Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Nouvelle version (revue si modification matérielle)",
+    "operationId": "patch_beneficiary_v1_beneficiaries__bene_id__patch",
+    "parameters": [
+     {
+      "name": "bene_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Bene Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BeneficiaryPatch"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/beneficiaries/{bene_id}/review": {
+   "post": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Valider/rejeter la version en revue (MFA)",
+    "operationId": "review_beneficiary_v1_beneficiaries__bene_id__review_post",
+    "parameters": [
+     {
+      "name": "bene_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Bene Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReviewIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/beneficiaries/{bene_id}/suspension": {
+   "post": {
+    "tags": [
+     "Paiements",
+     "Bénéficiaires"
+    ],
+    "summary": "Suspend Beneficiary",
+    "operationId": "suspend_beneficiary_v1_beneficiaries__bene_id__suspension_post",
+    "parameters": [
+     {
+      "name": "bene_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Bene Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SuspendIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches": {
+   "get": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "List Batches",
+    "operationId": "list_batches_v1_payment_batches_get",
+    "parameters": [
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Créer un virement unitaire ou un lot (Idempotency-Key recommandé)",
+    "operationId": "create_batch_v1_payment_batches_post",
+    "parameters": [
+     {
+      "name": "idempotency-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 200
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BatchIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches/import-csv": {
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Import CSV (iban;montant;libelle)",
+    "operationId": "import_csv_v1_payment_batches_import_csv_post",
+    "parameters": [
+     {
+      "name": "idempotency-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 200
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_import_csv_v1_payment_batches_import_csv_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches/{batch_id}": {
+   "get": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Get Batch",
+    "operationId": "get_batch_v1_payment_batches__batch_id__get",
+    "parameters": [
+     {
+      "name": "batch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Batch Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Modifier (toute modification matérielle invalide les approbations)",
+    "operationId": "patch_batch_v1_payment_batches__batch_id__patch",
+    "parameters": [
+     {
+      "name": "batch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Batch Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BatchPatch"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches/{batch_id}/submit-for-approval": {
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Submit For Approval",
+    "operationId": "submit_for_approval_v1_payment_batches__batch_id__submit_for_approval_post",
+    "parameters": [
+     {
+      "name": "batch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Batch Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/VersionIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches/{batch_id}/approvals": {
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Approuver/refuser une version précise (réauthentification requise)",
+    "operationId": "approve_v1_payment_batches__batch_id__approvals_post",
+    "parameters": [
+     {
+      "name": "batch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Batch Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApprovalIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-batches/{batch_id}/cancel": {
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Cancel",
+    "operationId": "cancel_v1_payment_batches__batch_id__cancel_post",
+    "parameters": [
+     {
+      "name": "batch_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Batch Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CancelIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payments": {
+   "get": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "List Payments",
+    "operationId": "list_payments_v1_payments_get",
+    "parameters": [
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payments/{payment_id}": {
+   "get": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Get Payment",
+    "operationId": "get_payment_v1_payments__payment_id__get",
+    "parameters": [
+     {
+      "name": "payment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Payment Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payments/{payment_id}/rejection-resolution": {
+   "post": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Traiter un rejet (justification obligatoire)",
+    "operationId": "resolve_rejection_v1_payments__payment_id__rejection_resolution_post",
+    "parameters": [
+     {
+      "name": "payment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Payment Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RejectionResolutionIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/payment-lifecycle": {
+   "get": {
+    "tags": [
+     "Paiements"
+    ],
+    "summary": "Transitions d'état documentées",
+    "operationId": "lifecycle_v1_payment_lifecycle_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/cashflow-scenarios": {
+   "get": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "List Scenarios",
+    "operationId": "list_scenarios_v1_cashflow_scenarios_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Create Scenario",
+    "operationId": "create_scenario_v1_cashflow_scenarios_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScenarioIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/forecasts": {
+   "post": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Calculer et figer une prévision explicable",
+    "operationId": "run_forecast_v1_forecasts_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ForecastIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/forecasts/chart": {
+   "get": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Historique observé, prévision centrale et fourchette de scénarios",
+    "operationId": "forecast_chart_v1_forecasts_chart_get",
+    "parameters": [
+     {
+      "name": "horizon_days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 90,
+       "title": "Horizon Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/forecasts/{forecast_id}": {
+   "get": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Get Forecast",
+    "operationId": "get_forecast_v1_forecasts__forecast_id__get",
+    "parameters": [
+     {
+      "name": "forecast_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Forecast Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/expected-receipts": {
+   "get": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Expected Receipts",
+    "operationId": "expected_receipts_v1_expected_receipts_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/recurring-assumptions": {
+   "get": {
+    "tags": [
+     "Trésorerie"
+    ],
+    "summary": "Recurring",
+    "operationId": "recurring_v1_recurring_assumptions_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reconciliation-cases": {
+   "get": {
+    "tags": [
+     "Trésorerie",
+     "Rapprochement"
+    ],
+    "summary": "List Cases",
+    "operationId": "list_cases_v1_reconciliation_cases_get",
+    "parameters": [
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reconciliation/runs": {
+   "post": {
+    "tags": [
+     "Trésorerie",
+     "Rapprochement"
+    ],
+    "summary": "Rapprocher le relevé du simulateur avec le registre",
+    "operationId": "run_reco_v1_reconciliation_runs_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReconRunIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reconciliation-cases/{case_id}/acknowledge": {
+   "post": {
+    "tags": [
+     "Trésorerie",
+     "Rapprochement"
+    ],
+    "summary": "Ack Case",
+    "operationId": "ack_case_v1_reconciliation_cases__case_id__acknowledge_post",
+    "parameters": [
+     {
+      "name": "case_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Case Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReconAckIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reconciliation-cases/{case_id}/resolve": {
+   "post": {
+    "tags": [
+     "Trésorerie",
+     "Rapprochement"
+    ],
+    "summary": "Resolve Case",
+    "operationId": "resolve_case_v1_reconciliation_cases__case_id__resolve_post",
+    "parameters": [
+     {
+      "name": "case_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Case Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReconResolveIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/decisions": {
+   "get": {
+    "tags": [
+     "Trésorerie",
+     "Centre de décisions"
+    ],
+    "summary": "List Decisions",
+    "operationId": "list_decisions_v1_decisions_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/decisions/acknowledge": {
+   "post": {
+    "tags": [
+     "Trésorerie",
+     "Centre de décisions"
+    ],
+    "summary": "Accuser réception (ne résout pas la cause)",
+    "operationId": "ack_decision_v1_decisions_acknowledge_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AckIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/fx/rates": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Change"
+    ],
+    "summary": "Rates",
+    "operationId": "rates_v1_fx_rates_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/fx-quotes": {
+   "post": {
+    "tags": [
+     "Change et financement",
+     "Change"
+    ],
+    "summary": "Create Quote",
+    "operationId": "create_quote_v1_fx_quotes_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FxQuoteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/fx-quotes/{quote_id}": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Change"
+    ],
+    "summary": "Get Quote",
+    "operationId": "get_quote_v1_fx_quotes__quote_id__get",
+    "parameters": [
+     {
+      "name": "quote_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Quote Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/fx-quotes/{quote_id}/accept": {
+   "post": {
+    "tags": [
+     "Change et financement",
+     "Change"
+    ],
+    "summary": "Accepter une offre exécutable SIMULÉE (aucun ordre réel)",
+    "operationId": "accept_quote_v1_fx_quotes__quote_id__accept_post",
+    "parameters": [
+     {
+      "name": "quote_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Quote Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/facilities": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Facilities",
+    "operationId": "facilities_v1_financing_facilities_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/facilities/{facility_id}": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Facility",
+    "operationId": "facility_v1_financing_facilities__facility_id__get",
+    "parameters": [
+     {
+      "name": "facility_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Facility Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/installments": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Installments",
+    "operationId": "installments_v1_financing_installments_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/installments/{inst_id}": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Installment",
+    "operationId": "installment_v1_financing_installments__inst_id__get",
+    "parameters": [
+     {
+      "name": "inst_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Inst Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/installments/{inst_id}/prepare": {
+   "post": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Préparer le paiement de l'échéance (circuit d'approbation normal)",
+    "operationId": "prepare_v1_financing_installments__inst_id__prepare_post",
+    "parameters": [
+     {
+      "name": "inst_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Inst Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/simulations": {
+   "post": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Simulate",
+    "operationId": "simulate_v1_financing_simulations_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FinancingSimIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/financing/requests": {
+   "get": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "List Requests",
+    "operationId": "list_requests_v1_financing_requests_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Change et financement",
+     "Financement"
+    ],
+    "summary": "Create Request",
+    "operationId": "create_request_v1_financing_requests_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FinancingRequestIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/documents": {
+   "get": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "List Documents",
+    "operationId": "list_documents_v1_documents_get",
+    "parameters": [
+     {
+      "name": "trade_file_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "format": "uuid"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Trade File Id"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Upload",
+    "operationId": "upload_v1_documents_post",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_upload_v1_documents_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/documents/{doc_id}/links": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Lien de téléchargement temporaire signé",
+    "operationId": "link_v1_documents__doc_id__links_post",
+    "parameters": [
+     {
+      "name": "doc_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Doc Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/documents/content": {
+   "get": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Téléchargement via lien temporaire (droits revérifiés)",
+    "operationId": "content_v1_documents_content_get",
+    "parameters": [
+     {
+      "name": "token",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 500,
+       "title": "Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files": {
+   "get": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "List Files",
+    "operationId": "list_files_v1_trade_files_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Create File",
+    "operationId": "create_file_v1_trade_files_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeFileIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}": {
+   "get": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Get File",
+    "operationId": "get_file_v1_trade_files__file_id__get",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/tasks": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Add Task",
+    "operationId": "add_task_v1_trade_files__file_id__tasks_post",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeTaskIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/tasks/{task_id}": {
+   "patch": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Patch Task",
+    "operationId": "patch_task_v1_trade_files__file_id__tasks__task_id__patch",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     },
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Task Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeTaskPatch"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/requests": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Add Request",
+    "operationId": "add_request_v1_trade_files__file_id__requests_post",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeRequestIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/decisions": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Add Decision",
+    "operationId": "add_decision_v1_trade_files__file_id__decisions_post",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeDecisionIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/deadlines": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Add Deadline",
+    "operationId": "add_deadline_v1_trade_files__file_id__deadlines_post",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeDeadlineIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/trade-files/{file_id}/parties": {
+   "post": {
+    "tags": [
+     "Documents et commerce international"
+    ],
+    "summary": "Add Party",
+    "operationId": "add_party_v1_trade_files__file_id__parties_post",
+    "parameters": [
+     {
+      "name": "file_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "File Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradePartyIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/admin/users": {
+   "get": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Users",
+    "operationId": "users_v1_admin_users_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/admin/role-assignments": {
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Grant",
+    "operationId": "grant_v1_admin_role_assignments_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RoleAssignmentIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/admin/role-assignments/{ra_id}/revoke": {
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Revoke",
+    "operationId": "revoke_v1_admin_role_assignments__ra_id__revoke_post",
+    "parameters": [
+     {
+      "name": "ra_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ra Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/admin/approval-policies": {
+   "get": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Policies",
+    "operationId": "policies_v1_admin_approval_policies_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Add Policy",
+    "operationId": "add_policy_v1_admin_approval_policies_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PolicyRuleIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/delegations": {
+   "get": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Delegations",
+    "operationId": "delegations_v1_delegations_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Déléguer son droit d'approbation (plafonné, temporaire)",
+    "operationId": "delegate_v1_delegations_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DelegationIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/delegations/{delegation_id}/revoke": {
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Revoke Delegation",
+    "operationId": "revoke_delegation_v1_delegations__delegation_id__revoke_post",
+    "parameters": [
+     {
+      "name": "delegation_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Delegation Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/audit-events": {
+   "get": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Audit Events",
+    "operationId": "audit_events_v1_audit_events_get",
+    "parameters": [
+     {
+      "name": "action",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Action"
+      }
+     },
+     {
+      "name": "object_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Object Id"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "description": "Nombre d'éléments (1-200)",
+       "default": 50,
+       "title": "Limit"
+      },
+      "description": "Nombre d'éléments (1-200)"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Curseur opaque renvoyé par la page précédente",
+       "title": "Cursor"
+      },
+      "description": "Curseur opaque renvoyé par la page précédente"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/audit-events/verify": {
+   "get": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Vérifier l'intégrité de la chaîne d'audit",
+    "operationId": "verify_v1_audit_events_verify_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reports/treasury-export": {
+   "post": {
+    "tags": [
+     "Administration et audit"
+    ],
+    "summary": "Rapport + piste d'audit (ZIP avec manifeste SHA-256)",
+    "operationId": "export_v1_reports_treasury_export_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/integrations/bank-simulator/events": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Intégrations"
+    ],
+    "summary": "Webhook signé du simulateur bancaire",
+    "operationId": "bank_events_v1_integrations_bank_simulator_events_post",
+    "parameters": [
+     {
+      "name": "x-horizon-signature",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Horizon-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/run-jobs": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Traiter la file de tâches (sans travailleur)",
+    "operationId": "run_jobs_v1_demo_run_jobs_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/jobs": {
+   "get": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Jobs",
+    "operationId": "jobs_v1_demo_jobs_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/simulator/faults": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Injecter une panne (résultat inconnu)",
+    "operationId": "fault_v1_demo_simulator_faults_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FaultIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/simulator/events": {
+   "get": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Sim Events",
+    "operationId": "sim_events_v1_demo_simulator_events_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/simulator/redeliver": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Redélivrer un événement (doublon)",
+    "operationId": "redeliver_v1_demo_simulator_redeliver_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RedeliverIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/simulator/returns": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Simuler un retour de fonds",
+    "operationId": "sim_return_v1_demo_simulator_returns_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReturnIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/demo/simulator/incoming": {
+   "post": {
+    "tags": [
+     "Administration et audit",
+     "Démonstration"
+    ],
+    "summary": "Simuler la réception d'un encaissement attendu",
+    "operationId": "sim_incoming_v1_demo_simulator_incoming_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IncomingIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/health": {
+   "get": {
+    "tags": [
+     "Exploitation"
+    ],
+    "summary": "Health",
+    "operationId": "health_health_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/ready": {
+   "get": {
+    "tags": [
+     "Exploitation"
+    ],
+    "summary": "Ready",
+    "operationId": "ready_ready_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "AckIn": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Key"
+     },
+     "note": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Note"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "key"
+    ],
+    "title": "AckIn"
+   },
+   "ApprovalIn": {
+    "properties": {
+     "decision": {
+      "type": "string",
+      "enum": [
+       "APPROVE",
+       "REJECT"
+      ],
+      "title": "Decision"
+     },
+     "version": {
+      "type": "integer",
+      "title": "Version",
+      "description": "Version du lot examinée par l'approbateur"
+     },
+     "comment": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "decision",
+     "version"
+    ],
+    "title": "ApprovalIn"
+   },
+   "BatchIn": {
+    "properties": {
+     "debtor_account_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Debtor Account Id"
+     },
+     "kind": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "SINGLE",
+         "SUPPLIER_BATCH"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kind"
+     },
+     "label": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Label"
+     },
+     "execution_date": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Execution Date"
+     },
+     "payments": {
+      "items": {
+       "$ref": "#/components/schemas/PaymentLineIn"
+      },
+      "type": "array",
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Payments"
+     },
+     "forecast_ref": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forecast Ref"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "debtor_account_id",
+     "payments"
+    ],
+    "title": "BatchIn"
+   },
+   "BatchPatch": {
+    "properties": {
+     "expected_version": {
+      "type": "integer",
+      "title": "Expected Version"
+     },
+     "label": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Label"
+     },
+     "execution_date": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Execution Date"
+     },
+     "add_payments": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/PaymentLineIn"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Add Payments"
+     },
+     "update_payments": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/PaymentUpdate"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Update Payments"
+     },
+     "remove_payment_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string",
+         "format": "uuid"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remove Payment Ids"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "expected_version"
+    ],
+    "title": "BatchPatch"
+   },
+   "BeneficiaryIn": {
+    "properties": {
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 2,
+      "title": "Name"
+     },
+     "iban": {
+      "type": "string",
+      "maxLength": 42,
+      "minLength": 15,
+      "title": "Iban"
+     },
+     "bic": {
+      "type": "string",
+      "maxLength": 11,
+      "title": "Bic",
+      "default": ""
+     },
+     "country_code": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2}$",
+      "title": "Country Code"
+     },
+     "address": {
+      "type": "string",
+      "maxLength": 500,
+      "title": "Address",
+      "default": ""
+     },
+     "email": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Email",
+      "default": ""
+     },
+     "category": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Category",
+      "default": "Fournisseur"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "entity_id",
+     "name",
+     "iban",
+     "country_code"
+    ],
+    "title": "BeneficiaryIn"
+   },
+   "BeneficiaryPatch": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 2
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "iban": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 42,
+        "minLength": 15
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iban"
+     },
+     "bic": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 11
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bic"
+     },
+     "country_code": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z]{2}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Country Code"
+     },
+     "address": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Address"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "category": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Category"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "title": "BeneficiaryPatch"
+   },
+   "Body_import_csv_v1_payment_batches_import_csv_post": {
+    "properties": {
+     "file": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "File"
+     },
+     "debtor_account_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Debtor Account Id"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label",
+      "default": "Import CSV"
+     },
+     "execution_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Execution Date"
+     }
+    },
+    "type": "object",
+    "required": [
+     "file",
+     "debtor_account_id"
+    ],
+    "title": "Body_import_csv_v1_payment_batches_import_csv_post"
+   },
+   "Body_upload_v1_documents_post": {
+    "properties": {
+     "file": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "File"
+     },
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "category": {
+      "type": "string",
+      "title": "Category",
+      "default": "Divers"
+     },
+     "trade_file_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trade File Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "file",
+     "entity_id",
+     "title"
+    ],
+    "title": "Body_upload_v1_documents_post"
+   },
+   "CancelIn": {
+    "properties": {
+     "reason": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 5,
+      "title": "Reason"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "reason"
+    ],
+    "title": "CancelIn"
+   },
+   "DelegationIn": {
+    "properties": {
+     "delegate_user_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Delegate User Id"
+     },
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "max_amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Max Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "valid_days": {
+      "type": "integer",
+      "maximum": 30.0,
+      "minimum": 1.0,
+      "title": "Valid Days"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 5,
+      "title": "Reason"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "delegate_user_id",
+     "entity_id",
+     "max_amount",
+     "valid_days",
+     "reason"
+    ],
+    "title": "DelegationIn"
+   },
+   "FaultIn": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "TIMEOUT_AFTER_RECORD",
+       "TIMEOUT_BEFORE_RECORD"
+      ],
+      "title": "Kind"
+     },
+     "match_remittance": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 140
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Match Remittance"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "kind"
+    ],
+    "title": "FaultIn"
+   },
+   "FinancingRequestIn": {
+    "properties": {
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "RCF",
+       "TERM_LOAN",
+       "SHORT_TERM"
+      ],
+      "title": "Kind"
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "currency": {
+      "type": "string",
+      "title": "Currency",
+      "default": "EUR"
+     },
+     "purpose": {
+      "type": "string",
+      "maxLength": 1000,
+      "minLength": 10,
+      "title": "Purpose"
+     },
+     "simulation_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Simulation Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "entity_id",
+     "kind",
+     "amount",
+     "purpose"
+    ],
+    "title": "FinancingRequestIn"
+   },
+   "FinancingSimIn": {
+    "properties": {
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "currency": {
+      "type": "string",
+      "title": "Currency",
+      "default": "EUR"
+     },
+     "months": {
+      "type": "integer",
+      "maximum": 360.0,
+      "minimum": 1.0,
+      "title": "Months"
+     },
+     "annual_rate_pct": {
+      "type": "number",
+      "maximum": 30.0,
+      "minimum": 0.0,
+      "title": "Annual Rate Pct"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "amount",
+     "months",
+     "annual_rate_pct"
+    ],
+    "title": "FinancingSimIn"
+   },
+   "ForecastIn": {
+    "properties": {
+     "scenario_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Scenario Id"
+     },
+     "horizon_days": {
+      "type": "integer",
+      "enum": [
+       7,
+       30,
+       90
+      ],
+      "title": "Horizon Days"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "scenario_id",
+     "horizon_days"
+    ],
+    "title": "ForecastIn"
+   },
+   "FxQuoteIn": {
+    "properties": {
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "base": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "title": "Base"
+     },
+     "quote": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "title": "Quote"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL"
+      ],
+      "title": "Side"
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "amount_currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "title": "Amount Currency"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "INDICATIVE",
+       "EXECUTABLE_SIMULATED"
+      ],
+      "title": "Kind",
+      "default": "INDICATIVE"
+     },
+     "sell_account_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sell Account Id"
+     },
+     "buy_account_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buy Account Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "entity_id",
+     "base",
+     "quote",
+     "side",
+     "amount",
+     "amount_currency"
+    ],
+    "title": "FxQuoteIn"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "IncomingIn": {
+    "properties": {
+     "expected_receipt_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Expected Receipt Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "expected_receipt_id"
+    ],
+    "title": "IncomingIn"
+   },
+   "LoginIn": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Email"
+     },
+     "password": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Password"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "email",
+     "password"
+    ],
+    "title": "LoginIn"
+   },
+   "MfaIn": {
+    "properties": {
+     "challenge_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Challenge Id"
+     },
+     "code": {
+      "type": "string",
+      "pattern": "^\\d{6}$",
+      "title": "Code"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "challenge_id",
+     "code"
+    ],
+    "title": "MfaIn"
+   },
+   "PaymentLineIn": {
+    "properties": {
+     "beneficiary_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Beneficiary Id"
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "remittance_info": {
+      "type": "string",
+      "maxLength": 140,
+      "title": "Remittance Info",
+      "default": ""
+     },
+     "forecast_ref": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forecast Ref"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "beneficiary_id",
+     "amount"
+    ],
+    "title": "PaymentLineIn"
+   },
+   "PaymentUpdate": {
+    "properties": {
+     "payment_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Payment Id"
+     },
+     "amount": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^\\d{1,13}(\\.\\d{1,2})?$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Amount",
+      "description": "Montant décimal positif"
+     },
+     "remittance_info": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 140
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remittance Info"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "payment_id"
+    ],
+    "title": "PaymentUpdate"
+   },
+   "PolicyRuleIn": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Name"
+     },
+     "entity_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Entity Id"
+     },
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
+     "min_amount": {
+      "type": "string",
+      "pattern": "^\\d{1,13}(\\.\\d{1,2})?$",
+      "title": "Min Amount",
+      "description": "Montant décimal positif, ex. « 480000.00 »"
+     },
+     "required_approvals": {
+      "type": "integer",
+      "maximum": 5.0,
+      "minimum": 1.0,
+      "title": "Required Approvals"
+     },
+     "approval_validity_hours": {
+      "type": "integer",
+      "maximum": 720.0,
+      "minimum": 1.0,
+      "title": "Approval Validity Hours",
+      "default": 72
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "name",
+     "min_amount",
+     "required_approvals"
+    ],
+    "title": "PolicyRuleIn"
+   },
+   "ReconAckIn": {
+    "properties": {
+     "note": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Note"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "title": "ReconAckIn"
+   },
+   "ReconResolveIn": {
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "POST_ADJUSTMENT",
+       "EXPLAINED"
+      ],
+      "title": "Action"
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 1000,
+      "minLength": 10,
+      "title": "Note"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "action",
+     "note"
+    ],
+    "title": "ReconResolveIn"
+   },
+   "ReconRunIn": {
+    "properties": {
+     "account_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Account Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "account_id"
+    ],
+    "title": "ReconRunIn"
+   },
+   "RedeliverIn": {
+    "properties": {
+     "event_id": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Event Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "event_id"
+    ],
+    "title": "RedeliverIn"
+   },
+   "RejectionResolutionIn": {
+    "properties": {
+     "resolution": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 10,
+      "title": "Resolution"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "resolution"
+    ],
+    "title": "RejectionResolutionIn"
+   },
+   "ReturnIn": {
+    "properties": {
+     "payment_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Payment Id"
+     },
+     "amount": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^\\d{1,13}(\\.\\d{1,2})?$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Amount",
+      "description": "Montant décimal positif"
+     },
+     "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]{4}$",
+      "title": "Reason Code",
+      "default": "MD06"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "payment_id"
+    ],
+    "title": "ReturnIn"
+   },
+   "ReverseIn": {
+    "properties": {
+     "reason": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 10,
+      "title": "Reason"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "reason"
+    ],
+    "title": "ReverseIn"
+   },
+   "ReviewIn": {
+    "properties": {
+     "decision": {
+      "type": "string",
+      "enum": [
+       "APPROVE",
+       "REJECT"
+      ],
+      "title": "Decision"
+     },
+     "comment": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "decision"
+    ],
+    "title": "ReviewIn"
+   },
+   "RoleAssignmentIn": {
+    "properties": {
+     "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "User Id"
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "VIEWER",
+       "PREPARER",
+       "APPROVER",
+       "ADMIN",
+       "AUDITOR"
+      ],
+      "title": "Role"
+     },
+     "entity_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Entity Id"
+     },
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
+     "approval_limit": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^\\d{1,13}(\\.\\d{1,2})?$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Approval Limit",
+      "description": "Montant décimal positif"
+     },
+     "mandate_reference": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Mandate Reference",
+      "default": ""
+     },
+     "valid_to": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Valid To"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "user_id",
+     "role"
+    ],
+    "title": "RoleAssignmentIn"
+   },
+   "ScenarioIn": {
+    "properties": {
+     "code": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_]{2,30}$",
+      "title": "Code"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Name"
+     },
+     "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "title": "Description",
+      "default": ""
+     },
+     "receipts_haircut_pct": {
+      "type": "number",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "title": "Receipts Haircut Pct",
+      "default": 0
+     },
+     "receipts_delay_days": {
+      "type": "integer",
+      "maximum": 90.0,
+      "minimum": 0.0,
+      "title": "Receipts Delay Days",
+      "default": 0
+     },
+     "disbursements_uplift_pct": {
+      "type": "number",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "title": "Disbursements Uplift Pct",
+      "default": 0
+     },
+     "include_pending_approval": {
+      "type": "boolean",
+      "title": "Include Pending Approval",
+      "default": true
+     },
+     "include_low_confidence": {
+      "type": "boolean",
+      "title": "Include Low Confidence",
+      "default": true
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "code",
+     "name"
+    ],
+    "title": "ScenarioIn"
+   },
+   "StepUpIn": {
+    "properties": {
+     "code": {
+      "type": "string",
+      "pattern": "^\\d{6}$",
+      "title": "Code"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "code"
+    ],
+    "title": "StepUpIn"
+   },
+   "SuspendIn": {
+    "properties": {
+     "suspend": {
+      "type": "boolean",
+      "title": "Suspend"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 5,
+      "title": "Reason"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "suspend",
+     "reason"
+    ],
+    "title": "SuspendIn"
+   },
+   "TradeDeadlineIn": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Label"
+     },
+     "due_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Due Date"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "label",
+     "due_date"
+    ],
+    "title": "TradeDeadlineIn"
+   },
+   "TradeDecisionIn": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Label"
+     },
+     "rationale": {
+      "type": "string",
+      "maxLength": 5000,
+      "minLength": 5,
+      "title": "Rationale"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "label",
+     "rationale"
+    ],
+    "title": "TradeDecisionIn"
+   },
+   "TradeFileIn": {
+    "properties": {
+     "entity_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Entity Id"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Title"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "IMPORT",
+       "EXPORT"
+      ],
+      "title": "Direction"
+     },
+     "instrument_considered": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Instrument Considered",
+      "default": ""
+     },
+     "amount": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^\\d{1,13}(\\.\\d{1,2})?$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Amount",
+      "description": "Montant décimal positif"
+     },
+     "currency": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Z]{3}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Currency"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "entity_id",
+     "title",
+     "direction"
+    ],
+    "title": "TradeFileIn"
+   },
+   "TradePartyIn": {
+    "properties": {
+     "role": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Role"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Name"
+     },
+     "country_code": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "title": "Country Code"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "role",
+     "name",
+     "country_code"
+    ],
+    "title": "TradePartyIn"
+   },
+   "TradeRequestIn": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Kind"
+     },
+     "body": {
+      "type": "string",
+      "maxLength": 5000,
+      "minLength": 5,
+      "title": "Body"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "kind",
+     "body"
+    ],
+    "title": "TradeRequestIn"
+   },
+   "TradeTaskIn": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Label"
+     },
+     "due_date": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Due Date"
+     },
+     "assignee_user_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Assignee User Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "label"
+    ],
+    "title": "TradeTaskIn"
+   },
+   "TradeTaskPatch": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "TODO",
+       "IN_PROGRESS",
+       "DONE"
+      ],
+      "title": "Status"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "status"
+    ],
+    "title": "TradeTaskPatch"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   },
+   "VersionIn": {
+    "properties": {
+     "expected_version": {
+      "type": "integer",
+      "title": "Expected Version"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "expected_version"
+    ],
+    "title": "VersionIn"
+   }
+  }
+ },
+ "tags": [
+  {
+   "name": "Vue d'ensemble"
+  },
+  {
+   "name": "Identité"
+  },
+  {
+   "name": "Comptes et registre"
+  },
+  {
+   "name": "Bénéficiaires"
+  },
+  {
+   "name": "Paiements"
+  },
+  {
+   "name": "Trésorerie"
+  },
+  {
+   "name": "Rapprochement"
+  },
+  {
+   "name": "Centre de décisions"
+  },
+  {
+   "name": "Change"
+  },
+  {
+   "name": "Financement"
+  },
+  {
+   "name": "Documents et commerce international"
+  },
+  {
+   "name": "Administration et audit"
+  },
+  {
+   "name": "Intégrations"
+  },
+  {
+   "name": "Démonstration"
+  }
+ ]
+}

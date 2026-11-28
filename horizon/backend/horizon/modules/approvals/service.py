@@ -42,8 +42,17 @@ def select_policy(db: Session, batch: PaymentBatch) -> ApprovalPolicyRule:
     if not candidates:
         raise DomainError("NO_APPROVAL_POLICY", "Aucune politique d'approbation applicable", 409)
     best_scope = max(scope_rank(r) for r in candidates)
-    scoped = [r for r in candidates if scope_rank(r) == best_scope and r.currency == batch.currency
-              and r.min_amount_minor <= batch.total_minor]
+
+    def total_in(ccy: str) -> int:
+        # Seuils exprimés dans la devise de la règle : conversion au taux daté si nécessaire.
+        if ccy == batch.currency:
+            return batch.total_minor
+        from horizon.modules.fx.service import get_rate
+
+        rate, _ = get_rate(db, batch.currency, ccy)
+        return convert_minor(batch.total_minor, batch.currency, ccy, rate)
+
+    scoped = [r for r in candidates if scope_rank(r) == best_scope and r.min_amount_minor <= total_in(r.currency)]
     if not scoped:
         raise DomainError("NO_APPROVAL_POLICY", "Aucune règle d'approbation pour ce montant/devise", 409)
     return max(scoped, key=lambda r: r.min_amount_minor)
@@ -93,6 +102,14 @@ def authority(db: Session, user_id: uuid.UUID, batch: PaymentBatch) -> dict | No
             return {"type": "DELEGATION", "delegation_id": d.id, "delegator_user_id": d.delegator_user_id,
                     "limit": money(d.max_amount_minor, d.currency)}
     return None
+
+
+def _active_delegation(db: Session, user_id, batch: PaymentBatch) -> bool:
+    now = clock.now()
+    return db.scalar(select(Delegation.id).where(
+        Delegation.delegate_user_id == user_id, Delegation.entity_id == batch.entity_id,
+        Delegation.organization_id == batch.organization_id, Delegation.revoked_at.is_(None),
+        Delegation.valid_from <= now, Delegation.valid_to >= now).limit(1)) is not None
 
 
 def authority_without_delegation(db: Session, user_id, batch) -> bool:
@@ -167,7 +184,9 @@ def decide(db: Session, principal, batch_id: uuid.UUID, decision: str, version: 
     decision = decision.upper()
     if decision not in {"APPROVE", "REJECT"}:
         raise DomainError("INVALID_DECISION", "Décision attendue : APPROVE ou REJECT", 422)
-    principal.require("payment.approve", batch.entity_id, batch.debtor_account_id)
+    if not principal.authz.has("payment.approve", batch.entity_id, batch.debtor_account_id) \
+            and not _active_delegation(db, principal.user_id, batch):
+        principal.require("payment.approve", batch.entity_id, batch.debtor_account_id)  # refus journalisé (403)
     if batch.status != "PENDING_APPROVAL":
         raise Conflict("BATCH_NOT_PENDING_APPROVAL", f"Le lot est à l'état {batch.status}", {"status": batch.status})
     if version != batch.version:

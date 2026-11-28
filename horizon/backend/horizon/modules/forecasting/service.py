@@ -285,6 +285,12 @@ def serialize_scenario(s: CashflowScenario) -> dict:
 
 
 def serialize_run(fr: ForecastRun, scenario: CashflowScenario) -> dict:
+    base = get_settings().base_currency
+    inflow = sum(x["amount_minor"] for x in fr.lines if x["amount_minor"] > 0)
+    outflow = -sum(x["amount_minor"] for x in fr.lines if x["amount_minor"] < 0)
     return {"id": str(fr.id), "scenario": serialize_scenario(scenario), "horizon_days": fr.horizon_days,
-            "as_of": fr.as_of.isoformat(), "method": fr.method, "created_at": fr.created_at.isoformat(),
-            "inputs": fr.inputs, "series": fr.series, "lines": fr.lines, "excluded": fr.excluded}
+            "as_of": fr.as_of.isoformat(), "method": fr.method, "method_description": __doc__,
+            "created_at": fr.created_at.isoformat(), "inputs": fr.inputs, "series": fr.series, "lines": fr.lines,
+            "excluded": fr.excluded,
+            "totals": {"inflows": money(inflow, base), "outflows": money(outflow, base),
+                       "ending": fr.series[-1]["closing"] if fr.series else None}}

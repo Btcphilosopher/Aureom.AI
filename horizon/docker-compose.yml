@@ -1,0 +1,98 @@
+# HORIZON — ENVIRONNEMENT DE DÉMONSTRATION (données synthétiques, aucun service bancaire réel)
+# Démarrage : cp .env.example .env && docker compose up --build
+name: horizon
+
+x-backend-env: &backend-env
+  HORIZON_ENV: demo
+  HORIZON_DATABASE_URL: postgresql+psycopg://horizon:${POSTGRES_PASSWORD:?}@postgres:5432/horizon
+  HORIZON_SECRET_KEY: ${HORIZON_SECRET_KEY:?}
+  HORIZON_SIMULATOR_WEBHOOK_SECRET: ${HORIZON_SIMULATOR_WEBHOOK_SECRET:?}
+  # Stockage objet protégé : objets chiffrés (Fernet) sur un volume privé, jamais exposé.
+  # Pour un stockage S3 compatible : HORIZON_STORAGE_BACKEND=s3 + HORIZON_S3_* (voir README).
+  HORIZON_STORAGE_BACKEND: ${HORIZON_STORAGE_BACKEND:-filesystem}
+  HORIZON_STORAGE_PATH: /app/var/objects
+  HORIZON_S3_ENDPOINT: ${HORIZON_S3_ENDPOINT:-}
+  HORIZON_S3_ACCESS_KEY: ${HORIZON_S3_ACCESS_KEY:-}
+  HORIZON_S3_SECRET_KEY: ${HORIZON_S3_SECRET_KEY:-}
+  HORIZON_S3_BUCKET: ${HORIZON_S3_BUCKET:-horizon-documents}
+  HORIZON_S3_SECURE: ${HORIZON_S3_SECURE:-true}
+  HORIZON_BOOTSTRAP_MOCKUP_STATE: ${HORIZON_BOOTSTRAP_MOCKUP_STATE:-true}
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: horizon
+      POSTGRES_USER: horizon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horizon -d horizon"]
+      interval: 5s
+      retries: 20
+    networks: [internal]
+
+  migrate:
+    image: horizon/backend:dev
+    build: ./backend
+    command: ["python", "-m", "horizon.bootstrap"]
+    healthcheck: {disable: true}
+    environment: *backend-env
+    volumes: [objects:/app/var/objects]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [internal]
+    restart: "no"
+
+  api:
+    image: horizon/backend:dev
+    environment: *backend-env
+    volumes: [objects:/app/var/objects]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:${HORIZON_API_PORT:-8000}:8000"]
+    networks: [internal]
+    restart: unless-stopped
+
+  worker:
+    image: horizon/backend:dev
+    command: ["python", "-m", "horizon.worker"]
+    healthcheck: {disable: true}
+    environment: *backend-env
+    volumes: [objects:/app/var/objects]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [internal]
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+  web:
+    image: horizon/web:dev
+    build: ./frontend
+    environment:
+      BACKEND_URL: http://api:8000
+    depends_on:
+      api: {condition: service_healthy}
+    ports: ["127.0.0.1:${HORIZON_WEB_PORT:-3000}:3000"]
+    networks: [internal]
+    restart: unless-stopped
+
+  # Sauvegarde ponctuelle : docker compose run --rm backup
+  backup:
+    image: postgres:16.6-alpine
+    profiles: [ops]
+    entrypoint: ["bash", "/scripts/backup.sh", "/backups"]
+    environment:
+      PGURL: postgresql://horizon:${POSTGRES_PASSWORD:?}@postgres:5432/horizon
+      STORAGE_PATH: /objects
+    volumes: ["./scripts:/scripts:ro", "./backups:/backups", "objects:/objects:ro"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [internal]
+
+volumes:
+  pgdata:
+  objects:
+
+networks:
+  internal:

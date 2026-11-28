@@ -1,0 +1,11 @@
+# Dépendances directes (versions vérifiées sur PyPI le 2026-11-28)
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.9
+alembic==1.20.1
+psycopg[binary]==3.3.9
+pydantic==2.13.5
+python-multipart==0.0.32
+cryptography==50.0.2
+minio==7.2.20
+httpx==0.29.0
